@@ -37,6 +37,8 @@ vi.mock("react-i18next", () => ({
         sidebarNoFolders: "尚未添加文件夹",
         folderShortcuts: "文件夹快捷入口",
         currentFolder: "当前文件夹",
+        pinnedSectionLabel: "置顶",
+        pinnedBoundaryLabel: "我是分界线",
         pinnedFolders: "置顶文件夹",
         recentFolders: "最近访问",
         pinFolder: "置顶文件夹",

@@ -4,6 +4,7 @@ import {
   buildFolderTree,
   FolderTree,
   flattenVisibleFolderTree,
+  pinFolderTreeNodes,
 } from "@/components/sidebar-trees";
 import type { Folder } from "@/types/photo";
 
@@ -72,6 +73,23 @@ describe("folder tree helpers", () => {
     expect(new Set(visible.map((item) => item.node.folder.id))).toEqual(
       new Set([1, 2, 3, 4])
     );
+  });
+
+  it("moves pinned nodes to the front without duplicating them", () => {
+    const tree = buildFolderTree([
+      createFolder(1, "Photos"),
+      createFolder(2, "Travel", 1),
+      createFolder(3, "Day 1", 2),
+      createFolder(4, "Archive"),
+    ]);
+    const pinnedTree = pinFolderTreeNodes(tree, [3]);
+
+    expect(pinnedTree.map((node) => node.folder.id)).toEqual([3, 4, 1]);
+    expect(
+      flattenVisibleFolderTree(pinnedTree, new Set([1, 2, 3, 4])).map(
+        (item) => item.node.folder.id
+      )
+    ).toEqual([3, 4, 1, 2]);
   });
 
   it("caps deep indentation while preserving the full path tooltip", () => {

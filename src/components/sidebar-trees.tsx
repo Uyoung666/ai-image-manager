@@ -1,8 +1,15 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Pin } from "lucide-react";
 import type React from "react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Tooltip,
   TooltipContent,
@@ -116,6 +123,56 @@ export function buildFolderTree(folders: FolderType[]): FolderTreeNode[] {
     node.children.sort(compareNodes);
   }
   return roots;
+}
+
+export function pinFolderTreeNodes(
+  nodes: FolderTreeNode[],
+  pinnedIds: readonly number[]
+): FolderTreeNode[] {
+  if (pinnedIds.length === 0) {
+    return nodes;
+  }
+
+  const pinnedIdSet = new Set(pinnedIds);
+  const pinnedNodes = new Map<number, FolderTreeNode>();
+
+  function removePinnedNodes(
+    node: FolderTreeNode,
+    ancestors: ReadonlySet<number> = new Set()
+  ): FolderTreeNode | null {
+    if (ancestors.has(node.folder.id)) {
+      return null;
+    }
+
+    const nextAncestors = new Set(ancestors);
+    nextAncestors.add(node.folder.id);
+    const remainingChildren: FolderTreeNode[] = [];
+    for (const child of node.children) {
+      const remainingChild = removePinnedNodes(child, nextAncestors);
+      if (remainingChild) {
+        remainingChildren.push(remainingChild);
+      }
+    }
+
+    if (pinnedIdSet.has(node.folder.id)) {
+      pinnedNodes.set(node.folder.id, {
+        children: remainingChildren,
+        folder: node.folder,
+      });
+      return null;
+    }
+
+    return { children: remainingChildren, folder: node.folder };
+  }
+
+  const remainingRoots = nodes
+    .map((node) => removePinnedNodes(node))
+    .filter((node): node is FolderTreeNode => node !== null);
+  const pinnedRoots = pinnedIds
+    .map((id) => pinnedNodes.get(id))
+    .filter((node): node is FolderTreeNode => node !== undefined);
+
+  return [...pinnedRoots, ...remainingRoots];
 }
 
 export function flattenVisibleFolderTree(
@@ -258,6 +315,11 @@ interface FolderTreeProps {
   onDrop: (e: React.DragEvent, id: number) => void;
   onSelect: (id: number) => void;
   onToggle: (id: number) => void;
+  onTogglePinned?: () => void;
+  pinnedBoundaryLabel?: string;
+  pinnedCollapsed?: boolean;
+  pinnedFolderIds?: readonly number[];
+  pinnedLabel?: string;
 }
 
 export function FolderTree({
@@ -266,28 +328,85 @@ export function FolderTree({
   expandedIds,
   label,
   nodes,
+  onTogglePinned,
   onContextMenu,
   onDragLeave,
   onDragOver,
   onDrop,
   onSelect,
   onToggle,
+  pinnedBoundaryLabel,
+  pinnedCollapsed = false,
+  pinnedFolderIds = [],
+  pinnedLabel,
 }: FolderTreeProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingFocusRef = useRef(false);
   const [hasMoreBelow, setHasMoreBelow] = useState(false);
-  const visibleNodes = useMemo(
-    () => flattenVisibleFolderTree(nodes, expandedIds),
-    [expandedIds, nodes]
+  const pinnedIdSet = useMemo(
+    () => new Set(pinnedFolderIds),
+    [pinnedFolderIds]
   );
+  const pinnedRootCount = useMemo(() => {
+    let count = 0;
+    while (
+      count < nodes.length &&
+      pinnedIdSet.has(nodes[count]?.folder.id ?? -1)
+    ) {
+      count += 1;
+    }
+    return count;
+  }, [nodes, pinnedIdSet]);
+  const hasPinnedSection = Boolean(
+    pinnedRootCount > 0 && pinnedLabel && onTogglePinned
+  );
+  const pinnedHeaderOffset = hasPinnedSection ? 1 : 0;
+  const treeNodes = pinnedCollapsed ? nodes.slice(pinnedRootCount) : nodes;
+  const visibleNodes = useMemo(
+    () => flattenVisibleFolderTree(treeNodes, expandedIds),
+    [expandedIds, treeNodes]
+  );
+  const pinnedBoundaryIndex = useMemo(() => {
+    if (!hasPinnedSection || pinnedCollapsed) {
+      return -1;
+    }
+    return visibleNodes.findIndex(
+      (item) => item.depth === 0 && !pinnedIdSet.has(item.node.folder.id)
+    );
+  }, [hasPinnedSection, pinnedCollapsed, pinnedIdSet, visibleNodes]);
+  const hasPinnedBoundary =
+    pinnedBoundaryIndex >= 0 && Boolean(pinnedBoundaryLabel);
+  const pinnedBoundaryOffset = hasPinnedBoundary ? 1 : 0;
+  const activeVisible =
+    activeId !== null &&
+    visibleNodes.some((item) => item.node.folder.id === activeId);
   const [focusedId, setFocusedId] = useState<number | null>(
-    activeId ?? visibleNodes[0]?.node.folder.id ?? null
+    activeVisible ? activeId : (visibleNodes[0]?.node.folder.id ?? null)
   );
   const shouldVirtualize = visibleNodes.length > VIRTUAL_FOLDER_THRESHOLD;
   const virtualizer = useVirtualizer({
-    count: shouldVirtualize ? visibleNodes.length : 0,
+    count: shouldVirtualize
+      ? visibleNodes.length + pinnedHeaderOffset + pinnedBoundaryOffset
+      : 0,
     estimateSize: () => 32,
-    getItemKey: (index) => visibleNodes[index].node.folder.id,
+    getItemKey: (index) => {
+      if (hasPinnedSection && index === 0) {
+        return "pinned-folder-section";
+      }
+      if (
+        hasPinnedBoundary &&
+        index === pinnedHeaderOffset + pinnedBoundaryIndex
+      ) {
+        return "pinned-folder-boundary";
+      }
+      const itemIndex =
+        index -
+        pinnedHeaderOffset -
+        (hasPinnedBoundary && index > pinnedHeaderOffset + pinnedBoundaryIndex
+          ? 1
+          : 0);
+      return visibleNodes[itemIndex].node.folder.id;
+    },
     getScrollElement: () => scrollRef.current,
     overscan: 8,
   });
@@ -329,7 +448,12 @@ export function FolderTree({
     if (visibleNodes.some((item) => item.node.folder.id === focusedId)) {
       return;
     }
-    setFocusedId(activeId ?? visibleNodes[0]?.node.folder.id ?? null);
+    setFocusedId(
+      activeId !== null &&
+        visibleNodes.some((item) => item.node.folder.id === activeId)
+        ? activeId
+        : (visibleNodes[0]?.node.folder.id ?? null)
+    );
   }, [activeId, focusedId, visibleNodes]);
 
   useEffect(() => {
@@ -344,9 +468,23 @@ export function FolderTree({
     }
     const targetIsOutsideVirtualRange =
       shouldVirtualize &&
-      (index < virtualStartIndex || index > virtualEndIndex);
+      (() => {
+        const targetVirtualIndex =
+          index +
+          pinnedHeaderOffset +
+          (hasPinnedBoundary && index >= pinnedBoundaryIndex ? 1 : 0);
+        return (
+          targetVirtualIndex < virtualStartIndex ||
+          targetVirtualIndex > virtualEndIndex
+        );
+      })();
     if (targetIsOutsideVirtualRange) {
-      virtualizer.scrollToIndex(index, { align: "auto" });
+      virtualizer.scrollToIndex(
+        index +
+          pinnedHeaderOffset +
+          (hasPinnedBoundary && index >= pinnedBoundaryIndex ? 1 : 0),
+        { align: "auto" }
+      );
       return;
     }
     const element = scrollRef.current?.querySelector<HTMLElement>(
@@ -358,10 +496,13 @@ export function FolderTree({
     }
   }, [
     focusedId,
+    hasPinnedBoundary,
+    pinnedBoundaryIndex,
     shouldVirtualize,
+    pinnedHeaderOffset,
     virtualEndIndex,
-    virtualizer,
     virtualStartIndex,
+    virtualizer,
     visibleNodes,
   ]);
 
@@ -370,7 +511,11 @@ export function FolderTree({
     setFocusedId(id);
   }
 
-  function handleHorizontalKey(key: string, node: FolderTreeNode): boolean {
+  function handleHorizontalKey(
+    key: string,
+    node: FolderTreeNode,
+    depth: number
+  ): boolean {
     const hasChildren = node.children.length > 0;
     const isExpanded = expandedIds.has(node.folder.id);
     if (key === "ArrowRight") {
@@ -386,7 +531,7 @@ export function FolderTree({
     }
     if (hasChildren && isExpanded) {
       onToggle(node.folder.id);
-    } else if (node.folder.parentId !== null) {
+    } else if (depth > 0 && node.folder.parentId !== null) {
       focusFolder(node.folder.parentId);
     }
     return true;
@@ -417,7 +562,7 @@ export function FolderTree({
       }
       return;
     }
-    if (handleHorizontalKey(event.key, node)) {
+    if (handleHorizontalKey(event.key, node, item.depth)) {
       event.preventDefault();
       return;
     }
@@ -425,6 +570,54 @@ export function FolderTree({
       event.preventDefault();
       onSelect(node.folder.id);
     }
+  }
+
+  function renderPinnedHeader() {
+    if (!hasPinnedSection) {
+      return null;
+    }
+    return (
+      <div className="flex h-8 items-center px-1" role="presentation">
+        <button
+          aria-expanded={!pinnedCollapsed}
+          className="flex w-full items-center gap-1 rounded-[6px] px-2 py-1 text-left text-[11px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+          data-surface="pinned-folder-header"
+          onClick={() => onTogglePinned?.()}
+          type="button"
+        >
+          <Pin className="h-3 w-3 text-primary/80" />
+          <span className="font-medium uppercase tracking-wider">
+            {pinnedLabel}
+          </span>
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform ${
+              pinnedCollapsed ? "-rotate-90" : ""
+            }`}
+          />
+        </button>
+      </div>
+    );
+  }
+
+  function renderPinnedBoundary() {
+    if (!hasPinnedBoundary) {
+      return null;
+    }
+    return (
+      <div
+        className="flex h-8 items-center gap-2 px-3"
+        data-pinned-boundary="true"
+      >
+        <hr
+          aria-label={pinnedBoundaryLabel}
+          className="h-px min-w-0 flex-1 border-0 bg-border/70"
+        />
+        <span className="shrink-0 px-1 font-medium text-[10px] text-primary/80">
+          {pinnedBoundaryLabel}
+        </span>
+        <span aria-hidden="true" className="h-px min-w-0 flex-1 bg-border/70" />
+      </div>
+    );
   }
 
   function renderRow(item: VisibleFolderNode, index: number) {
@@ -505,7 +698,52 @@ export function FolderTree({
           style={{ height: virtualizer.getTotalSize(), position: "relative" }}
         >
           {virtualItems.map((virtualRow) => {
-            const item = visibleNodes[virtualRow.index];
+            if (hasPinnedSection && virtualRow.index === 0) {
+              return (
+                <div
+                  key="pinned-folder-section"
+                  style={{
+                    left: 0,
+                    position: "absolute",
+                    top: 0,
+                    transform: `translateY(${virtualRow.start}px)`,
+                    width: "100%",
+                  }}
+                >
+                  {renderPinnedHeader()}
+                </div>
+              );
+            }
+            if (
+              hasPinnedBoundary &&
+              virtualRow.index === pinnedHeaderOffset + pinnedBoundaryIndex
+            ) {
+              return (
+                <div
+                  key="pinned-folder-boundary"
+                  style={{
+                    left: 0,
+                    position: "absolute",
+                    top: 0,
+                    transform: `translateY(${virtualRow.start}px)`,
+                    width: "100%",
+                  }}
+                >
+                  {renderPinnedBoundary()}
+                </div>
+              );
+            }
+            const itemIndex =
+              virtualRow.index -
+              pinnedHeaderOffset -
+              (hasPinnedBoundary &&
+              virtualRow.index > pinnedHeaderOffset + pinnedBoundaryIndex
+                ? 1
+                : 0);
+            const item = visibleNodes[itemIndex];
+            if (!item) {
+              return null;
+            }
             return (
               <div
                 key={item.node.folder.id}
@@ -517,13 +755,23 @@ export function FolderTree({
                   width: "100%",
                 }}
               >
-                {renderRow(item, virtualRow.index)}
+                {renderRow(item, itemIndex)}
               </div>
             );
           })}
         </div>
       ) : (
-        visibleNodes.map(renderRow)
+        <>
+          {renderPinnedHeader()}
+          {visibleNodes.map((item, index) => (
+            <Fragment key={item.node.folder.id}>
+              {hasPinnedBoundary && index === pinnedBoundaryIndex
+                ? renderPinnedBoundary()
+                : null}
+              {renderRow(item, index)}
+            </Fragment>
+          ))}
+        </>
       )}
     </div>
   );

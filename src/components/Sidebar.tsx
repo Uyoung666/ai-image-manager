@@ -67,6 +67,7 @@ import {
   buildTagTree,
   FolderTree,
   type FolderTreeNode,
+  pinFolderTreeNodes,
   renderTagTree,
   type TagInfo,
 } from "./sidebar-trees";
@@ -187,28 +188,45 @@ function RailButton({
 
 function FolderShortcutRow({
   folder,
+  isActive = false,
   onSelect,
+  onContextMenu,
   onUnpin,
   unpinLabel,
 }: {
   folder: FolderType;
+  isActive?: boolean;
   onSelect: () => void;
+  onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
   onUnpin?: () => void;
   unpinLabel: string;
 }) {
   return (
-    <div className="group flex min-w-0 items-center rounded-[6px] hover:bg-foreground/5">
+    <div
+      className="group flex min-w-0 items-center rounded-[6px] hover:bg-foreground/5"
+      onContextMenu={onContextMenu}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            aria-current={isActive ? "page" : undefined}
             aria-label={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})`}
-            className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
+            className={`flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left ${
+              isActive
+                ? "nav-item-active bg-primary/15 text-primary"
+                : "text-foreground"
+            }`}
+            data-folder-shortcut-id={folder.id}
             onClick={onSelect}
             type="button"
           >
             <FolderBadge className="h-6 w-6" folder={folder} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium text-[12px] text-foreground">
+              <span
+                className={`block truncate font-medium text-[12px] ${
+                  isActive ? "text-primary" : "text-foreground"
+                }`}
+              >
                 {folder.displayName}
               </span>
               <span className="block truncate text-[10px] text-muted-foreground/65">
@@ -297,6 +315,7 @@ export function Sidebar({
   const [pinnedFolderIds, setPinnedFolderIds] = useState<number[]>(() =>
     loadFolderIds(PINNED_FOLDER_IDS_KEY, MAX_PINNED_FOLDERS)
   );
+  const [pinnedFoldersCollapsed, setPinnedFoldersCollapsed] = useState(false);
   const [recentFolderIds, setRecentFolderIds] = useState<number[]>(() =>
     loadFolderIds(RECENT_FOLDER_IDS_KEY, MAX_RECENT_FOLDERS)
   );
@@ -978,7 +997,18 @@ export function Sidebar({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onToggleCollapse]);
 
-  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+  const folderById = useMemo(
+    () => new Map(folders.map((folder) => [folder.id, folder])),
+    [folders]
+  );
+  const validPinnedFolderIds = useMemo(
+    () => pinnedFolderIds.filter((id) => folderById.has(id)),
+    [folderById, pinnedFolderIds]
+  );
+  const folderTree = useMemo(
+    () => pinFolderTreeNodes(buildFolderTree(folders), validPinnedFolderIds),
+    [folders, validPinnedFolderIds]
+  );
   const folderSearchResult = useMemo(() => {
     const query = folderSearch.trim().toLocaleLowerCase();
     if (!query) {
@@ -1011,10 +1041,6 @@ export function Sidebar({
   }, [expandedFolderIds, folderSearch, folderSearchResult.ancestorIds]);
   const appearanceFolder =
     folders.find((folder) => folder.id === appearanceFolderId) ?? null;
-  const folderById = useMemo(
-    () => new Map(folders.map((folder) => [folder.id, folder])),
-    [folders]
-  );
   const activeShortcutFolder =
     activeFolderId === null ? null : (folderById.get(activeFolderId) ?? null);
   const pinnedShortcutFolders = pinnedFolderIds
@@ -1241,6 +1267,14 @@ export function Sidebar({
                       </p>
                       <FolderShortcutRow
                         folder={activeShortcutFolder}
+                        isActive
+                        onContextMenu={(event) =>
+                          handleFolderContextMenu(
+                            event,
+                            activeShortcutFolder.id,
+                            activeShortcutFolder.displayName
+                          )
+                        }
                         onSelect={() =>
                           selectShortcutFolder(activeShortcutFolder.id)
                         }
@@ -1262,6 +1296,13 @@ export function Sidebar({
                         <FolderShortcutRow
                           folder={folder}
                           key={folder.id}
+                          onContextMenu={(event) =>
+                            handleFolderContextMenu(
+                              event,
+                              folder.id,
+                              folder.displayName
+                            )
+                          }
                           onSelect={() => selectShortcutFolder(folder.id)}
                           onUnpin={() => togglePinnedFolder(folder.id)}
                           unpinLabel={t("unpinFolder")}
@@ -1278,6 +1319,13 @@ export function Sidebar({
                         <FolderShortcutRow
                           folder={folder}
                           key={folder.id}
+                          onContextMenu={(event) =>
+                            handleFolderContextMenu(
+                              event,
+                              folder.id,
+                              folder.displayName
+                            )
+                          }
                           onSelect={() => selectShortcutFolder(folder.id)}
                           unpinLabel={t("unpinFolder")}
                         />
@@ -1463,7 +1511,7 @@ export function Sidebar({
               <div
                 className={`${resourceView === "folders" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}
               >
-                <div className="mb-1 flex items-center gap-1 px-1">
+                <div className="mb-1 flex flex-shrink-0 items-center gap-1 px-1">
                   <div className="relative min-w-0 flex-1">
                     <Search className="pointer-events-none absolute top-1/2 left-2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60" />
                     <input
@@ -1541,6 +1589,13 @@ export function Sidebar({
                       }
                       setExpandedFolderIds(next);
                     }}
+                    onTogglePinned={() =>
+                      setPinnedFoldersCollapsed((collapsed) => !collapsed)
+                    }
+                    pinnedBoundaryLabel={t("pinnedBoundaryLabel")}
+                    pinnedCollapsed={pinnedFoldersCollapsed}
+                    pinnedFolderIds={validPinnedFolderIds}
+                    pinnedLabel={t("pinnedSectionLabel")}
                   />
                 )}
               </div>

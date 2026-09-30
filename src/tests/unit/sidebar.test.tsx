@@ -399,11 +399,189 @@ describe("Sidebar", () => {
     fireEvent.click(pinButton);
     expect(localStorage.getItem("sidebar-pinned-folder-ids")).toBe("[1]");
 
-    fireEvent.contextMenu(
-      screen.getByText("Photos").closest("button") as Element
-    );
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "C:/Photos" }));
     fireEvent.click(screen.getByRole("button", { name: "取消置顶" }));
     expect(localStorage.getItem("sidebar-pinned-folder-ids")).toBe("[]");
+  });
+
+  it("moves pinned nested folders to the front without duplicating tree rows", () => {
+    localStorage.setItem("sidebar-pinned-folder-ids", JSON.stringify([3]));
+    render(
+      <Sidebar
+        {...baseProps}
+        activeFolderId={3}
+        folders={[
+          {
+            displayName: "Photos",
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            photoCount: 500,
+          },
+          {
+            displayName: "Travel",
+            id: 2,
+            parentId: 1,
+            path: "C:/Photos/Travel",
+            photoCount: 200,
+          },
+          {
+            displayName: "Day 1",
+            id: 3,
+            parentId: 2,
+            path: "C:/Photos/Travel/Day 1",
+            photoCount: 20,
+          },
+        ]}
+      />
+    );
+
+    const treeItems = screen.getAllByRole("treeitem");
+    expect(treeItems[0]).toHaveAttribute(
+      "aria-label",
+      "C:/Photos/Travel/Day 1"
+    );
+    expect(
+      screen.getAllByRole("treeitem", { name: "C:/Photos/Travel/Day 1" })
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("searchbox", { name: "folderSearchPlaceholder" })
+    ).toBeInTheDocument();
+  });
+
+  it("collapses and expands the pinned section inside the folder tree", () => {
+    localStorage.setItem("sidebar-pinned-folder-ids", JSON.stringify([2]));
+    render(
+      <Sidebar
+        {...baseProps}
+        activeFolderId={2}
+        folders={[
+          {
+            displayName: "Photos",
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            photoCount: 500,
+          },
+          {
+            displayName: "Travel",
+            id: 2,
+            parentId: null,
+            path: "C:/Travel",
+            photoCount: 200,
+          },
+        ]}
+      />
+    );
+
+    const pinnedHeader = screen.getByRole("button", { name: "置顶" });
+    expect(pinnedHeader).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("treeitem", { name: "C:/Travel" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tree").querySelector('[data-pinned-boundary="true"]')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("separator", { name: "我是分界线" })
+    ).toBeInTheDocument();
+
+    fireEvent.click(pinnedHeader);
+
+    expect(pinnedHeader).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("treeitem", { name: "C:/Travel" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("treeitem", { name: "C:/Photos" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "C:/Photos" })).toHaveAttribute(
+      "tabindex",
+      "0"
+    );
+    expect(
+      screen.getByRole("tree").querySelector('[data-pinned-boundary="true"]')
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(pinnedHeader);
+    expect(
+      screen.getByRole("treeitem", { name: "C:/Travel" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tree").querySelector('[data-pinned-boundary="true"]')
+    ).toBeInTheDocument();
+  });
+
+  it("returns an unpinned tree row to the normal folder order", async () => {
+    localStorage.setItem("sidebar-pinned-folder-ids", JSON.stringify([2]));
+    render(
+      <Sidebar
+        {...baseProps}
+        folders={[
+          {
+            displayName: "Photos",
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            photoCount: 500,
+          },
+          {
+            displayName: "Travel",
+            id: 2,
+            parentId: null,
+            path: "C:/Travel",
+            photoCount: 200,
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getAllByRole("treeitem")[0]).toHaveAttribute(
+      "aria-label",
+      "C:/Travel"
+    );
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "C:/Travel" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消置顶" }));
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("treeitem")[0]).toHaveAttribute(
+        "aria-label",
+        "C:/Photos"
+      )
+    );
+  });
+
+  it("opens the existing context menu from a reordered tree row", () => {
+    localStorage.setItem("sidebar-pinned-folder-ids", JSON.stringify([1, 2]));
+    render(
+      <Sidebar
+        {...baseProps}
+        folders={[
+          {
+            displayName: "Photos",
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            photoCount: 500,
+          },
+          {
+            displayName: "Travel",
+            id: 2,
+            parentId: null,
+            path: "C:/Travel",
+            photoCount: 200,
+          },
+        ]}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "C:/Photos" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消置顶" }));
+
+    expect(localStorage.getItem("sidebar-pinned-folder-ids")).toBe("[2]");
+    expect(screen.getAllByRole("treeitem", { name: "C:/Photos" })).toHaveLength(
+      1
+    );
   });
 
   it("does not replace pinned folders when the five-folder limit is reached", () => {
@@ -423,7 +601,11 @@ describe("Sidebar", () => {
     fireEvent.contextMenu(
       screen.getByText("Folder 6").closest("button") as Element
     );
-    fireEvent.click(screen.getByRole("button", { name: "置顶文件夹" }));
+    const pinButton = screen
+      .getAllByRole("button", { name: "置顶文件夹" })
+      .find((button) => button.closest('[data-overlay-kind="context-menu"]'));
+    expect(pinButton).toBeDefined();
+    fireEvent.click(pinButton as HTMLElement);
 
     expect(localStorage.getItem("sidebar-pinned-folder-ids")).toBe(
       "[1,2,3,4,5]"
