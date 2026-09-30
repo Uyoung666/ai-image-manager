@@ -337,7 +337,9 @@ const config: ForgeConfig = {
     ],
   },
 
-  rebuildConfig: {},
+  // npm rebuild can replace native binaries without updating .forge-meta.
+  // Always rebuild for Electron instead of trusting a stale ABI marker.
+  rebuildConfig: { force: true },
 
   makers: [
     new MakerSquirrel({
