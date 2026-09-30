@@ -2,7 +2,7 @@
 // biome-ignore-all lint/style/useDefaultSwitchClause: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
 import { CheckCircle2, XCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   checkForUpdates,
@@ -33,6 +33,8 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   const [updateVersion, setUpdateVersion] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [lastCheckTime, setLastCheckTime] = useState<string>("");
+  const [lastCheckResult, setLastCheckResult] =
+    useState<UpdateStatus["lastCheckResult"]>();
   const [percent, setPercent] = useState<number | undefined>();
   const [bytesPerSecond, setBytesPerSecond] = useState<number | undefined>();
   const [releaseNotes, setReleaseNotes] = useState("");
@@ -40,44 +42,115 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
     "delta" | "full" | undefined
   >();
   const [fallbackReason, setFallbackReason] = useState("");
+  const [errorOperation, setErrorOperation] = useState<
+    "check" | "install" | undefined
+  >();
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [updateReminder, setUpdateReminder] = useState(true);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const downloadStartRef = useRef<number>(0);
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const statusRevisionRef = useRef(0);
+
+  const applyStatusSnapshot = useCallback(
+    (status: UpdateStatus) => {
+      if (!status || status.phase === "idle") {
+        return;
+      }
+      setPhase(status.phase);
+      setErrorOperation(status.operation);
+      if (status.version) {
+        setUpdateVersion(status.version);
+      }
+      if (status.releaseNotes) {
+        setReleaseNotes(status.releaseNotes);
+      }
+      if (status.updateMethod) {
+        setUpdateMethod(status.updateMethod);
+      }
+      if (status.fallbackReason) {
+        setFallbackReason(status.fallbackReason);
+      }
+      if (status.percent != null) {
+        setPercent(status.percent);
+      }
+      if (status.bytesPerSecond != null) {
+        setBytesPerSecond(status.bytesPerSecond);
+      }
+      if (status.lastCheckedAt) {
+        setLastCheckTime(new Date(status.lastCheckedAt).toLocaleTimeString());
+      }
+      setLastCheckResult(status.lastCheckResult);
+      if (status.phase === "up-to-date") {
+        setErrorOperation(undefined);
+        setLastCheckResult("up-to-date");
+        if (!status.lastCheckedAt) {
+          setLastCheckTime(new Date().toLocaleTimeString());
+        }
+      }
+      if (status.phase === "downloaded") {
+        setErrorOperation(undefined);
+        setLastCheckResult(status.lastCheckResult ?? "update-available");
+      }
+      if (status.phase === "checking") {
+        setErrorOperation("check");
+        setPercent(undefined);
+        setBytesPerSecond(undefined);
+        setUpdateMethod(undefined);
+        setFallbackReason("");
+      }
+      if (status.phase === "downloading") {
+        setErrorOperation(status.operation === "install" ? "install" : "check");
+      }
+      if (
+        status.phase === "installing" ||
+        status.phase === "recovering" ||
+        status.phase === "restarting"
+      ) {
+        setErrorOperation("install");
+      }
+      if (status.phase === "error") {
+        setErrorMsg(mapUpdateErrorMessage(status.message, t));
+      } else if (status.phase !== "checking") {
+        setErrorMsg("");
+      }
+
+      const timestamp = status.installStartedAt ?? status.phaseStartedAt;
+      if (timestamp) {
+        const parsed = Date.parse(timestamp);
+        if (Number.isFinite(parsed)) {
+          downloadStartRef.current = parsed;
+          setElapsedSeconds(
+            Math.max(0, Math.floor((Date.now() - parsed) / 1000))
+          );
+        }
+      } else if (
+        status.phase === "downloading" ||
+        status.phase === "installing" ||
+        status.phase === "recovering" ||
+        status.phase === "restarting"
+      ) {
+        downloadStartRef.current = Date.now();
+        setElapsedSeconds(0);
+      }
+    },
+    [t]
+  );
 
   // Restore cached update status on mount (e.g. auto-download completed while on another page)
   useEffect(() => {
+    const requestRevision = statusRevisionRef.current;
     getUpdateStatus()
       .then((rawStatus) => {
-        const status = rawStatus;
-        if (!status || status.phase === "idle") {
+        if (requestRevision !== statusRevisionRef.current || !rawStatus) {
           return;
         }
-        setPhase(status.phase);
-        if (status.version) {
-          setUpdateVersion(status.version);
-        }
-        if (status.releaseNotes) {
-          setReleaseNotes(status.releaseNotes);
-        }
-        if (status.updateMethod) {
-          setUpdateMethod(status.updateMethod);
-        }
-        if (status.fallbackReason) {
-          setFallbackReason(status.fallbackReason);
-        }
-        if (status.percent != null) {
-          setPercent(status.percent);
-        }
-        if (status.bytesPerSecond != null) {
-          setBytesPerSecond(status.bytesPerSecond);
-        }
-        if (status.phase === "error") {
-          setErrorMsg(mapUpdateErrorMessage(status.message, t));
-        }
+        applyStatusSnapshot(rawStatus);
       })
       .catch((error: unknown) => {
+        if (requestRevision !== statusRevisionRef.current) {
+          return;
+        }
         setPhase("error");
         setErrorMsg(mapUpdateErrorMessage(error, t));
       });
@@ -88,7 +161,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
         setUpdateReminder(preferences.updateReminder);
       })
       .catch(() => undefined);
-  }, [t]);
+  }, [applyStatusSnapshot, t]);
 
   // Listen for update status events from main process
   useEffect(() => {
@@ -98,62 +171,21 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
         return;
       }
 
-      switch (data.phase) {
-        case "checking":
-          setPhase("checking");
-          setPercent(undefined);
-          setBytesPerSecond(undefined);
-          setUpdateMethod(undefined);
-          setFallbackReason("");
-          break;
-        case "downloading":
-          setPhase("downloading");
-          if (data.version) {
-            setUpdateVersion(data.version);
-          }
-          if (data.percent != null) {
-            setPercent(data.percent);
-          }
-          if (data.bytesPerSecond != null) {
-            setBytesPerSecond(data.bytesPerSecond);
-          }
-          break;
-        case "up-to-date":
-          setPhase("up-to-date");
-          setLastCheckTime(new Date().toLocaleTimeString());
-          break;
-        case "downloaded":
-          setPhase("downloaded");
-          if (data.version) {
-            setUpdateVersion(data.version);
-          }
-          if (data.releaseNotes) {
-            setReleaseNotes(data.releaseNotes);
-          }
-          if (data.updateMethod) {
-            setUpdateMethod(data.updateMethod);
-          }
-          if (data.fallbackReason) {
-            setFallbackReason(data.fallbackReason);
-          }
-          break;
-        case "error":
-          setPhase("error");
-          if (data.version) {
-            setUpdateVersion(data.version);
-          }
-          setErrorMsg(mapUpdateErrorMessage(data.message, t));
-          break;
+      if (!data.phase || data.phase === "idle") {
+        return;
       }
+      statusRevisionRef.current += 1;
+      applyStatusSnapshot(data as UpdateStatus);
     }
     // Also listen for update:available to sync state
     function onUpdateAvailable(event: MessageEvent) {
       if (event.data?.channel === "update:available") {
-        setPhase("downloaded");
-        setUpdateVersion(event.data.version || "");
-        if (event.data.releaseNotes) {
-          setReleaseNotes(event.data.releaseNotes);
-        }
+        statusRevisionRef.current += 1;
+        applyStatusSnapshot({
+          phase: "downloaded",
+          releaseNotes: event.data.releaseNotes,
+          version: event.data.version,
+        });
       }
     }
     window.addEventListener("message", onMessage);
@@ -162,13 +194,20 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
       window.removeEventListener("message", onMessage);
       window.removeEventListener("message", onUpdateAvailable);
     };
-  }, [t]);
+  }, [applyStatusSnapshot]);
 
   // Track elapsed time while downloading
   useEffect(() => {
-    if (phase === "downloading") {
-      downloadStartRef.current = Date.now();
-      setElapsedSeconds(0);
+    if (
+      phase === "downloading" ||
+      phase === "installing" ||
+      phase === "recovering" ||
+      phase === "restarting"
+    ) {
+      downloadStartRef.current ||= Date.now();
+      setElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - downloadStartRef.current) / 1000))
+      );
       elapsedTimerRef.current = setInterval(() => {
         setElapsedSeconds(
           Math.floor((Date.now() - downloadStartRef.current) / 1000)
@@ -177,6 +216,8 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
     } else if (elapsedTimerRef.current) {
       clearInterval(elapsedTimerRef.current);
       elapsedTimerRef.current = null;
+      downloadStartRef.current = 0;
+      setElapsedSeconds(0);
     }
     return () => {
       if (elapsedTimerRef.current) {
@@ -200,35 +241,72 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   }
 
   async function handleCheck() {
+    const actionRevision = ++statusRevisionRef.current;
     setPhase("checking");
     setErrorMsg("");
+    setErrorOperation("check");
     setUpdateMethod(undefined);
     setFallbackReason("");
     try {
       const result = await checkForUpdates();
+      if (actionRevision !== statusRevisionRef.current) {
+        return;
+      }
       const data = result;
       if (!data?.ok) {
         setPhase("error");
+        setErrorOperation("check");
         setErrorMsg(mapUpdateErrorMessage(data?.error, t));
       }
     } catch (err: unknown) {
+      if (actionRevision !== statusRevisionRef.current) {
+        return;
+      }
       setPhase("error");
+      setErrorOperation("check");
       setErrorMsg(mapUpdateErrorMessage(err, t));
     }
   }
 
   async function handleRestart() {
+    const actionRevision = ++statusRevisionRef.current;
+    setPhase("installing");
+    setErrorOperation("install");
+    setErrorMsg("");
     try {
       const result = await installDownloadedUpdate();
+      if (actionRevision !== statusRevisionRef.current) {
+        return;
+      }
       if (!result?.ok) {
         setPhase("error");
+        setErrorOperation("install");
         setErrorMsg(mapUpdateErrorMessage(result?.error, t));
       }
     } catch {
+      if (actionRevision !== statusRevisionRef.current) {
+        return;
+      }
       setPhase("error");
+      setErrorOperation("install");
       setErrorMsg(t("updateError"));
     }
   }
+
+  async function handleRetry() {
+    if (errorOperation === "install") {
+      await handleRestart();
+      return;
+    }
+    await handleCheck();
+  }
+
+  const isBusy =
+    phase === "checking" ||
+    phase === "downloading" ||
+    phase === "installing" ||
+    phase === "recovering" ||
+    phase === "restarting";
 
   async function handleOpenManual() {
     await openReleasePage();
@@ -262,23 +340,33 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
             >
               {t("updateRestartNow")}
             </button>
+          ) : isBusy ? (
+            <button
+              className="inline-flex min-h-8 max-w-full shrink-0 items-center justify-center gap-1.5 rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground opacity-70"
+              disabled
+              type="button"
+            >
+              <LoadingSpinner size="sm" variant="inherit" />
+              {t(
+                phase === "recovering"
+                  ? "updateRecovering"
+                  : phase === "downloading" && errorOperation === "install"
+                    ? "updateRecovering"
+                    : phase === "restarting"
+                      ? "updateRestarting"
+                      : phase === "installing"
+                        ? "updateInstalling"
+                        : "updateChecking"
+              )}
+            </button>
           ) : (
             <button
               className="inline-flex min-h-8 max-w-full shrink-0 items-center justify-center rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={phase === "checking" || phase === "downloading"}
-              onClick={handleCheck}
+              disabled={isBusy}
+              onClick={phase === "error" ? handleRetry : handleCheck}
               type="button"
             >
-              {phase === "checking" || phase === "downloading" ? (
-                <span className="flex items-center justify-center gap-1.5">
-                  <LoadingSpinner size="sm" variant="inherit" />
-                  {t("updateChecking")}
-                </span>
-              ) : phase === "error" ? (
-                t("updateRetry")
-              ) : (
-                t("updateCheckBtn")
-              )}
+              {phase === "error" ? t("updateRetry") : t("updateCheckBtn")}
             </button>
           )}
         </div>
@@ -369,6 +457,11 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
                     ? t("updateFound", { version: updateVersion })
                     : t("updateDownloading")}
                 </p>
+                {fallbackReason && (
+                  <p className="mt-1 text-[11px] text-muted-foreground/70">
+                    {t("updateDeltaFallback")}
+                  </p>
+                )}
                 <div
                   className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted"
                   data-reduced-motion-keep="progress-bar"
@@ -386,6 +479,63 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
                     ? `${t("updateElapsed", { seconds: elapsedSeconds })}${bytesPerSecond ? ` · ${formatSpeed(bytesPerSecond)}` : ""}`
                     : t("updateDownloading")}
                 </p>
+              </div>
+            )}
+
+            {phase === "recovering" && (
+              <div
+                aria-live="polite"
+                className="flex items-center gap-2 rounded-[6px] bg-background/40 px-3 py-2.5"
+              >
+                <LoadingSpinner size="sm" variant="secondary" />
+                <div className="min-w-0">
+                  <span className="text-[12px] text-muted-foreground">
+                    {t("updateRecovering")}
+                  </span>
+                  {elapsedSeconds > 0 && (
+                    <p className="mt-0.5 text-[11px] text-muted-foreground/60">
+                      {t("updateElapsed", { seconds: elapsedSeconds })}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {phase === "installing" && (
+              <div
+                aria-live="polite"
+                className="flex items-center gap-2 rounded-[6px] bg-background/40 px-3 py-2.5"
+              >
+                <LoadingSpinner size="sm" variant="secondary" />
+                <div className="min-w-0">
+                  <span className="text-[12px] text-muted-foreground">
+                    {t("updateInstalling")}
+                  </span>
+                  {elapsedSeconds > 0 && (
+                    <p className="mt-0.5 text-[11px] text-muted-foreground/60">
+                      {t("updateElapsed", { seconds: elapsedSeconds })}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {phase === "restarting" && (
+              <div
+                aria-live="polite"
+                className="flex items-center gap-2 rounded-[6px] bg-background/40 px-3 py-2.5"
+              >
+                <LoadingSpinner size="sm" variant="secondary" />
+                <div className="min-w-0">
+                  <span className="text-[12px] text-muted-foreground">
+                    {t("updateRestarting")}
+                  </span>
+                  {elapsedSeconds > 0 && (
+                    <p className="mt-0.5 text-[11px] text-muted-foreground/60">
+                      {t("updateElapsed", { seconds: elapsedSeconds })}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -427,6 +577,14 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
                     {errorMsg || t("updateError")}
                   </span>
                 </div>
+                {errorOperation === "check" && (
+                  <p className="mt-1 text-[11px] text-muted-foreground/70">
+                    {t("updateCheckUnavailable")}
+                    {lastCheckResult === "up-to-date" && lastCheckTime
+                      ? ` ${t("updateLastKnownUpToDate", { time: lastCheckTime })}`
+                      : ""}
+                  </p>
+                )}
               </div>
             )}
 

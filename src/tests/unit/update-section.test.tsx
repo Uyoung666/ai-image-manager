@@ -8,6 +8,8 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateSection } from "@/components/settings/UpdateSection";
 
+const UPDATE_INSTALLING_LABEL_RE = /updateInstalling/i;
+
 const mocks = vi.hoisted(() => ({
   getUpdateStatus: vi.fn(),
   checkForUpdates: vi.fn(),
@@ -107,5 +109,45 @@ describe("update settings errors", () => {
       await screen.findByRole("button", { name: "updateRestartNow" })
     );
     expect(await screen.findByText("updateErrorBusy")).toBeInTheDocument();
+  });
+
+  it("shows an immediate installing state and disables duplicate installs", async () => {
+    let finishInstall: (() => void) | undefined;
+    mocks.getUpdateStatus.mockResolvedValue({
+      phase: "downloaded",
+      version: "2.2.2",
+    });
+    mocks.installDownloadedUpdate.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishInstall = () => resolve({ ok: true });
+        })
+    );
+    render(<UpdateSection appVersion="2.2.1" />);
+
+    const restart = await screen.findByRole("button", {
+      name: "updateRestartNow",
+    });
+    fireEvent.click(restart);
+
+    expect(screen.getAllByText("updateInstalling")).not.toHaveLength(0);
+    expect(
+      screen.getByRole("button", { name: UPDATE_INSTALLING_LABEL_RE })
+    ).toBeDisabled();
+    expect(mocks.installDownloadedUpdate).toHaveBeenCalledOnce();
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            channel: "update:status",
+            phase: "restarting",
+            version: "2.2.2",
+          },
+        })
+      );
+    });
+    expect(await screen.findAllByText("updateRestarting")).not.toHaveLength(0);
+    finishInstall?.();
   });
 });

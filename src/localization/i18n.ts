@@ -1018,8 +1018,13 @@ i18n.use(initReactI18next).init({
         updateStatusIdle: "当前版本 {{version}}",
         updateChecking: "正在检查更新...",
         updateUpToDate: "已是最新版本",
+        updateCheckUnavailable: "暂时无法检查更新。",
+        updateLastKnownUpToDate: "上次成功检查时已是最新版（{{time}}）。",
         updateFound: "发现新版本 {{version}}",
         updateDownloading: "正在下载...",
+        updateInstalling: "正在安装，可能需要几分钟，请勿退出",
+        updateRecovering: "增量安装失败，正在切换完整包并恢复更新...",
+        updateRestarting: "安装完成，正在启动新版本...",
         updateElapsed: "已耗时 {{seconds}} 秒...",
         updateDownloadedStatus: "{{version}} 已下载就绪",
         updateDeltaDownloaded: "已使用增量包下载",
@@ -1058,6 +1063,18 @@ i18n.use(initReactI18next).init({
           "安装更新超时。请关闭其他应用后重试，或手动下载并安装。",
         updateErrorRateLimited:
           "GitHub 更新服务暂时繁忙，请稍后重试或手动下载。",
+        updateErrorAccessDenied:
+          "GitHub 拒绝了更新请求，请稍后重试或检查网络代理。",
+        updateErrorServiceUnavailable:
+          "GitHub 更新服务暂时不可用，请稍后重试。",
+        updateErrorInstallInterrupted:
+          "更新安装被中断。可以重试安装或重新下载更新包。",
+        updateErrorInstallAccessDenied:
+          "更新安装被系统拒绝。请检查安装目录权限后重试。",
+        updateErrorInstallDiskFull:
+          "磁盘空间不足，无法完成更新安装。请释放空间后重试。",
+        updateErrorRestartRequired:
+          "更新已安装，但未能启动新版本。请重新启动应用。",
         updateProxySystemHint:
           "更新程序由 Windows 系统网络设置管理。如更新失败，请检查系统代理或网络后重试。",
         updateChangelogTitle: "更新日志",
@@ -3299,8 +3316,16 @@ i18n.use(initReactI18next).init({
         updateStatusIdle: "Current version {{version}}",
         updateChecking: "Checking for updates...",
         updateUpToDate: "Up to date",
+        updateCheckUnavailable: "Updates are temporarily unavailable to check.",
+        updateLastKnownUpToDate:
+          "The last successful check found this version up to date ({{time}}).",
         updateFound: "New version {{version}} found",
         updateDownloading: "Downloading...",
+        updateInstalling:
+          "Installing the update. This may take a few minutes; please keep the app open.",
+        updateRecovering:
+          "The delta install failed. Switching to the full package and recovering...",
+        updateRestarting: "Update installed. Starting the new version...",
         updateElapsed: "{{seconds}}s elapsed...",
         updateDownloadedStatus: "{{version}} ready to install",
         updateDeltaDownloaded: "Downloaded with the delta package",
@@ -3342,6 +3367,18 @@ i18n.use(initReactI18next).init({
           "Installing the update timed out. Close other apps and retry, or download it manually.",
         updateErrorRateLimited:
           "GitHub is temporarily rate limited. Retry later or download manually.",
+        updateErrorAccessDenied:
+          "GitHub denied the update request. Retry later or check your network proxy.",
+        updateErrorServiceUnavailable:
+          "GitHub's update service is temporarily unavailable. Retry later.",
+        updateErrorInstallInterrupted:
+          "The update installation was interrupted. Retry the installation or download the package again.",
+        updateErrorInstallAccessDenied:
+          "Windows denied the update installation. Check the install folder permissions and retry.",
+        updateErrorInstallDiskFull:
+          "There is not enough disk space to install the update. Free space and retry.",
+        updateErrorRestartRequired:
+          "The update was installed, but the new version could not be started. Restart the app manually.",
         updateProxySystemHint:
           "Updates use the Windows system network settings. If the check fails, review your system proxy or network and try again.",
         updateChangelogTitle: "Release Notes",

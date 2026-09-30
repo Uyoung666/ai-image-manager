@@ -79,6 +79,8 @@ import {
 } from "@/services/tracked-child-processes";
 import {
   installUpdate,
+  isUpdateInstallationActive,
+  isUpdateQuitAllowed,
   startUpdateManager,
   stopAutomaticChecks,
 } from "@/services/update-manager";
@@ -855,7 +857,6 @@ function createWindow(httpPort: number, httpAuthToken: string) {
     const { closeBehavior } = getWindowPreferences();
     if (closeBehavior === "quit" || !tray) {
       event.preventDefault();
-      isQuitting = true;
       app.quit();
       return;
     }
@@ -886,7 +887,6 @@ function createWindow(httpPort: number, httpAuthToken: string) {
       })
       .then(({ response }) => {
         if (response === 1) {
-          isQuitting = true;
           app.quit();
         } else {
           hideMainWindowToTray();
@@ -1145,6 +1145,10 @@ function checkForUpdates() {
 
 ipcMain.on("app:restart", (event) => {
   if (!ipcContext.isTrustedSender(event)) {
+    return;
+  }
+  if (isUpdateInstallationActive() && !isUpdateQuitAllowed()) {
+    log.info("app:restart blocked while update installation is active");
     return;
   }
   app.relaunch({
@@ -1804,6 +1808,10 @@ const handleBeforeQuit = createBeforeQuitHandler({
   },
   requestQuit: () => {
     app.quit();
+  },
+  shouldBlockQuit: () => isUpdateInstallationActive() && !isUpdateQuitAllowed(),
+  onQuitBlocked: () => {
+    log.info("before-quit: update installation is still running");
   },
 });
 

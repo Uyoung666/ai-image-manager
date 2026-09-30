@@ -233,13 +233,13 @@ describe("update manager single-flight and installation", () => {
       skipped: true,
     });
     expect(mocks.checkForUpdates).toHaveBeenCalledOnce();
-    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
-      phase: "downloaded",
-      releaseDate: "2026-08-09T00:00:00.000Z",
-      releaseNotes: "Release notes",
-      updateURL: "https://cos.example.test/updates/stable",
-      version: "2.1.0",
-    });
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operation: "install",
+        phase: "installing",
+        version: "2.1.0",
+      })
+    );
   });
 
   it("refuses to call quitAndInstall before an update is downloaded", async () => {
@@ -314,10 +314,12 @@ describe("update manager event payloads", () => {
     manager.checkForUpdatesManually();
     const raw = `Command failed: 4294967295 System.AggregateException: ${"�".repeat(220)} System.Net.WebException: System.IO.IOException: at System.Net.TlsStream.EndWrite`;
     mocks.emit("error", new Error(raw));
-    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
-      phase: "error",
-      message: "UPDATE_TLS_ERROR",
-    });
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        phase: "error",
+        message: "UPDATE_TLS_ERROR",
+      })
+    );
     expect(mocks.diagnosticLog).toHaveBeenCalledWith(
       expect.objectContaining({ message: raw, action: "update-event" })
     );
@@ -360,10 +362,12 @@ describe("update manager event payloads", () => {
       throw new Error("disk full");
     });
     mocks.emit("error", new Error("System.IO.IOException: disk full"));
-    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
-      phase: "error",
-      message: "UPDATE_UNKNOWN_ERROR",
-    });
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        phase: "error",
+        message: "UPDATE_INSTALL_DISK_FULL",
+      })
+    );
     expect(manager.checkForUpdatesManually()).toEqual({ ok: true });
   });
   it("does not invent metadata for update-available and reads downloaded metadata", async () => {
@@ -371,9 +375,9 @@ describe("update manager event payloads", () => {
     manager.checkForUpdatesManually();
 
     mocks.emit("update-available", { type: "event" });
-    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
-      phase: "downloading",
-    });
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ phase: "downloading" })
+    );
 
     mocks.emit(
       "update-downloaded",
@@ -383,13 +387,15 @@ describe("update manager event payloads", () => {
       "2026-08-09T00:00:00.000Z",
       "https://example.test/update"
     );
-    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
-      phase: "downloaded",
-      releaseDate: "2026-08-09T00:00:00.000Z",
-      releaseNotes: "Release notes",
-      updateURL: "https://example.test/update",
-      version: "2.1.0",
-    });
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        phase: "downloaded",
+        releaseDate: "2026-08-09T00:00:00.000Z",
+        releaseNotes: "Release notes",
+        updateURL: "https://example.test/update",
+        version: "2.1.0",
+      })
+    );
   });
 
   it("normalizes package verification and Squirrel lock errors", async () => {
@@ -402,17 +408,21 @@ describe("update manager event payloads", () => {
         "Checksummed file size doesn't match: packages\\ai-image-manager-2.1.0-full.nupkg"
       )
     );
-    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
-      message: "UPDATE_PACKAGE_CORRUPT",
-      phase: "error",
-    });
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        message: "UPDATE_PACKAGE_CORRUPT",
+        phase: "error",
+      })
+    );
 
     manager.checkForUpdatesManually();
     mocks.emit("error", new Error("Could not acquire lock for update"));
-    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
-      message: "UPDATE_BUSY",
-      phase: "error",
-    });
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        message: "UPDATE_BUSY",
+        phase: "error",
+      })
+    );
   });
 });
 

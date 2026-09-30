@@ -48,16 +48,26 @@ export function createBeforeQuitHandler({
   markQuitting,
   onCleanupError,
   requestQuit,
+  shouldBlockQuit,
+  onQuitBlocked,
 }: {
   cleanup: () => Promise<void>;
   destroyTray: () => void;
   markQuitting: () => void;
   onCleanupError: (error: unknown) => void;
   requestQuit: () => void;
+  shouldBlockQuit?: () => boolean;
+  onQuitBlocked?: () => void;
 }): (event: QuitEventHandle) => void {
   let state: "idle" | "cleaning" | "ready" = "idle";
 
   return (event) => {
+    if (shouldBlockQuit?.()) {
+      event.preventDefault();
+      onQuitBlocked?.();
+      return;
+    }
+
     markQuitting();
     destroyTray();
 

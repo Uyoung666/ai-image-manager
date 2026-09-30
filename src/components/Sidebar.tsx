@@ -349,6 +349,13 @@ export function Sidebar({
           .getAppPreferences({})
           .then((preferences) => setUpdateAvailable(preferences.updateReminder))
           .catch(() => undefined);
+        return;
+      }
+      if (
+        event.data?.channel === "update:status" &&
+        ["installing", "recovering", "restarting"].includes(event.data.phase)
+      ) {
+        setUpdateAvailable(false);
       }
     }
     function handleReminder(event: Event) {

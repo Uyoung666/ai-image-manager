@@ -168,4 +168,25 @@ describe("window and tray lifecycle", () => {
     });
     expect(onCleanupError).toHaveBeenCalledWith(error);
   });
+
+  it("blocks a manual quit while an update installer is active", () => {
+    const event = { preventDefault: vi.fn() };
+    const onQuitBlocked = vi.fn();
+    const cleanup = vi.fn(async () => undefined);
+    const handler = createBeforeQuitHandler({
+      cleanup,
+      destroyTray: vi.fn(),
+      markQuitting: vi.fn(),
+      onCleanupError: vi.fn(),
+      onQuitBlocked,
+      requestQuit: vi.fn(),
+      shouldBlockQuit: () => true,
+    });
+
+    handler(event);
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(onQuitBlocked).toHaveBeenCalledOnce();
+    expect(cleanup).not.toHaveBeenCalled();
+  });
 });

@@ -6,6 +6,8 @@ import { getHttpServerPort } from "@/services/http-server";
 import {
   checkForUpdatesManually,
   installUpdate,
+  isUpdateInstallationActive,
+  isUpdateQuitAllowed,
 } from "@/services/update-manager";
 import { getUpdateState } from "@/services/update-state";
 import { consumeUpdateWelcome as consumeUpdateWelcomeState } from "@/services/update-welcome-state";
@@ -22,6 +24,9 @@ export const appVersion = os.handler(() => {
 });
 
 export const restartApp = os.handler(() => {
+  if (isUpdateInstallationActive() && !isUpdateQuitAllowed()) {
+    return;
+  }
   try {
     const dir = path.join(app.getPath("userData"), "logs");
     fs.mkdirSync(dir, { recursive: true });
