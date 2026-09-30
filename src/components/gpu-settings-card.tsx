@@ -1,6 +1,7 @@
 import { CheckCircle2, MinusCircle, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Switch } from "@/components/ui/switch";
 import { ipc } from "@/ipc/manager";
@@ -351,7 +352,7 @@ export function GpuSettingsCard({
           <p className="min-w-0 pt-1 text-[11px] text-muted-foreground/60 leading-relaxed [overflow-wrap:anywhere]">
             {t("gpuRestartHint")}
           </p>
-          <div className="flex max-w-full flex-wrap justify-end gap-2 min-[900px]:shrink-0">
+          <div className="flex max-w-full flex-wrap items-start justify-end gap-2 min-[900px]:shrink-0">
             <button
               className="rounded-[6px] border border-input bg-background px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
               disabled={detectPhase === "checking"}
@@ -361,14 +362,15 @@ export function GpuSettingsCard({
               {getDetectButtonLabel(detectPhase, t)}
             </button>
             {!hideSaveButton && (
-              <button
-                className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              <AnimatedActionButton
+                animationDisabled={Boolean(saveStatus)}
+                className="py-1.5"
                 disabled={saving}
+                loading={saving}
                 onClick={handleSave}
-                type="button"
               >
                 {saveStatus || t("save")}
-              </button>
+              </AnimatedActionButton>
             )}
           </div>
         </div>

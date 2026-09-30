@@ -14,6 +14,7 @@ import {
 } from "@/actions/diagnostics";
 import { openExternalLink, openInExplorer } from "@/actions/shell";
 import { FilterDropdown } from "@/components/filter-dropdown";
+import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
   DialogContent,
@@ -339,7 +340,7 @@ export function DiagnosticsReportForm({
         </div>
       )}
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-end">
         <button
           className="rounded-[6px] border border-border px-3 py-2 font-medium text-[12px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           disabled={generating || dismissing}
@@ -348,17 +349,17 @@ export function DiagnosticsReportForm({
         >
           {t("diagnosticsExportOnly")}
         </button>
-        <button
-          className="inline-flex items-center justify-center gap-2 rounded-[6px] bg-primary px-3 py-2 font-medium text-[12px] text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        <AnimatedActionButton
+          className="py-2"
           disabled={generating || dismissing}
+          icon={<FileArchive className="h-4 w-4" />}
+          loading={generating}
           onClick={() => generate(true)}
-          type="button"
         >
-          <FileArchive className="h-4 w-4" />
           {generating
             ? t("diagnosticsGenerating")
             : t("diagnosticsGenerateAndReport")}
-        </button>
+        </AnimatedActionButton>
       </div>
     </div>
   );

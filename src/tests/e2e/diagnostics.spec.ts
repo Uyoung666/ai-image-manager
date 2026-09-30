@@ -145,6 +145,19 @@ test("exports within the target time and hands off a prefilled issue", async () 
   await expect(page.getByText(READY_NAME)).toBeVisible({ timeout: 5000 });
   expect(Date.now() - startedAt).toBeLessThanOrEqual(5000);
 
+  await expect
+    .poll(
+      () =>
+        electronApp?.evaluate(() => {
+          const state = globalThis as typeof globalThis & {
+            __diagnosticHandoff?: { selectedPath?: string };
+          };
+          return state.__diagnosticHandoff?.selectedPath;
+        }),
+      { timeout: 5000 }
+    )
+    .toMatch(DIAGNOSTIC_ZIP_PATTERN);
+
   const handoff = await electronApp.evaluate(() => {
     const state = globalThis as typeof globalThis & {
       __diagnosticHandoff?: { issueUrl?: string; selectedPath?: string };

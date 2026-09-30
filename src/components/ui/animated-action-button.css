@@ -1,0 +1,167 @@
+.animated-action-button {
+  --animated-action-button-duration: 300ms;
+  --animated-action-button-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  max-width: 100%;
+  min-width: 0;
+  overflow: visible;
+  border-radius: 10px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  transition:
+    background-color var(--animated-action-button-duration) ease,
+    transform 150ms ease;
+}
+
+.animated-action-button:hover:not(:disabled):not([data-loading="true"]):not(
+    [data-animation-disabled="true"]
+  ) {
+  background: var(--primary-hover);
+}
+
+.animated-action-button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.animated-action-button__viewport {
+  position: relative;
+  display: inline-flex;
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+
+.animated-action-button__icon,
+.animated-action-button__label {
+  position: relative;
+  min-width: 0;
+  transition:
+    opacity var(--animated-action-button-duration) ease,
+    transform var(--animated-action-button-duration) var(--animated-action-button-ease);
+}
+
+.animated-action-button__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.animated-action-button__label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.animated-action-button__plane {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(0deg) scale(0.8);
+  transition:
+    opacity var(--animated-action-button-duration) ease,
+    transform var(--animated-action-button-duration) var(--animated-action-button-ease);
+}
+
+.animated-action-button__plane-motion {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.animated-action-button__plane svg {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.animated-action-button:hover:not(:disabled):not([data-loading="true"]):not(
+    [data-animation-disabled="true"]
+  ):not(:focus-visible)
+  .animated-action-button__icon {
+  opacity: 0;
+  transform: translateX(-0.35rem) scale(0.8);
+}
+
+.animated-action-button:hover:not(:disabled):not([data-loading="true"]):not(
+    [data-animation-disabled="true"]
+  ):not(:focus-visible)
+  .animated-action-button__label {
+  opacity: 0;
+  transform: translateX(
+    calc(var(--animated-action-button-width, 100%) + 1rem)
+  );
+}
+
+.animated-action-button:hover:not(:disabled):not([data-loading="true"]):not(
+    [data-animation-disabled="true"]
+  ):not(:focus-visible)
+  .animated-action-button__plane {
+  opacity: 1;
+  transform: translate(-50%, -50%) rotate(45deg) scale(1.1);
+}
+
+.animated-action-button:hover:not(:disabled):not([data-loading="true"]):not(
+    [data-animation-disabled="true"]
+  ):not(:focus-visible)
+  .animated-action-button__plane-motion {
+  animation: animated-action-button-fly 600ms ease-in-out infinite alternate;
+}
+
+@keyframes animated-action-button-fly {
+  from {
+    transform: translateY(0.1em);
+  }
+
+  to {
+    transform: translateY(-0.1em);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animated-action-button,
+  .animated-action-button * {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .animated-action-button:hover .animated-action-button__icon,
+  .animated-action-button:hover .animated-action-button__label {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .animated-action-button:hover .animated-action-button__plane {
+    opacity: 0 !important;
+    transform: translate(-50%, -50%) rotate(0deg) scale(0.8) !important;
+  }
+
+  .animated-action-button:active:not(:disabled) {
+    transform: none !important;
+  }
+}
+
+.animated-action-button[data-animation-disabled="true"]:hover
+  .animated-action-button__icon,
+.animated-action-button[data-animation-disabled="true"]:hover
+  .animated-action-button__label {
+  opacity: 1;
+  transform: none;
+}
+
+.animated-action-button[data-animation-disabled="true"]:hover
+  .animated-action-button__plane {
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(0deg) scale(0.8);
+}

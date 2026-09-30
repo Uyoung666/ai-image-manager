@@ -18,6 +18,8 @@ const ROUTES = [
   "/dashboard",
   "/cull",
   "/settings/appearance",
+  "/settings/acceleration",
+  "/settings/diagnostics",
   "/settings/plugins",
   "/settings/storage",
   "/settings/update",
@@ -33,6 +35,8 @@ const WINDOW_SIZES = [
 
 const OVERFLOW_TOLERANCE_PX = 2;
 const LANGUAGE_LABEL_PATTERN = /^(Language|语言)$/;
+const DIAGNOSTICS_ACTION_NAME = /^Generate bundle and report$/;
+const SAVE_ACTION_NAME = /^Save$/;
 
 interface OverflowMeasurement {
   clientWidth: number;
@@ -154,6 +158,71 @@ function measureHorizontalOverflow(): Promise<OverflowMeasurement[]> {
 
     return measurements;
   }, OVERFLOW_TOLERANCE_PX);
+}
+
+async function expectAnimatedActionButton(name: RegExp): Promise<void> {
+  const currentPage = requirePage();
+  const button = currentPage.getByRole("button", { name });
+  await expect(button).toBeVisible();
+  await button.scrollIntoViewIfNeeded();
+  const initialBounds = await button.boundingBox();
+  if (!initialBounds) {
+    throw new Error(`Animated action button ${name} has no layout box`);
+  }
+  expect(initialBounds.height).toBeLessThan(56);
+  await expect
+    .poll(() =>
+      button.evaluate((element) =>
+        Number.parseFloat(
+          element.style.getPropertyValue("--animated-action-button-width")
+        )
+      )
+    )
+    .toBeGreaterThan(0);
+  const measuredWidth = await button.evaluate((element) =>
+    Number.parseFloat(
+      element.style.getPropertyValue("--animated-action-button-width")
+    )
+  );
+  expect(measuredWidth).toBeCloseTo(initialBounds.width, 1);
+  await currentPage.screenshot({
+    path: test.info().outputPath(`animated-action-${name.source}-static.png`),
+  });
+
+  await button.hover();
+  await expect
+    .poll(() =>
+      button.evaluate((element) => {
+        const root = element as HTMLElement;
+        const label = root.querySelector(".animated-action-button__label");
+        const plane = root.querySelector(".animated-action-button__plane");
+        return {
+          labelOpacity: label ? getComputedStyle(label).opacity : "missing",
+          planeOpacity: plane ? getComputedStyle(plane).opacity : "missing",
+        };
+      })
+    )
+    .toEqual({ labelOpacity: "0", planeOpacity: "1" });
+
+  const hoveredBounds = await button.boundingBox();
+  expect(hoveredBounds).toEqual(initialBounds);
+  await currentPage.screenshot({
+    path: test.info().outputPath(`animated-action-${name.source}-hover.png`),
+  });
+
+  await currentPage.mouse.move(1, 1);
+  await expect
+    .poll(() =>
+      button.evaluate((element) => {
+        const label = element.querySelector(".animated-action-button__label");
+        const plane = element.querySelector(".animated-action-button__plane");
+        return {
+          labelOpacity: label ? getComputedStyle(label).opacity : "missing",
+          planeOpacity: plane ? getComputedStyle(plane).opacity : "missing",
+        };
+      })
+    )
+    .toEqual({ labelOpacity: "1", planeOpacity: "0" });
 }
 
 async function expectShortcutDialogInsideViewport(): Promise<void> {
@@ -472,9 +541,47 @@ for (const { width, height } of WINDOW_SIZES) {
     });
   });
 
+  test(`${width}x${height} keeps animated action buttons usable`, async () => {
+    const currentPage = requirePage();
+    await resizeWindow(width, height);
+
+    await navigateTo("/settings/diagnostics");
+    await expectAnimatedActionButton(DIAGNOSTICS_ACTION_NAME);
+
+    await navigateTo("/settings/acceleration");
+    await expectAnimatedActionButton(SAVE_ACTION_NAME);
+    expect(await measureHorizontalOverflow()).toEqual([]);
+    await currentPage.mouse.move(1, 1);
+  });
+
   test(`${width}x${height} returns release notes to update settings`, async () => {
     await resizeWindow(width, height);
     await expectUpdateHistoryReturnsToSettings();
     expect(await measureHorizontalOverflow()).toEqual([]);
   });
 }
+
+test("reduced motion keeps animated action buttons static", async () => {
+  const currentPage = requirePage();
+  await currentPage.emulateMedia({ reducedMotion: "reduce" });
+  try {
+    await resizeWindow(900, 600);
+    await navigateTo("/settings/acceleration");
+    const button = currentPage.getByRole("button", { name: SAVE_ACTION_NAME });
+    await button.hover();
+    await expect
+      .poll(() =>
+        button.evaluate((element) => {
+          const label = element.querySelector(".animated-action-button__label");
+          const plane = element.querySelector(".animated-action-button__plane");
+          return {
+            labelOpacity: label ? getComputedStyle(label).opacity : "missing",
+            planeOpacity: plane ? getComputedStyle(plane).opacity : "missing",
+          };
+        })
+      )
+      .toEqual({ labelOpacity: "1", planeOpacity: "0" });
+  } finally {
+    await currentPage.emulateMedia({ reducedMotion: null });
+  }
+});
