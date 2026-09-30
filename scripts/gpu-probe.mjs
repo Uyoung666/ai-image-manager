@@ -23,6 +23,7 @@ import path from "node:path";
 const VIRTUAL_GPU_PATTERNS = [
   /virtual/i,
   /mumu/i,
+  /oray/i,
   /remote\s*display/i,
   /basic\s*display/i,
   /hyper-?v/i,
@@ -33,13 +34,34 @@ const VIRTUAL_GPU_PATTERNS = [
   /software/i,
   /indirect\s*display/i,
 ];
+const LINE_BREAK_RE = /\r?\n/u;
 
-function isRealGpu(name) {
+export function isRealGpu(name) {
   return !VIRTUAL_GPU_PATTERNS.some((p) => p.test(name));
 }
 
-function getGpuName() {
-  const allNames = [];
+export function selectRealGpuName(names) {
+  return names.find((name) => isRealGpu(name)) || null;
+}
+
+function parseWmicGpuNames(raw) {
+  return raw
+    .trim()
+    .split(LINE_BREAK_RE)
+    .map((line) => line.split(",")[1]?.trim())
+    .filter((name) => name && name !== "Name");
+}
+
+function parsePowerShellGpuNames(raw) {
+  return raw
+    .trim()
+    .split(LINE_BREAK_RE)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+export function getGpuName() {
+  let wmicNames = [];
 
   // wmic is fast and available on all supported Windows versions.
   try {
@@ -48,47 +70,37 @@ function getGpuName() {
       ["path", "Win32_VideoController", "get", "name", "/format:csv"],
       { timeout: 5000, encoding: "utf-8" }
     );
-    for (const line of raw.trim().split("\n")) {
-      const name = line.split(",")[1]?.trim();
-      if (name && name !== "Name") {
-        allNames.push(name);
-      }
-    }
+    wmicNames = parseWmicGpuNames(raw);
   } catch {
     /* fall through to PowerShell */
   }
 
-  if (allNames.length === 0) {
-    try {
-      const raw = execFileSync(
-        "powershell",
-        [
-          "-NoProfile",
-          "-Command",
-          "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
-        ],
-        { timeout: 5000, encoding: "utf-8" }
-      );
-      for (const line of raw.trim().split("\n")) {
-        const name = line.trim();
-        if (name) {
-          allNames.push(name);
-        }
-      }
-    } catch {
-      /* fall through */
-    }
+  // If WMIC only returned virtual adapters, try PowerShell before giving up.
+  const wmicGpuName = selectRealGpuName(wmicNames);
+  if (wmicGpuName) {
+    return wmicGpuName;
   }
 
-  // Return the first real GPU, filtering out virtual adapters
-  for (const name of allNames) {
-    if (isRealGpu(name)) {
-      return name;
+  try {
+    const raw = execFileSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-Command",
+        "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
+      ],
+      { timeout: 5000, encoding: "utf-8" }
+    );
+    const powershellGpuName = selectRealGpuName(parsePowerShellGpuNames(raw));
+    if (powershellGpuName) {
+      return powershellGpuName;
     }
+  } catch {
+    /* fall through */
   }
 
-  // If all were filtered out, fall back to the first name (better than nothing)
-  return allNames[0] || null;
+  // Never expose a virtual adapter as the detected GPU name.
+  return null;
 }
 
 // ── onnxruntime-node lazy-load (same pattern as face-worker / embed-worker) ──

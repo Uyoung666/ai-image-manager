@@ -90,6 +90,27 @@ describe("GpuSettingsCard", () => {
     });
   });
 
+  it("shows the detected real GPU name without changing DirectML status", async () => {
+    vi.mocked(ipc.client.settings.getGpuSettings).mockResolvedValue({
+      detected: {
+        dmlAvailable: true,
+        gpuName: "NVIDIA GeForce RTX 4060 Laptop GPU",
+        probeTimeMs: 34,
+      },
+      enabled: true,
+      promptShown: true,
+    });
+
+    render(<GpuSettingsCard hideSaveButton />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("NVIDIA GeForce RTX 4060 Laptop GPU")
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText("gpuStatusActive")).toBeInTheDocument();
+  });
+
   it("shows CPU fallback after an embedding probe failure without claiming GPU use", async () => {
     vi.mocked(ipc.client.settings.getGpuSettings).mockResolvedValue({
       detected: {

@@ -306,7 +306,7 @@ export function getCachedDetection(): GpuProbeResult | null {
   try {
     const parsed = JSON.parse(raw) as GpuProbeResult & { timestamp?: number };
     // Reject cached results that picked up a virtual adapter
-    // (e.g. MuMu Virtual Display Adapter from Android emulators).
+    // (e.g. OrayIddDriver or MuMu Virtual Display Adapter).
     if (parsed.gpuName && isVirtualGpuName(parsed.gpuName)) {
       return null;
     }
@@ -319,6 +319,7 @@ export function getCachedDetection(): GpuProbeResult | null {
 const VIRTUAL_GPU_PATTERNS = [
   /virtual/i,
   /mumu/i,
+  /oray/i,
   /remote\s*display/i,
   /basic\s*display/i,
   /hyper-?v/i,
@@ -330,7 +331,7 @@ const VIRTUAL_GPU_PATTERNS = [
   /indirect\s*display/i,
 ];
 
-function isVirtualGpuName(name: string): boolean {
+export function isVirtualGpuName(name: string): boolean {
   return VIRTUAL_GPU_PATTERNS.some((p) => p.test(name));
 }
 

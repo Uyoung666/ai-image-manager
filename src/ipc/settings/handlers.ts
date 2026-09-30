@@ -571,7 +571,7 @@ export const checkMirrorHealth = os.handler(async () => {
 });
 
 const VIRTUAL_GPU_RE =
-  /virtual|mumu|remote\s*display|basic\s*display|hyper-?v|vmware|virtualbox|citrix|parsec|indirect\s*display/i;
+  /virtual|mumu|oray|remote\s*display|basic\s*display|hyper-?v|vmware|virtualbox|citrix|parsec|indirect\s*display/i;
 
 export const getGpuSettings = os.handler(() => {
   const enabled = getSetting("gpu.enabled") === "true";
@@ -582,7 +582,7 @@ export const getGpuSettings = os.handler(() => {
     try {
       detected = JSON.parse(raw);
       // Reject stale cache that captured a virtual display adapter
-      // (e.g. MuMu, Hyper-V) instead of the real GPU.
+      // (e.g. OrayIddDriver, MuMu, Hyper-V) instead of the real GPU.
       if (
         detected &&
         typeof detected.gpuName === "string" &&
