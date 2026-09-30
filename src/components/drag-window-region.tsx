@@ -15,10 +15,14 @@ import {
 import icon from "../../assets/icon.png";
 
 interface DragWindowRegionProps {
+  immersive?: boolean;
   title?: ReactNode;
 }
 
-export default function DragWindowRegion({ title }: DragWindowRegionProps) {
+export default function DragWindowRegion({
+  immersive = false,
+  title,
+}: DragWindowRegionProps) {
   const { t } = useTranslation();
   const [platform, setPlatform] = useState<string | null>(null);
 
@@ -66,7 +70,9 @@ export default function DragWindowRegion({ title }: DragWindowRegionProps) {
 
   return (
     <div
-      className="flex w-full min-w-0 items-stretch justify-between"
+      className={`flex w-full min-w-0 items-stretch justify-between ${
+        immersive ? "cull-window-chrome" : ""
+      }`}
       data-surface="toolbar"
     >
       <button

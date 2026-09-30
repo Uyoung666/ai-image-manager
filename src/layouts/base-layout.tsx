@@ -144,6 +144,7 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
 function BaseLayoutContent({ children }: { children: ReactNode }) {
   const location = useLocation();
   const isHomePage = location.pathname === "/";
+  const isCullSession = location.pathname.startsWith("/cull/");
   const { zones } = useImportDropContext();
   const { t } = useTranslation();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -199,7 +200,10 @@ function BaseLayoutContent({ children }: { children: ReactNode }) {
               onDrop={isHomePage ? zones.handleRootDrop : undefined}
               role="application"
             >
-              <DragWindowRegion title="AI Image Manager" />
+              <DragWindowRegion
+                immersive={isCullSession}
+                title="AI Image Manager"
+              />
               <GlobalProgressBar />
               <div
                 className={`relative flex min-h-0 flex-1 overflow-hidden ${

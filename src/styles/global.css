@@ -265,6 +265,37 @@
   --primary-foreground: #ffffff;
 }
 
+/* 选片工作区是沉浸式的图片判断界面，始终使用深色材质。将 token
+   绑定在工作区根节点上，避免浅色主题把标题和操作栏渲染成黑字。 */
+[data-surface="immersive"][data-immersive-kind="cull"],
+.cull-window-chrome {
+  --background: #000000;
+  --background-secondary: #07090c;
+  --surface: #0b0e12;
+  --surface-hover: #12161c;
+  --surface-elevated: #181d24;
+  --foreground: #f1f4f8;
+  --foreground-secondary: #aab2bd;
+  --foreground-tertiary: #7b8490;
+  --card: #0b0e12;
+  --card-foreground: var(--foreground);
+  --popover: #12161c;
+  --popover-foreground: var(--foreground);
+  --secondary: #0b0e12;
+  --secondary-foreground: var(--foreground);
+  --muted: #11151a;
+  --muted-foreground: #9ca5b1;
+  --border-subtle: rgb(255 255 255 / 0.08);
+  --border-default: rgb(255 255 255 / 0.12);
+  --border-strong: rgb(255 255 255 / 0.18);
+  --border: var(--border-subtle);
+  --input: var(--border-default);
+  --success: #46a758;
+  --destructive: #e5484d;
+  color-scheme: dark;
+  background: #000000;
+}
+
 @theme inline {
   --font-sans: "Inter Variable", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", SF Mono, monospace;
