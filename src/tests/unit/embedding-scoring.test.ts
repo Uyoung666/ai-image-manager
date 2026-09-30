@@ -49,7 +49,7 @@ describe("SigLIP scoring policy", () => {
     expect(getTextSearchMaxCosineDistance(1, "en")).toBe(0.98);
   });
 
-  it("selects separated SigLIP tags, limits categories, and calibrates confidence", () => {
+  it("selects separated SigLIP tags, allows category co-occurrence, and calibrates confidence", () => {
     delete process.env.AI_EMBEDDING_MODEL;
     const model = getActiveEmbeddingModel();
     const selected = selectTagScores(
@@ -70,8 +70,9 @@ describe("SigLIP scoring policy", () => {
       model
     );
 
-    expect(selected.map((tag) => tag.tag)).toEqual(["阅读", "人物"]);
-    expect(selected[0].confidence).toBe(0.95);
+    expect(selected.map((tag) => tag.tag)).toEqual(["阅读", "学习", "人物"]);
+    expect(selected[0].confidence).toBeLessThan(0.95);
+    expect(selected[0].confidence).toBeGreaterThanOrEqual(0.55);
     expect(selected[1].confidence).toBeGreaterThanOrEqual(0.55);
     expect(selected.every((tag) => tag.confidence <= 0.95)).toBe(true);
   });
@@ -82,7 +83,7 @@ describe("SigLIP scoring policy", () => {
     expect(
       selectTagScores(
         [
-          { category: "scene", displayName: "室内", similarity: 0.03 },
+          { category: "scene", displayName: "室内", similarity: 0.034 },
           { category: "object", displayName: "书籍", similarity: 0.025 },
           { category: "style", displayName: "极简", similarity: 0.02 },
         ],
@@ -90,6 +91,35 @@ describe("SigLIP scoring policy", () => {
         getActiveEmbeddingModel()
       )
     ).toEqual([]);
+  });
+
+  it("applies candidate-specific floors before the shared top-five cutoff", () => {
+    const selected = selectTagScores(
+      [
+        {
+          id: "anime",
+          category: "format",
+          displayName: "二次元动漫风格",
+          similarity: 0.09,
+        },
+        {
+          id: "illustration",
+          category: "format",
+          displayName: "插画",
+          similarity: 0.064,
+        },
+        {
+          id: "subject:person people human",
+          category: "subject",
+          displayName: "人物",
+          similarity: 0.06,
+        },
+      ],
+      5,
+      getActiveEmbeddingModel()
+    );
+
+    expect(selected.map((tag) => tag.tag)).toEqual(["插画", "人物"]);
   });
 
   it("validates active-model vector dimensions and finite values", () => {
@@ -117,6 +147,7 @@ describe("SigLIP scoring policy", () => {
 describe("embedding prompts and ranked fusion", () => {
   it("provides a curated SigLIP label for every candidate tag", () => {
     const expectedCategoryCounts = {
+      format: 21,
       activity: 15,
       animal: 12,
       color: 10,
@@ -134,11 +165,12 @@ describe("embedding prompts and ranked fusion", () => {
       ])
     );
 
-    expect(CANDIDATE_TAGS).toHaveLength(132);
+    expect(CANDIDATE_TAGS).toHaveLength(153);
     expect(actualCategoryCounts).toEqual(expectedCategoryCounts);
     expect(
       CANDIDATE_TAGS.every((tag) => tag.siglipLabel.trim().length > 0)
     ).toBe(true);
+    expect(CANDIDATE_TAGS.every((tag) => tag.id.trim().length > 0)).toBe(true);
     expect(
       CANDIDATE_TAGS.find((tag) => tag.en === "reading studying book learning")
         ?.siglipLabel

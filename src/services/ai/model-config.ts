@@ -28,6 +28,7 @@ export interface EmbeddingScoringPolicy {
     relativeToTopRatio: number;
   };
   tag?: {
+    candidateMinimumById?: Record<string, number>;
     candidateFromMedian: number;
     candidateFromTop: number;
     confidenceMax: number;

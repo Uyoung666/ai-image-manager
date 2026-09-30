@@ -22,6 +22,7 @@ export {
   generateSearchPrompts,
   parseChineseQuery,
 } from "./query-parser";
+export { TAG_SELECTION_POLICY_VERSION } from "./scoring";
 export type { SemanticTextSearchResult } from "./search";
 export {
   isAiSearchReady,
@@ -78,7 +79,22 @@ export {
   setWasAutoRepaired,
   wasAutoRepaired,
 } from "./state";
-export { batchSuggestTags, CANDIDATE_TAGS, suggestTags } from "./tag-suggester";
+export type {
+  BatchTagMode,
+  CandidateTag,
+  CandidateTagDefinition,
+  TagCategory,
+} from "./tag-suggester";
+export {
+  batchSuggestTags,
+  CANDIDATE_TAG_DEFINITIONS,
+  CANDIDATE_TAGS,
+  MAX_AUTO_TAGS_PER_PHOTO,
+  suggestTags,
+  TAG_AUTO_CONFIRM_MINIMUM,
+  TAG_PROMPT_VERSION,
+  TAG_VOCABULARY_VERSION,
+} from "./tag-suggester";
 export { embedText } from "./text-embedder";
 export {
   backfillColorVectors,

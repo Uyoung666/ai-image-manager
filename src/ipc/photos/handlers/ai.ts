@@ -187,7 +187,8 @@ export const batchGenerateTags = os.handler(async () => {
           currentFile: String(photoId),
         });
         broadcastProgress();
-      }
+      },
+      "refresh"
     );
     setCurrentProgress({
       processed: indexed.length,

@@ -14,6 +14,7 @@ import {
 export interface TagScore<TCategory extends string = string> {
   category: TCategory;
   displayName: string;
+  id?: string;
   similarity: number;
 }
 
@@ -23,20 +24,33 @@ export interface SelectedTag<TCategory extends string = string> {
   tag: string;
 }
 
+// Bump when the tag selection policy changes independently of the model or
+// candidate vocabulary. This is also exposed in diagnostics so an audit can
+// identify the exact filtering policy that produced its rows.
+export const TAG_SELECTION_POLICY_VERSION = 3;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function median(values: number[]): number {
-  if (values.length === 0) {
-    return 0;
-  }
-  const sorted = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) {
-    return sorted[middle];
-  }
-  return (sorted[middle - 1] + sorted[middle]) / 2;
+/**
+ * Tag confidence is a fixed score mapping for the active profile. It is a
+ * strength indicator for ranking and review, not a calibrated probability.
+ * In particular, the highest scoring tag is no longer forced to 0.95.
+ */
+export function calibrateTagConfidence(
+  similarity: number,
+  policy: ThresholdProfile["tag"]
+): number {
+  const span = Math.max(policy.candidateFromTop * 2, 0.001);
+  const relative = clamp((similarity - policy.topMinimum) / span, 0, 1);
+  return (
+    Math.round(
+      (policy.confidenceMin +
+        relative * (policy.confidenceMax - policy.confidenceMin)) *
+        100
+    ) / 100
+  );
 }
 
 function selectSiglipTags<TCategory extends string>(
@@ -47,7 +61,7 @@ function selectSiglipTags<TCategory extends string>(
   const policy = getActiveThresholdProfile().tag;
   if (
     getActiveThresholdProfile().calibrationStatus === "uncalibrated" ||
-    !(policy && scores.length > 0)
+    !(policy && scores.length > 0 && maxTags > 0)
   ) {
     return [];
   }
@@ -60,33 +74,27 @@ function selectSiglipTags<TCategory extends string>(
   }
 
   const top = sorted[0].similarity;
-  const scoreMedian = median(sorted.map((score) => score.similarity));
-  if (top < policy.topMinimum || top - scoreMedian < policy.topFromMedian) {
+  if (top < policy.topMinimum) {
     return [];
   }
 
-  const cutoff = Math.max(
-    top - policy.candidateFromTop,
-    scoreMedian + policy.candidateFromMedian
-  );
-  const confidenceRange = policy.confidenceMax - policy.confidenceMin;
-  const denominator = Math.max(top - cutoff, Number.EPSILON);
+  // Use a score-relative floor. The candidate set can grow over time, so a
+  // global median must not silently move the output threshold.
+  const cutoff = Math.max(top - policy.candidateFromTop, policy.topMinimum);
   const selected: SelectedTag<TCategory>[] = [];
-  const usedCategories = new Set<TCategory>();
 
   for (const score of sorted) {
-    if (score.similarity < cutoff || usedCategories.has(score.category)) {
+    const candidateMinimum = score.id
+      ? (policy.candidateMinimumById?.[score.id] ?? policy.topMinimum)
+      : policy.topMinimum;
+    if (score.similarity < cutoff || score.similarity < candidateMinimum) {
       continue;
     }
-    const relative = clamp((score.similarity - cutoff) / denominator, 0, 1);
     selected.push({
       tag: score.displayName,
-      confidence:
-        Math.round((policy.confidenceMin + relative * confidenceRange) * 100) /
-        100,
+      confidence: calibrateTagConfidence(score.similarity, policy),
       category: score.category,
     });
-    usedCategories.add(score.category);
     if (selected.length >= maxTags) {
       break;
     }
@@ -115,9 +123,11 @@ export function isValidEmbeddingVector(
 
 export function getTagEmbeddingCacheKey(
   embeddingFingerprint: string,
-  promptVersion: number
+  promptVersion: number | string
 ): string {
-  return `${embeddingFingerprint}:tags-v${promptVersion}`;
+  const version =
+    typeof promptVersion === "number" ? `v${promptVersion}` : promptVersion;
+  return `${embeddingFingerprint}:tags-${version}`;
 }
 
 export function filterCosineSearchResults(

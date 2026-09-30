@@ -27,6 +27,8 @@ export interface ThresholdProfile {
     relativeToTopRatio: number;
   };
   tag: {
+    /** Conservative development-set floors keyed by stable candidate ID. */
+    candidateMinimumById?: Record<string, number>;
     candidateFromMedian: number;
     candidateFromTop: number;
     confidenceMax: number;
@@ -62,6 +64,35 @@ function createSiglipV1Profile(): ThresholdProfile {
       relativeToTopRatio: 0.4,
     },
     tag: {
+      // Calibrated on tag-benchmark-v2 development rows with explicit media
+      // negatives. Infinity keeps labels with insufficient evidence in the
+      // audit candidate set without allowing them into automatic output.
+      candidateMinimumById: {
+        photograph: 0.09,
+        illustration: 0.0585,
+        // Anime has only 14 reviewed positives in v2 (<20); keep it as an
+        // experiment candidate until a larger, balanced set is annotated.
+        anime: Number.POSITIVE_INFINITY,
+        text_overlay: 0.0638,
+        sticker: Number.POSITIVE_INFINITY,
+        emoji: Number.POSITIVE_INFINITY,
+        cartoon: Number.POSITIVE_INFINITY,
+        digital_art: Number.POSITIVE_INFINITY,
+        "format:comic panel or comic art": Number.POSITIVE_INFINITY,
+        "format:computer screenshot": Number.POSITIVE_INFINITY,
+        "format:scanned document": 0.0775,
+        "format:chart or data visualization": Number.POSITIVE_INFINITY,
+        "format:map or map illustration": Number.POSITIVE_INFINITY,
+        // Poster has only 15 development positives (<20); keep it in the
+        // audit candidate set until the next reviewed batch expands evidence.
+        "format:poster or flyer": Number.POSITIVE_INFINITY,
+        "format:icon or pictogram": Number.POSITIVE_INFINITY,
+        "format:logo or brand mark": Number.POSITIVE_INFINITY,
+        "format:pixel art": Number.POSITIVE_INFINITY,
+        "format:watercolor painting": Number.POSITIVE_INFINITY,
+        "format:pencil sketch or line drawing": Number.POSITIVE_INFINITY,
+        "format:three dimensional render": Number.POSITIVE_INFINITY,
+      },
       candidateFromMedian: 0.02,
       candidateFromTop: 0.04,
       confidenceMax: 0.95,
@@ -132,6 +163,7 @@ export function getUncalibratedThresholdProfile(
       relativeToTopRatio: 0,
     },
     tag: {
+      candidateMinimumById: {},
       candidateFromMedian: Number.POSITIVE_INFINITY,
       candidateFromTop: Number.POSITIVE_INFINITY,
       confidenceMax: 0,

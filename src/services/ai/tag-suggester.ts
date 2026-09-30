@@ -1,11 +1,16 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photoTags, tags } from "@/db/schema";
+import { invalidateTagSearch } from "../tag-search-revision";
 import { cosineSimilarity } from "./constants";
 import { getActiveEmbeddingModel } from "./model-config";
 import { getActiveEmbeddingFingerprint } from "./model-fingerprint";
 import { ensureLocalModel, loadModel } from "./model-loader";
-import { getTagEmbeddingCacheKey, selectTagScores } from "./scoring";
+import {
+  getTagEmbeddingCacheKey,
+  isValidEmbeddingVector,
+  selectTagScores,
+} from "./scoring";
 import { embedImageInWorker } from "./search";
 import {
   _localModelPath,
@@ -22,6 +27,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 export type TagCategory =
+  | "format"
   | "scene"
   | "subject"
   | "animal"
@@ -35,11 +41,13 @@ export type TagCategory =
 export interface CandidateTag {
   category: TagCategory;
   en: string;
+  id: string;
   siglipLabel: string;
   zh: string;
 }
 
 const CATEGORY_PARENTS: Record<TagCategory, string> = {
+  format: "图片类型",
   scene: "场景",
   subject: "人物",
   animal: "动物",
@@ -51,7 +59,14 @@ const CATEGORY_PARENTS: Record<TagCategory, string> = {
   weather: "天气",
 };
 
-const CANDIDATE_TAG_DEFINITIONS: Omit<CandidateTag, "siglipLabel">[] = [
+export type CandidateTagDefinition = Omit<
+  CandidateTag,
+  "id" | "siglipLabel"
+> & {
+  id?: string;
+};
+
+export const CANDIDATE_TAG_DEFINITIONS: CandidateTagDefinition[] = [
   // === SCENES (25) ===
   { en: "indoor room interior", zh: "室内", category: "scene" },
   { en: "outdoor outside", zh: "户外", category: "scene" },
@@ -213,9 +228,89 @@ const CANDIDATE_TAG_DEFINITIONS: Omit<CandidateTag, "siglipLabel">[] = [
   { en: "windy wind blowing weather", zh: "风天", category: "weather" },
   { en: "sunny clear blue sky bright", zh: "晴朗", category: "weather" },
   { en: "cloudy overcast grey sky", zh: "多云", category: "weather" },
+  // === IMAGE FORMATS (21) ===
+  {
+    id: "photograph",
+    en: "photograph photo realistic image",
+    zh: "摄影照片",
+    category: "format",
+  },
+  {
+    id: "illustration",
+    en: "illustration drawn artwork",
+    zh: "插画",
+    category: "format",
+  },
+  {
+    id: "anime",
+    en: "anime style illustration Japanese animation",
+    zh: "二次元动漫风格",
+    category: "format",
+  },
+  {
+    id: "meme",
+    en: "internet meme reaction image",
+    zh: "网络表情包",
+    category: "format",
+  },
+  {
+    id: "text_overlay",
+    en: "image with overlaid text",
+    zh: "带文字图片",
+    category: "format",
+  },
+  {
+    id: "sticker",
+    en: "sticker cutout graphic",
+    zh: "贴纸",
+    category: "format",
+  },
+  {
+    id: "emoji",
+    en: "emoji or emoticon graphic",
+    zh: "表情符号",
+    category: "format",
+  },
+  { id: "cartoon", en: "cartoon drawing", zh: "卡通画", category: "format" },
+  { id: "digital_art", en: "digital art", zh: "数字艺术", category: "format" },
+  { en: "comic panel or comic art", zh: "漫画", category: "format" },
+  { en: "computer screenshot", zh: "截图", category: "format" },
+  { en: "scanned document", zh: "扫描文档", category: "format" },
+  { en: "chart or data visualization", zh: "图表", category: "format" },
+  { en: "map or map illustration", zh: "地图", category: "format" },
+  { en: "poster or flyer", zh: "海报", category: "format" },
+  { en: "icon or pictogram", zh: "图标", category: "format" },
+  { en: "logo or brand mark", zh: "标志", category: "format" },
+  { en: "pixel art", zh: "像素画", category: "format" },
+  { en: "watercolor painting", zh: "水彩画", category: "format" },
+  { en: "pencil sketch or line drawing", zh: "素描线稿", category: "format" },
+  { en: "three dimensional render", zh: "三维渲染", category: "format" },
 ];
 
 const SIGLIP_LABELS_BY_CATEGORY: Record<TagCategory, string[]> = {
+  format: [
+    "a photograph",
+    "an illustration",
+    "an anime-style illustration",
+    "an internet meme",
+    "an image with overlaid text",
+    "a sticker",
+    "an emoji or emoticon",
+    "a cartoon drawing",
+    "digital art",
+    "a comic",
+    "a computer screenshot",
+    "a scanned document",
+    "a chart or data visualization",
+    "a map",
+    "a poster",
+    "an icon",
+    "a logo",
+    "pixel art",
+    "a watercolor painting",
+    "a pencil sketch or line drawing",
+    "a 3D render",
+  ],
   scene: [
     "an indoor room",
     "an outdoor scene",
@@ -369,6 +464,7 @@ const SIGLIP_LABELS_BY_CATEGORY: Record<TagCategory, string[]> = {
 };
 
 const siglipLabelOffsets: Record<TagCategory, number> = {
+  format: 0,
   scene: 0,
   subject: 0,
   animal: 0,
@@ -387,7 +483,11 @@ export const CANDIDATE_TAGS: CandidateTag[] = CANDIDATE_TAG_DEFINITIONS.map(
     if (!siglipLabel) {
       throw new Error(`Missing SigLIP label for ${tag.category}:${tag.en}`);
     }
-    return { ...tag, siglipLabel };
+    return {
+      ...tag,
+      id: tag.id ?? `${tag.category}:${tag.en}`,
+      siglipLabel,
+    };
   }
 );
 
@@ -405,6 +505,7 @@ for (const category of Object.keys(
 
 // Pre-computed text embeddings for candidate tags (computed once after model load)
 let cachedTagEmbeddings: Array<{
+  id: string;
   tag: string;
   displayName: string;
   category: TagCategory;
@@ -413,8 +514,13 @@ let cachedTagEmbeddings: Array<{
 let cachedTagEmbeddingKey: string | null = null;
 let tagEmbeddingPromise: Promise<void> | null = null;
 let tagEmbeddingPromiseKey: string | null = null;
-const TAG_PROMPT_VERSION = 2;
+// Keep the vocabulary and prompt revisions separate so changing one cannot
+// accidentally reuse text embeddings produced for the other.
+export const TAG_VOCABULARY_VERSION = 2;
+export const TAG_PROMPT_VERSION = 3;
 const TAG_EMBEDDING_BATCH_SIZE = 16;
+export const MAX_AUTO_TAGS_PER_PHOTO = 5;
+export const TAG_AUTO_CONFIRM_MINIMUM = 0.9;
 
 // In-memory LRU cache for recently queried image vectors
 const imageVecCache = new Map<number, number[]>();
@@ -434,7 +540,7 @@ export function _ensureTagEmbeddingsForTest(): Promise<void> {
   const model = getActiveEmbeddingModel();
   const cacheKey = getTagEmbeddingCacheKey(
     getActiveEmbeddingFingerprint(),
-    TAG_PROMPT_VERSION
+    `vocabulary-${TAG_VOCABULARY_VERSION}-prompt-${TAG_PROMPT_VERSION}`
   );
   if (cachedTagEmbeddings && cachedTagEmbeddingKey === cacheKey) {
     return Promise.resolve();
@@ -447,6 +553,7 @@ export function _ensureTagEmbeddingsForTest(): Promise<void> {
   tagEmbeddingPromiseKey = cacheKey;
   const pending = (async () => {
     const fresh: Array<{
+      id: string;
       tag: string;
       displayName: string;
       category: TagCategory;
@@ -485,6 +592,7 @@ export function _ensureTagEmbeddingsForTest(): Promise<void> {
           );
         }
         fresh.push({
+          id: tag.id,
           tag: tag.en,
           displayName: tag.zh,
           category: tag.category,
@@ -533,6 +641,7 @@ export async function suggestTags(
     return [];
   }
 
+  const activeModel = getActiveEmbeddingModel();
   const embeddingFingerprint = getActiveEmbeddingFingerprint();
   if (imageVecCacheFingerprint !== embeddingFingerprint) {
     imageVecCache.clear();
@@ -555,11 +664,13 @@ export async function suggestTags(
 
   if (photoId != null) {
     const cached = imageVecCache.get(photoId);
-    if (cached) {
+    if (cached && isValidEmbeddingVector(cached, activeModel)) {
       imageVec = cached;
       console.log(
         `[AI] suggestTags: using cached image vector for photo ${photoId}`
       );
+    } else if (cached) {
+      imageVecCache.delete(photoId);
     }
   }
 
@@ -568,7 +679,7 @@ export async function suggestTags(
       await initVectorDB();
       const vectors = await getPhotoVectors([photoId]);
       const vec = vectors.get(photoId);
-      if (vec) {
+      if (vec && isValidEmbeddingVector(vec, activeModel)) {
         imageVec = vec;
         if (imageVecCache.size >= IMAGE_VEC_CACHE_MAX) {
           const firstKey = imageVecCache.keys().next().value;
@@ -577,6 +688,10 @@ export async function suggestTags(
           }
         }
         imageVecCache.set(photoId, vec);
+      } else if (vec) {
+        console.warn(
+          `[AI] suggestTags: ignoring invalid image vector for photo ${photoId}`
+        );
       } else {
         console.log(
           `[AI] suggestTags: no vector in LanceDB for photo ${photoId}`
@@ -611,7 +726,7 @@ export async function suggestTags(
     }
   }
 
-  if (!imageVec) {
+  if (!(imageVec && isValidEmbeddingVector(imageVec, activeModel))) {
     console.error("[AI] suggestTags: could not obtain image vector");
     return [];
   }
@@ -623,9 +738,10 @@ export async function suggestTags(
   // Score all tags
   const resolvedImageVec = imageVec;
   const scores = cachedTagEmbeddings.map(
-    ({ displayName, category, vector }) => ({
+    ({ category, displayName, id, vector }) => ({
       displayName,
       category,
+      id,
       similarity: cosineSimilarity(resolvedImageVec, vector),
     })
   );
@@ -633,26 +749,28 @@ export async function suggestTags(
   const selected = selectTagScores(
     scores,
     MAX_AUTO_TAGS_PER_PHOTO,
-    getActiveEmbeddingModel()
+    activeModel
   );
   const sortedScores = [...scores].sort(
     (left, right) => right.similarity - left.similarity
   );
   console.log(
-    `[AI] suggestTags: model=${getActiveEmbeddingModel().kind} top=${sortedScores[0]?.similarity.toFixed(4) ?? "n/a"} selected=${selected.length}`
+    `[AI] suggestTags: model=${activeModel.kind} top=${sortedScores[0]?.similarity.toFixed(4) ?? "n/a"} selected=${selected.length}`
   );
   return selected;
 }
 
-const MAX_AUTO_TAGS_PER_PHOTO = 5;
 let activeBatchTaggingPromise: Promise<{
   tagged: number;
   skipped: number;
 }> | null = null;
 
+export type BatchTagMode = "append" | "refresh";
+
 export function batchSuggestTags(
   photoIds: number[],
-  onProgress?: (processed: number, total: number, photoId: number) => void
+  onProgress?: (processed: number, total: number, photoId: number) => void,
+  mode: BatchTagMode = "append"
 ): Promise<{ tagged: number; skipped: number }> {
   if (activeBatchTaggingPromise) {
     return activeBatchTaggingPromise;
@@ -662,7 +780,8 @@ export function batchSuggestTags(
   beginAutoTagging(uniquePhotoIds);
   activeBatchTaggingPromise = runBatchSuggestTags(
     uniquePhotoIds,
-    onProgress
+    onProgress,
+    mode
   ).finally(() => {
     finishAutoTagging(uniquePhotoIds);
     activeBatchTaggingPromise = null;
@@ -673,7 +792,8 @@ export function batchSuggestTags(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Batch tagging preserves per-photo retry, transaction, progress, and cancellation behavior in one worker loop.
 async function runBatchSuggestTags(
   photoIds: number[],
-  onProgress?: (processed: number, total: number, photoId: number) => void
+  onProgress?: (processed: number, total: number, photoId: number) => void,
+  mode: BatchTagMode = "append"
 ): Promise<{ tagged: number; skipped: number }> {
   const db = getDatabase();
 
@@ -731,6 +851,7 @@ async function runBatchSuggestTags(
 
   let tagged = 0;
   let skipped = 0;
+  let tagsMutated = false;
   const tagColors = [
     "#5e6ad2",
     "#46a758",
@@ -741,20 +862,22 @@ async function runBatchSuggestTags(
     "#d97a3e",
     "#a855f7",
   ];
+  const activeModel = getActiveEmbeddingModel();
 
   try {
     for (const [index, photoId] of toProcess.entries()) {
       try {
         const imageVec = vectors.get(photoId);
-        if (!imageVec) {
+        if (!(imageVec && isValidEmbeddingVector(imageVec, activeModel))) {
           skipped++;
           continue;
         }
 
         const scores = cachedTagEmbeddings.map(
-          ({ displayName, category, vector }) => ({
+          ({ category, displayName, id, vector }) => ({
             displayName,
             category,
+            id,
             similarity: cosineSimilarity(imageVec, vector),
           })
         );
@@ -762,17 +885,17 @@ async function runBatchSuggestTags(
         const topTags = selectTagScores(
           scores,
           MAX_AUTO_TAGS_PER_PHOTO,
-          getActiveEmbeddingModel()
+          activeModel
         );
 
-        for (const s of topTags) {
-          // Relative confirmation: top score's 85% or fallback 0.38
-          const confirmThreshold = topTags[0]
-            ? topTags[0].confidence * 0.85
-            : 0.38;
-          const isConfirmed = s.confidence >= confirmThreshold;
+        const pendingTags: Array<{
+          confidence: number;
+          isConfirmed: boolean;
+          tagId: number;
+        }> = [];
 
-          try {
+        try {
+          for (const s of topTags) {
             let hash = 0;
             for (let i = 0; i < s.tag.length; i++) {
               hash = Math.imul(hash, 31) + s.tag.charCodeAt(i);
@@ -781,18 +904,17 @@ async function runBatchSuggestTags(
               }
             }
             const tagColor = tagColors[Math.abs(hash) % tagColors.length];
-
             const existingTag = db
               .select({ id: tags.id })
               .from(tags)
               .where(eq(tags.name, s.tag))
               .get();
-
-            let tagId: number;
             const parentId = categoryParentIds[s.category] || null;
+            let tagId: number;
             if (existingTag) {
               tagId = existingTag.id;
-              // Backfill parentId for existing tags that lack one (never self-reference)
+              // Backfill the category parent without changing user-created
+              // hierarchy links or creating a self-reference.
               if (parentId && tagId !== parentId) {
                 db.update(tags)
                   .set({ parentId })
@@ -808,34 +930,89 @@ async function runBatchSuggestTags(
                 .returning({ insertedId: tags.id })
                 .get();
               if (!result) {
-                continue;
+                throw new Error(`Could not create tag ${s.tag}`);
               }
               tagId = result.insertedId;
             }
-
-            const existing = db
-              .select({ id: photoTags.id })
-              .from(photoTags)
-              .where(
-                sql`${photoTags.photoId} = ${photoId} AND ${photoTags.tagId} = ${tagId}`
-              )
-              .get();
-            if (!existing) {
-              db.insert(photoTags)
-                .values({
-                  photoId,
-                  tagId,
-                  confidence: s.confidence,
-                  isConfirmed,
-                  origin: "auto",
-                  userConfirmed: false,
-                })
-                .onConflictDoNothing()
-                .run();
-            }
-          } catch {
-            /* skip individual tag failures */
+            pendingTags.push({
+              confidence: s.confidence,
+              isConfirmed: s.confidence >= TAG_AUTO_CONFIRM_MINIMUM,
+              tagId,
+            });
           }
+
+          const changed = db.transaction((tx) => {
+            let changedRows = 0;
+            if (mode === "refresh") {
+              const deleted = tx
+                .delete(photoTags)
+                .where(
+                  and(
+                    eq(photoTags.photoId, photoId),
+                    eq(photoTags.origin, "auto"),
+                    eq(photoTags.userConfirmed, false)
+                  )
+                )
+                .run();
+              changedRows += deleted.changes;
+            }
+
+            for (const pending of pendingTags) {
+              const existing = tx
+                .select({
+                  id: photoTags.id,
+                  origin: photoTags.origin,
+                  userConfirmed: photoTags.userConfirmed,
+                })
+                .from(photoTags)
+                .where(
+                  and(
+                    eq(photoTags.photoId, photoId),
+                    eq(photoTags.tagId, pending.tagId)
+                  )
+                )
+                .get();
+              // A manual or user-confirmed association always wins over an
+              // automatic refresh.
+              if (existing?.origin === "manual" || existing?.userConfirmed) {
+                continue;
+              }
+              if (existing) {
+                const updated = tx
+                  .update(photoTags)
+                  .set({
+                    confidence: pending.confidence,
+                    isConfirmed: pending.isConfirmed,
+                    origin: "auto",
+                    userConfirmed: false,
+                  })
+                  .where(eq(photoTags.id, existing.id))
+                  .run();
+                changedRows += updated.changes;
+              } else {
+                tx.insert(photoTags)
+                  .values({
+                    photoId,
+                    tagId: pending.tagId,
+                    confidence: pending.confidence,
+                    isConfirmed: pending.isConfirmed,
+                    origin: "auto",
+                    userConfirmed: false,
+                  })
+                  .run();
+                changedRows++;
+              }
+            }
+            return changedRows;
+          });
+          tagsMutated ||= changed > 0;
+        } catch (error: unknown) {
+          console.warn(
+            `[AI] batchSuggestTags: keeping existing tags for photo ${photoId}:`,
+            getErrorMessage(error)
+          );
+          skipped++;
+          continue;
         }
         if (topTags.length > 0) {
           tagged++;
@@ -849,6 +1026,10 @@ async function runBatchSuggestTags(
     }
   } finally {
     finishAutoTagging(toProcess);
+  }
+
+  if (tagsMutated) {
+    invalidateTagSearch();
   }
 
   return { tagged, skipped };

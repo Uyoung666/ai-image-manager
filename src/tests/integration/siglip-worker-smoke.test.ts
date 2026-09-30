@@ -254,7 +254,7 @@ async function runProductionWorkerSmoke(
 
 function probeSiglipDirectML(layoutModelRoot: string): Promise<boolean> {
   if (process.platform !== "win32") {
-    return false;
+    return Promise.resolve(false);
   }
   const adapter = getActiveEmbeddingAdapter();
   const modelPath = path.join(
