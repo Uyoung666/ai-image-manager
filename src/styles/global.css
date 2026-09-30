@@ -1297,6 +1297,12 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 
 .wheel-and-hamster {
   --dur: 1s;
+  --wheel-frame-color: var(--foreground-tertiary);
+  --wheel-spoke-color: color-mix(
+    in srgb,
+    var(--foreground-tertiary) 78%,
+    transparent
+  );
   position: relative;
   width: 12em;
   height: 12em;
@@ -1323,8 +1329,8 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   z-index: 2;
   background: radial-gradient(
     100% 100% at center,
-    hsl(0deg 0% 60% / 0%) 47.8%,
-    hsl(0deg 0% 60%) 48%
+    transparent 47.8%,
+    var(--wheel-frame-color) 48%
   );
 }
 
@@ -1470,13 +1476,13 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   background:
     radial-gradient(
       100% 100% at center,
-      hsl(0deg 0% 60%) 4.8%,
-      hsl(0deg 0% 60% / 0%) 5%
+      var(--wheel-spoke-color) 4.8%,
+      transparent 5%
     ),
     linear-gradient(
-      hsl(0deg 0% 55% / 0%) 46.9%,
-      hsl(0deg 0% 65%) 47% 52.9%,
-      hsl(0deg 0% 65% / 0%) 53%
+      transparent 46.9%,
+      var(--wheel-spoke-color) 47% 52.9%,
+      transparent 53%
     )
     50% 50% / 99% 99% no-repeat;
   animation: spoke var(--dur) linear infinite;
@@ -1651,6 +1657,50 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   }
 }
 
+.wander-hamster-overlay {
+  color: var(--foreground);
+  background-color: var(--background);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.wander-hamster-header {
+  background-image: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--background) 94%, transparent),
+    transparent
+  );
+}
+
+.wander-hamster-muted {
+  color: var(--foreground-tertiary);
+}
+
+.wander-hamster-secondary {
+  color: var(--foreground-secondary);
+}
+
+.wander-hamster-paused {
+  color: var(--foreground-secondary);
+  background-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 18%, transparent);
+}
+
+.wander-hamster-close {
+  color: var(--foreground-secondary);
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 14%, transparent);
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.wander-hamster-close:hover {
+  color: var(--foreground);
+  background-color: color-mix(in srgb, var(--foreground) 14%, transparent);
+}
+
 .wander-hamster-wheel {
   display: flex;
   align-items: center;
@@ -1660,12 +1710,19 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 
 .wander-hamster-wheel .wheel-and-hamster {
   --dur: 1.35s;
-  font-size: clamp(12px, min(4vw, 8vh), 32px);
+  font-size: clamp(12px, min(28dvw, 5.5dvh), 32px);
 }
 
 .wander-hamster-wheel.is-paused .wheel-and-hamster,
 .wander-hamster-wheel.is-paused .wheel-and-hamster * {
   animation-play-state: paused;
+}
+
+@media (max-height: 520px) {
+  .wander-hamster-stage {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

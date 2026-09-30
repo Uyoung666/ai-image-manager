@@ -144,6 +144,11 @@ describe("WanderOverlay", () => {
   it("shows the theme card for 1.2 seconds before the first photo", () => {
     renderOverlay();
 
+    expect(screen.getByRole("dialog")).toHaveClass("bg-[#070709]");
+    expect(screen.getByRole("dialog")).not.toHaveClass(
+      "wander-hamster-overlay"
+    );
+
     // The intro card renders the round label; the contain image is not yet.
     expect(screen.getAllByText("wander.roundLabel").length).toBeGreaterThan(0);
     expect(screen.queryByAltText("first.jpg")).not.toBeInTheDocument();
@@ -164,6 +169,13 @@ describe("WanderOverlay", () => {
     expect(
       screen.getByRole("img", { name: "wander.title.hamsterWheel" })
     ).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveClass("wander-hamster-overlay");
+    expect(dialog).toHaveAttribute("data-wander-mode", "hamsterWheel");
+    expect(dialog.querySelector("header")).toHaveClass("wander-hamster-header");
+    expect(
+      dialog.querySelector("button.wander-hamster-close")
+    ).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "wander.saveRound" })
@@ -171,6 +183,23 @@ describe("WanderOverlay", () => {
 
     await advanceTimers(10_000);
     expect(onRoundComplete).not.toHaveBeenCalled();
+  });
+
+  it("pauses and resumes the hamster wheel without changing its themed surface", async () => {
+    renderOverlay({ session: hamsterWheelSession });
+
+    await advanceTimers(1200);
+    const dialog = screen.getByRole("dialog");
+    const loader = dialog.querySelector(".wander-hamster-wheel");
+    expect(loader).not.toBeNull();
+    expect(loader).not.toHaveClass("is-paused");
+
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    expect(loader).toHaveClass("is-paused");
+    expect(dialog).toHaveClass("wander-hamster-overlay");
+
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    expect(loader).not.toHaveClass("is-paused");
   });
 
   it("advances to the next photo after the photo interval", async () => {

@@ -450,13 +450,27 @@ export function WanderOverlay({
   const themeSubtitle = session.subtitleKey
     ? t(session.subtitleKey, session.subtitleParams ?? {})
     : null;
+  const overlaySurfaceClass = isHamsterWheel
+    ? "wander-hamster-overlay"
+    : "bg-[#070709] text-white";
+  const mutedTextClass = isHamsterWheel
+    ? "wander-hamster-muted"
+    : "text-white/50";
+  const introMutedTextClass = isHamsterWheel
+    ? "wander-hamster-muted"
+    : "text-white/45";
+  const secondaryTextClass = isHamsterWheel
+    ? "wander-hamster-secondary"
+    : "text-white/65";
+  const stageClass = isHamsterWheel ? "wander-hamster-stage" : "";
 
   return createPortal(
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the full-screen dialog owns dismissal gestures across its backdrop.
     <div
       aria-label={t("wander.experience")}
       aria-modal="true"
-      className={`fixed inset-0 z-[10000] h-dvh min-h-0 min-w-0 overflow-hidden bg-[#070709] text-white outline-none ${controlsVisible ? "cursor-default" : "cursor-none"}`}
+      className={`fixed inset-0 z-[10000] h-dvh min-h-0 min-w-0 overflow-hidden ${overlaySurfaceClass} outline-none ${controlsVisible ? "cursor-default" : "cursor-none"}`}
+      data-wander-mode={session.mode}
       onMouseMove={handleMouseMove}
       onPointerDown={revealControls}
       onWheel={(event) => {
@@ -485,14 +499,18 @@ export function WanderOverlay({
 
       {view === "intro" && (
         <div className="absolute inset-0 flex min-h-full min-w-0 flex-col items-center justify-center gap-3 overflow-y-auto px-4 py-16 text-center sm:px-8">
-          <div className="text-[11px] text-white/45 uppercase tracking-[0.12em]">
+          <div
+            className={`text-[11px] uppercase tracking-[0.12em] ${introMutedTextClass}`}
+          >
             {t("wander.roundLabel", { round: roundNumber })}
           </div>
           <h2 className="max-w-full break-words font-medium text-2xl sm:text-3xl">
             {themeTitle}
           </h2>
           {themeSubtitle && (
-            <p className="max-w-full break-words text-sm text-white/65">
+            <p
+              className={`max-w-full break-words text-sm ${secondaryTextClass}`}
+            >
               {themeSubtitle}
             </p>
           )}
@@ -500,7 +518,9 @@ export function WanderOverlay({
       )}
 
       {view === "playing" && isHamsterWheel && (
-        <div className="absolute inset-0 flex min-h-0 min-w-0 items-center justify-center px-4 pt-20 pb-16 sm:px-10 sm:pt-24 sm:pb-20">
+        <div
+          className={`absolute inset-0 flex min-h-0 min-w-0 items-center justify-center px-4 pt-20 pb-16 sm:px-10 sm:pt-24 sm:pb-20 ${stageClass}`}
+        >
           <div className={`wander-hamster-wheel ${paused ? "is-paused" : ""}`}>
             <HamsterWheelLoader label={themeTitle} />
           </div>
@@ -540,7 +560,7 @@ export function WanderOverlay({
       {view === "playing" && hintVisible && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-14 z-10 px-4 text-center text-[11px] text-white/50 transition-opacity duration-500 sm:bottom-16"
+          className={`pointer-events-none absolute inset-x-0 bottom-14 z-10 px-4 text-center text-[11px] transition-opacity duration-500 sm:bottom-16 ${mutedTextClass}`}
         >
           {t(
             isHamsterWheel
@@ -556,25 +576,29 @@ export function WanderOverlay({
           className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
           role="status"
         >
-          <span className="rounded-full bg-black/45 px-4 py-2 text-sm text-white/80 backdrop-blur-sm">
+          <span
+            className={`rounded-full px-4 py-2 text-sm backdrop-blur-sm ${isHamsterWheel ? "wander-hamster-paused" : "bg-black/45 text-white/80"}`}
+          >
             {t("wander.paused")}
           </span>
         </div>
       )}
 
       <header
-        className={`absolute inset-x-0 top-0 flex min-w-0 items-start justify-between gap-3 bg-gradient-to-b from-black/65 to-transparent px-4 pt-4 pb-14 transition-opacity duration-300 sm:px-6 sm:pt-6 sm:pb-16 ${controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        className={`absolute inset-x-0 top-0 flex min-w-0 items-start justify-between gap-3 px-4 pt-4 pb-14 transition-opacity duration-300 sm:px-6 sm:pt-6 sm:pb-16 ${isHamsterWheel ? "wander-hamster-header" : "bg-gradient-to-b from-black/65 to-transparent"} ${controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
         data-wander-control
       >
         <div className="min-w-0">
-          <div className="text-[10px] text-white/50 uppercase tracking-[0.12em]">
+          <div
+            className={`text-[10px] uppercase tracking-[0.12em] ${mutedTextClass}`}
+          >
             {t("wander.roundLabel", { round: roundNumber })}
           </div>
           <h1 className="mt-1 break-words font-medium text-base sm:text-lg">
             {themeTitle}
           </h1>
           {themeSubtitle && (
-            <p className="mt-1 break-words text-white/65 text-xs">
+            <p className={`mt-1 break-words text-xs ${secondaryTextClass}`}>
               {themeSubtitle}
             </p>
           )}
@@ -583,7 +607,7 @@ export function WanderOverlay({
           <TooltipTrigger asChild>
             <button
               aria-label={t("close")}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/30 text-white/70 hover:bg-black/55 hover:text-white"
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${isHamsterWheel ? "wander-hamster-close" : "bg-black/30 text-white/70 hover:bg-black/55 hover:text-white"}`}
               onBlur={handleControlsLeave}
               onClick={onClose}
               onFocus={handleControlsEnter}
