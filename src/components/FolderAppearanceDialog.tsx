@@ -1,6 +1,7 @@
 /** biome-ignore-all lint/style/useFilenamingConvention: React component files use the project's PascalCase convention. */
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
   DialogContent,
@@ -197,14 +198,14 @@ export function FolderAppearanceDialog({
             >
               {t("cancel")}
             </button>
-            <button
-              className="rounded-[6px] bg-primary px-3 py-1.5 font-medium text-primary-foreground text-xs disabled:opacity-50"
+            <AnimatedActionButton
+              className="px-3 py-1.5 text-xs"
               disabled={!colorIsValid || saving}
+              loading={saving}
               onClick={handleSave}
-              type="button"
             >
               {saving ? t("saving") : t("save")}
-            </button>
+            </AnimatedActionButton>
           </div>
         </DialogFooter>
       </DialogContent>

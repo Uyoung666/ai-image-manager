@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
   DialogContent,
@@ -242,15 +243,19 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
           >
             {t("cancel")}
           </button>
-          <button
-            className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+          <AnimatedActionButton
+            className="py-1.5"
             disabled={exporting}
+            icon={
+              exporting ? <LoadingSpinner size="sm" variant="inherit" /> : null
+            }
+            loading={exporting}
             onClick={handleExport}
-            type="button"
           >
-            {exporting && <LoadingSpinner size="sm" variant="inherit" />}
-            {t("exportAction")}
-          </button>
+            {exporting
+              ? t("exportProgress", { count: photoIds.length })
+              : t("exportAction")}
+          </AnimatedActionButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

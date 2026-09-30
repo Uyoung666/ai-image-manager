@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { openExternalLink } from "@/actions/shell";
+import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
   DialogContent,
@@ -261,24 +262,21 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
           >
             {t("cancel")}
           </button>
-          <button
-            className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+          <AnimatedActionButton
+            className="py-1.5"
             disabled={!selectedId || loading}
-            onClick={handleGenerate}
-            type="button"
-          >
-            {loading ? (
-              <>
+            icon={
+              loading ? (
                 <LoadingSpinner size="sm" variant="inherit" />
-                {t("generating")}
-              </>
-            ) : (
-              <>
+              ) : (
                 <Share2 className="h-4 w-4" />
-                {t("generateAndPublish")}
-              </>
-            )}
-          </button>
+              )
+            }
+            loading={loading}
+            onClick={handleGenerate}
+          >
+            {loading ? t("generating") : t("generateAndPublish")}
+          </AnimatedActionButton>
         </DialogFooter>
       </>
     );

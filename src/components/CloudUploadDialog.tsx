@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
   DialogContent,
@@ -231,6 +232,18 @@ export function CloudUploadDialog({
     }
   }
 
+  let actionLabel = t("cloudUploadAction", { count: photoIds.length });
+  if (uploading) {
+    actionLabel =
+      progressLabel ||
+      t("cloudUploadingProgress", {
+        done: progress?.done ?? 0,
+        total: progress?.total ?? photoIds.length,
+      });
+  } else if (stopped) {
+    actionLabel = t("cloudUploadResume");
+  }
+
   let configContent: ReactNode;
   if (configLoadState === "loading") {
     configContent = (
@@ -388,17 +401,21 @@ export function CloudUploadDialog({
             </button>
           )}
           {configLoadState === "loaded" && configs.length > 0 && !done && (
-            <button
-              className="flex max-w-full items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity [overflow-wrap:anywhere] hover:opacity-90 disabled:opacity-40"
+            <AnimatedActionButton
+              className="py-1.5 [overflow-wrap:anywhere]"
               disabled={!selectedId || uploading}
+              icon={
+                uploading ? (
+                  <LoadingSpinner size="sm" variant="inherit" />
+                ) : (
+                  <CloudUpload className="h-4 w-4" />
+                )
+              }
+              loading={uploading}
               onClick={handleUpload}
-              type="button"
             >
-              <CloudUpload className="h-4 w-4" />
-              {stopped
-                ? t("cloudUploadResume")
-                : t("cloudUploadAction", { count: photoIds.length })}
-            </button>
+              {actionLabel}
+            </AnimatedActionButton>
           )}
         </DialogFooter>
       </DialogContent>

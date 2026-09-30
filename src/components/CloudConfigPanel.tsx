@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FilterDropdown } from "@/components/filter-dropdown";
+import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
   DialogContent,
@@ -309,14 +310,14 @@ export function CloudConfigPanel() {
             >
               {t("cancel")}
             </button>
-            <button
-              className="max-w-full rounded-[6px] bg-primary px-4 py-1.5 text-[12px] text-primary-foreground transition-colors [overflow-wrap:anywhere] hover:bg-primary/90 disabled:opacity-40"
+            <AnimatedActionButton
+              className="py-1.5 [overflow-wrap:anywhere]"
               disabled={!name.trim() || saving}
+              loading={saving}
               onClick={handleSave}
-              type="button"
             >
               {saving ? t("saving") : t("save")}
-            </button>
+            </AnimatedActionButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
