@@ -12,8 +12,17 @@ name: Release
         required: false
         default: ''
         type: string
+      release_notes:
+        description: 中文发布说明（直接传入，不提交到代码仓库）
+        required: false
+        default: ''
+        type: string
   workflow_call:
     inputs:
+      release_notes:
+        required: false
+        default: ''
+        type: string
       version:
         required: true
         type: string
@@ -58,6 +67,7 @@ jobs:
       id: preflight
       env:
         GH_TOKEN: ${{ github.token }}
+        RELEASE_NOTES: ${{ inputs.release_notes }}
       run: node scripts/release-pipeline.mjs preflight
     - name: Save release context
       uses: actions/upload-artifact@v4

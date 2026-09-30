@@ -331,6 +331,24 @@ describe("local installer feed", () => {
 });
 
 describe("publication and recovery", () => {
+  it("accepts workflow notes without a tracked file and preserves pinned notes", async () => {
+    const body = "# v2.2.2\n\n- 通过 GitHub 发布和更新。";
+    const noGit = () => {
+      throw new Error("Workflow notes must not read repository files");
+    };
+    expect(await loadReleaseNotes(identity, noGit, body)).toBe(body);
+    expect(
+      await loadReleaseNotes(
+        { ...identity, releaseNotes: body },
+        noGit,
+        "- 不能覆盖已固定的发布说明。"
+      )
+    ).toBe(body);
+    await expect(loadReleaseNotes(identity, noGit, "# v2.2.2")).rejects.toThrow(
+      /describe changes/
+    );
+  });
+
   it("loads authored notes from the exact application commit instead of generated changelog links", async () => {
     const calls = [];
     const body = "# v2.2.0\n\n- 支持中断导入恢复。";

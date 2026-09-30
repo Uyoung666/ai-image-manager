@@ -31,18 +31,27 @@ export function validateReleaseNotes(text) {
   return body;
 }
 
-export async function loadReleaseNotes(manifest, runCommand = command) {
+export async function loadReleaseNotes(
+  manifest,
+  runCommand = command,
+  suppliedNotes = process.env.RELEASE_NOTES
+) {
   assertIdentity(manifest);
   if (manifest.releaseNotes !== undefined) {
     return validateReleaseNotes(manifest.releaseNotes);
   }
+  if (suppliedNotes?.trim()) {
+    return validateReleaseNotes(suppliedNotes);
+  }
+  // Compatibility for recovery of historical tags only. New releases pass
+  // notes through workflow inputs and pin them in the immutable bundle.
   const file = `RELEASE_NOTES_${manifest.tag}.md`;
   let text;
   try {
     text = await runCommand("git", ["show", `${manifest.commit}:${file}`]);
   } catch (cause) {
     throw new Error(
-      `Release requires ${file} in application commit ${manifest.commit}`,
+      `Supply release_notes when dispatching the release; historical fallback ${file} is absent from ${manifest.commit}`,
       { cause }
     );
   }

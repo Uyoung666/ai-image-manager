@@ -134,3 +134,6 @@ docs/*
 
 # Scripts (test utilities / one-off tools)
 convert-formats.mjs
+
+# Release bodies live on release pages, never in source control.
+RELEASE_NOTES*.md
