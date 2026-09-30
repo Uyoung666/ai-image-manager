@@ -20,6 +20,7 @@ const ROUTES = [
   "/settings/appearance",
   "/settings/plugins",
   "/settings/storage",
+  "/settings/update",
   "/settings/watermark",
   "/whats-new",
 ] as const;
@@ -281,6 +282,49 @@ async function expectLanguageDropdownInsideViewport(): Promise<void> {
   await expect(popover).not.toBeVisible();
 }
 
+async function expectUpdateHistoryReturnsToSettings(): Promise<void> {
+  const currentPage = requirePage();
+  await navigateTo("/settings/update");
+
+  const history = currentPage.locator(".update-changelog-history");
+  const scrollContainer = history.locator(
+    "xpath=ancestor::div[contains(@class, 'overflow-y-auto')][1]"
+  );
+  await expect(history).toBeVisible();
+
+  for (const version of ["2.2.0", "2.2.1"]) {
+    const entry = currentPage
+      .locator(".update-changelog-item")
+      .filter({ hasText: `v${version}` });
+    await entry.scrollIntoViewIfNeeded();
+    const expectedScrollTop = await scrollContainer.evaluate(
+      (element) => (element as HTMLElement).scrollTop
+    );
+    await entry.getByRole("button").click();
+    await expect(currentPage.locator(".whats-new-page")).toBeVisible();
+    await expect(
+      currentPage.locator(".whats-new-release-visual-version")
+    ).toHaveText(`v${version}`);
+
+    await currentPage.locator(".whats-new-continue").click();
+    await expect(history).toBeVisible();
+    await expect
+      .poll(() =>
+        scrollContainer.evaluate(
+          (element) => (element as HTMLElement).scrollTop
+        )
+      )
+      .toBeGreaterThanOrEqual(expectedScrollTop - 2);
+    await expect
+      .poll(() =>
+        scrollContainer.evaluate(
+          (element) => (element as HTMLElement).scrollTop
+        )
+      )
+      .toBeLessThanOrEqual(expectedScrollTop + 2);
+  }
+}
+
 test.beforeAll(async () => {
   await fs.promises.writeFile(
     referenceImagePath,
@@ -426,5 +470,11 @@ for (const { width, height } of WINDOW_SIZES) {
     await test.step("language dropdown stays inside the viewport", async () => {
       await expectLanguageDropdownInsideViewport();
     });
+  });
+
+  test(`${width}x${height} returns release notes to update settings`, async () => {
+    await resizeWindow(width, height);
+    await expectUpdateHistoryReturnsToSettings();
+    expect(await measureHorizontalOverflow()).toEqual([]);
   });
 }

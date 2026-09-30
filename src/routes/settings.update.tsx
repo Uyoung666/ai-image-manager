@@ -11,7 +11,7 @@ function UpdateSettingsPage() {
   const { t } = useTranslation();
   const [appVersion, setAppVersion] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
-  useRouteScrollRestoration(scrollRef);
+  useRouteScrollRestoration(scrollRef, { restoreReady: true });
 
   useEffect(() => {
     ipc.client.app.appVersion({}).then((v) => setAppVersion(v as string));

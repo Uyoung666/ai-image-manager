@@ -1066,8 +1066,10 @@ i18n.use(initReactI18next).init({
         whatsNewHighlights: "本次更新亮点",
         whatsNewGithub: "在 GitHub 查看完整更新说明",
         whatsNewContinue: "继续使用",
+        whatsNewBackToUpdate: "返回软件更新",
         whatsNewClose: "关闭更新日志",
         whatsNewEscapeHint: "按 Esc 继续使用",
+        whatsNewBackToUpdateEscapeHint: "按 Esc 返回软件更新",
         whatsNewLibrary: "图库",
         whatsNewLocalLibrary: "本地图库",
         settingsGitHub: "GitHub 项目主页",
@@ -1252,6 +1254,7 @@ i18n.use(initReactI18next).init({
         cloudUploadResume: "继续上传",
         cloudSyncScope:
           "仅主动上传你选择的照片，不自动双向同步，也不会修改本地原图。",
+        recentlyViewedPhoto: "刚刚浏览",
         close: "关闭",
         windowMaximize: "最大化",
         windowMinimize: "最小化",
@@ -3343,8 +3346,11 @@ i18n.use(initReactI18next).init({
         whatsNewHighlights: "Highlights from this release",
         whatsNewGithub: "Read the full release notes on GitHub",
         whatsNewContinue: "Continue",
+        whatsNewBackToUpdate: "Back to Software Updates",
         whatsNewClose: "Close release notes",
         whatsNewEscapeHint: "Press Esc to continue",
+        whatsNewBackToUpdateEscapeHint:
+          "Press Esc to return to Software Updates",
         whatsNewLibrary: "Library",
         whatsNewLocalLibrary: "Local library",
         settingsGitHub: "GitHub Project",
@@ -3542,6 +3548,7 @@ i18n.use(initReactI18next).init({
         cloudUploadResume: "Continue upload",
         cloudSyncScope:
           "Uploads only the photos you choose. There is no automatic two-way sync, and local originals are not modified.",
+        recentlyViewedPhoto: "Just viewed",
         close: "Close",
         windowMaximize: "Maximize",
         windowMinimize: "Minimize",

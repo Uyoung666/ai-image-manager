@@ -10,6 +10,11 @@ import { z } from "zod";
 import { openExternalLink } from "@/actions/shell";
 import { Button } from "@/components/ui/button";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   getChangelog,
   getLatestChangelog,
   getLocalizedText,
@@ -19,8 +24,11 @@ import appIcon from "../../assets/icon.png";
 const GITHUB_RELEASE_URL = "https://github.com/Uyoung666/ai-image-manager";
 
 const searchSchema = z.object({
+  source: z.string().optional(),
   version: z.string().optional(),
 });
+
+const SETTINGS_UPDATE_SOURCE = "settings-update";
 
 function formatReleaseDate(date: string, language: string): string {
   const parsed = new Date(`${date}T00:00:00`);
@@ -59,12 +67,22 @@ function ReleaseVisual({ version }: { version: string }) {
 export function WhatsNewPage() {
   const { i18n, t } = useTranslation();
   const navigate = useNavigate();
-  const { version } = useSearch({ from: "/whats-new" });
+  const { source, version } = useSearch({ from: "/whats-new" });
   const entry = getChangelog(version) ?? getLatestChangelog();
+  const isSettingsUpdateSource = source === SETTINGS_UPDATE_SOURCE;
+  const continueLabel = isSettingsUpdateSource
+    ? t("whatsNewBackToUpdate")
+    : t("whatsNewContinue");
+  const escapeHint = isSettingsUpdateSource
+    ? t("whatsNewBackToUpdateEscapeHint")
+    : t("whatsNewEscapeHint");
 
   const handleContinue = useCallback(() => {
-    navigate({ to: "/", replace: true });
-  }, [navigate]);
+    navigate({
+      to: isSettingsUpdateSource ? "/settings/update" : "/",
+      replace: true,
+    });
+  }, [isSettingsUpdateSource, navigate]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -85,7 +103,7 @@ export function WhatsNewPage() {
           onClick={handleContinue}
           type="button"
         >
-          {t("whatsNewContinue")}
+          {continueLabel}
         </Button>
       </div>
     );
@@ -114,16 +132,21 @@ export function WhatsNewPage() {
             />
             <span className="min-w-0 truncate">AI Image Manager</span>
           </div>
-          <Button
-            aria-label={t("whatsNewClose")}
-            className="whats-new-close"
-            onClick={handleContinue}
-            size="icon"
-            type="button"
-            variant="outline"
-          >
-            <X className="h-[17px] w-[17px]" strokeWidth={1.8} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={t("whatsNewClose")}
+                className="whats-new-close"
+                onClick={handleContinue}
+                size="icon"
+                type="button"
+                variant="outline"
+              >
+                <X className="h-[17px] w-[17px]" strokeWidth={1.8} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("whatsNewClose")}</TooltipContent>
+          </Tooltip>
         </nav>
 
         <main className="whats-new-main min-w-0">
@@ -197,14 +220,14 @@ export function WhatsNewPage() {
             type="button"
             variant="default"
           >
-            {t("whatsNewContinue")}
+            {continueLabel}
             <ArrowRight
               aria-hidden="true"
               className="h-4 w-4"
               strokeWidth={1.8}
             />
           </Button>
-          <p className="whats-new-escape-hint">{t("whatsNewEscapeHint")}</p>
+          <p className="whats-new-escape-hint">{escapeHint}</p>
         </footer>
       </div>
     </div>

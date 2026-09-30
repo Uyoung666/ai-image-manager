@@ -12,13 +12,14 @@ const mocks = vi.hoisted(() => ({
   language: "zh",
   navigate: vi.fn(),
   openExternalLink: vi.fn(),
+  source: undefined as string | undefined,
   version: "2.2.1" as string | undefined,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => options,
   useNavigate: () => mocks.navigate,
-  useSearch: () => ({ version: mocks.version }),
+  useSearch: () => ({ source: mocks.source, version: mocks.version }),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -47,6 +48,7 @@ describe("WhatsNewPage", () => {
     mocks.language = "zh";
     mocks.navigate.mockReset();
     mocks.openExternalLink.mockReset();
+    mocks.source = undefined;
     mocks.version = "2.2.1";
   });
 
@@ -98,6 +100,16 @@ describe("WhatsNewPage", () => {
     );
   });
 
+  it("uses the latest release when an unknown version is selected", () => {
+    const entry = getEntry();
+    mocks.version = "missing-version";
+    render(<WhatsNewPage />);
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      getLocalizedText(entry.title, "zh")
+    );
+  });
+
   it("switches the page content to English", () => {
     const entry = getEntry();
     mocks.language = "en";
@@ -123,6 +135,56 @@ describe("WhatsNewPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "whatsNewClose" }));
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", replace: true });
+  });
+
+  it("treats an unknown source like the default welcome page", () => {
+    mocks.source = "unknown-source";
+    render(<WhatsNewPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "whatsNewContinue" }));
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", replace: true });
+  });
+
+  it("returns to update settings when opened from the update history", () => {
+    mocks.source = "settings-update";
+    render(<WhatsNewPage />);
+
+    expect(
+      screen.getByRole("button", { name: "whatsNewBackToUpdate" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("whatsNewBackToUpdateEscapeHint")
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "whatsNewBackToUpdate" })
+    );
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      replace: true,
+      to: "/settings/update",
+    });
+  });
+
+  it("returns to update settings when the close button is used", () => {
+    mocks.source = "settings-update";
+    render(<WhatsNewPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "whatsNewClose" }));
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      replace: true,
+      to: "/settings/update",
+    });
+  });
+
+  it("returns to update settings when Escape is pressed", () => {
+    mocks.source = "settings-update";
+    render(<WhatsNewPage />);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      replace: true,
+      to: "/settings/update",
+    });
   });
 
   it("opens the full release notes on GitHub", () => {

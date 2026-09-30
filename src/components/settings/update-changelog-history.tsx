@@ -61,7 +61,10 @@ export function UpdateChangelogHistory() {
                 onClick={() =>
                   navigate({
                     to: "/whats-new",
-                    search: { version: entry.version },
+                    search: {
+                      source: "settings-update",
+                      version: entry.version,
+                    },
                   })
                 }
                 type="button"
