@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { OnboardingOverlay } from "@/components/onboarding/OnboardingOverlay";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  DEV_AUTO_SHOW_ONBOARDING,
+  OnboardingOverlay,
+} from "@/components/onboarding/OnboardingOverlay";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 
@@ -35,13 +38,19 @@ vi.mock("@/providers/QueryProvider", () => ({
   },
 }));
 
+const onboardingMocks = vi.hoisted(() => ({
+  setExiting: vi.fn(),
+  setNeedsOnboarding: vi.fn(),
+  setPreRenderContent: vi.fn(),
+}));
+
 vi.mock("@/components/onboarding/OnboardingProvider", () => ({
   useOnboarding: () => ({
     exiting: false,
     needsOnboarding: true,
-    setExiting: vi.fn(),
-    setNeedsOnboarding: vi.fn(),
-    setPreRenderContent: vi.fn(),
+    setExiting: onboardingMocks.setExiting,
+    setNeedsOnboarding: onboardingMocks.setNeedsOnboarding,
+    setPreRenderContent: onboardingMocks.setPreRenderContent,
   }),
 }));
 
@@ -92,6 +101,34 @@ describe("OnboardingOverlay", () => {
     vi.mocked(ipc.client.settings.setGpuSettings).mockResolvedValue({
       ok: true,
     });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, "electronAPI");
+  });
+
+  it("keeps the persisted step after development auto-show is disabled", async () => {
+    expect(DEV_AUTO_SHOW_ONBOARDING).toBe(false);
+    localStorage.setItem("onboarding_current_step", "2");
+
+    render(<OnboardingOverlay />);
+
+    expect(await screen.findByText("onboardingStep2Title")).toBeInTheDocument();
+    expect(localStorage.getItem("onboarding_current_step")).toBe("2");
+  });
+
+  it("keeps the E2E startup bypass ahead of development auto-show", async () => {
+    Object.defineProperty(window, "electronAPI", {
+      configurable: true,
+      value: { isE2E: true },
+    });
+
+    render(<OnboardingOverlay />);
+
+    await waitFor(() =>
+      expect(onboardingMocks.setNeedsOnboarding).toHaveBeenCalledWith(false)
+    );
+    expect(ipc.client.settings.getAppSetting).not.toHaveBeenCalled();
   });
 
   it("shows a migration error and keeps the old path when the backend rejects the directory", async () => {

@@ -24,6 +24,18 @@ import { StepIndicator } from "./StepIndicator";
 const ONBOARDING_STEP_KEY = "onboarding_current_step";
 const TOTAL_STEPS = 3;
 
+/** Toggle for temporarily replaying onboarding in development during acceptance. */
+export const DEV_AUTO_SHOW_ONBOARDING = false;
+
+function shouldAutoShowDevOnboarding(): boolean {
+  return Boolean(
+    import.meta.env.DEV &&
+      DEV_AUTO_SHOW_ONBOARDING &&
+      typeof window !== "undefined" &&
+      !window.electronAPI?.isE2E
+  );
+}
+
 function loadPersistedStep(): number {
   try {
     const raw = localStorage.getItem(ONBOARDING_STEP_KEY);
@@ -121,9 +133,13 @@ export function OnboardingOverlay() {
     setPreRenderContent,
   } = useOnboarding();
 
+  const devAutoShow = shouldAutoShowDevOnboarding();
+
   // ── Step state ──────────────────────────────────────────────────
 
-  const [currentStep, setCurrentStep] = useState(() => loadPersistedStep());
+  const [currentStep, setCurrentStep] = useState(() =>
+    devAutoShow ? 1 : loadPersistedStep()
+  );
   const [stepAnimKey, setStepAnimKey] = useState(0);
   const [dataPath, setDataPath] = useState<string>("");
   const [isMigrating, setIsMigrating] = useState(false);
@@ -145,6 +161,26 @@ export function OnboardingOverlay() {
 
   useEffect(() => {
     let cancelled = false;
+
+    async function initDevAuto() {
+      if (cancelled) {
+        return;
+      }
+      // Development acceptance always starts at the first step, while the
+      // persisted onboarding step remains available for normal launches.
+      setCurrentStep(1);
+      clearPersistedStep();
+      setNeedsOnboarding(true);
+      notifyStartupOnboardingState(true);
+      try {
+        const pathInfo = await ipc.client.settings.getDataPathInfo({});
+        if (!cancelled && pathInfo?.path) {
+          setDataPath(pathInfo.path);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
 
     async function initDevForce() {
       if (cancelled) {
@@ -206,7 +242,9 @@ export function OnboardingOverlay() {
       }
     }
 
-    if (devForce) {
+    if (devAutoShow) {
+      initDevAuto();
+    } else if (devForce) {
       initDevForce();
     } else {
       initNormal();
@@ -215,7 +253,7 @@ export function OnboardingOverlay() {
     return () => {
       cancelled = true;
     };
-  }, [setNeedsOnboarding, devForce]);
+  }, [devAutoShow, devForce, setNeedsOnboarding]);
 
   // ── Step 2: detect GPU status on mount ──────────────────────────
 
@@ -586,7 +624,7 @@ export function OnboardingOverlay() {
 
       {/* Language toggle — bottom right, subtle */}
       <div className="fixed right-3 bottom-3 z-10 opacity-70 transition-opacity duration-300 focus-within:opacity-100 hover:opacity-100 sm:right-6 sm:bottom-6">
-        <LangToggle />
+        <LangToggle contentClassName="z-[110]" />
       </div>
     </div>
   );

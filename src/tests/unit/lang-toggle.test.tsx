@@ -34,6 +34,14 @@ describe("LangToggle", () => {
     ).toHaveClass("w-[160px]", "max-w-full");
   });
 
+  it("forwards the menu layer override to the shared dropdown", () => {
+    render(<LangToggle contentClassName="z-[110]" languages={[]} />);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "settingsLanguage" }));
+
+    expect(screen.getByRole("listbox")).toHaveClass("z-[110]");
+  });
+
   it("uses FilterDropdown and loads locale-plugin options asynchronously", async () => {
     render(<LangToggle />);
 

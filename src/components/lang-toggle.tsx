@@ -12,6 +12,7 @@ export type LanguageOption = LocaleOption;
 
 export interface LangToggleProps {
   className?: string;
+  contentClassName?: string;
   disabled?: boolean;
   languages?: readonly LanguageOption[];
   onError?: (error: unknown) => void;
@@ -63,6 +64,7 @@ function selectedOptionValue(
 
 export default function LangToggle({
   className,
+  contentClassName,
   disabled = false,
   languages,
   onError,
@@ -150,6 +152,7 @@ export default function LangToggle({
     <FilterDropdown
       ariaLabel={t("settingsLanguage")}
       className={cn("w-[200px] max-w-full", className)}
+      contentClassName={contentClassName}
       disabled={disabled || loading || changing}
       onChange={(nextValue) => {
         handleChange(nextValue).catch(() => undefined);

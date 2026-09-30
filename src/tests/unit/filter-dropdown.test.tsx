@@ -55,6 +55,14 @@ describe("FilterDropdown", () => {
     expect(input.parentElement).toHaveClass("w-full", "max-w-[220px]");
   });
 
+  it("allows callers to raise the portaled menu layer when it is behind a modal", () => {
+    renderDropdown({ contentClassName: "z-[110]" });
+
+    fireEvent.click(screen.getByRole("combobox"));
+
+    expect(screen.getByRole("listbox")).toHaveClass("z-[110]");
+  });
+
   it("selects an option by click and closes the list", () => {
     const onChange = vi.fn();
     renderDropdown({ onChange });
