@@ -110,6 +110,7 @@ interface PhotoGridProps {
   onOpenSequence?: (sequenceId: number) => void;
   onOpenSequenceDetails?: (sequenceId: number) => void;
   onRestoreSettled?: (routeKey: string) => void;
+  onRetrySequences?: () => void;
   onScrollTopChange?: (scrollTop: number) => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSelectSequence?: (memberIds: number[], event: React.MouseEvent) => void;
@@ -136,6 +137,10 @@ interface PhotoGridProps {
   semanticTopSimilarity?: number;
   /** 序列数量徽标；传给工具栏"序列"切换按钮。默认不显示。 */
   sequenceCount?: number;
+  /** 序列归属查询失败时阻止展示未确认的混合内容。 */
+  sequenceError?: string | null;
+  /** 序列归属尚未解析完成时，禁止短暂展示混合内容。 */
+  sequenceLoading?: boolean;
   sequenceMode?: "photos" | "sequences";
   sequences?: PhotoSequence[];
   showGroupHeaders?: boolean;
@@ -857,6 +862,7 @@ export const PhotoGrid = memo(
     onSelectSequenceMembers,
     onSequenceMutationComplete,
     onSequenceOrderChange,
+    onRetrySequences,
     onDoubleClick,
     onContextMenu,
     onEndReached,
@@ -876,6 +882,8 @@ export const PhotoGrid = memo(
     restoreGateReady = true,
     sequences = [],
     sequenceCount,
+    sequenceError,
+    sequenceLoading = false,
     sequenceMode = "photos",
     showGroupHeaders = true,
     onOpenSequence,
@@ -960,31 +968,23 @@ export const PhotoGrid = memo(
       });
       return sorted;
     }, [scopedSequences, sort, sortOrder]);
-    const collapsibleSequences = useMemo(
-      () =>
-        orderedSequences.filter(
-          (sequence) => scopedSequenceMemberIds(sequence).length >= 2
-        ),
-      [orderedSequences]
-    );
     const sequenceByRepresentative = useMemo(
       () =>
         new Map(
-          (sequenceMode === "sequences"
-            ? orderedSequences
-            : collapsibleSequences
-          ).map((sequence) => [sequence.photo.id, sequence])
+          (sequenceMode === "sequences" ? orderedSequences : []).map(
+            (sequence) => [sequence.photo.id, sequence]
+          )
         ),
-      [collapsibleSequences, orderedSequences, sequenceMode]
+      [orderedSequences, sequenceMode]
     );
     const sequenceMemberIds = useMemo(
       () =>
         new Set(
-          collapsibleSequences.flatMap((sequence) =>
+          orderedSequences.flatMap((sequence) =>
             scopedSequenceMemberIds(sequence)
           )
         ),
-      [collapsibleSequences]
+      [orderedSequences]
     );
     const displayPhotos = useMemo<DisplayPhoto[]>(() => {
       const trayColumns = Math.max(1, Math.min(columnCount, 6));
@@ -1011,45 +1011,53 @@ export const PhotoGrid = memo(
           ...visible.slice(representativeIndex + 1),
         ];
       }
-      const visible = photos.filter(
-        (photo) =>
-          !sequenceMemberIds.has(photo.id) ||
-          sequenceByRepresentative.has(photo.id)
-      );
-      const visibleIds = new Set(visible.map((photo) => photo.id));
-      for (const sequence of collapsibleSequences) {
-        if (!visibleIds.has(sequence.photo.id)) {
-          visible.push(sequence.photo);
-        }
-      }
-      if (!(expandedSequence && tray)) {
-        return visible;
-      }
-      const representativeId =
-        expandedSequence.representativePhotoId ??
-        expandedSequence.members[0]?.id;
-      const representativeIndex = visible.findIndex(
-        (photo) => photo.id === representativeId
-      );
-      if (representativeIndex < 0) {
-        return visible;
-      }
-      return [
-        ...visible.slice(0, representativeIndex),
-        tray,
-        ...visible.slice(representativeIndex + 1),
-      ];
+      return photos.filter((photo) => !sequenceMemberIds.has(photo.id));
     }, [
       photos,
       sequenceMode,
       sequenceMemberIds,
-      sequenceByRepresentative,
       orderedSequences,
-      collapsibleSequences,
       expandedSequence,
       columnCount,
       containerWidth,
     ]);
+    const handleGridMarqueeSelect = useCallback(
+      (ids: Set<number>) => {
+        if (!onMarqueeSelect) {
+          return;
+        }
+        if (sequenceMode !== "sequences") {
+          onMarqueeSelect(ids);
+          return;
+        }
+        const expandedIds = new Set<number>();
+        for (const id of ids) {
+          const sequence = sequenceByRepresentative.get(id);
+          if (sequence) {
+            for (const memberId of scopedSequenceMemberIds(sequence)) {
+              expandedIds.add(memberId);
+            }
+            continue;
+          }
+          if (id < 0 && expandedSequence?.id === -id) {
+            for (const member of expandedSequence.members) {
+              expandedIds.add(member.id);
+            }
+            continue;
+          }
+          expandedIds.add(id);
+        }
+        if (expandedIds.size > 0) {
+          onMarqueeSelect(expandedIds);
+        }
+      },
+      [
+        expandedSequence,
+        onMarqueeSelect,
+        sequenceByRepresentative,
+        sequenceMode,
+      ]
+    );
     // Re-measure when the conditional loading/empty toolbar is replaced by the
     // populated grid toolbar; the ref target changes without changing props.
     // biome-ignore lint/correctness/useExhaustiveDependencies: render-state changes are intentional re-measure triggers
@@ -1525,7 +1533,7 @@ export const PhotoGrid = memo(
     // `displayPhotos` can be temporarily empty while changing presentation
     // modes (for example, before the sequence query resolves). The full-grid
     // skeleton is only for the initial photo query, not for a derived view.
-    if (loading && photos.length === 0) {
+    if (sequenceLoading || (loading && photos.length === 0)) {
       const skelCols = Array.from({ length: columnCount }, (_, ci) =>
         Array.from({ length: 3 }, (_, ri) => ci * 3 + ri)
       );
@@ -1563,14 +1571,17 @@ export const PhotoGrid = memo(
       );
     }
 
-    if (!loading && displayPhotos.length === 0) {
-      const isError = !!error;
+    if (sequenceError || (!loading && displayPhotos.length === 0)) {
+      const displayError = sequenceError ?? error;
+      const isError = Boolean(displayError);
       return (
         <div className="flex flex-1 flex-col">
           {showToolbar && (
             <div className="flex items-center justify-between border-border border-b px-4 py-2">
               <span className="truncate text-[12px] text-muted-foreground">
-                {t("photosCount", { count: 0 })}
+                {t("photosCount", {
+                  count: sequenceError ? 0 : displayPhotos.length,
+                })}
               </span>
               {toolbarActions}
             </div>
@@ -1594,14 +1605,48 @@ export const PhotoGrid = memo(
                     />
                   </svg>
                 </div>
-                <p className="text-[13px] text-muted-foreground/70">{error}</p>
+                <p className="text-[13px] text-muted-foreground/70">
+                  {displayError}
+                </p>
+                {sequenceError && onRetrySequences && (
+                  <button
+                    className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
+                    onClick={onRetrySequences}
+                    type="button"
+                  >
+                    {t("retry")}
+                  </button>
+                )}
               </div>
             ) : (
-              (emptyState ?? (
+              (emptyState ??
+              (sequenceMode === "photos" && orderedSequences.length > 0 ? (
+                <div className="flex flex-col items-center gap-3 px-6 text-center">
+                  <Layers
+                    aria-hidden="true"
+                    className="h-5 w-5 text-muted-foreground"
+                  />
+                  <p className="text-[13px] text-muted-foreground/70">
+                    {t("sequenceEmptyPhotosTitle")}
+                  </p>
+                  <p className="max-w-sm text-[12px] text-muted-foreground/60">
+                    {t("sequenceEmptyPhotosDescription")}
+                  </p>
+                  {onSequenceModeChange && (
+                    <button
+                      className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
+                      onClick={() => onSequenceModeChange("sequences")}
+                      type="button"
+                    >
+                      {t("sequenceEmptyViewSequences")}
+                    </button>
+                  )}
+                </div>
+              ) : (
                 <span className="text-[13px] text-muted-foreground/70">
                   {t("noPhotos")}
                 </span>
-              ))
+              )))
             )}
           </div>
         </div>
@@ -1633,10 +1678,7 @@ export const PhotoGrid = memo(
           >
             <span className="truncate text-[12px] text-muted-foreground">
               {t("photosCount", {
-                count:
-                  sequenceMode === "sequences"
-                    ? displayPhotos.length.toLocaleString()
-                    : photos.length.toLocaleString(),
+                count: displayPhotos.length.toLocaleString(),
               })}
               {selectedIds.size > 0 &&
                 t("photosSelected", { count: selectedIds.size })}
@@ -1665,7 +1707,7 @@ export const PhotoGrid = memo(
             itemStateVersion={itemStateVersion}
             items={displayPhotos}
             onEndReached={onEndReached}
-            onMarqueeSelect={onMarqueeSelect}
+            onMarqueeSelect={handleGridMarqueeSelect}
             onRestoreSettled={onRestoreSettled}
             onScrollTopChange={handleGridScrollTopChange}
             ref={gridRef}
@@ -1705,6 +1747,15 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.sequenceCount !== nextProps.sequenceCount) {
+      return false;
+    }
+    if (prevProps.sequenceLoading !== nextProps.sequenceLoading) {
+      return false;
+    }
+    if (prevProps.sequenceError !== nextProps.sequenceError) {
+      return false;
+    }
+    if (prevProps.onRetrySequences !== nextProps.onRetrySequences) {
       return false;
     }
     if (prevProps.sequenceMode !== nextProps.sequenceMode) {

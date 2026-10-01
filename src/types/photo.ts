@@ -49,6 +49,8 @@ export interface PhotoListResponse {
   limit: number;
   offset: number;
   total: number;
+  /** Total before the optional ungroupedOnly filter. */
+  totalAll?: number;
 }
 
 export interface SearchResponse {

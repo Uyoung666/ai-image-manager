@@ -19,6 +19,8 @@ export const ImageSearchPreviewSchema = ImageSearchSchema.pick({
 });
 export const ListSchema = z.object({
   folderId: z.number().optional(),
+  /** Only return active photos that are not members of any sequence. */
+  ungroupedOnly: z.boolean().optional(),
   tagId: z.number().optional(),
   tagIds: z.number().array().optional(),
   tagMode: z.enum(["and", "or"]).optional().default("or"),

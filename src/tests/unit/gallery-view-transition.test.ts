@@ -7,6 +7,7 @@ import {
 const originalStartViewTransition = document.startViewTransition;
 
 afterEach(() => {
+  vi.useRealTimers();
   Object.defineProperty(document, "startViewTransition", {
     configurable: true,
     value: originalStartViewTransition,
@@ -28,6 +29,7 @@ describe("gallery view transition", () => {
   });
 
   it("commits inside the transition and clears its root class", async () => {
+    vi.useFakeTimers();
     const update = vi.fn();
     const finished = Promise.resolve();
     const skipTransition = vi.fn();
@@ -50,6 +52,8 @@ describe("gallery view transition", () => {
     expect(document.documentElement).toHaveClass("gallery-mode-transitioning");
     await finished;
     await Promise.resolve();
+    expect(document.documentElement).toHaveClass("gallery-mode-transitioning");
+    vi.advanceTimersByTime(220);
     expect(document.documentElement).not.toHaveClass(
       "gallery-mode-transitioning"
     );

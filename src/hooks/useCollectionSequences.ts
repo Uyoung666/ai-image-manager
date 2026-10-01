@@ -10,6 +10,16 @@ import type {
 
 export type CollectionSequenceMode = "photos" | "sequences";
 
+export function getSequenceMemberIds(sequences: PhotoSequence[]): number[] {
+  return [
+    ...new Set(
+      sequences.flatMap(
+        (sequence) => sequence.matchedPhotoIds ?? sequence.memberPhotoIds ?? []
+      )
+    ),
+  ];
+}
+
 export function shouldShowSequenceEmptyState({
   mode,
   sequenceCount,
@@ -112,7 +122,7 @@ export function useCollectionSequences({
     readMode(storageKey)
   );
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
-  const [sequencesError, setSequencesError] = useState<string | null>(null);
+  const [sequencesError, setSequencesError] = useState(false);
   const [loadedSequenceRequestKey, setLoadedSequenceRequestKey] = useState<
     string | null
   >(null);
@@ -191,7 +201,7 @@ export function useCollectionSequences({
     let cancelled = false;
     if (photoIds.length === 0) {
       setSequences([]);
-      setSequencesError(null);
+      setSequencesError(false);
       setLoadedSequenceRequestKey(sequenceRequestKey);
       return;
     }
@@ -200,7 +210,7 @@ export function useCollectionSequences({
     if (!preserveExistingSequences) {
       setSequences([]);
     }
-    setSequencesError(null);
+    setSequencesError(false);
     ipc.client.photos
       .listSequences({ photoIds, scope: "members" })
       .then((result) => {
@@ -213,7 +223,7 @@ export function useCollectionSequences({
         console.error("[useCollectionSequences] list failed", error);
         if (!cancelled) {
           setSequences([]);
-          setSequencesError("Unable to load sequences");
+          setSequencesError(true);
           setLoadedSequenceRequestKey(sequenceRequestKey);
         }
       });

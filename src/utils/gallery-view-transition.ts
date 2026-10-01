@@ -2,10 +2,16 @@ import { flushSync } from "react-dom";
 import { isReducedMotionEnabled } from "@/actions/ui-preferences";
 
 const GALLERY_TRANSITION_CLASS = "gallery-mode-transitioning";
+const GALLERY_TRANSITION_MIN_DURATION_MS = 220;
 let activeTransitionId = 0;
+let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function cancelGalleryViewTransition(): void {
   activeTransitionId += 1;
+  if (cleanupTimer !== null) {
+    clearTimeout(cleanupTimer);
+    cleanupTimer = null;
+  }
   if (typeof document !== "undefined") {
     document.documentElement.classList.remove(GALLERY_TRANSITION_CLASS);
   }
@@ -41,7 +47,12 @@ export function startGalleryViewTransition(
 
   const root = document.documentElement;
   root.classList.add(GALLERY_TRANSITION_CLASS);
+  if (cleanupTimer !== null) {
+    clearTimeout(cleanupTimer);
+    cleanupTimer = null;
+  }
   const transitionId = ++activeTransitionId;
+  const startedAt = performance.now();
   let committed = false;
   try {
     const transition = document.startViewTransition(() => {
@@ -49,9 +60,24 @@ export function startGalleryViewTransition(
       flushSync(update);
     });
     const clearTransitionClass = () => {
-      if (activeTransitionId === transitionId) {
-        root.classList.remove(GALLERY_TRANSITION_CLASS);
+      if (activeTransitionId !== transitionId) {
+        return;
       }
+      const elapsed = performance.now() - startedAt;
+      const remaining = Math.max(
+        0,
+        GALLERY_TRANSITION_MIN_DURATION_MS - elapsed
+      );
+      if (remaining === 0) {
+        root.classList.remove(GALLERY_TRANSITION_CLASS);
+        return;
+      }
+      cleanupTimer = setTimeout(() => {
+        cleanupTimer = null;
+        if (activeTransitionId === transitionId) {
+          root.classList.remove(GALLERY_TRANSITION_CLASS);
+        }
+      }, remaining);
     };
     transition.finished.then(clearTransitionClass, clearTransitionClass);
     return transition;

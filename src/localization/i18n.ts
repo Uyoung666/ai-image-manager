@@ -258,6 +258,10 @@ i18n.use(initReactI18next).init({
         sequenceEmptyDescription:
           "当前没有已识别的序列，请点击“识别序列”重新检测，或查看全部照片。",
         sequenceEmptyViewPhotos: "查看照片",
+        sequenceEmptyPhotosTitle: "当前范围内没有未归组照片",
+        sequenceEmptyPhotosDescription:
+          "当前范围内的照片都属于序列，可以切换到“序列”查看。",
+        sequenceEmptyViewSequences: "查看序列",
         sequenceDetectNoPhotos: "当前没有可用于识别序列的照片",
         sequenceDetectNoMatches: "未识别到符合条件的序列",
         sequenceManualRepresentativeSet: "已设为手动代表帧",
@@ -2506,6 +2510,10 @@ i18n.use(initReactI18next).init({
         sequenceEmptyDescription:
           "No sequences have been detected. Click “Detect sequences” to try again, or view all photos.",
         sequenceEmptyViewPhotos: "View photos",
+        sequenceEmptyPhotosTitle: "No ungrouped photos in this view",
+        sequenceEmptyPhotosDescription:
+          "All photos in this view belong to sequences. Switch to Sequences to view them.",
+        sequenceEmptyViewSequences: "View sequences",
         sequenceDetectNoPhotos:
           "No photos are available for sequence detection",
         sequenceDetectNoMatches: "No matching sequences were found",

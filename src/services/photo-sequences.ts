@@ -17,6 +17,7 @@ import {
   photoSequences,
   photos,
 } from "@/db/schema";
+import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { normalizeAdvancedExif } from "@/services/advanced-exif-normalizer";
 import { hammingDistance } from "@/services/bk-tree";
 import {
@@ -410,6 +411,9 @@ export function notifySequencesChanged(
   reason: SequenceChangeReason,
   details?: { orderedMemberIds: number[]; sequenceId: number }
 ): void {
+  // Sequence membership affects the optional ungrouped photo count, so any
+  // mutation must discard cached list totals before renderers refetch.
+  invalidateCountCache();
   bumpPhotoSequenceRevision();
   sequenceVersion += 1;
   for (const window of BrowserWindow.getAllWindows()) {

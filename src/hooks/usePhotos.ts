@@ -13,6 +13,7 @@ interface UsePhotosParams {
   tagId?: number | null;
   tagIds?: number[];
   tagMode?: "and" | "or";
+  ungroupedOnly?: boolean;
 }
 
 /**
@@ -25,6 +26,7 @@ interface UsePhotosParams {
  */
 export function usePhotos({
   folderId,
+  ungroupedOnly = false,
   tagId,
   tagIds,
   tagMode = "or",
@@ -38,6 +40,7 @@ export function usePhotos({
       "photos",
       {
         folderId: folderId ?? null,
+        ungroupedOnly,
         tagId: tagId ?? null,
         tagIds: tagIds ?? null,
         tagMode: tagMode ?? "or",
@@ -49,6 +52,7 @@ export function usePhotos({
     queryFn: async ({ pageParam = 0 }) => {
       const result = await ipc.client.photos.listPhotos({
         folderId: folderId || undefined,
+        ungroupedOnly: ungroupedOnly || undefined,
         tagId: tagIds?.length ? undefined : tagId || undefined,
         tagIds: tagIds?.length ? tagIds : undefined,
         tagMode: tagIds?.length ? tagMode : undefined,

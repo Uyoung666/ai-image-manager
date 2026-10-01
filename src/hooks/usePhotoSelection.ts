@@ -60,6 +60,7 @@ interface UsePhotoSelectionReturn {
   lastClickedIdx: number;
   removeFromSelection: (ids: number[]) => void;
   selectAll: () => void;
+  selectAllIds: (ids: number[]) => void;
   selectedIds: Set<number>;
 }
 
@@ -262,6 +263,22 @@ export function usePhotoSelection(
     });
   }, [photos, routeKey, saveSession]);
 
+  const selectAllIds = useCallback(
+    (ids: number[]) => {
+      const uniqueIds = [...new Set(ids)];
+      const firstIndex = uniqueIds.length
+        ? photos.findIndex((photo) => photo.id === uniqueIds[0])
+        : -1;
+      setSelectedIds(new Set(uniqueIds));
+      setLastClickedIdx(firstIndex);
+      saveSession(routeKey, {
+        selectedIds: uniqueIds,
+        lastClickedIdx: firstIndex,
+      });
+    },
+    [photos, routeKey, saveSession]
+  );
+
   return {
     addToSelection,
     selectedIds,
@@ -273,5 +290,6 @@ export function usePhotoSelection(
     clearSelection,
     removeFromSelection,
     selectAll,
+    selectAllIds,
   };
 }

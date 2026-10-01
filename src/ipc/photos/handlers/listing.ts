@@ -19,6 +19,7 @@ import {
   faceIdentities,
   faceIdentityMembers,
   folders,
+  photoSequenceMembers,
   photos,
   photoTags,
   tags,
@@ -289,6 +290,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   const db = getDatabase();
   const {
     folderId,
+    ungroupedOnly,
     tagId,
     tagIds,
     tagMode,
@@ -325,6 +327,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
 
   // Always exclude soft-deleted photos
   const conditions: SQL[] = [isNull(photos.deletedAt)];
+  let ungroupedCondition: SQL | null = null;
 
   if (folderId) {
     const folderHierarchy = db
@@ -436,6 +439,10 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   if (favoriteOnly) {
     conditions.push(eq(photos.isFavorite, true));
   }
+  if (ungroupedOnly) {
+    ungroupedCondition = sql`NOT EXISTS (SELECT 1 FROM ${photoSequenceMembers} WHERE ${photoSequenceMembers.photoId} = ${photos.id})`;
+    conditions.push(ungroupedCondition);
+  }
 
   query = query.where(and(...conditions));
 
@@ -458,6 +465,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     tagMode: effectiveTagMode,
     search: search ?? null,
     favoriteOnly: favoriteOnly ?? null,
+    ungroupedOnly: ungroupedOnly ?? false,
   });
 
   let total: number;
@@ -522,7 +530,25 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     }));
   }
 
-  return { items, total, offset, limit };
+  let totalAll: number | undefined;
+  if (ungroupedCondition) {
+    const allCountQuery = db
+      .select({ count: sql<number>`count(*)` })
+      .from(photos)
+      .$dynamic();
+    const filteredAllCountQuery = allCountQuery.where(
+      and(...conditions.filter((condition) => condition !== ungroupedCondition))
+    );
+    totalAll = filteredAllCountQuery.get()?.count || 0;
+  }
+
+  return {
+    items,
+    total,
+    ...(totalAll === undefined ? {} : { totalAll }),
+    offset,
+    limit,
+  };
 });
 
 // Photo detail

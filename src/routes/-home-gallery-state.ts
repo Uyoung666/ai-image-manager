@@ -6,6 +6,7 @@ interface HomeGalleryVisibilityInput {
   isSearching: boolean;
   loading: boolean;
   photoCount: number;
+  sequenceCount?: number;
 }
 
 export function shouldShowHomeGallery({
@@ -16,9 +17,11 @@ export function shouldShowHomeGallery({
   isSearching,
   loading,
   photoCount,
+  sequenceCount,
 }: HomeGalleryVisibilityInput): boolean {
   return (
     photoCount > 0 ||
+    (sequenceCount ?? 0) > 0 ||
     initialQueryError ||
     loading ||
     isSearching ||

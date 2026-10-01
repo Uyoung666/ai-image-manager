@@ -1279,9 +1279,7 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 }
 
 html[data-reduced-motion="true"]::view-transition-old(home-gallery-content),
-html[data-reduced-motion="true"]::view-transition-new(home-gallery-content),
-html.gallery-mode-transitioning::view-transition-old(home-gallery-content),
-html.gallery-mode-transitioning::view-transition-new(home-gallery-content) {
+html[data-reduced-motion="true"]::view-transition-new(home-gallery-content) {
   animation: none !important;
 }
 

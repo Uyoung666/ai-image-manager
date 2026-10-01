@@ -336,6 +336,7 @@ function HomePage() {
   const [sequenceDataSource, setSequenceDataSource] =
     useState<SequenceDataSource | null>(null);
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
+  const [sequenceError, setSequenceError] = useState<string | null>(null);
   const [gallerySequenceCount, setGallerySequenceCount] = useState(0);
   const [sequenceSuggestions, setSequenceSuggestions] = useState<
     SequenceSuggestion[]
@@ -772,6 +773,10 @@ function HomePage() {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
       }
       if (event.data?.channel === "sequences-changed") {
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
         if (
           event.data.reason === "reorder" &&
           typeof event.data.sequenceId === "number" &&
@@ -806,6 +811,7 @@ function HomePage() {
     tagIds: filter.activeTagIds.length > 0 ? filter.activeTagIds : undefined,
     tagMode: filter.tagMode,
     favoriteOnly: filter.favoriteOnly || undefined,
+    ungroupedOnly: sequenceMode === "photos",
     sort: sortField,
     order: sortOrder,
     enabled: !isSearching,
@@ -847,6 +853,7 @@ function HomePage() {
     [photosData]
   );
   const totalFromQuery = photosData?.pages[0]?.total ?? 0;
+  const totalAllFromQuery = photosData?.pages[0]?.totalAll ?? totalFromQuery;
   const initialHomeQueryError =
     !isSearching &&
     Boolean(
@@ -997,6 +1004,7 @@ function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
+    setSequenceError(null);
     // In browse mode, sequence cards must be resolved against the full filtered
     // gallery rather than just the loaded photo page. Otherwise a page made up
     // entirely of one collapsed sequence can hide later sequences in the same
@@ -1086,6 +1094,7 @@ function HomePage() {
           if (useGalleryScope) {
             setGallerySequenceCount(result.length);
           }
+          setSequenceError(null);
           setSequenceDataSource({
             key: sequenceQuerySourceKey,
             photoIds: sequencePhotoIds,
@@ -1102,6 +1111,7 @@ function HomePage() {
               setGallerySequenceCount(0);
             }
           }
+          setSequenceError(t("loadFailedRetry"));
           setSequenceDataSource({
             key: sequenceQuerySourceKey,
             photoIds: sequencePhotoIds,
@@ -1123,6 +1133,7 @@ function HomePage() {
     sequencePhotoIds,
     sequenceQuerySourceKey,
     sequenceRefresh,
+    t,
   ]);
 
   const sequenceCount = isSearching ? sequences.length : gallerySequenceCount;
@@ -1627,6 +1638,12 @@ function HomePage() {
     routeKey,
     sequenceViewReady,
   });
+  // Sequence ownership can take a little longer than the photo query. Keep
+  // the gallery surface visible while its own skeleton is shown; hiding the
+  // entire masonry container here makes later detail-panel layout changes
+  // look like a flash. A saved scroll position still uses the existing
+  // restore veil until positioning has settled.
+  const contentRestorePending = hasSavedPosition && restorePending;
 
   // 预加载期间自动推进分页加载（顺序拉取，避免并发乱序）
   useEffect(() => {
@@ -1651,6 +1668,24 @@ function HomePage() {
     fetchNextPage,
   ]);
 
+  const sequenceMemberIdSet = useMemo(
+    () =>
+      new Set(
+        sequences.flatMap(
+          (sequence) =>
+            sequence.matchedPhotoIds ?? sequence.memberPhotoIds ?? []
+        )
+      ),
+    [sequences]
+  );
+  const selectionPhotos = useMemo(
+    () =>
+      displayedSequenceMode === "photos"
+        ? photos.filter((photo) => !sequenceMemberIdSet.has(photo.id))
+        : actionPhotos.filter((photo) => sequenceMemberIdSet.has(photo.id)),
+    [actionPhotos, displayedSequenceMode, photos, sequenceMemberIdSet]
+  );
+
   // 共享 Hooks：选中状态、详情面板
   const {
     selectedIds,
@@ -1661,8 +1696,33 @@ function HomePage() {
     handleMarqueeSelect,
     clearSelection,
     removeFromSelection,
-    selectAll: selectAllPhotos,
-  } = usePhotoSelection(routeKey, actionPhotos);
+    selectAllIds,
+  } = usePhotoSelection(routeKey, selectionPhotos);
+  const visibleSelectionIds = useMemo(
+    () =>
+      displayedSequenceMode === "sequences"
+        ? [...sequenceMemberIdSet]
+        : selectionPhotos.map((photo) => photo.id),
+    [displayedSequenceMode, selectionPhotos, sequenceMemberIdSet]
+  );
+  const selectAllVisible = useCallback(() => {
+    selectAllIds(visibleSelectionIds);
+  }, [selectAllIds, visibleSelectionIds]);
+  useEffect(() => {
+    if (!sequenceViewReady) {
+      return;
+    }
+    const allowed = new Set(visibleSelectionIds);
+    const hidden = [...selectedIds].filter((id) => !allowed.has(id));
+    if (hidden.length > 0) {
+      removeFromSelection(hidden);
+    }
+  }, [
+    removeFromSelection,
+    selectedIds,
+    sequenceViewReady,
+    visibleSelectionIds,
+  ]);
   const clearRecentlyViewed = useCallback((preservePhotoId?: number) => {
     setRecentlyViewedPhotoId((current) => {
       if (preservePhotoId !== undefined && current === preservePhotoId) {
@@ -1736,6 +1796,13 @@ function HomePage() {
     setExpandedSequence(null);
     setExpandedSequenceComplete(null);
     setSequenceRefresh((value) => value + 1);
+    queryClient.invalidateQueries({
+      queryKey: ["photos"],
+      refetchType: "active",
+    });
+  }, []);
+  const handleSequenceRetry = useCallback(() => {
+    setSequenceRefresh((value) => value + 1);
   }, []);
   const {
     detailDismissed,
@@ -1745,12 +1812,15 @@ function HomePage() {
     showPhoto,
   } = usePhotoDetailPanel(
     selectedIds,
-    actionPhotos,
+    selectionPhotos,
     routeKey,
     handleKeyboardPhotoSelect
   );
   const dismissPhotoDetail = useCallback(() => {
-    if (detailPhoto && photos.some((photo) => photo.id === detailPhoto.id)) {
+    if (
+      detailPhoto &&
+      selectionPhotos.some((photo) => photo.id === detailPhoto.id)
+    ) {
       markRecentlyViewed(detailPhoto.id);
     } else if (detailPhoto) {
       clearRecentlyViewed();
@@ -1761,7 +1831,7 @@ function HomePage() {
     detailPhoto,
     dismissDetail,
     markRecentlyViewed,
-    photos,
+    selectionPhotos,
   ]);
   // 底部操作胶囊清空选择时，详情面板也会随选中状态关闭，先记录最后查看的照片。
   const handleClearSelection = useCallback(() => {
@@ -1771,7 +1841,7 @@ function HomePage() {
       const selectedPhotoId = selectedIds.values().next().value;
       if (
         selectedPhotoId !== undefined &&
-        photos.some((photo) => photo.id === selectedPhotoId)
+        selectionPhotos.some((photo) => photo.id === selectedPhotoId)
       ) {
         markRecentlyViewed(selectedPhotoId);
       } else {
@@ -1787,7 +1857,7 @@ function HomePage() {
     detailDismissed,
     dismissPhotoDetail,
     markRecentlyViewed,
-    photos,
+    selectionPhotos,
     selectedIds,
   ]);
   const recentlyViewedContextKey = [
@@ -1857,11 +1927,12 @@ function HomePage() {
     !filter.favoriteOnly
       ? searchExactTotal
       : photos.length;
-  const totalPhotos = isSearching ? searchDisplayCount : totalFromQuery;
+  const totalPhotos = isSearching ? searchDisplayCount : totalAllFromQuery;
   const loading = isSearching
     ? searchLoading
     : photosLoading ||
-      (initialHomeQueryError && (photosFetching || foldersFetching));
+      (initialHomeQueryError && (photosFetching || foldersFetching)) ||
+      !sequenceViewReady;
   const startupHomeReadyRef = useRef(false);
 
   useEffect(() => {
@@ -1966,7 +2037,16 @@ function HomePage() {
   }, [totalPhotos, filter.setTotalPhotos]);
 
   const hasActiveExifFilters = searchMode === "exif";
+  const photosModeSequenceOnlyEmpty =
+    displayedSequenceMode === "photos" &&
+    selectionPhotos.length === 0 &&
+    (photos.length > 0 || sequenceCount > 0);
   const emptyStateContent = useMemo(() => {
+    // Search results may all belong to sequences. Let PhotoGrid show the
+    // mode-specific empty state instead of reporting a false search miss.
+    if (photosModeSequenceOnlyEmpty) {
+      return undefined;
+    }
     if (isSearching) {
       return (
         <SearchEmptyState
@@ -2079,6 +2159,7 @@ function HomePage() {
   }, [
     displayedSequenceMode,
     isSearching,
+    photosModeSequenceOnlyEmpty,
     filter.favoriteOnly,
     filter.activeFolderId,
     filter.activeTagIds.length,
@@ -2249,6 +2330,46 @@ function HomePage() {
     t,
   ]);
 
+  // A search page can be made entirely of sequence members. Since those
+  // members are hidden in Photos mode, keep consuming the search cursor until
+  // the gallery has enough standalone photos to fill the first viewport or the
+  // backend is exhausted. The normal masonry sentinel continues pagination
+  // after the initial batch has been filled.
+  const searchUngroupedPhotoCount = useMemo(() => {
+    if (!isSearching) {
+      return 0;
+    }
+    const sequenceMemberIds = new Set(
+      sequences.flatMap(
+        (sequence) => sequence.matchedPhotoIds ?? sequence.memberPhotoIds ?? []
+      )
+    );
+    return (searchResults ?? []).filter(
+      (photo) => !sequenceMemberIds.has(photo.id)
+    ).length;
+  }, [isSearching, searchResults, sequences]);
+
+  useEffect(() => {
+    if (
+      !isSearching ||
+      displayedSequenceMode !== "photos" ||
+      !sequenceViewReady ||
+      searchUngroupedPhotoCount >= 100 ||
+      !searchHasMore ||
+      searchLoadingMoreRef.current
+    ) {
+      return;
+    }
+    handleEndReached();
+  }, [
+    displayedSequenceMode,
+    handleEndReached,
+    isSearching,
+    searchHasMore,
+    searchUngroupedPhotoCount,
+    sequenceViewReady,
+  ]);
+
   const handleToggleFavorite = useCallback(
     async (id: number, requestedValue?: boolean) => {
       const photo = photosRef.current.find((p) => p.id === id);
@@ -2333,14 +2454,14 @@ function HomePage() {
 
   const handleDoubleClick = useCallback(
     (id: number) => {
-      const idx = photosRef.current.findIndex((p) => p.id === id);
+      const idx = selectionPhotos.findIndex((p) => p.id === id);
       if (idx >= 0) {
         clearSelection();
         dismissPhotoDetail();
         setLightboxIndex(idx);
       }
     },
-    [clearSelection, dismissPhotoDetail]
+    [clearSelection, dismissPhotoDetail, selectionPhotos]
   );
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: search fallback and semantic refresh share one request lifecycle
   async function performSearch(
@@ -2880,7 +3001,7 @@ function HomePage() {
 
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
-        selectAllPhotos();
+        selectAllVisible();
         return;
       }
 
@@ -2939,7 +3060,7 @@ function HomePage() {
       if (e.key === " " && selectedIds.size > 0 && quickPreviewIndex < 0) {
         e.preventDefault();
         const firstId = selectedIds.values().next().value as number;
-        const idx = photos.findIndex((p) => p.id === firstId);
+        const idx = selectionPhotos.findIndex((p) => p.id === firstId);
         if (idx >= 0) {
           setQuickPreviewIndex(idx);
         }
@@ -2950,7 +3071,7 @@ function HomePage() {
         e.preventDefault();
         const ids = [...selectedIds];
         const allFav = ids.every(
-          (id) => photos.find((p) => p.id === id)?.isFavorite
+          (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
         );
         const newVal = !allFav;
         ipc.client.photos
@@ -3048,7 +3169,7 @@ function HomePage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
-    photos,
+    selectionPhotos,
     selectedIds,
     renameDialogOpen,
     convertDialogOpen,
@@ -3138,6 +3259,7 @@ function HomePage() {
     isSearching,
     loading,
     photoCount: photos.length,
+    sequenceCount: gallerySequenceCount,
   });
   const isImportingFirstFolder =
     folders.length > 0 &&
@@ -3342,7 +3464,7 @@ function HomePage() {
             >
               <div
                 className={`home-gallery-restore-content flex min-w-0 flex-1 ${
-                  restorePending ? "is-restoring" : ""
+                  contentRestorePending ? "is-restoring" : ""
                 }`}
               >
                 <PhotoGrid
@@ -3378,10 +3500,12 @@ function HomePage() {
                   onOpenSequence={handleOpenSequence}
                   onOpenSequenceDetails={handleSequenceDetails}
                   onRestoreSettled={handleRestoreSettled}
+                  onRetrySequences={handleSequenceRetry}
                   onScrollTopChange={handleGalleryScrollTopChange}
                   onSelect={handlePhotoSelect}
                   onSelectSequence={handleSequenceSelect}
                   onSelectSequenceMembers={handleSelectSequenceMembers}
+                  onSequenceModeChange={handleSequenceModeChange}
                   onSequenceMutationComplete={handleSequenceMutationComplete}
                   onSequenceOrderChange={handleSequenceOrderChange}
                   onToggleFavorite={handleToggleFavorite}
@@ -3395,6 +3519,8 @@ function HomePage() {
                   searchQuery={searchQuery}
                   selectedIds={selectedIds}
                   semanticTopSimilarity={searchSemantic?.topSimilarity}
+                  sequenceError={sequenceError}
+                  sequenceLoading={!sequenceViewReady}
                   sequenceMode={displayedSequenceMode}
                   sequences={sequences}
                   showToolbar={false}
@@ -3740,7 +3866,7 @@ function HomePage() {
           onAddToAlbum={handleAddToAlbum}
           onClose={({ photoId }) => {
             setLightboxIndex(-1);
-            if (photos.some((photo) => photo.id === photoId)) {
+            if (selectionPhotos.some((photo) => photo.id === photoId)) {
               markRecentlyViewed(photoId);
             } else {
               clearRecentlyViewed();
@@ -3748,7 +3874,7 @@ function HomePage() {
           }}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
-          photos={actionPhotos}
+          photos={selectionPhotos}
         />
       )}
       {openSequence && (
@@ -3763,16 +3889,16 @@ function HomePage() {
           showThumbnailsInitially={true}
         />
       )}
-      {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
+      {quickPreviewIndex >= 0 && selectionPhotos[quickPreviewIndex] && (
         <QuickPreview
           onClose={() => setQuickPreviewIndex(-1)}
           onNavigate={(dir) => {
             setQuickPreviewIndex((prev) => {
               const next = prev + dir;
-              if (next < 0 || next >= photos.length) {
+              if (next < 0 || next >= selectionPhotos.length) {
                 return prev;
               }
-              handleKeyboardSelect(photos[next].id);
+              handleKeyboardSelect(selectionPhotos[next].id);
               return next;
             });
           }}
@@ -3780,7 +3906,7 @@ function HomePage() {
             setLightboxIndex(quickPreviewIndex);
             setQuickPreviewIndex(-1);
           }}
-          photo={photos[quickPreviewIndex]}
+          photo={selectionPhotos[quickPreviewIndex]}
         />
       )}
       <PhotoContextMenu

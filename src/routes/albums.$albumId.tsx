@@ -25,7 +25,10 @@ import { ShareDialog } from "@/components/ShareDialog";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
-import { useCollectionSequences } from "@/hooks/useCollectionSequences";
+import {
+  getSequenceMemberIds,
+  useCollectionSequences,
+} from "@/hooks/useCollectionSequences";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
@@ -178,6 +181,33 @@ function AlbumDetailPage() {
   const photosRef = useRef(photos);
   photosRef.current = photos;
 
+  const selectionActionsRef = useRef<{
+    clearSelection: () => void;
+    removeFromSelection: (ids: number[]) => void;
+  }>({
+    clearSelection: () => undefined,
+    removeFromSelection: () => undefined,
+  });
+  const sequenceView = useCollectionSequences({
+    onClearSelection: () => selectionActionsRef.current.clearSelection(),
+    onRemoveSelection: (ids) =>
+      selectionActionsRef.current.removeFromSelection(ids),
+    photos,
+    storageKey: "album_sequence_view_mode",
+  });
+  const sequenceMemberIdSet = useMemo(
+    () => new Set(getSequenceMemberIds(sequenceView.sequences)),
+    [sequenceView.sequences]
+  );
+  const selectionPhotos = useMemo(
+    () =>
+      photos.filter((photo) =>
+        sequenceView.mode === "sequences"
+          ? sequenceMemberIdSet.has(photo.id)
+          : !sequenceMemberIdSet.has(photo.id)
+      ),
+    [photos, sequenceMemberIdSet, sequenceView.mode]
+  );
   // 共享 Hooks：选中状态、详情面板
   const {
     selectedIds,
@@ -188,14 +218,34 @@ function AlbumDetailPage() {
     handleMarqueeSelect,
     clearSelection,
     removeFromSelection,
-    selectAll: selectAllPhotos,
-  } = usePhotoSelection(routeKey, photos);
-  const sequenceView = useCollectionSequences({
-    onClearSelection: clearSelection,
-    onRemoveSelection: removeFromSelection,
-    photos,
-    storageKey: "album_sequence_view_mode",
-  });
+    selectAllIds,
+  } = usePhotoSelection(routeKey, selectionPhotos);
+  selectionActionsRef.current = { clearSelection, removeFromSelection };
+  const visibleSelectionIds = useMemo(
+    () =>
+      sequenceView.sequencesLoading
+        ? []
+        : selectionPhotos.map((photo) => photo.id),
+    [selectionPhotos, sequenceView.sequencesLoading]
+  );
+  const selectAllVisible = useCallback(() => {
+    selectAllIds(visibleSelectionIds);
+  }, [selectAllIds, visibleSelectionIds]);
+  useEffect(() => {
+    if (sequenceView.sequencesLoading) {
+      return;
+    }
+    const allowed = new Set(visibleSelectionIds);
+    const hidden = [...selectedIds].filter((id) => !allowed.has(id));
+    if (hidden.length > 0) {
+      removeFromSelection(hidden);
+    }
+  }, [
+    removeFromSelection,
+    selectedIds,
+    sequenceView.sequencesLoading,
+    visibleSelectionIds,
+  ]);
   const handleSequenceSelect = useCallback(
     (memberIds: number[], event: React.MouseEvent) => {
       if (event.ctrlKey || event.metaKey) {
@@ -262,7 +312,7 @@ function AlbumDetailPage() {
     showPhoto,
   } = usePhotoDetailPanel(
     selectedIds,
-    photos,
+    selectionPhotos,
     routeKey,
     handleKeyboardPhotoSelect
   );
@@ -591,14 +641,14 @@ function AlbumDetailPage() {
 
   const handleDoubleClick = useCallback(
     (id: number) => {
-      const idx = photosRef.current.findIndex((p) => p.id === id);
+      const idx = selectionPhotos.findIndex((p) => p.id === id);
       if (idx >= 0) {
         clearSelection();
         dismissDetail();
         setLightboxIndex(idx);
       }
     },
-    [clearSelection, dismissDetail]
+    [clearSelection, dismissDetail, selectionPhotos]
   );
 
   const handleContextMenu = useCallback(
@@ -745,7 +795,7 @@ function AlbumDetailPage() {
 
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
-        selectAllPhotos();
+        selectAllVisible();
         return;
       }
 
@@ -799,7 +849,7 @@ function AlbumDetailPage() {
       if (e.key === " " && selectedIds.size > 0 && quickPreviewIndex < 0) {
         e.preventDefault();
         const firstId = selectedIds.values().next().value as number;
-        const idx = photos.findIndex((p) => p.id === firstId);
+        const idx = selectionPhotos.findIndex((p) => p.id === firstId);
         if (idx >= 0) {
           setQuickPreviewIndex(idx);
         }
@@ -810,7 +860,7 @@ function AlbumDetailPage() {
         e.preventDefault();
         const ids = [...selectedIds];
         const allFav = ids.every(
-          (id) => photos.find((p) => p.id === id)?.isFavorite
+          (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
         );
         const newVal = !allFav;
         ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
@@ -867,7 +917,7 @@ function AlbumDetailPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
-    photos,
+    selectionPhotos,
     selectedIds,
     renameDialogOpen,
     convertDialogOpen,
@@ -1067,6 +1117,7 @@ function AlbumDetailPage() {
             onMarqueeSelect={wrappedMarqueeSelect}
             onOpenSequence={sequenceView.openPlayback}
             onOpenSequenceDetails={sequenceView.openDetails}
+            onRetrySequences={sequenceView.refreshSequences}
             onSelect={handlePhotoSelect}
             onSelectSequence={handleSequenceSelect}
             onSelectSequenceMembers={handleSelectSequenceMembers}
@@ -1083,6 +1134,10 @@ function AlbumDetailPage() {
             routeKey={routeKey}
             selectedIds={selectedIds}
             sequenceCount={sequenceView.sequences.length}
+            sequenceError={
+              sequenceView.sequencesError ? t("loadFailedRetry") : null
+            }
+            sequenceLoading={sequenceView.sequencesLoading}
             sequenceMode={sequenceView.mode}
             sequences={sequenceView.sequences}
             showGroupHeaders={false}
@@ -1093,7 +1148,7 @@ function AlbumDetailPage() {
             allFavorite={
               selectedIds.size > 0 &&
               [...selectedIds].every(
-                (id) => photos.find((p) => p.id === id)?.isFavorite
+                (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
               )
             }
             onAddToAlbum={() => {
@@ -1116,7 +1171,7 @@ function AlbumDetailPage() {
             onToggleFavorite={() => {
               const ids = [...selectedIds];
               const allFav = ids.every(
-                (id) => photos.find((p) => p.id === id)?.isFavorite
+                (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
               );
               const newVal = !allFav;
               ipc.client.photos
@@ -1252,7 +1307,7 @@ function AlbumDetailPage() {
           }}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
-          photos={photos}
+          photos={selectionPhotos}
         />
       )}
       {sequenceView.openSequence && (
@@ -1266,16 +1321,16 @@ function AlbumDetailPage() {
           showThumbnailsInitially={true}
         />
       )}
-      {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
+      {quickPreviewIndex >= 0 && selectionPhotos[quickPreviewIndex] && (
         <QuickPreview
           onClose={() => setQuickPreviewIndex(-1)}
           onNavigate={(dir) => {
             setQuickPreviewIndex((prev) => {
               const next = prev + dir;
-              if (next < 0 || next >= photos.length) {
+              if (next < 0 || next >= selectionPhotos.length) {
                 return prev;
               }
-              handleKeyboardPhotoSelect(photos[next].id);
+              handleKeyboardPhotoSelect(selectionPhotos[next].id);
               return next;
             });
           }}
@@ -1283,7 +1338,7 @@ function AlbumDetailPage() {
             setLightboxIndex(quickPreviewIndex);
             setQuickPreviewIndex(-1);
           }}
-          photo={photos[quickPreviewIndex]}
+          photo={selectionPhotos[quickPreviewIndex]}
         />
       )}
 
@@ -1304,7 +1359,7 @@ function AlbumDetailPage() {
         onBatchToggleFavorite={() => {
           const ids = [...selectedIds];
           const allFav = ids.every(
-            (id) => photos.find((p) => p.id === id)?.isFavorite
+            (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
           );
           const newVal = !allFav;
           ipc.client.photos

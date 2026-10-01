@@ -34,6 +34,7 @@ import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import {
+  getSequenceMemberIds,
   shouldShowSequenceEmptyState,
   useCollectionSequences,
 } from "@/hooks/useCollectionSequences";
@@ -109,14 +110,16 @@ function PersonSequenceEmptyState({
   onRetry: () => void;
   onViewPhotos: () => void;
   showEmpty: boolean;
-  sequencesError: string | null;
+  sequencesError: boolean;
 }) {
   const { t } = useTranslation();
 
   if (sequencesError) {
     return (
       <div className="flex flex-col items-center gap-3 px-6 text-center">
-        <p className="text-[13px] text-muted-foreground/70">{sequencesError}</p>
+        <p className="text-[13px] text-muted-foreground/70">
+          {t("loadFailedRetry")}
+        </p>
         <button
           className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
           onClick={onRetry}
@@ -303,6 +306,33 @@ function PersonDetailPage() {
     );
   }, [activeIdentity?.faces]);
 
+  const selectionActionsRef = useRef<{
+    clearSelection: () => void;
+    removeFromSelection: (ids: number[]) => void;
+  }>({
+    clearSelection: () => undefined,
+    removeFromSelection: () => undefined,
+  });
+  const sequenceView = useCollectionSequences({
+    onClearSelection: () => selectionActionsRef.current.clearSelection(),
+    onRemoveSelection: (ids) =>
+      selectionActionsRef.current.removeFromSelection(ids),
+    photos,
+    storageKey: "person_sequence_view_mode",
+  });
+  const sequenceMemberIdSet = useMemo(
+    () => new Set(getSequenceMemberIds(sequenceView.sequences)),
+    [sequenceView.sequences]
+  );
+  const selectionPhotos = useMemo(
+    () =>
+      photos.filter((photo) =>
+        sequenceView.mode === "sequences"
+          ? sequenceMemberIdSet.has(photo.id)
+          : !sequenceMemberIdSet.has(photo.id)
+      ),
+    [photos, sequenceMemberIdSet, sequenceView.mode]
+  );
   // 共享 Hooks：选中状态、详情面板
   const {
     selectedIds,
@@ -313,14 +343,34 @@ function PersonDetailPage() {
     handleMarqueeSelect,
     clearSelection,
     removeFromSelection,
-    selectAll: selectAllPhotos,
-  } = usePhotoSelection(routeKey, photos);
-  const sequenceView = useCollectionSequences({
-    onClearSelection: clearSelection,
-    onRemoveSelection: removeFromSelection,
-    photos,
-    storageKey: "person_sequence_view_mode",
-  });
+    selectAllIds,
+  } = usePhotoSelection(routeKey, selectionPhotos);
+  selectionActionsRef.current = { clearSelection, removeFromSelection };
+  const visibleSelectionIds = useMemo(
+    () =>
+      sequenceView.sequencesLoading
+        ? []
+        : selectionPhotos.map((photo) => photo.id),
+    [selectionPhotos, sequenceView.sequencesLoading]
+  );
+  const selectAllVisible = useCallback(() => {
+    selectAllIds(visibleSelectionIds);
+  }, [selectAllIds, visibleSelectionIds]);
+  useEffect(() => {
+    if (sequenceView.sequencesLoading) {
+      return;
+    }
+    const allowed = new Set(visibleSelectionIds);
+    const hidden = [...selectedIds].filter((id) => !allowed.has(id));
+    if (hidden.length > 0) {
+      removeFromSelection(hidden);
+    }
+  }, [
+    removeFromSelection,
+    selectedIds,
+    sequenceView.sequencesLoading,
+    visibleSelectionIds,
+  ]);
   const handleSequenceSelect = useCallback(
     (memberIds: number[], event: React.MouseEvent) => {
       if (event.ctrlKey || event.metaKey) {
@@ -341,7 +391,12 @@ function PersonDetailPage() {
     [addToSelection, removeFromSelection]
   );
   const { detailPhoto, dismissDetail, navigateDetail, showPhoto } =
-    usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
+    usePhotoDetailPanel(
+      selectedIds,
+      selectionPhotos,
+      routeKey,
+      handleKeyboardSelect
+    );
   const [returnSequence, setReturnSequence] =
     useState<PhotoSequenceDetail | null>(null);
 
@@ -362,14 +417,14 @@ function PersonDetailPage() {
 
   const handleDoubleClick = useCallback(
     (id: number) => {
-      const idx = photosRef.current.findIndex((p) => p.id === id);
+      const idx = selectionPhotos.findIndex((p) => p.id === id);
       if (idx >= 0) {
         clearSelection();
         dismissDetail();
         setLightboxIndex(idx);
       }
     },
-    [clearSelection, dismissDetail]
+    [clearSelection, dismissDetail, selectionPhotos]
   );
 
   const handleContextMenu = useCallback(
@@ -815,7 +870,7 @@ function PersonDetailPage() {
 
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
-        selectAllPhotos();
+        selectAllVisible();
         return;
       }
 
@@ -869,7 +924,7 @@ function PersonDetailPage() {
       if (e.key === " " && selectedIds.size > 0 && quickPreviewIndex < 0) {
         e.preventDefault();
         const firstId = selectedIds.values().next().value as number;
-        const idx = photos.findIndex((p) => p.id === firstId);
+        const idx = selectionPhotos.findIndex((p) => p.id === firstId);
         if (idx >= 0) {
           setQuickPreviewIndex(idx);
         }
@@ -880,7 +935,7 @@ function PersonDetailPage() {
         e.preventDefault();
         const ids = [...selectedIds];
         const allFav = ids.every(
-          (id) => photos.find((p) => p.id === id)?.isFavorite
+          (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
         );
         const newVal = !allFav;
         ipc.client.photos
@@ -944,7 +999,7 @@ function PersonDetailPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
-    photos,
+    selectionPhotos,
     selectedIds,
     renameDialogOpen,
     convertDialogOpen,
@@ -1086,16 +1141,18 @@ function PersonDetailPage() {
         >
           <PhotoGrid
             emptyState={
-              <PersonSequenceEmptyState
-                onRetry={sequenceView.refreshSequences}
-                onViewPhotos={() => sequenceView.setMode("photos")}
-                sequencesError={sequenceView.sequencesError}
-                showEmpty={shouldShowSequenceEmptyState({
-                  mode: sequenceView.mode,
-                  sequenceCount: sequenceView.sequences.length,
-                  sequencesLoaded: !sequenceView.sequencesLoading,
-                })}
-              />
+              sequenceView.mode === "sequences" ? (
+                <PersonSequenceEmptyState
+                  onRetry={sequenceView.refreshSequences}
+                  onViewPhotos={() => sequenceView.setMode("photos")}
+                  sequencesError={sequenceView.sequencesError}
+                  showEmpty={shouldShowSequenceEmptyState({
+                    mode: sequenceView.mode,
+                    sequenceCount: sequenceView.sequences.length,
+                    sequencesLoaded: !sequenceView.sequencesLoading,
+                  })}
+                />
+              ) : undefined
             }
             expandedSequence={sequenceView.expandedSequence}
             expandedSequenceComplete={sequenceView.expandedSequenceComplete}
@@ -1122,6 +1179,7 @@ function PersonDetailPage() {
             onNameFace={handleNameFace}
             onOpenSequence={sequenceView.openPlayback}
             onOpenSequenceDetails={sequenceView.openDetails}
+            onRetrySequences={sequenceView.refreshSequences}
             onSelect={handleSelect}
             onSelectSequence={handleSequenceSelect}
             onSelectSequenceMembers={handleSelectSequenceMembers}
@@ -1135,6 +1193,10 @@ function PersonDetailPage() {
             routeKey={routeKey}
             selectedIds={selectedIds}
             sequenceCount={sequenceView.sequences.length}
+            sequenceError={
+              sequenceView.sequencesError ? t("loadFailedRetry") : null
+            }
+            sequenceLoading={sequenceView.sequencesLoading}
             sequenceMode={sequenceView.mode}
             sequences={sequenceView.sequences}
             showGroupHeaders={false}
@@ -1145,7 +1207,7 @@ function PersonDetailPage() {
             allFavorite={
               selectedIds.size > 0 &&
               [...selectedIds].every(
-                (id) => photos.find((p) => p.id === id)?.isFavorite
+                (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
               )
             }
             onAddToAlbum={() => {
@@ -1168,7 +1230,7 @@ function PersonDetailPage() {
             onToggleFavorite={() => {
               const ids = [...selectedIds];
               const allFav = ids.every(
-                (id) => photos.find((p) => p.id === id)?.isFavorite
+                (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
               );
               const newVal = !allFav;
               ipc.client.photos
@@ -1308,7 +1370,7 @@ function PersonDetailPage() {
           onClose={() => setLightboxIndex(-1)}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
-          photos={photos}
+          photos={selectionPhotos}
         />
       )}
       {sequenceView.openSequence && (
@@ -1322,16 +1384,16 @@ function PersonDetailPage() {
           showThumbnailsInitially={true}
         />
       )}
-      {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
+      {quickPreviewIndex >= 0 && selectionPhotos[quickPreviewIndex] && (
         <QuickPreview
           onClose={() => setQuickPreviewIndex(-1)}
           onNavigate={(dir) => {
             setQuickPreviewIndex((prev) => {
               const next = prev + dir;
-              if (next < 0 || next >= photos.length) {
+              if (next < 0 || next >= selectionPhotos.length) {
                 return prev;
               }
-              handleKeyboardSelect(photos[next].id);
+              handleKeyboardSelect(selectionPhotos[next].id);
               return next;
             });
           }}
@@ -1339,7 +1401,7 @@ function PersonDetailPage() {
             setLightboxIndex(quickPreviewIndex);
             setQuickPreviewIndex(-1);
           }}
-          photo={photos[quickPreviewIndex]}
+          photo={selectionPhotos[quickPreviewIndex]}
         />
       )}
 
@@ -1357,7 +1419,7 @@ function PersonDetailPage() {
         onBatchToggleFavorite={() => {
           const ids = [...selectedIds];
           const allFav = ids.every(
-            (id) => photos.find((p) => p.id === id)?.isFavorite
+            (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
           );
           const newVal = !allFav;
           ipc.client.photos
