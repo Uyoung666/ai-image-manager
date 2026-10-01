@@ -91,6 +91,10 @@ import {
   isSequenceSourceReady,
   shouldUseImmediateGalleryPhotos,
 } from "@/utils/gallery-view-state";
+import {
+  cancelGalleryViewTransition,
+  startGalleryViewTransition,
+} from "@/utils/gallery-view-transition";
 import { shouldRestoreSavedSearch } from "@/utils/search-state";
 import { notifyStartupHomeReady } from "@/utils/startup-readiness";
 import { shouldShowHomeGallery } from "./-home-gallery-state";
@@ -319,6 +323,16 @@ function HomePage() {
   const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">(
     () => getBrowseSession("home-search").sequenceMode
   );
+  const gridRef = useRef<MasonryGridHandle>(null);
+  const displayedSequenceModeRef = useRef<"photos" | "sequences">("photos");
+  const galleryModeTransitionRef = useRef<ViewTransition | null>(null);
+  const galleryScrollPositionsRef = useRef<
+    Record<"photos" | "sequences", number>
+  >({
+    photos: 0,
+    sequences: 0,
+  });
+  const galleryScrollRouteKeyRef = useRef<string | null>(null);
   const [sequenceDataSource, setSequenceDataSource] =
     useState<SequenceDataSource | null>(null);
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
@@ -925,9 +939,37 @@ function HomePage() {
     sequenceQuerySourceKey,
     sequenceRefresh,
   ]);
-  const displayedSequenceMode = getDisplayedSequenceMode(
+  const requestedDisplayedSequenceMode = getDisplayedSequenceMode(
     sequenceMode,
     sequenceViewReady
+  );
+  const [displayedSequenceMode, setDisplayedSequenceMode] = useState<
+    "photos" | "sequences"
+  >("photos");
+  const commitDisplayedSequenceMode = useCallback(
+    (nextMode: "photos" | "sequences") => {
+      if (displayedSequenceModeRef.current === nextMode) {
+        return;
+      }
+      galleryModeTransitionRef.current?.skipTransition();
+      const transition = startGalleryViewTransition(() => {
+        displayedSequenceModeRef.current = nextMode;
+        setDisplayedSequenceMode(nextMode);
+      });
+      galleryModeTransitionRef.current = transition;
+    },
+    []
+  );
+  useEffect(() => {
+    commitDisplayedSequenceMode(requestedDisplayedSequenceMode);
+  }, [commitDisplayedSequenceMode, requestedDisplayedSequenceMode]);
+  useEffect(
+    () => () => {
+      galleryModeTransitionRef.current?.skipTransition();
+      galleryModeTransitionRef.current = null;
+      cancelGalleryViewTransition();
+    },
+    []
   );
   // The masonry end sentinel is based on the currently rendered items. When
   // switching to the usually shorter sequence view it immediately intersects,
@@ -941,6 +983,12 @@ function HomePage() {
   const previousSequenceRefreshRef = useRef(sequenceRefresh);
   const handleSequenceModeChange = useCallback(
     (mode: "photos" | "sequences") => {
+      const currentMode = displayedSequenceModeRef.current;
+      const scrollElement = gridRef.current?.scrollElement;
+      if (scrollElement) {
+        galleryScrollPositionsRef.current[currentMode] =
+          scrollElement.scrollTop;
+      }
       setSequenceMode(mode);
       saveBrowseSession("home-search", { sequenceMode: mode });
     },
@@ -1548,7 +1596,6 @@ function HomePage() {
   }, []);
 
   // ── 网格 ref（用于原子化滚动定位）─────────────────────────────
-  const gridRef = useRef<MasonryGridHandle>(null);
   const [restoredRouteKey, setRestoredRouteKey] = useState<string | null>(null);
   const handleRestoreSettled = useCallback((settledRouteKey: string) => {
     setRestoredRouteKey(settledRouteKey);
@@ -1867,11 +1914,36 @@ function HomePage() {
   }, []);
 
   const handleGalleryScrollTopChange = useCallback((scrollTop: number) => {
+    galleryScrollPositionsRef.current[displayedSequenceModeRef.current] =
+      scrollTop;
     setGalleryScrolled((previous) => {
       const next = scrollTop > 4;
       return previous === next ? previous : next;
     });
   }, []);
+
+  useLayoutEffect(() => {
+    const scrollElement = gridRef.current?.scrollElement;
+    if (!scrollElement) {
+      return;
+    }
+    if (galleryScrollRouteKeyRef.current !== routeKey) {
+      galleryScrollRouteKeyRef.current = routeKey;
+      galleryScrollPositionsRef.current.photos = 0;
+      galleryScrollPositionsRef.current.sequences = 0;
+      return;
+    }
+    const requestedTop =
+      galleryScrollPositionsRef.current[displayedSequenceMode] ?? 0;
+    const maxTop = Math.max(
+      0,
+      scrollElement.scrollHeight - scrollElement.clientHeight
+    );
+    const nextTop = Math.min(Math.max(0, requestedTop), maxTop);
+    if (Math.abs(scrollElement.scrollTop - nextTop) > 1) {
+      scrollElement.scrollTop = nextTop;
+    }
+  }, [displayedSequenceMode, routeKey]);
 
   useEffect(() => {
     const element = galleryToolbarRef.current;
@@ -3263,7 +3335,7 @@ function HomePage() {
             )}
         </div>
         {hasPhotos ? (
-          <div className="home-gallery-body relative flex min-h-0 flex-1">
+          <div className="home-gallery-body home-gallery-content-transition relative flex min-h-0 flex-1">
             <div
               className="relative flex min-w-0 flex-1"
               inert={compactDetailOverlay && detailOverlayOpen}

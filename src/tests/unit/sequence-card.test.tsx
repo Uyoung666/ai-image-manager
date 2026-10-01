@@ -24,6 +24,27 @@ const sequence: PhotoSequence = {
 };
 
 describe("SequenceCard", () => {
+  it("fades the cover in after an eager image load", () => {
+    const { container } = render(
+      <SequenceCard
+        isSelected={false}
+        loading="eager"
+        onClick={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
+        sequence={sequence}
+      />
+    );
+    const image = container.querySelector("img");
+    expect(image).toHaveAttribute("loading", "eager");
+    expect(image).toHaveClass("opacity-0");
+
+    if (image) {
+      fireEvent.load(image);
+    }
+    expect(image).toHaveClass("opacity-100");
+  });
+
   it("selects and opens sequence details on a normal click", () => {
     vi.useFakeTimers();
     const onClick = vi.fn();

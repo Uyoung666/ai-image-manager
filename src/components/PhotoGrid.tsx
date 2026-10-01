@@ -1308,6 +1308,9 @@ export const PhotoGrid = memo(
                 memberIds.length > 0 &&
                 memberIds.every((id) => selectedIdsRef.current.has(id))
               }
+              loading={
+                index < columnCount * INITIAL_EAGER_ROWS ? "eager" : "lazy"
+              }
               onClick={(_id, event) => {
                 if (onSelectSequence) {
                   onSelectSequence(memberIds, event);

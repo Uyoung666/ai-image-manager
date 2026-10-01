@@ -1,8 +1,16 @@
 // biome-ignore-all lint/a11y/useSemanticElements: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/noSvgWithoutTitle: scoped component lint cleanup preserves existing UI behavior
+// biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
 import { ChevronDown, ChevronUp, Layers, Timer } from "lucide-react";
-import { memo, useCallback, useEffect, useRef } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import type { PhotoSequence } from "@/types/photo-sequence";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -15,6 +23,7 @@ interface SequenceCardProps {
   faceOverlays?: FaceOverlay[];
   faceOverlaysVisible?: boolean;
   isSelected: boolean;
+  loading?: "eager" | "lazy";
   onClick: (id: number, event: React.MouseEvent) => void;
   onOpen: (sequenceId: number) => void;
   onOpenDetails: (sequenceId: number) => void;
@@ -35,9 +44,17 @@ export const SequenceCard = memo(function SequenceCard({
   expanding = false,
   faceOverlays,
   faceOverlaysVisible = true,
+  loading = "lazy",
 }: SequenceCardProps) {
   const { t } = useTranslation();
   const { photo } = sequence;
+  const thumbnailUrl = photo.thumbnailPath
+    ? toLocalMediaUrl(photo.thumbnailPath)
+    : null;
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [imageState, setImageState] = useState<"loading" | "loaded" | "error">(
+    thumbnailUrl ? "loading" : "error"
+  );
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelPendingClick = useCallback(() => {
     if (clickTimerRef.current !== null) {
@@ -45,6 +62,13 @@ export const SequenceCard = memo(function SequenceCard({
       clickTimerRef.current = null;
     }
   }, []);
+  useLayoutEffect(() => {
+    setImageState(thumbnailUrl ? "loading" : "error");
+    const image = imageRef.current;
+    if (image?.complete) {
+      setImageState(image.naturalWidth > 0 ? "loaded" : "error");
+    }
+  }, [thumbnailUrl]);
   useEffect(() => cancelPendingClick, [cancelPendingClick]);
   const duration = Math.max(0, sequence.endedAt - sequence.startedAt);
   /* const durationLabel =
@@ -72,7 +96,7 @@ export const SequenceCard = memo(function SequenceCard({
         ),
       })}
       aria-pressed={isSelected}
-      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted ${isSelected ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
+      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity,box-shadow] duration-200 motion-reduce:transition-none ${isSelected ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
       data-photo-id={photo.id}
       data-photo-path={photo.path}
       data-sequence-id={sequence.id}
@@ -107,16 +131,30 @@ export const SequenceCard = memo(function SequenceCard({
       }}
       tabIndex={0}
     >
-      {photo.thumbnailPath ? (
-        <img
-          alt={photo.filename}
-          className="h-full w-full object-cover"
-          height={photo.height ?? 1}
-          loading="lazy"
-          src={toLocalMediaUrl(photo.thumbnailPath)}
-          width={photo.width ?? 1}
-        />
-      ) : null}
+      <div className="absolute inset-0 bg-muted">
+        {thumbnailUrl && (
+          // biome-ignore lint/a11y/noNoninteractiveElementInteractions: image load state controls the thumbnail reveal transition
+          <img
+            alt={photo.filename}
+            className={`h-full w-full object-cover transition-opacity duration-150 motion-reduce:transition-none ${imageState === "loaded" ? "opacity-100" : "opacity-0"}`}
+            decoding="async"
+            fetchPriority={loading === "eager" ? "high" : "auto"}
+            height={photo.height ?? 1}
+            loading={loading}
+            onError={() => setImageState("error")}
+            onLoad={() => setImageState("loaded")}
+            ref={imageRef}
+            src={thumbnailUrl}
+            width={photo.width ?? 1}
+          />
+        )}
+        {imageState !== "loaded" && (
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-gradient-to-br from-foreground/[0.04] to-transparent"
+          />
+        )}
+      </div>
       {faceOverlays?.map((faceOverlay) => (
         <div
           aria-label={faceOverlay.label ?? t("faceReviewTitle")}
