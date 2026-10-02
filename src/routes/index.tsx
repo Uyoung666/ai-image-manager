@@ -325,7 +325,7 @@ function HomePage() {
   );
   const gridRef = useRef<MasonryGridHandle>(null);
   const displayedSequenceModeRef = useRef<"photos" | "sequences">("photos");
-  const galleryModeTransitionRef = useRef<ViewTransition | null>(null);
+  const gallerySurfaceRef = useRef<HTMLDivElement>(null);
   const galleryScrollPositionsRef = useRef<
     Record<"photos" | "sequences", number>
   >({
@@ -333,6 +333,9 @@ function HomePage() {
     sequences: 0,
   });
   const galleryScrollRouteKeyRef = useRef<string | null>(null);
+  const pendingModeScrollRestoreRef = useRef<"photos" | "sequences" | null>(
+    null
+  );
   const [sequenceDataSource, setSequenceDataSource] =
     useState<SequenceDataSource | null>(null);
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
@@ -946,24 +949,24 @@ function HomePage() {
     sequenceQuerySourceKey,
     sequenceRefresh,
   ]);
-  const requestedDisplayedSequenceMode = getDisplayedSequenceMode(
-    sequenceMode,
-    sequenceViewReady
-  );
   const [displayedSequenceMode, setDisplayedSequenceMode] = useState<
     "photos" | "sequences"
   >("photos");
+  const requestedDisplayedSequenceMode = getDisplayedSequenceMode(
+    sequenceMode,
+    sequenceViewReady &&
+      (isSearching || (!photosIsPlaceholder && rawPhotos === photos)),
+    displayedSequenceMode
+  );
   const commitDisplayedSequenceMode = useCallback(
     (nextMode: "photos" | "sequences") => {
       if (displayedSequenceModeRef.current === nextMode) {
         return;
       }
-      galleryModeTransitionRef.current?.skipTransition();
-      const transition = startGalleryViewTransition(() => {
+      startGalleryViewTransition(() => {
         displayedSequenceModeRef.current = nextMode;
         setDisplayedSequenceMode(nextMode);
-      });
-      galleryModeTransitionRef.current = transition;
+      }, gallerySurfaceRef.current);
     },
     []
   );
@@ -972,8 +975,6 @@ function HomePage() {
   }, [commitDisplayedSequenceMode, requestedDisplayedSequenceMode]);
   useEffect(
     () => () => {
-      galleryModeTransitionRef.current?.skipTransition();
-      galleryModeTransitionRef.current = null;
       cancelGalleryViewTransition();
     },
     []
@@ -991,15 +992,22 @@ function HomePage() {
   const handleSequenceModeChange = useCallback(
     (mode: "photos" | "sequences") => {
       const currentMode = displayedSequenceModeRef.current;
+      if (mode === sequenceMode) {
+        return;
+      }
       const scrollElement = gridRef.current?.scrollElement;
-      if (scrollElement) {
+      if (
+        scrollElement &&
+        pendingModeScrollRestoreRef.current !== currentMode
+      ) {
         galleryScrollPositionsRef.current[currentMode] =
           scrollElement.scrollTop;
       }
+      pendingModeScrollRestoreRef.current = mode;
       setSequenceMode(mode);
       saveBrowseSession("home-search", { sequenceMode: mode });
     },
-    [saveBrowseSession]
+    [saveBrowseSession, sequenceMode]
   );
 
   useEffect(() => {
@@ -1985,8 +1993,12 @@ function HomePage() {
   }, []);
 
   const handleGalleryScrollTopChange = useCallback((scrollTop: number) => {
-    galleryScrollPositionsRef.current[displayedSequenceModeRef.current] =
-      scrollTop;
+    if (
+      pendingModeScrollRestoreRef.current !== displayedSequenceModeRef.current
+    ) {
+      galleryScrollPositionsRef.current[displayedSequenceModeRef.current] =
+        scrollTop;
+    }
     setGalleryScrolled((previous) => {
       const next = scrollTop > 4;
       return previous === next ? previous : next;
@@ -1994,27 +2006,50 @@ function HomePage() {
   }, []);
 
   useLayoutEffect(() => {
-    const scrollElement = gridRef.current?.scrollElement;
-    if (!scrollElement) {
-      return;
-    }
     if (galleryScrollRouteKeyRef.current !== routeKey) {
       galleryScrollRouteKeyRef.current = routeKey;
       galleryScrollPositionsRef.current.photos = 0;
       galleryScrollPositionsRef.current.sequences = 0;
+    }
+    const scrollElement = gridRef.current?.scrollElement;
+    if (
+      !scrollElement ||
+      photosIsPlaceholder ||
+      !sequenceViewReady ||
+      rawPhotos !== photos
+    ) {
+      return;
+    }
+    if (pendingModeScrollRestoreRef.current !== displayedSequenceMode) {
       return;
     }
     const requestedTop =
       galleryScrollPositionsRef.current[displayedSequenceMode] ?? 0;
-    const maxTop = Math.max(
-      0,
-      scrollElement.scrollHeight - scrollElement.clientHeight
-    );
-    const nextTop = Math.min(Math.max(0, requestedTop), maxTop);
-    if (Math.abs(scrollElement.scrollTop - nextTop) > 1) {
-      scrollElement.scrollTop = nextTop;
-    }
-  }, [displayedSequenceMode, routeKey]);
+    // Masonry measures the new items in its own layout pass. Restore after
+    // that pass so the previous mode's shorter surface cannot clamp the target.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        const current = gridRef.current?.scrollElement;
+        if (
+          !current ||
+          pendingModeScrollRestoreRef.current !== displayedSequenceMode
+        ) {
+          return;
+        }
+        const maxTop = Math.max(0, current.scrollHeight - current.clientHeight);
+        current.scrollTop = Math.min(Math.max(0, requestedTop), maxTop);
+        pendingModeScrollRestoreRef.current = null;
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    displayedSequenceMode,
+    routeKey,
+    photosIsPlaceholder,
+    sequenceViewReady,
+    rawPhotos,
+    photos,
+  ]);
 
   useEffect(() => {
     const element = galleryToolbarRef.current;
@@ -3457,7 +3492,7 @@ function HomePage() {
             )}
         </div>
         {hasPhotos ? (
-          <div className="home-gallery-body home-gallery-content-transition relative flex min-h-0 flex-1">
+          <div className="home-gallery-body relative flex min-h-0 flex-1">
             <div
               className="relative flex min-w-0 flex-1"
               inert={compactDetailOverlay && detailOverlayOpen}
@@ -3466,6 +3501,7 @@ function HomePage() {
                 className={`home-gallery-restore-content flex min-w-0 flex-1 ${
                   contentRestorePending ? "is-restoring" : ""
                 }`}
+                ref={gallerySurfaceRef}
               >
                 <PhotoGrid
                   columnWidth={gridColumnWidth}

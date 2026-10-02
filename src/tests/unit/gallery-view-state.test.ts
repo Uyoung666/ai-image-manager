@@ -10,6 +10,14 @@ import {
 } from "@/utils/gallery-view-state";
 
 describe("gallery view state", () => {
+  it("keeps the previous presentation while the target query is pending", () => {
+    expect(getDisplayedSequenceMode("photos", false, "sequences")).toBe(
+      "sequences"
+    );
+    expect(getDisplayedSequenceMode("photos", true, "sequences")).toBe(
+      "photos"
+    );
+  });
   it("shows already loaded sequences immediately after switching modes", () => {
     expect(getDisplayedSequenceMode("sequences", true)).toBe("sequences");
     expect(getDisplayedSequenceMode("sequences", false)).toBe("photos");

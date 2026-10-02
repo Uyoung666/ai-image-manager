@@ -4,74 +4,68 @@ import {
   startGalleryViewTransition,
 } from "@/utils/gallery-view-transition";
 
-const originalStartViewTransition = document.startViewTransition;
-
 afterEach(() => {
-  vi.useRealTimers();
-  Object.defineProperty(document, "startViewTransition", {
-    configurable: true,
-    value: originalStartViewTransition,
-  });
-  document.documentElement.classList.remove("gallery-mode-transitioning");
+  cancelGalleryViewTransition();
+  delete document.documentElement.dataset.reducedMotion;
   vi.restoreAllMocks();
 });
 
-describe("gallery view transition", () => {
-  it("updates immediately when the native API is unavailable", () => {
-    const update = vi.fn();
-    Object.defineProperty(document, "startViewTransition", {
-      configurable: true,
-      value: undefined,
-    });
+function surface() {
+  const element = document.createElement("div");
+  const animation = {
+    cancel: vi.fn(),
+    finished: new Promise<void>(() => undefined),
+  } as unknown as Animation;
+  const animate = vi.fn(() => animation);
+  element.animate = animate;
+  return { element, animation, animate };
+}
 
+describe("gallery view transition", () => {
+  it("updates immediately without an animation surface", () => {
+    const update = vi.fn();
     expect(startGalleryViewTransition(update)).toBeNull();
     expect(update).toHaveBeenCalledOnce();
   });
-
-  it("commits inside the transition and clears its root class", async () => {
-    vi.useFakeTimers();
+  it("animates only the gallery and never requests a document snapshot", () => {
+    const target = surface();
+    const documentTransition = vi.fn();
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: documentTransition,
+    });
     const update = vi.fn();
-    const finished = Promise.resolve();
-    const skipTransition = vi.fn();
-    const startViewTransition = vi.fn(
-      (callback: ViewTransitionUpdateCallback) => {
-        callback();
-        return { finished, skipTransition } as unknown as ViewTransition;
-      }
+    expect(startGalleryViewTransition(update, target.element)).toBe(
+      target.animation
     );
-    Object.defineProperty(document, "startViewTransition", {
-      configurable: true,
-      value: startViewTransition,
-    });
-
-    const transition = startGalleryViewTransition(update);
-
-    expect(transition).not.toBeNull();
-    expect(startViewTransition).toHaveBeenCalledOnce();
     expect(update).toHaveBeenCalledOnce();
-    expect(document.documentElement).toHaveClass("gallery-mode-transitioning");
-    await finished;
-    await Promise.resolve();
-    expect(document.documentElement).toHaveClass("gallery-mode-transitioning");
-    vi.advanceTimersByTime(220);
-    expect(document.documentElement).not.toHaveClass(
-      "gallery-mode-transitioning"
-    );
+    expect(target.animate).toHaveBeenCalledOnce();
+    expect(documentTransition).not.toHaveBeenCalled();
   });
-
-  it("cancels an in-flight transition when the gallery unmounts", () => {
-    const finished = new Promise<void>(() => undefined);
-    Object.defineProperty(document, "startViewTransition", {
-      configurable: true,
-      value: () =>
-        ({ finished, skipTransition: vi.fn() }) as unknown as ViewTransition,
-    });
-
-    startGalleryViewTransition(vi.fn());
+  it("cancels old animations on consecutive changes and on unmount", () => {
+    const first = surface();
+    const second = surface();
+    startGalleryViewTransition(vi.fn(), first.element);
+    startGalleryViewTransition(vi.fn(), second.element);
+    expect(first.animation.cancel).toHaveBeenCalledOnce();
     cancelGalleryViewTransition();
-
-    expect(document.documentElement).not.toHaveClass(
-      "gallery-mode-transitioning"
-    );
+    expect(second.animation.cancel).toHaveBeenCalledOnce();
+  });
+  it("respects reduced motion without delaying the update", () => {
+    document.documentElement.dataset.reducedMotion = "true";
+    const target = surface();
+    const update = vi.fn();
+    expect(startGalleryViewTransition(update, target.element)).toBeNull();
+    expect(update).toHaveBeenCalledOnce();
+    expect(target.animate).not.toHaveBeenCalled();
+  });
+  it("keeps the committed update if animation creation fails", () => {
+    const target = surface();
+    target.animate.mockImplementation(() => {
+      throw new Error("unsupported");
+    });
+    const update = vi.fn();
+    expect(startGalleryViewTransition(update, target.element)).toBeNull();
+    expect(update).toHaveBeenCalledOnce();
   });
 });

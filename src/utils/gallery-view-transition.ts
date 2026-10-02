@@ -1,20 +1,10 @@
-import { flushSync } from "react-dom";
 import { isReducedMotionEnabled } from "@/actions/ui-preferences";
 
-const GALLERY_TRANSITION_CLASS = "gallery-mode-transitioning";
-const GALLERY_TRANSITION_MIN_DURATION_MS = 220;
-let activeTransitionId = 0;
-let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
+let activeAnimation: Animation | null = null;
 
 export function cancelGalleryViewTransition(): void {
-  activeTransitionId += 1;
-  if (cleanupTimer !== null) {
-    clearTimeout(cleanupTimer);
-    cleanupTimer = null;
-  }
-  if (typeof document !== "undefined") {
-    document.documentElement.classList.remove(GALLERY_TRANSITION_CLASS);
-  }
+  activeAnimation?.cancel();
+  activeAnimation = null;
 }
 
 function prefersReducedMotion(): boolean {
@@ -26,68 +16,30 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-/**
- * Commit a gallery presentation change inside a local View Transition.
- *
- * The native API is intentionally optional: the gallery remains usable in
- * older Chromium builds and in tests, while the CSS named transition keeps
- * the route-level transition from moving the rest of the page.
- */
+/** Animate only the gallery surface; document snapshots can cover its toolbar. */
 export function startGalleryViewTransition(
-  update: () => void
-): ViewTransition | null {
-  if (
-    typeof document === "undefined" ||
-    typeof document.startViewTransition !== "function" ||
-    prefersReducedMotion()
-  ) {
-    update();
+  update: () => void,
+  surface?: HTMLElement | null
+): Animation | null {
+  cancelGalleryViewTransition();
+  update();
+  if (!surface?.animate || prefersReducedMotion()) {
     return null;
   }
-
-  const root = document.documentElement;
-  root.classList.add(GALLERY_TRANSITION_CLASS);
-  if (cleanupTimer !== null) {
-    clearTimeout(cleanupTimer);
-    cleanupTimer = null;
-  }
-  const transitionId = ++activeTransitionId;
-  const startedAt = performance.now();
-  let committed = false;
   try {
-    const transition = document.startViewTransition(() => {
-      committed = true;
-      flushSync(update);
+    const animation = surface.animate([{ opacity: 0.96 }, { opacity: 1 }], {
+      duration: 200,
+      easing: "ease-out",
     });
-    const clearTransitionClass = () => {
-      if (activeTransitionId !== transitionId) {
-        return;
+    activeAnimation = animation;
+    const clear = () => {
+      if (activeAnimation === animation) {
+        activeAnimation = null;
       }
-      const elapsed = performance.now() - startedAt;
-      const remaining = Math.max(
-        0,
-        GALLERY_TRANSITION_MIN_DURATION_MS - elapsed
-      );
-      if (remaining === 0) {
-        root.classList.remove(GALLERY_TRANSITION_CLASS);
-        return;
-      }
-      cleanupTimer = setTimeout(() => {
-        cleanupTimer = null;
-        if (activeTransitionId === transitionId) {
-          root.classList.remove(GALLERY_TRANSITION_CLASS);
-        }
-      }, remaining);
     };
-    transition.finished.then(clearTransitionClass, clearTransitionClass);
-    return transition;
+    animation.finished.then(clear, clear);
+    return animation;
   } catch {
-    if (activeTransitionId === transitionId) {
-      root.classList.remove(GALLERY_TRANSITION_CLASS);
-    }
-    if (!committed) {
-      update();
-    }
     return null;
   }
 }

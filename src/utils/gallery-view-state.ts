@@ -9,9 +9,10 @@ export function createSearchResultSourceKey(
 
 export function getDisplayedSequenceMode(
   mode: GallerySequenceMode,
-  sequenceViewReady: boolean
+  sequenceViewReady: boolean,
+  currentMode: GallerySequenceMode = "photos"
 ): GallerySequenceMode {
-  return mode === "photos" || sequenceViewReady ? mode : "photos";
+  return sequenceViewReady ? mode : currentMode;
 }
 
 export function canPaginateGalleryPhotos(
