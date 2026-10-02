@@ -21,6 +21,7 @@ const SIZES = [
 ];
 declare global {
   interface Window {
+    galleryFrameProbe: { stop: () => number[][] };
     gallerySequenceGate: {
       armed: boolean;
       operation: "listSequences" | "listPhotos";
@@ -225,6 +226,11 @@ test.beforeAll(async () => {
   const sqlEscape = (value: string) => value.replaceAll("'", "''");
   const statements = [
     `INSERT INTO folders(id,path,display_name,photo_count,created_at) VALUES(1,'${sqlEscape(fixture)}','GalleryFixture',270,1)`,
+    ...Array.from(
+      { length: 6 },
+      (_, index) =>
+        `INSERT INTO folders(id,path,display_name,photo_count,created_at) VALUES(${index + 2},'${sqlEscape(path.join(fixture, `folder-${index + 2}`))}','Folder ${index + 2}',30,1)`
+    ),
   ];
   for (let id = 1; id <= 270; id++) {
     const photoPath = path.join(
@@ -589,5 +595,126 @@ for (const size of SIZES) {
           document.documentElement.clientWidth + 2
       )
     ).toBe(false);
+  });
+}
+
+for (const [folderIndex, size] of SIZES.entries()) {
+  test(`${size.width}x${size.height} switches folders without an intermediate gallery`, async () => {
+    await app.evaluate(
+      ({ BrowserWindow }, requested) =>
+        BrowserWindow.getAllWindows()[0].setSize(
+          requested.width,
+          requested.height
+        ),
+      size
+    );
+    const folderBId = 2 + folderIndex * 2;
+    const folderCId = folderBId + 1;
+    query(
+      `UPDATE photos SET folder_id=CASE WHEN id BETWEEN 201 AND 230 THEN ${folderBId} WHEN id BETWEEN 231 AND 260 THEN ${folderCId} ELSE 1 END`,
+      true
+    );
+    await navigate("/albums/9001");
+    await page.locator(".page-toolbar").waitFor();
+    await navigate("/?reset=true");
+    await page.getByRole("button", { name: "Photos", exact: true }).click();
+    const clickFolder = async (id: number) => {
+      const expand = page.getByRole("button", {
+        name: "Expand sidebar",
+        exact: true,
+      });
+      if (await expand.isVisible()) {
+        await expand.click();
+      }
+      await page.locator(`[data-folder-id="${id}"][role="treeitem"]`).click();
+    };
+    await clickFolder(1);
+    const gallery = page.locator("[data-masonry-scroll]");
+    await expect(gallery.locator('[data-photo-id="270"]')).toBeVisible();
+    await expect(page.locator(".home-gallery-restore-overlay")).toHaveCount(0);
+    const mountedGallery = await gallery.elementHandle();
+    await page.evaluate(() => {
+      window.gallerySequenceGate.operation = "listSequences";
+      window.gallerySequenceGate.armed = true;
+    });
+    await clickFolder(folderBId);
+    await expect
+      .poll(() => page.evaluate(() => window.gallerySequenceGate.held))
+      .toBe(1);
+    await expect(gallery.locator('[data-photo-id="270"]')).toBeVisible();
+    expect(
+      await mountedGallery?.evaluate((element) => element.isConnected)
+    ).toBe(true);
+    await expect(page.locator(".home-gallery-restore-overlay")).toHaveCount(0);
+    await page.screenshot({
+      path: test.info().outputPath("sequence-pending.png"),
+    });
+    await page.evaluate(() => window.gallerySequenceGate.release());
+    await expect(gallery.locator('[data-photo-id="230"]')).toBeVisible();
+    await expect(gallery.locator('[data-photo-id="270"]')).toHaveCount(0);
+    await page.evaluate(() => {
+      window.gallerySequenceGate.operation = "listPhotos";
+      window.gallerySequenceGate.armed = true;
+    });
+    await clickFolder(folderCId);
+    await expect
+      .poll(() => page.evaluate(() => window.gallerySequenceGate.held))
+      .toBe(1);
+    await expect(gallery.locator('[data-photo-id="230"]')).toBeVisible();
+    await expect(page.locator(".home-gallery-restore-overlay")).toHaveCount(0);
+    await page.screenshot({
+      path: test.info().outputPath("photos-pending.png"),
+    });
+    await page.evaluate(() => window.gallerySequenceGate.release());
+    await expect(gallery.locator('[data-photo-id="260"]')).toBeVisible();
+    await expect(gallery.locator('[data-photo-id="230"]')).toHaveCount(0);
+    // Cached folder queries still need their current sequence response. A late
+    // intermediate response must never replace the most recent destination.
+    await clickFolder(1);
+    await expect(gallery.locator('[data-photo-id="270"]')).toBeVisible();
+    await expect(page.locator(".home-gallery-restore-overlay")).toHaveCount(0);
+    await page.evaluate(() => {
+      const frames: number[][] = [];
+      let frame = 0;
+      const sample = () => {
+        frames.push(
+          [
+            ...document.querySelectorAll(
+              "[data-masonry-scroll] [data-photo-id]"
+            ),
+          ].map((photo) => Number(photo.getAttribute("data-photo-id")))
+        );
+        frame = requestAnimationFrame(sample);
+      };
+      sample();
+      window.galleryFrameProbe = {
+        stop: () => {
+          cancelAnimationFrame(frame);
+          return frames;
+        },
+      };
+      window.gallerySequenceGate.operation = "listSequences";
+      window.gallerySequenceGate.armed = true;
+    });
+    await clickFolder(folderBId);
+    await expect
+      .poll(() => page.evaluate(() => window.gallerySequenceGate.held))
+      .toBe(1);
+    await expect(gallery.locator('[data-photo-id="270"]')).toBeVisible();
+    await clickFolder(folderCId);
+    await expect(gallery.locator('[data-photo-id="260"]')).toBeVisible();
+    await page.evaluate(() => window.gallerySequenceGate.release());
+    await expect(page.locator(".home-gallery-restore-overlay")).toHaveCount(0);
+    await expect(gallery.locator('[data-photo-id="230"]')).toHaveCount(0);
+    const frames = await page.evaluate(() => window.galleryFrameProbe.stop());
+    expect(
+      frames.every(
+        (ids) => ids.length > 0 && ids.every((id) => id < 201 || id > 230)
+      )
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath("rapid-switch-settled.png"),
+    });
+    query("UPDATE photos SET folder_id=1", true);
   });
 }

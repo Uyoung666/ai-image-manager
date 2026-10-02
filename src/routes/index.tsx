@@ -65,6 +65,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { useFolders } from "@/hooks/useFolders";
+import { useGallerySnapshot } from "@/hooks/useGallerySnapshot";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { usePhotos } from "@/hooks/usePhotos";
@@ -1672,12 +1673,43 @@ function HomePage() {
     routeKey,
     sequenceViewReady,
   });
+  const galleryValue = useMemo(
+    () => ({
+      photos,
+      sequences,
+      mode: displayedSequenceMode,
+      routeKey,
+      expandedSequence,
+      expandedSequenceComplete,
+      expandingSequenceId,
+    }),
+    [
+      photos,
+      sequences,
+      displayedSequenceMode,
+      routeKey,
+      expandedSequence,
+      expandedSequenceComplete,
+      expandingSequenceId,
+    ]
+  );
+  const gallerySnapshot = useGallerySnapshot({
+    enabled: !(isSearching || photosError || sequenceError),
+    ready:
+      sequenceViewReady &&
+      !photosIsPlaceholder &&
+      !photosLoading &&
+      rawPhotos === photos &&
+      displayedSequenceMode === sequenceMode,
+    value: galleryValue,
+  });
   // Sequence ownership can take a little longer than the photo query. Keep
   // the gallery surface visible while its own skeleton is shown; hiding the
   // entire masonry container here makes later detail-panel layout changes
   // look like a flash. A saved scroll position still uses the existing
   // restore veil until positioning has settled.
-  const contentRestorePending = hasSavedPosition && restorePending;
+  const contentRestorePending =
+    hasSavedPosition && restorePending && !gallerySnapshot.retaining;
 
   // 预加载期间自动推进分页加载（顺序拉取，避免并发乱序）
   useEffect(() => {
@@ -3572,7 +3604,10 @@ function HomePage() {
           <div className="home-gallery-body relative flex min-h-0 flex-1">
             <div
               className="relative flex min-w-0 flex-1"
-              inert={compactDetailOverlay && detailOverlayOpen}
+              inert={
+                (compactDetailOverlay && detailOverlayOpen) ||
+                gallerySnapshot.retaining
+              }
             >
               <div
                 className={`home-gallery-restore-content flex min-w-0 flex-1 ${
@@ -3584,20 +3619,28 @@ function HomePage() {
                   columnWidth={gridColumnWidth}
                   deletingIds={deletingIds}
                   emptyState={emptyStateContent}
-                  expandedSequence={expandedSequence}
-                  expandedSequenceComplete={expandedSequenceComplete}
-                  expandingSequenceId={expandingSequenceId}
+                  expandedSequence={gallerySnapshot.value.expandedSequence}
+                  expandedSequenceComplete={
+                    gallerySnapshot.value.expandedSequenceComplete
+                  }
+                  expandingSequenceId={
+                    gallerySnapshot.value.expandingSequenceId
+                  }
                   gridRef={gridRef}
-                  hasMore={isPhotoPaginationActive}
+                  hasMore={
+                    isPhotoPaginationActive && !gallerySnapshot.retaining
+                  }
                   isLoadingMore={
                     isPhotoPaginationActive &&
                     (isSearching
                       ? isFetchingSearchNextPage
                       : isFetchingNextPage)
                   }
-                  isPlaceholderData={photosIsPlaceholder}
+                  isPlaceholderData={
+                    photosIsPlaceholder || gallerySnapshot.retaining
+                  }
                   isStale={isPhotosStale}
-                  loading={loading}
+                  loading={loading && !gallerySnapshot.retaining}
                   onBackgroundClick={() => {
                     if (marqueeJustCompleted.current) {
                       marqueeJustCompleted.current = false;
@@ -3623,7 +3666,7 @@ function HomePage() {
                   onSequenceOrderChange={handleSequenceOrderChange}
                   onToggleFavorite={handleToggleFavorite}
                   onToggleSequenceExpand={handleScopedSequenceExpand}
-                  photos={photos}
+                  photos={gallerySnapshot.value.photos}
                   preserveOnSequenceError={
                     isSearching &&
                     sequenceDataSource?.key !== sequenceQuerySourceKey &&
@@ -3632,15 +3675,19 @@ function HomePage() {
                   recentlyViewedPhotoId={recentlyViewedPhotoId}
                   recentlyViewedPulseActive={recentlyViewedPulseActive}
                   recentlyViewedPulseKey={recentlyViewedPulseKey}
-                  restoreGateReady={restoreGateReady}
-                  routeKey={routeKey}
+                  restoreGateReady={
+                    restoreGateReady && !gallerySnapshot.retaining
+                  }
+                  routeKey={gallerySnapshot.value.routeKey}
                   searchQuery={searchQuery}
                   selectedIds={selectedIds}
                   semanticTopSimilarity={searchSemantic?.topSimilarity}
                   sequenceError={sequenceError}
-                  sequenceLoading={!sequenceViewReady}
-                  sequenceMode={displayedSequenceMode}
-                  sequences={sequences}
+                  sequenceLoading={
+                    !(sequenceViewReady || gallerySnapshot.retaining)
+                  }
+                  sequenceMode={gallerySnapshot.value.mode}
+                  sequences={gallerySnapshot.value.sequences}
                   showToolbar={false}
                   sort={sortField}
                   sortOrder={sortOrder}
@@ -3648,7 +3695,7 @@ function HomePage() {
                 />
               </div>
               <GalleryRestoreOverlay
-                active={restorePending}
+                active={restorePending && !gallerySnapshot.retaining}
                 key={routeKey}
                 label={t(
                   hasSavedPosition
