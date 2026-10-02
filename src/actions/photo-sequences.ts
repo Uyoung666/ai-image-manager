@@ -1,6 +1,8 @@
 import { ipc } from "@/ipc/manager";
 
 export const photoSequenceActions = {
+  acceptSuggestion: (suggestionId: number) =>
+    ipc.client.photos.acceptSequenceSuggestion({ suggestionId }),
   create: (input: { type: "burst" | "timelapse"; photoIds: number[] }) =>
     ipc.client.photos.createSequence(input),
   deleteManual: (id: number) => ipc.client.photos.deleteManualSequence({ id }),

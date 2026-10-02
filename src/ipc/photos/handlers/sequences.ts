@@ -17,22 +17,28 @@ import {
   folders,
   photoSequenceExclusions,
   photoSequenceMembers,
-  photoSequenceSuggestions,
   photoSequences,
   photos,
   photoTags,
 } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
-import { hammingDistance } from "@/services/bk-tree";
-import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
 import {
-  detectPhotoSequences,
+  getSequenceFolderIds,
   notifySequencesChanged,
   previewPhotoSequences,
   readCaptureMetadata,
+  rebuildPhotoSequences,
 } from "@/services/photo-sequences";
-import { getSequenceDetectionSettings } from "@/services/sequence-detection-settings";
+import {
+  insertManualSequence,
+  mergeSequencePair,
+  sequenceMembers,
+} from "@/services/sequence-members";
 import { recommendSequenceRepresentative as recommendRepresentative } from "@/services/sequence-representative";
+import {
+  acceptSequenceSuggestion as acceptSuggestion,
+  refreshSequenceSuggestions,
+} from "@/services/sequence-suggestions";
 import { invalidateSmartAlbumCache } from "@/services/smart-album-engine";
 import { invalidateStatsCache } from "./stats";
 
@@ -69,20 +75,6 @@ const ListSequencesSchema = z.object({
   tagMode: z.enum(["and", "or"]).optional(),
 });
 type ListSequencesInput = z.infer<typeof ListSequencesSchema>;
-
-function getSequenceFolderIds(
-  db: ReturnType<typeof getDatabase>,
-  folderId: number | undefined
-) {
-  if (folderId == null) {
-    return undefined;
-  }
-  const hierarchy = db
-    .select({ id: folders.id, parentId: folders.parentId })
-    .from(folders)
-    .all();
-  return getFolderSubtreeIds(hierarchy, folderId);
-}
 
 function getGalleryPhotoConditions(
   input: ListSequencesInput,
@@ -157,38 +149,6 @@ const sequenceFields = {
   userLocked: photoSequences.userLocked,
 };
 
-function sequenceMembers(
-  db: ReturnType<typeof getDatabase>,
-  sequenceId: number
-) {
-  return db
-    .select({
-      id: photos.id,
-      folderId: photos.folderId,
-      capturedAt: exifData.dateTaken,
-      normalizedJson: advancedExifData.normalizedJson,
-      vendorRawJson: advancedExifData.vendorRawJson,
-    })
-    .from(photoSequenceMembers)
-    .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
-    .leftJoin(exifData, eq(exifData.photoId, photos.id))
-    .leftJoin(advancedExifData, eq(advancedExifData.photoId, photos.id))
-    .where(
-      and(
-        eq(photoSequenceMembers.sequenceId, sequenceId),
-        isNull(photos.deletedAt)
-      )
-    )
-    .orderBy(asc(photoSequenceMembers.position))
-    .all()
-    .map((member) => ({
-      ...member,
-      capturedAt:
-        readCaptureMetadata(member.normalizedJson, member.vendorRawJson)
-          .capturedAt ?? member.capturedAt,
-    }));
-}
-
 function activeSequenceMemberIds(
   db: ReturnType<typeof getDatabase>,
   sequenceId: number
@@ -248,6 +208,17 @@ export function updateSequenceMembersInPlace(
   ) {
     throw new Error("Sequence members must be active photos from one folder");
   }
+  const conflicts = db
+    .select({
+      photoId: photoSequenceMembers.photoId,
+      sequenceId: photoSequenceMembers.sequenceId,
+    })
+    .from(photoSequenceMembers)
+    .where(inArray(photoSequenceMembers.photoId, uniqueIds))
+    .all();
+  if (conflicts.some((member) => member.sequenceId !== sequenceId)) {
+    throw new Error("Photo already belongs to another sequence");
+  }
   const byId = new Map(
     rows.map((row) => [
       row.id,
@@ -285,184 +256,21 @@ export function updateSequenceMembersInPlace(
     .run();
   db.update(photoSequences)
     .set({
-      endedAt: captureTimes.at(-1) ?? sequence.endedAt,
+      endedAt: captureTimes.length
+        ? Math.max(...captureTimes)
+        : sequence.endedAt,
       frameCount: uniqueIds.length,
       representativePhotoId,
       source: "manual",
-      startedAt: captureTimes[0] ?? sequence.startedAt,
+      startedAt: captureTimes.length
+        ? Math.min(...captureTimes)
+        : sequence.startedAt,
       updatedAt: Date.now(),
       userLocked: true,
     })
     .where(eq(photoSequences.id, sequenceId))
     .run();
   return { dissolved: false, id: sequenceId };
-}
-
-function insertManualSequence(
-  db: ReturnType<typeof getDatabase>,
-  type: "burst" | "timelapse",
-  members: Array<{
-    id: number;
-    folderId: number | null;
-    capturedAt: number | null;
-  }>
-) {
-  if (
-    members.length < 2 ||
-    new Set(members.map((member) => member.folderId)).size !== 1
-  ) {
-    throw new Error(
-      "A manual sequence requires at least two active photos from one folder"
-    );
-  }
-  const sorted = [...members].sort(
-    (left, right) => (left.capturedAt ?? 0) - (right.capturedAt ?? 0)
-  );
-  const inserted = db
-    .insert(photoSequences)
-    .values({
-      folderId: sorted[0].folderId,
-      type,
-      source: "manual",
-      userLocked: true,
-      representativePhotoId: sorted[0].id,
-      startedAt: sorted[0].capturedAt ?? Date.now(),
-      endedAt: sorted.at(-1)?.capturedAt ?? Date.now(),
-      frameCount: sorted.length,
-      updatedAt: Date.now(),
-    })
-    .returning({ id: photoSequences.id })
-    .get();
-  db.insert(photoSequenceMembers)
-    .values(
-      sorted.map((member, position) => ({
-        sequenceId: inserted.id,
-        photoId: member.id,
-        position,
-      }))
-    )
-    .run();
-  return inserted.id;
-}
-
-function median(values: number[]) {
-  const sorted = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[middle - 1] + sorted[middle]) / 2
-    : sorted[middle];
-}
-
-function sequenceEvidence(
-  db: ReturnType<typeof getDatabase>,
-  sequenceId: number
-) {
-  const members = db
-    .select({
-      normalizedJson: advancedExifData.normalizedJson,
-      phash: photos.phash,
-      position: photoSequenceMembers.position,
-      vendorRawJson: advancedExifData.vendorRawJson,
-    })
-    .from(photoSequenceMembers)
-    .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
-    .leftJoin(advancedExifData, eq(advancedExifData.photoId, photos.id))
-    .where(
-      and(
-        eq(photoSequenceMembers.sequenceId, sequenceId),
-        isNull(photos.deletedAt)
-      )
-    )
-    .orderBy(asc(photoSequenceMembers.position))
-    .all();
-  const captures = members.map(
-    (member) =>
-      readCaptureMetadata(member.normalizedJson, member.vendorRawJson)
-        .capturedAt
-  );
-  if (captures.some((value) => value === null) || members.length < 2) {
-    return null;
-  }
-  const timestamps = captures.filter(
-    (value): value is number => value !== null
-  );
-  return {
-    firstHash: members[0]?.phash ?? null,
-    interval: median(
-      timestamps
-        .slice(1)
-        .map((timestamp, index) => timestamp - timestamps[index])
-    ),
-    lastHash: members.at(-1)?.phash ?? null,
-  };
-}
-
-export function refreshSequenceSuggestions(folderId?: number) {
-  const db = getDatabase();
-  const settings = getSequenceDetectionSettings();
-  const rows = db
-    .select({
-      id: photoSequences.id,
-      folderId: photoSequences.folderId,
-      type: photoSequences.type,
-      startedAt: photoSequences.startedAt,
-      endedAt: photoSequences.endedAt,
-      camera: exifData.cameraModel,
-      lens: exifData.lensModel,
-    })
-    .from(photoSequences)
-    .leftJoin(
-      exifData,
-      eq(exifData.photoId, photoSequences.representativePhotoId)
-    )
-    .where(folderId == null ? undefined : eq(photoSequences.folderId, folderId))
-    .orderBy(asc(photoSequences.folderId), asc(photoSequences.startedAt))
-    .all();
-  for (let index = 1; index < rows.length; index++) {
-    const previous = rows[index - 1];
-    const current = rows[index];
-    const gap = current.startedAt - previous.endedAt;
-    if (
-      previous.folderId !== current.folderId ||
-      previous.type !== "timelapse" ||
-      current.type !== "timelapse" ||
-      previous.camera !== current.camera ||
-      previous.lens !== current.lens ||
-      gap < 0 ||
-      gap > settings.continuationWindowMs
-    ) {
-      continue;
-    }
-    const previousEvidence = sequenceEvidence(db, previous.id);
-    const currentEvidence = sequenceEvidence(db, current.id);
-    if (
-      !(previousEvidence && currentEvidence) ||
-      previousEvidence.interval < settings.minTimelapseGapMs ||
-      currentEvidence.interval < settings.minTimelapseGapMs ||
-      gap <= previousEvidence.interval * 3 ||
-      Math.abs(previousEvidence.interval - currentEvidence.interval) >
-        Math.max(
-          1000,
-          Math.max(previousEvidence.interval, currentEvidence.interval) *
-            settings.rhythmTolerance
-        ) ||
-      !previousEvidence.lastHash ||
-      !currentEvidence.firstHash ||
-      hammingDistance(previousEvidence.lastHash, currentEvidence.firstHash) >
-        settings.timelapsePHashDistance
-    ) {
-      continue;
-    }
-    db.insert(photoSequenceSuggestions)
-      .values({
-        firstSequenceId: previous.id,
-        secondSequenceId: current.id,
-        confidence: 0.8,
-        updatedAt: Date.now(),
-      })
-      .onConflictDoNothing()
-      .run();
-  }
 }
 
 export function querySequences(input: ListSequencesInput) {
@@ -615,9 +423,10 @@ export const rebuildSequences = os
     if (input.dryRun) {
       return { dryRun: true, ...previewPhotoSequences(input.folderId) };
     }
-    const processed = detectPhotoSequences(input.folderId, "rebuild");
+    const result = rebuildPhotoSequences(input.folderId, "rebuild", false);
     refreshSequenceSuggestions(input.folderId);
-    return { processed };
+    const revision = notifySequencesChanged(input.folderId, "rebuild", result);
+    return { ...result, revision };
   });
 
 export const ignoreSequencePhotos = os
@@ -664,59 +473,53 @@ export const createSequence = os
         id: photos.id,
         folderId: photos.folderId,
         capturedAt: exifData.dateTaken,
+        normalizedJson: advancedExifData.normalizedJson,
+        vendorRawJson: advancedExifData.vendorRawJson,
       })
       .from(photos)
       .leftJoin(exifData, eq(exifData.photoId, photos.id))
+      .leftJoin(advancedExifData, eq(advancedExifData.photoId, photos.id))
       .where(and(inArray(photos.id, input.photoIds), isNull(photos.deletedAt)))
       .all();
-    const id = insertManualSequence(db, input.type, members);
+    if (
+      new Set(input.photoIds).size !== input.photoIds.length ||
+      members.length !== input.photoIds.length
+    ) {
+      throw new Error("All requested photos must be active and unique");
+    }
+    const normalized = members.map((member) => ({
+      ...member,
+      capturedAt:
+        readCaptureMetadata(member.normalizedJson, member.vendorRawJson)
+          .capturedAt ?? member.capturedAt,
+    }));
+    const id = db.transaction(() =>
+      insertManualSequence(db, input.type, normalized)
+    );
     notifySequencesChanged(members[0]?.folderId ?? undefined, "manual");
     return { id };
   });
 
+export const acceptSequenceSuggestion = os
+  .input(z.object({ suggestionId: z.number().int().positive() }))
+  .handler(({ input }) => acceptSuggestion(input.suggestionId));
+
 export const mergeSequences = os
   .input(SequenceIdsSchema)
   .handler(({ input }) => {
-    const db = getDatabase();
-    const result = db.transaction(() => {
-      const sequences = input.sequenceIds.map((id) =>
-        db.select().from(photoSequences).where(eq(photoSequences.id, id)).get()
-      );
-      if (
-        sequences.some((sequence) => !sequence) ||
-        sequences[0]?.folderId !== sequences[1]?.folderId ||
-        sequences[0]?.type !== sequences[1]?.type
-      ) {
-        throw new Error(
-          "Only same-folder sequences of the same type can be merged"
-        );
+    const result = getDatabase().transaction(() =>
+      mergeSequencePair(getDatabase(), input.sequenceIds)
+    );
+    refreshSequenceSuggestions(result.folderId ?? undefined);
+    const revision = notifySequencesChanged(
+      result.folderId ?? undefined,
+      "manual",
+      {
+        deletedSequenceIds: input.sequenceIds,
+        replacementSequenceIds: [result.id],
       }
-      const members = input.sequenceIds.flatMap((id) =>
-        sequenceMembers(db, id)
-      );
-      db.delete(photoSequences)
-        .where(inArray(photoSequences.id, input.sequenceIds))
-        .run();
-      const merged = {
-        id: insertManualSequence(
-          db,
-          sequences[0]?.type as "burst" | "timelapse",
-          members
-        ),
-      };
-      db.update(photoSequenceSuggestions)
-        .set({ status: "accepted", updatedAt: Date.now() })
-        .where(
-          and(
-            eq(photoSequenceSuggestions.firstSequenceId, input.sequenceIds[0]),
-            eq(photoSequenceSuggestions.secondSequenceId, input.sequenceIds[1])
-          )
-        )
-        .run();
-      return merged;
-    });
-    notifySequencesChanged(undefined, "manual");
-    return result;
+    );
+    return { id: result.id, revision };
   });
 
 export const splitSequence = os
@@ -750,17 +553,22 @@ export const splitSequence = os
           insertManualSequence(
             db,
             sequence.type as "burst" | "timelapse",
-            members.slice(0, input.position)
+            members.slice(0, input.position),
+            true
           ),
           insertManualSequence(
             db,
             sequence.type as "burst" | "timelapse",
-            members.slice(input.position)
+            members.slice(input.position),
+            true
           ),
         ],
       };
     });
-    notifySequencesChanged(undefined, "manual");
+    notifySequencesChanged(undefined, "manual", {
+      deletedSequenceIds: [input.id],
+      replacementSequenceIds: result.ids,
+    });
     return result;
   });
 
@@ -776,10 +584,12 @@ export const setSequenceRepresentative = os
     const isMember = db
       .select({ id: photoSequenceMembers.id })
       .from(photoSequenceMembers)
+      .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
       .where(
         and(
           eq(photoSequenceMembers.sequenceId, input.id),
-          eq(photoSequenceMembers.photoId, input.photoId)
+          eq(photoSequenceMembers.photoId, input.photoId),
+          isNull(photos.deletedAt)
         )
       )
       .get();
@@ -820,7 +630,10 @@ export const updateSequenceMembers = os
       }
       return updated;
     });
-    notifySequencesChanged(undefined, "reorder", {
+    const pureReorder =
+      oldMemberIds.length === input.photoIds.length &&
+      oldMemberIds.every((id) => retainedIds.has(id));
+    notifySequencesChanged(undefined, pureReorder ? "reorder" : "manual", {
       orderedMemberIds: input.photoIds,
       sequenceId: input.id,
     });
@@ -1032,34 +845,15 @@ export const restoreAutomaticSequence = os
           )
           .run();
       }
-      detectPhotoSequences(sequence.folderId ?? undefined, "restore");
+      rebuildPhotoSequences(sequence.folderId ?? undefined, "restore", false);
       refreshSequenceSuggestions(sequence.folderId ?? undefined);
+    });
+    notifySequencesChanged(sequence.folderId ?? undefined, "restore", {
+      deletedSequenceIds: [input.id],
     });
     return { ok: true };
   });
 
 export const listSequenceSuggestions = os
   .input(z.object({ folderId: z.number().int().positive().optional() }))
-  .handler(({ input }) => {
-    refreshSequenceSuggestions(input.folderId);
-    const db = getDatabase();
-    const suggestions = db
-      .select()
-      .from(photoSequenceSuggestions)
-      .where(eq(photoSequenceSuggestions.status, "pending"))
-      .all();
-    if (input.folderId == null) {
-      return suggestions;
-    }
-    const sequenceIds = new Set(
-      db
-        .select({ id: photoSequences.id })
-        .from(photoSequences)
-        .where(eq(photoSequences.folderId, input.folderId))
-        .all()
-        .map((sequence) => sequence.id)
-    );
-    return suggestions.filter((suggestion) =>
-      sequenceIds.has(suggestion.firstSequenceId)
-    );
-  });
+  .handler(({ input }) => refreshSequenceSuggestions(input.folderId));

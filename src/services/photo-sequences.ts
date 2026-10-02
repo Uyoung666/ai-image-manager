@@ -6,12 +6,14 @@ import {
   isNotNull,
   isNull,
   notInArray,
+  sql,
 } from "drizzle-orm";
 import { BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
 import {
   advancedExifData,
   exifData,
+  folders,
   photoSequenceExclusions,
   photoSequenceMembers,
   photoSequences,
@@ -20,12 +22,14 @@ import {
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { normalizeAdvancedExif } from "@/services/advanced-exif-normalizer";
 import { hammingDistance } from "@/services/bk-tree";
+import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
+import { getSequenceDetectionSettings } from "@/services/sequence-detection-settings";
+import { getSetting, setSetting } from "@/services/settings-manager";
+import type { SequenceChangeEvent } from "@/types/photo-sequence";
 import {
   defaultSequenceDetectionSettings,
-  getSequenceDetectionSettings,
   type SequenceDetectionSettings,
-} from "@/services/sequence-detection-settings";
-import { getSetting, setSetting } from "@/services/settings-manager";
+} from "@/types/sequence-detection-settings";
 
 const BURST_GAP_MS = 2000;
 const MAX_BURST_PHASH_DISTANCE = 12;
@@ -245,23 +249,23 @@ function stableTimelapseGroups(
 ): SequenceDetectionCandidate[][] {
   const groups: SequenceDetectionCandidate[][] = [];
   let current: SequenceDetectionCandidate[] = [];
+  let gaps: number[] = [];
   for (const item of items) {
     const previous = current.at(-1);
     if (!previous) {
       current.push(item);
       continue;
     }
-    const gaps = current
-      .slice(1)
-      .map((entry, index) => entry.capturedAt - current[index].capturedAt);
     const gap = item.capturedAt - previous.capturedAt;
     const interval = gaps.length ? median(gaps) : gap;
     const intervalIsStable = isTimelapseGap(gap, interval, settings);
     if (!intervalIsStable) {
       groups.push(current);
       current = [item];
+      gaps = [];
       continue;
     }
+    gaps.push(gap);
     current.push(item);
   }
   if (current.length) {
@@ -270,7 +274,7 @@ function stableTimelapseGroups(
   return groups;
 }
 
-export function detectSequenceCandidates(
+function detectCaptureContextCandidates(
   entries: SequenceDetectionCandidate[],
   settings: SequenceDetectionSettings = defaultSequenceDetectionSettings
 ) {
@@ -329,10 +333,39 @@ export function detectSequenceCandidates(
   return detected;
 }
 
+/** Independent capture contexts cannot interrupt or join one another. */
+export function detectSequenceCandidates(
+  entries: SequenceDetectionCandidate[],
+  settings: SequenceDetectionSettings = defaultSequenceDetectionSettings
+) {
+  const groups = new Map<string, SequenceDetectionCandidate[]>();
+  for (const entry of entries) {
+    if (
+      !(
+        hasCompleteCaptureContext(entry) && Number.isFinite(entry.capturedAt)
+      ) ||
+      entry.capturedAt <= 0
+    ) {
+      continue;
+    }
+    const key = JSON.stringify([entry.folderId, entry.camera, entry.lens]);
+    const group = groups.get(key) ?? [];
+    group.push(entry);
+    groups.set(key, group);
+  }
+  return [...groups.values()].flatMap((group) =>
+    detectCaptureContextCandidates(group, settings)
+  );
+}
+
 type Database = ReturnType<typeof getDatabase>;
 
 /** Remove soft-deleted members and keep persisted sequence metadata accurate. */
 export function cleanupDeletedPhotoSequenceMembers(db: Database): boolean {
+  return db.transaction(() => cleanupSequenceMembers(db));
+}
+
+function cleanupSequenceMembers(db: Database): boolean {
   const deletedMemberIds = db
     .select({ id: photoSequenceMembers.id })
     .from(photoSequenceMembers)
@@ -352,14 +385,25 @@ export function cleanupDeletedPhotoSequenceMembers(db: Database): boolean {
       frameCount: photoSequences.frameCount,
       id: photoSequences.id,
       representativePhotoId: photoSequences.representativePhotoId,
+      startedAt: photoSequences.startedAt,
+      endedAt: photoSequences.endedAt,
     })
     .from(photoSequences)
     .all();
   for (const sequence of sequences) {
     const members = db
-      .select({ photoId: photoSequenceMembers.photoId })
+      .select({
+        id: photoSequenceMembers.id,
+        position: photoSequenceMembers.position,
+        photoId: photoSequenceMembers.photoId,
+        dateTaken: exifData.dateTaken,
+        normalizedJson: advancedExifData.normalizedJson,
+        vendorRawJson: advancedExifData.vendorRawJson,
+      })
       .from(photoSequenceMembers)
       .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
+      .leftJoin(exifData, eq(exifData.photoId, photos.id))
+      .leftJoin(advancedExifData, eq(advancedExifData.photoId, photos.id))
       .where(
         and(
           eq(photoSequenceMembers.sequenceId, sequence.id),
@@ -378,12 +422,41 @@ export function cleanupDeletedPhotoSequenceMembers(db: Database): boolean {
     )
       ? sequence.representativePhotoId
       : (members[0]?.photoId ?? null);
+    const times = members.flatMap((member) => {
+      const time =
+        readCaptureMetadata(member.normalizedJson, member.vendorRawJson)
+          .capturedAt ?? member.dateTaken;
+      return time != null && Number.isFinite(time) ? [time] : [];
+    });
+    const startedAt = times.length ? Math.min(...times) : sequence.startedAt;
+    const endedAt = times.length ? Math.max(...times) : sequence.endedAt;
+    if (members.some((member, index) => member.position !== index)) {
+      const offset =
+        Math.max(...members.map((member) => member.position)) +
+        members.length +
+        1;
+      db.update(photoSequenceMembers)
+        .set({ position: sql`${photoSequenceMembers.position} + ${offset}` })
+        .where(eq(photoSequenceMembers.sequenceId, sequence.id))
+        .run();
+      for (const [position, member] of members.entries()) {
+        db.update(photoSequenceMembers)
+          .set({ position })
+          .where(eq(photoSequenceMembers.id, member.id))
+          .run();
+      }
+      changed = true;
+    }
     if (
+      sequence.startedAt !== startedAt ||
+      sequence.endedAt !== endedAt ||
       sequence.frameCount !== members.length ||
       sequence.representativePhotoId !== representativePhotoId
     ) {
       db.update(photoSequences)
         .set({
+          startedAt,
+          endedAt,
           frameCount: members.length,
           representativePhotoId,
           updatedAt: Date.now(),
@@ -396,36 +469,37 @@ export function cleanupDeletedPhotoSequenceMembers(db: Database): boolean {
   return changed;
 }
 
-export type SequenceChangeReason =
-  | "detection"
-  | "manual"
-  | "reorder"
-  | "rebuild"
-  | "restore";
+export type SequenceChangeReason = SequenceChangeEvent["reason"];
 
-let sequenceVersion = 0;
-
-/** Notify every open renderer after a sequence mutation has committed. */
+/** Notify only after the owning transaction commits. */
 export function notifySequencesChanged(
   folderId: number | undefined,
   reason: SequenceChangeReason,
-  details?: { orderedMemberIds: number[]; sequenceId: number }
-): void {
-  // Sequence membership affects the optional ungrouped photo count, so any
-  // mutation must discard cached list totals before renderers refetch.
+  details?: Partial<
+    Pick<
+      SequenceChangeEvent,
+      | "orderedMemberIds"
+      | "sequenceId"
+      | "affectedSequenceIds"
+      | "deletedSequenceIds"
+      | "replacementSequenceIds"
+    >
+  >
+): number {
   invalidateCountCache();
-  bumpPhotoSequenceRevision();
-  sequenceVersion += 1;
+  const revision = bumpPhotoSequenceRevision();
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       window.webContents.send("sequences-changed", {
         folderId,
         reason,
         ...details,
-        version: sequenceVersion,
+        revision,
+        version: revision,
       });
     }
   }
+  return revision;
 }
 
 export function getPhotoSequenceRevision(): number {
@@ -442,45 +516,116 @@ export function bumpPhotoSequenceRevision(): number {
   return next;
 }
 
-function deleteUnlockedAutomaticSequences(db: Database, folderId?: number) {
-  const conditions = [
-    eq(photoSequences.source, "auto"),
-    eq(photoSequences.userLocked, false),
-  ];
-  if (folderId != null) {
-    conditions.push(eq(photoSequences.folderId, folderId));
-  }
-  const unlocked = db
-    .select({ id: photoSequences.id })
-    .from(photoSequences)
-    .where(and(...conditions))
-    .all()
-    .map((row) => row.id);
-  if (unlocked.length) {
-    db.delete(photoSequences).where(inArray(photoSequences.id, unlocked)).run();
-  }
+export function getSequenceFolderIds(db: Database, folderId?: number) {
+  return folderId == null
+    ? undefined
+    : getFolderSubtreeIds(
+        db
+          .select({ id: folders.id, parentId: folders.parentId })
+          .from(folders)
+          .all(),
+        folderId
+      );
 }
 
-function insertDetectedSequences(
+function automaticSequences(db: Database, folderId?: number) {
+  const folderIds = getSequenceFolderIds(db, folderId);
+  return db
+    .select()
+    .from(photoSequences)
+    .where(
+      and(
+        eq(photoSequences.source, "auto"),
+        eq(photoSequences.userLocked, false),
+        folderIds ? inArray(photoSequences.folderId, folderIds) : undefined
+      )
+    )
+    .all();
+}
+
+function persistDetectedSequences(
   db: Database,
-  folderId: number | null,
-  entries: SequenceDetectionCandidate[],
-  settings: SequenceDetectionSettings
+  candidates: SequenceDetectionCandidate[],
+  folderId?: number
 ) {
-  const claimed = new Set<number>();
-  for (const sequence of detectSequenceCandidates(entries, settings)) {
-    if (sequence.members.some((member) => claimed.has(member.id))) {
-      continue;
+  const detected = detectSequenceCandidates(
+    candidates,
+    getSequenceDetectionSettings()
+  );
+  const existing = automaticSequences(db, folderId);
+  const existingIds = existing.map((sequence) => sequence.id);
+  const memberRows = existingIds.length
+    ? db
+        .select()
+        .from(photoSequenceMembers)
+        .where(inArray(photoSequenceMembers.sequenceId, existingIds))
+        .orderBy(asc(photoSequenceMembers.position))
+        .all()
+    : [];
+  const idsBySequence = new Map<number, number[]>();
+  for (const member of memberRows) {
+    const ids = idsBySequence.get(member.sequenceId) ?? [];
+    ids.push(member.photoId);
+    idsBySequence.set(member.sequenceId, ids);
+  }
+  const key = (type: string, ids: number[]) => `${type}:${ids.join(",")}`;
+  const byKey = new Map(
+    existing.map((sequence) => [
+      key(sequence.type, idsBySequence.get(sequence.id) ?? []),
+      sequence,
+    ])
+  );
+  const retained = new Set<number>();
+  for (const sequence of detected) {
+    const match = byKey.get(
+      key(
+        sequence.type,
+        sequence.members.map((member) => member.id)
+      )
+    );
+    if (match) {
+      retained.add(match.id);
     }
+  }
+  const deletedSequenceIds = existingIds.filter((id) => !retained.has(id));
+  if (deletedSequenceIds.length) {
+    db.delete(photoSequences)
+      .where(inArray(photoSequences.id, deletedSequenceIds))
+      .run();
+  }
+  const replacementSequenceIds: number[] = [];
+  for (const sequence of detected) {
     const first = sequence.members[0];
     const last = sequence.members.at(-1);
-    if (!(first && last)) {
+    if (!last) {
+      continue;
+    }
+    const match = byKey.get(
+      key(
+        sequence.type,
+        sequence.members.map((member) => member.id)
+      )
+    );
+    if (match) {
+      if (
+        match.startedAt !== first.capturedAt ||
+        match.endedAt !== last.capturedAt
+      ) {
+        db.update(photoSequences)
+          .set({
+            startedAt: first.capturedAt,
+            endedAt: last.capturedAt,
+            updatedAt: Date.now(),
+          })
+          .where(eq(photoSequences.id, match.id))
+          .run();
+      }
       continue;
     }
     const inserted = db
       .insert(photoSequences)
       .values({
-        folderId,
+        folderId: first.folderId,
         type: sequence.type,
         representativePhotoId: first.id,
         startedAt: first.capturedAt,
@@ -499,33 +644,19 @@ function insertDetectedSequences(
         }))
       )
       .run();
-    for (const member of sequence.members) {
-      claimed.add(member.id);
-    }
+    replacementSequenceIds.push(inserted.id);
   }
+  return {
+    deletedSequenceIds,
+    replacementSequenceIds,
+    nextAutomatic: detected.length,
+    timelapseSegments: detected.filter(
+      (sequence) => sequence.type === "timelapse"
+    ).length,
+  };
 }
 
-function rebuildDetectedSequences(
-  db: Database,
-  candidates: SequenceDetectionCandidate[],
-  settings: SequenceDetectionSettings
-) {
-  const byFolder = new Map<number | null, SequenceDetectionCandidate[]>();
-  for (const candidate of candidates) {
-    byFolder.set(candidate.folderId, [
-      ...(byFolder.get(candidate.folderId) ?? []),
-      candidate,
-    ]);
-  }
-  for (const [folderId, entries] of byFolder) {
-    insertDetectedSequences(db, folderId, entries, settings);
-  }
-}
-
-function loadSequenceCandidates(
-  db: Database,
-  folderId?: number
-): SequenceDetectionCandidate[] {
+function loadSequenceCandidates(db: Database, folderId?: number) {
   const excludedIds = db
     .select({ photoId: photoSequenceExclusions.photoId })
     .from(photoSequenceExclusions)
@@ -546,7 +677,9 @@ function loadSequenceCandidates(
   ];
   const conditions = [isNull(photos.deletedAt)];
   if (folderId != null) {
-    conditions.push(eq(photos.folderId, folderId));
+    conditions.push(
+      inArray(photos.folderId, getSequenceFolderIds(db, folderId) ?? [folderId])
+    );
   }
   if (unavailableIds.length) {
     conditions.push(notInArray(photos.id, unavailableIds));
@@ -555,7 +688,6 @@ function loadSequenceCandidates(
     .select({
       id: photos.id,
       folderId: photos.folderId,
-      fileDate: photos.fileDate,
       dateTaken: exifData.dateTaken,
       camera: exifData.cameraModel,
       lens: exifData.lensModel,
@@ -573,7 +705,8 @@ function loadSequenceCandidates(
       asc(photos.fileDate)
     )
     .all();
-  return rows
+  const skipped = { missingCaptureTime: 0, missingDevice: 0, missingHash: 0 };
+  const candidates = rows
     .map((row) => {
       const metadata = readCaptureMetadata(
         row.normalizedJson,
@@ -593,30 +726,35 @@ function loadSequenceCandidates(
         isContinuousDrive: metadata.isContinuousDrive,
       };
     })
-    .filter((row) => row.capturedAt > 0);
+    .filter((row) => {
+      if (row.capturedAt <= 0) {
+        skipped.missingCaptureTime += 1;
+        return false;
+      }
+      if (!hasCompleteCaptureContext(row)) {
+        skipped.missingDevice += 1;
+        return false;
+      }
+      if (!row.phash) {
+        skipped.missingHash += 1;
+        return false;
+      }
+      return true;
+    });
+  return { candidates, skipped };
 }
 
 export function previewPhotoSequences(folderId?: number) {
   const db = getDatabase();
-  const candidates = loadSequenceCandidates(db, folderId);
+  const { candidates, skipped } = loadSequenceCandidates(db, folderId);
   const detected = detectSequenceCandidates(
     candidates,
     getSequenceDetectionSettings()
   );
-  const existingAutomatic = db
-    .select({ id: photoSequences.id })
-    .from(photoSequences)
-    .where(
-      and(
-        eq(photoSequences.source, "auto"),
-        eq(photoSequences.userLocked, false),
-        folderId == null ? undefined : eq(photoSequences.folderId, folderId)
-      )
-    )
-    .all().length;
   return {
     candidatePhotos: candidates.length,
-    existingAutomatic,
+    skipped,
+    existingAutomatic: automaticSequences(db, folderId).length,
     nextAutomatic: detected.length,
     timelapseSegments: detected.filter(
       (sequence) => sequence.type === "timelapse"
@@ -624,19 +762,34 @@ export function previewPhotoSequences(folderId?: number) {
   };
 }
 
-/** Rebuilds only automatic, unlocked sequences. Safe to call after EXIF enrichment. */
+export function rebuildPhotoSequences(
+  folderId?: number,
+  reason: SequenceChangeReason = "rebuild",
+  notify = true
+) {
+  const started = Date.now();
+  const db = getDatabase();
+  const { candidates, skipped } = loadSequenceCandidates(db, folderId);
+  const result = db.transaction(() =>
+    persistDetectedSequences(db, candidates, folderId)
+  );
+  const revision = notify
+    ? notifySequencesChanged(folderId, reason, result)
+    : getPhotoSequenceRevision();
+  console.info("[Sequences] detection", {
+    folderId,
+    candidates: candidates.length,
+    sequences: result.nextAutomatic,
+    skipped,
+    elapsedMs: Date.now() - started,
+  });
+  return { ...result, processed: candidates.length, skipped, revision };
+}
+
+/** Deferred EXIF enrichment calls one complete rebuild for each affected scope. */
 export function detectPhotoSequences(
   folderId?: number,
   reason: SequenceChangeReason = "detection"
 ): number {
-  const db = getDatabase();
-  const candidates = loadSequenceCandidates(db, folderId);
-
-  const settings = getSequenceDetectionSettings();
-  db.transaction(() => {
-    deleteUnlockedAutomaticSequences(db, folderId);
-    rebuildDetectedSequences(db, candidates, settings);
-  });
-  notifySequencesChanged(folderId, reason);
-  return candidates.length;
+  return rebuildPhotoSequences(folderId, reason).processed;
 }

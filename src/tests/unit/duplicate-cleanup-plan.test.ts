@@ -37,6 +37,7 @@ vi.mock("@/ipc/photos/handlers/stats", () => ({
   invalidateStatsCache: vi.fn(),
 }));
 vi.mock("@/services/photo-sequences", () => ({
+  notifySequencesChanged: vi.fn(),
   bumpPhotoSequenceRevision: vi.fn(),
   cleanupDeletedPhotoSequenceMembers: vi.fn(() => false),
 }));

@@ -193,6 +193,34 @@ i18n.use(initReactI18next).init({
         sequenceMoved: "顺序已更新",
         sequenceManagement: "序列管理",
         sequenceSuggestionCount: "续段建议 {{count}}",
+        sequenceSuggestionsTitle: "续段建议",
+        sequenceSuggestionsFolderScope:
+          "范围：当前文件夹及子目录。搜索、标签和收藏筛选不改变合并范围；合并包含两段的全部照片。",
+        sequenceSuggestionsAllScope:
+          "范围：全部照片。搜索、标签和收藏筛选不改变合并范围；合并包含两段的全部照片。",
+        sequenceSuggestionsLoadFailed:
+          "建议刷新失败，已完成的合并不受影响。请重试获取最新建议。",
+        sequenceSuggestionsEmpty: "暂无待处理的续段建议。",
+        sequenceSuggestionFrames: "{{count}} 帧",
+        sequenceSuggestionInterval: "拍摄间隔约 {{seconds}} 秒",
+        sequenceSuggestionViewSegment: "查看{{segment}}",
+        sequenceSuggestionViewMerged: "查看合并结果",
+        sequenceSuggestionFirst: "前段",
+        sequenceSuggestionSecond: "后段",
+        sequenceSuggestionLastFrame: "前段末帧",
+        sequenceSuggestionFirstFrame: "后段首帧",
+        sequenceSuggestionGap: "两段间隔 {{seconds}} 秒",
+        sequenceSuggestionMerging: "正在合并…",
+        sequenceSuggestionSameDevice: "相机和镜头一致",
+        sequenceSuggestionSimilarRhythm: "拍摄节奏接近",
+        sequenceSuggestionSimilarBoundary: "边界画面相似",
+        sequenceSuggestionStale:
+          "该建议已失效或已在其他窗口处理，已刷新建议列表。",
+        sequenceSuggestionConfirm:
+          "合并完整的两段，共 {{count}} 帧，拍摄范围 {{start}} 至 {{end}}。结果将成为手动锁定序列，自动识别不会覆盖它。",
+        sequenceDetectionSkipped:
+          "未参与识别：缺少拍摄时间 {{time}} 张、设备信息 {{device}} 张、图像证据 {{hash}} 张。",
+
         sequenceActionFailed: "序列操作失败",
         sequenceRemoveAction: "移出序列",
         sequenceRemoveShort: "移出",
@@ -2445,6 +2473,35 @@ i18n.use(initReactI18next).init({
         sequenceMoved: "Order updated",
         sequenceManagement: "Sequence management",
         sequenceSuggestionCount: "Continuation suggestions: {{count}}",
+        sequenceSuggestionsTitle: "Continuation suggestions",
+        sequenceSuggestionsFolderScope:
+          "Scope: this folder and subfolders. Search, tag and favorite filters do not limit the merge; every photo in both segments is included.",
+        sequenceSuggestionsAllScope:
+          "Scope: all photos. Search, tag and favorite filters do not limit the merge; every photo in both segments is included.",
+        sequenceSuggestionsLoadFailed:
+          "Could not refresh suggestions. Completed merges are preserved. Retry to load the latest suggestions.",
+        sequenceSuggestionsEmpty: "No pending continuation suggestions.",
+        sequenceSuggestionFrames: "{{count}} frames",
+        sequenceSuggestionInterval:
+          "Capture interval: about {{seconds}} seconds",
+        sequenceSuggestionViewSegment: "View {{segment}}",
+        sequenceSuggestionViewMerged: "View merged sequence",
+        sequenceSuggestionFirst: "First segment",
+        sequenceSuggestionSecond: "Second segment",
+        sequenceSuggestionLastFrame: "Last frame of first segment",
+        sequenceSuggestionFirstFrame: "First frame of second segment",
+        sequenceSuggestionGap: "Gap between segments: {{seconds}} seconds",
+        sequenceSuggestionMerging: "Merging…",
+        sequenceSuggestionSameDevice: "Same camera and lens",
+        sequenceSuggestionSimilarRhythm: "Similar capture rhythm",
+        sequenceSuggestionSimilarBoundary: "Similar boundary images",
+        sequenceSuggestionStale:
+          "This suggestion changed or was already handled in another window. The list has been refreshed.",
+        sequenceSuggestionConfirm:
+          "Merge both complete segments: {{count}} frames, captured from {{start}} to {{end}}. The result becomes a manually locked sequence, preserved during automatic detection.",
+        sequenceDetectionSkipped:
+          "Skipped: {{time}} without capture time, {{device}} without device information, {{hash}} without image evidence.",
+
         sequenceActionFailed: "Sequence operation failed",
         sequenceRemoveAction: "Remove from sequence",
         sequenceRemoveShort: "Remove",

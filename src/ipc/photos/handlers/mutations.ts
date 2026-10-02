@@ -39,8 +39,8 @@ import {
   type AssetMove as PhotoAssetMove,
 } from "@/services/photo-file-operations";
 import {
-  bumpPhotoSequenceRevision,
   cleanupDeletedPhotoSequenceMembers,
+  notifySequencesChanged,
 } from "@/services/photo-sequences";
 import { invalidateSmartAlbumCache } from "@/services/smart-album-engine";
 import {
@@ -151,7 +151,7 @@ function performHardDelete(photoIds: number[]): void {
   );
 
   cleanupDeletedPhotoSequenceMembers(db);
-  bumpPhotoSequenceRevision();
+  notifySequencesChanged(undefined, "manual");
   invalidateStatsCache();
   invalidateCountCache();
   invalidateSmartAlbumCache();
@@ -271,7 +271,7 @@ export const deletePhoto = os.input(IdSchema).handler(({ input }) => {
       }
     });
     cleanupDeletedPhotoSequenceMembers(db);
-    bumpPhotoSequenceRevision();
+    notifySequencesChanged(undefined, "manual");
   }
   invalidateStatsCache();
   invalidateCountCache();
@@ -317,7 +317,7 @@ export const deletePhotos = os
       }
     });
     cleanupDeletedPhotoSequenceMembers(db);
-    bumpPhotoSequenceRevision();
+    notifySequencesChanged(undefined, "manual");
     invalidateCountCache();
     invalidateStatsCache();
     invalidateSmartAlbumCache();
@@ -394,7 +394,7 @@ export const cleanupOrphanPhotos = os.handler(() => {
       console.error("[AI] cleanupOrphanPhotos vector cleanup failed:", err)
     );
     cleanupDeletedPhotoSequenceMembers(db);
-    bumpPhotoSequenceRevision();
+    notifySequencesChanged(undefined, "manual");
   }
   const allFolders = db.select({ id: folders.id }).from(folders).all();
   for (const f of allFolders) {
@@ -1128,7 +1128,7 @@ export const restorePhotos = os
 
     if (succeededIds.length > 0) {
       cleanupDeletedPhotoSequenceMembers(db);
-      bumpPhotoSequenceRevision();
+      notifySequencesChanged(undefined, "manual");
     }
     invalidateCountCache();
     invalidateStatsCache();

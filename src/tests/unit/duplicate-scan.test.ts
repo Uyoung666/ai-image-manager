@@ -56,6 +56,7 @@ vi.mock("@/ipc/photos/handlers/listing", () => ({
 }));
 
 vi.mock("@/services/photo-sequences", () => ({
+  notifySequencesChanged: vi.fn(),
   bumpPhotoSequenceRevision: vi.fn(),
   getPhotoSequenceRevision: () => 0,
   cleanupDeletedPhotoSequenceMembers: vi.fn(() => false),

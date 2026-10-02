@@ -13,6 +13,7 @@ const electronTestDataRoot = path.join(
 // is loaded. This mock must be in setup so it intercepts all import chains before
 // any test file's transitive dependencies can trigger a real electron require.
 vi.mock("electron", () => ({
+  BrowserWindow: { getAllWindows: () => [] },
   app: {
     getAppPath: () => process.cwd(),
     getLocale: () => "zh-CN",

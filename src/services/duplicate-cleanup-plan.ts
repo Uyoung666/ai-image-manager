@@ -26,8 +26,8 @@ import {
 import { hasActiveDuplicateScan } from "@/services/duplicate-scan-runtime";
 import { computeFullFileHash, filesHaveSameBytes } from "@/services/file-hash";
 import {
-  bumpPhotoSequenceRevision,
   cleanupDeletedPhotoSequenceMembers,
+  notifySequencesChanged,
 } from "@/services/photo-sequences";
 import { getSetting } from "@/services/settings-manager";
 import { invalidateSmartAlbumCache } from "@/services/smart-album-engine";
@@ -1371,7 +1371,7 @@ export async function executeDuplicateCleanupPlan(
 
   if (!execution.alreadyExecuted) {
     cleanupDeletedPhotoSequenceMembers(db);
-    bumpPhotoSequenceRevision();
+    notifySequencesChanged(undefined, "manual");
     invalidateCountCache();
     invalidateStatsCache();
     invalidateSmartAlbumCache();
@@ -1583,7 +1583,7 @@ export function restoreDuplicateCleanupBatch(
   });
   if (restoreIds.length > 0) {
     cleanupDeletedPhotoSequenceMembers(db);
-    bumpPhotoSequenceRevision();
+    notifySequencesChanged(undefined, "manual");
     invalidateCountCache();
     invalidateStatsCache();
     invalidateSmartAlbumCache();

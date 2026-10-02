@@ -11,7 +11,9 @@ import {
   getDuplicateSensitivityConfig,
   parseDuplicateSensitivity,
 } from "@/services/duplicate-sensitivity";
+import { notifySequencesChanged } from "@/services/photo-sequences";
 import { registry } from "@/services/registry";
+import { refreshSequenceSuggestions } from "@/services/sequence-suggestions";
 import {
   getAllSettings,
   getSetting,
@@ -25,6 +27,7 @@ import {
   parseBooleanPreference,
   parseCloseBehavior,
 } from "@/types/app-preferences";
+import { normalizeSequenceDetectionSettings } from "@/types/sequence-detection-settings";
 import {
   getDataPath,
   isDefaultDataPath,
@@ -141,7 +144,18 @@ export const updateDuplicateSettings = os
 export const setAppSetting = os
   .input(z.object({ key: z.string(), value: z.string() }))
   .handler(({ input }) => {
-    setSetting(input.key, input.value);
+    if (input.key === "sequence.detection.settings") {
+      const normalized = normalizeSequenceDetectionSettings(
+        JSON.parse(input.value)
+      );
+      getDatabase().transaction(() => {
+        setSetting(input.key, JSON.stringify(normalized));
+        refreshSequenceSuggestions();
+      });
+      notifySequencesChanged(undefined, "settings");
+    } else {
+      setSetting(input.key, input.value);
+    }
     return { ok: true };
   });
 

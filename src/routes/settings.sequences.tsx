@@ -10,69 +10,22 @@ import {
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import {
+  defaultSequenceDetectionSettings as defaultSettings,
+  normalizeSequenceDetectionSettings,
+  sequenceDetectionPresets as presets,
+  type SequenceDetectionPreset,
+  type SequenceDetectionSettings,
+} from "@/types/sequence-detection-settings";
+import {
   createOptimisticSaveQueue,
   type OptimisticSaveQueue,
 } from "@/utils/optimistic-save-queue";
-
-type SequenceDetectionPreset = "strict" | "balanced" | "relaxed" | "custom";
-type BuiltInSequencePreset = Exclude<SequenceDetectionPreset, "custom">;
-
-interface SequenceDetectionSettings {
-  burstMinFrames: number;
-  continuationWindowMs: number;
-  maxMissingFrames: number;
-  maxTimelapseGapMs: number;
-  minTimelapseGapMs: number;
-  preset: SequenceDetectionPreset;
-  rhythmTolerance: number;
-  timelapseMinFrames: number;
-  timelapsePHashDistance: number;
-}
 
 type CustomSequenceValues = Pick<
   SequenceDetectionSettings,
   "rhythmTolerance" | "timelapseMinFrames" | "timelapsePHashDistance"
 >;
 
-const presets: Record<
-  BuiltInSequencePreset,
-  Omit<SequenceDetectionSettings, "preset">
-> = {
-  strict: {
-    burstMinFrames: 3,
-    continuationWindowMs: 900_000,
-    maxMissingFrames: 0,
-    maxTimelapseGapMs: 600_000,
-    minTimelapseGapMs: 2000,
-    rhythmTolerance: 0.1,
-    timelapseMinFrames: 8,
-    timelapsePHashDistance: 12,
-  },
-  balanced: {
-    burstMinFrames: 3,
-    continuationWindowMs: 1_800_000,
-    maxMissingFrames: 2,
-    maxTimelapseGapMs: 600_000,
-    minTimelapseGapMs: 2000,
-    rhythmTolerance: 0.15,
-    timelapseMinFrames: 6,
-    timelapsePHashDistance: 16,
-  },
-  relaxed: {
-    burstMinFrames: 3,
-    continuationWindowMs: 2_700_000,
-    maxMissingFrames: 2,
-    maxTimelapseGapMs: 900_000,
-    minTimelapseGapMs: 2000,
-    rhythmTolerance: 0.2,
-    timelapseMinFrames: 5,
-    timelapsePHashDistance: 20,
-  },
-};
-const defaultSettings: SequenceDetectionSettings = {
-  preset: "balanced",
-  ...presets.balanced,
-};
 const defaultCustomValues: CustomSequenceValues = {
   rhythmTolerance: defaultSettings.rhythmTolerance,
   timelapseMinFrames: defaultSettings.timelapseMinFrames,
@@ -202,25 +155,14 @@ function SequenceSettingsPage() {
           hydrateSettings(defaultSettings);
           return;
         }
-        const parsed = JSON.parse(value) as Partial<SequenceDetectionSettings>;
-        const preset: SequenceDetectionPreset =
-          parsed.preset === "strict" ||
-          parsed.preset === "relaxed" ||
-          parsed.preset === "custom"
-            ? parsed.preset
-            : "balanced";
-        const next = {
-          ...defaultSettings,
-          ...(preset === "custom" ? {} : presets[preset]),
-          ...parsed,
-          preset,
-        };
+        const next = normalizeSequenceDetectionSettings(JSON.parse(value));
         hydrateSettings(next);
       })
       .catch(() => hydrateSettings(defaultSettings));
   }, [hydrateSettings]);
 
-  function save(next: SequenceDetectionSettings) {
+  function save(value: SequenceDetectionSettings) {
+    const next = normalizeSequenceDetectionSettings(value);
     settingsRef.current = next;
     setSettings(next);
     saveQueueRef.current?.enqueue(next);

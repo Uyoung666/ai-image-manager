@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ipc } from "@/ipc/manager";
+import { photoSequenceActions } from "@/actions/photo-sequences";
+import { useSequenceDetailRefresh } from "@/hooks/useSequenceDetailRefresh";
 import type { Photo } from "@/types/photo";
 import type {
   PhotoSequence,
@@ -62,11 +63,9 @@ function scopeDetail(
       : (members[0]?.id ?? null);
   return {
     ...detail,
-    endedAt: members.at(-1)?.fileDate ?? detail.endedAt,
     frameCount: members.length,
     members,
     representativePhotoId,
-    startedAt: members[0]?.fileDate ?? detail.startedAt,
   };
 }
 
@@ -91,7 +90,7 @@ function applySequenceOrderToSummary(
   sequence: PhotoSequence,
   change: SequenceOrderChange
 ): PhotoSequence {
-  const next = { ...sequence };
+  const next = { ...sequence, source: "manual" as const, userLocked: true };
   if (sequence.memberPhotoIds) {
     const memberIds = new Set(sequence.memberPhotoIds);
     next.memberPhotoIds = change.orderedMemberIds.filter((id) =>
@@ -150,6 +149,8 @@ export function useCollectionSequences({
   const updateSequenceOrder = useCallback((change: SequenceOrderChange) => {
     const applyOrder = (detail: PhotoSequenceDetail) => ({
       ...detail,
+      source: "manual" as const,
+      userLocked: true,
       members: reorderMembers(detail.members, change.orderedMemberIds),
     });
     setExpandedSequence((current) =>
@@ -243,9 +244,42 @@ export function useCollectionSequences({
     ]
   );
 
+  useSequenceDetailRefresh(
+    refreshVersion,
+    selectedSequence,
+    setSelectedSequence,
+    photoIds
+  );
+  useSequenceDetailRefresh(
+    refreshVersion,
+    openSequence,
+    setOpenSequence,
+    photoIds
+  );
+  useSequenceDetailRefresh(
+    refreshVersion,
+    expandedSequence,
+    setExpandedSequence,
+    photoIds
+  );
+  useSequenceDetailRefresh(
+    refreshVersion,
+    expandedSequenceComplete,
+    setExpandedSequenceComplete
+  );
+  const revisionRef = useRef(0);
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.data?.channel === "sequences-changed") {
+        if (typeof event.data.revision === "number") {
+          if (event.data.revision <= revisionRef.current) {
+            return;
+          }
+          revisionRef.current = event.data.revision;
+        }
+        requestRef.current += 1;
+        detailsRequestRef.current += 1;
+        setExpandingSequenceId(null);
         if (
           event.data.reason === "reorder" &&
           typeof event.data.sequenceId === "number" &&
@@ -255,14 +289,23 @@ export function useCollectionSequences({
             orderedMemberIds: event.data.orderedMemberIds,
             sequenceId: event.data.sequenceId,
           });
-          return;
         }
         detailCacheRef.current.clear();
         setRefreshVersion((value) => value + 1);
       }
     };
+    const onFocus = () => {
+      requestRef.current += 1;
+      detailsRequestRef.current += 1;
+      detailCacheRef.current.clear();
+      setRefreshVersion((value) => value + 1);
+    };
+    window.addEventListener("focus", onFocus);
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [updateSequenceOrder]);
 
   useEffect(() => {
@@ -288,8 +331,8 @@ export function useCollectionSequences({
       setLoadedSequenceRequestKey(sequenceRequestKey);
       return;
     }
-    ipc.client.photos
-      .listSequences({ photoIds, scope: "members" })
+    photoSequenceActions
+      .list({ photoIds, scope: "members" })
       .then((result) => {
         if (!cancelled && requestedVersion === refreshVersion) {
           setSequences(result as PhotoSequence[]);
@@ -320,7 +363,7 @@ export function useCollectionSequences({
       return cached;
     }
     const cacheGeneration = requestRef.current;
-    const result = await ipc.client.photos.getSequence({ id: sequenceId });
+    const result = await photoSequenceActions.get(sequenceId);
     if (!result) {
       throw new Error("Sequence not found");
     }

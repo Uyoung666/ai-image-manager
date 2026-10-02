@@ -71,9 +71,9 @@ import {
   filesHaveSameBytes,
 } from "@/services/file-hash";
 import {
-  bumpPhotoSequenceRevision,
   cleanupDeletedPhotoSequenceMembers,
   getPhotoSequenceRevision,
+  notifySequencesChanged,
 } from "@/services/photo-sequences";
 import { getSetting, setSetting } from "@/services/settings-manager";
 import { getThumbnailDiskUsage } from "@/services/thumbnailer";
@@ -1624,7 +1624,7 @@ async function scanDuplicates(
   const phashThreshold = input.threshold ?? sensitivity.phashThreshold;
   const embeddingThreshold = sensitivity.embeddingThreshold;
   if (cleanupDeletedPhotoSequenceMembers(db)) {
-    bumpPhotoSequenceRevision();
+    notifySequencesChanged(undefined, "manual");
   }
   const sequenceByPhoto = getPhotoSequenceIds(db);
   const scanSequenceRevision = getPhotoSequenceRevision();

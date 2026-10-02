@@ -229,4 +229,16 @@ describe("high-confidence photo sequence detection", () => {
     );
     expect(detectSequenceCandidates(entries)[0]?.members).toHaveLength(6);
   });
+  it("keeps interleaved cameras and folders independent", () => {
+    const entries = Array.from({ length: 6 }, (_, index) => [
+      candidate(index + 1, index * 5000),
+      candidate(index + 11, index * 5000 + 100, { camera: "Camera B" }),
+      candidate(index + 21, index * 5000 + 200, { folderId: 2 }),
+    ]).flat();
+    const sequences = detectSequenceCandidates(entries);
+    expect(sequences).toHaveLength(3);
+    expect(sequences.map((sequence) => sequence.members.length)).toEqual([
+      6, 6, 6,
+    ]);
+  });
 });

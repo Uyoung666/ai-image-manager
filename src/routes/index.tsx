@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { imageSearchActions } from "@/actions/image-search";
 import { setPhotoFavorites } from "@/actions/photo-favorites";
 import { searchPhotos } from "@/actions/photo-search";
+import { photoSequenceActions } from "@/actions/photo-sequences";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
 import { CloudUploadDialog } from "@/components/CloudUploadDialog";
@@ -47,6 +48,7 @@ import { SearchBar } from "@/components/SearchBar";
 import { SearchEmptyState } from "@/components/SearchEmptyState";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
+import { SequenceSuggestionsDialog } from "@/components/SequenceSuggestionsDialog";
 import { ShareDialog } from "@/components/ShareDialog";
 import { SortDropdown } from "@/components/SortDropdown";
 import { StatusBar } from "@/components/StatusBar";
@@ -71,7 +73,9 @@ import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { usePhotos } from "@/hooks/usePhotos";
 import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
+import { useSequenceDetailRefresh } from "@/hooks/useSequenceDetailRefresh";
 import { useSequenceSelectionPhotos } from "@/hooks/useSequenceSelectionPhotos";
+import { useSequenceSuggestions } from "@/hooks/useSequenceSuggestions";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo, PhotoListResponse, SearchResponse } from "@/types/photo";
@@ -132,12 +136,6 @@ interface SemanticSearchMeta {
   used: boolean;
 }
 
-interface SequenceSuggestion {
-  firstSequenceId: number;
-  id: number;
-  secondSequenceId: number;
-}
-
 interface SequenceDataSource {
   key: string;
   photoIds: number[];
@@ -149,6 +147,11 @@ interface SequenceRebuildPreview {
   existingAutomatic: number;
   folderId?: number;
   nextAutomatic: number;
+  skipped?: {
+    missingCaptureTime: number;
+    missingDevice: number;
+    missingHash: number;
+  };
   timelapseSegments: number;
 }
 
@@ -340,9 +343,12 @@ function HomePage() {
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
   const [sequenceError, setSequenceError] = useState<string | null>(null);
   const [gallerySequenceCount, setGallerySequenceCount] = useState(0);
-  const [sequenceSuggestions, setSequenceSuggestions] = useState<
-    SequenceSuggestion[]
-  >([]);
+  const suggestionState = useSequenceSuggestions(
+    filter.activeFolderId ?? undefined
+  );
+  const sequenceSuggestions = suggestionState.suggestions;
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const suggestionsTriggerRef = useRef<HTMLButtonElement>(null);
   const [openSequence, setOpenSequence] = useState<PhotoSequenceDetail | null>(
     null
   );
@@ -424,8 +430,6 @@ function HomePage() {
   const [rebuildingSequences, setRebuildingSequences] = useState(false);
   const [sequenceRebuildPreview, setSequenceRebuildPreview] =
     useState<SequenceRebuildPreview | null>(null);
-  const [pendingSequenceMerge, setPendingSequenceMerge] =
-    useState<SequenceSuggestion | null>(null);
   const [pendingSequenceAction, setPendingSequenceAction] =
     useState<PendingSequenceAction | null>(null);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
@@ -752,8 +756,39 @@ function HomePage() {
     return () => window.removeEventListener("photo-drop:album", handler);
   }, []);
 
+  const sequenceRevisionRef = useRef(0);
   // Listen for file-change events from main process (chokidar watcher)
   useEffect(() => {
+    const handleSequenceMessage = (event: MessageEvent) => {
+      if (event.data?.channel !== "sequences-changed") {
+        return;
+      }
+      if (typeof event.data.revision === "number") {
+        if (event.data.revision <= sequenceRevisionRef.current) {
+          return;
+        }
+        sequenceRevisionRef.current = event.data.revision;
+      }
+      expandSequenceRequestRef.current += 1;
+      sequenceDetailsRequestRef.current += 1;
+      setExpandingSequenceId(null);
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
+      if (
+        event.data.reason === "reorder" &&
+        typeof event.data.sequenceId === "number" &&
+        Array.isArray(event.data.orderedMemberIds)
+      ) {
+        handleSequenceOrderChange({
+          orderedMemberIds: event.data.orderedMemberIds,
+          sequenceId: event.data.sequenceId,
+        });
+      }
+      expandedSequenceCacheRef.current.clear();
+      setSequenceRefresh((value) => value + 1);
+    };
     const handler = (event: MessageEvent) => {
       if (event.data?.channel === "file-change") {
         // refetchType: "active" — 仅重取当前视口活跃的页面，
@@ -774,28 +809,20 @@ function HomePage() {
       if (event.data?.channel === "ai-status-changed") {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
       }
-      if (event.data?.channel === "sequences-changed") {
-        queryClient.invalidateQueries({
-          queryKey: ["photos"],
-          refetchType: "active",
-        });
-        if (
-          event.data.reason === "reorder" &&
-          typeof event.data.sequenceId === "number" &&
-          Array.isArray(event.data.orderedMemberIds)
-        ) {
-          handleSequenceOrderChange({
-            orderedMemberIds: event.data.orderedMemberIds,
-            sequenceId: event.data.sequenceId,
-          });
-          return;
-        }
-        expandedSequenceCacheRef.current.clear();
-        setSequenceRefresh((value) => value + 1);
-      }
+      handleSequenceMessage(event);
     };
+    const onFocus = () => {
+      expandSequenceRequestRef.current += 1;
+      sequenceDetailsRequestRef.current += 1;
+      expandedSequenceCacheRef.current.clear();
+      setSequenceRefresh((value) => value + 1);
+    };
+    window.addEventListener("focus", onFocus);
     window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
+    return () => {
+      window.removeEventListener("message", handler);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [handleSequenceOrderChange, t]);
 
   const {
@@ -1064,8 +1091,8 @@ function HomePage() {
       });
       return;
     }
-    ipc.client.photos
-      .listSequences(
+    photoSequenceActions
+      .list(
         useGalleryScope
           ? {
               scope: "gallery",
@@ -1165,26 +1192,32 @@ function HomePage() {
 
   const sequenceCount = isSearching ? sequences.length : gallerySequenceCount;
 
-  useEffect(() => {
-    let cancelled = false;
-    ipc.client.photos
-      .listSequenceSuggestions({
-        folderId: filter.activeFolderId ?? undefined,
-      })
-      .then((result) => {
-        if (!cancelled) {
-          setSequenceSuggestions(result as SequenceSuggestion[]);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSequenceSuggestions([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filter.activeFolderId]);
+  useSequenceDetailRefresh(
+    sequenceRefresh,
+    selectedSequence,
+    setSelectedSequence
+  );
+  useSequenceDetailRefresh(
+    sequenceRefresh,
+    openSequence,
+    setOpenSequence,
+    isSearching
+      ? (sequences.find((entry) => entry.id === openSequence?.id)
+          ?.matchedPhotoIds ?? [])
+      : undefined
+  );
+  useSequenceDetailRefresh(
+    sequenceRefresh,
+    expandedSequence,
+    setExpandedSequence,
+    sequences.find((entry) => entry.id === expandedSequence?.id)
+      ?.matchedPhotoIds ?? []
+  );
+  useSequenceDetailRefresh(
+    sequenceRefresh,
+    expandedSequenceComplete,
+    setExpandedSequenceComplete
+  );
 
   const handleOpenSequence = useCallback(
     (sequenceId: number) => {
@@ -1199,8 +1232,8 @@ function HomePage() {
         sequenceSummary?.memberPhotoIds ??
         [];
       const scopeIdSet = new Set(scopeIds);
-      ipc.client.photos
-        .getSequence({ id: sequenceId })
+      photoSequenceActions
+        .get(sequenceId)
         .then((sequence) => {
           if (sequence && requestId === sequenceDetailsRequestRef.current) {
             setSequenceAutoPlay(false);
@@ -1233,14 +1266,18 @@ function HomePage() {
     (sequenceId: number) => {
       const requestId = ++sequenceDetailsRequestRef.current;
       setSequenceDetailsLoading(true);
-      ipc.client.photos
-        .getSequence({ id: sequenceId })
+      photoSequenceActions
+        .get(sequenceId)
         .then((sequence) => {
           if (sequence && requestId === sequenceDetailsRequestRef.current) {
             setSelectedSequence(sequence as unknown as PhotoSequenceDetail);
           }
         })
-        .catch(() => toast.error(t("sequenceDetailOpenFailed")))
+        .catch(() => {
+          if (requestId === sequenceDetailsRequestRef.current) {
+            toast.error(t("sequenceDetailOpenFailed"));
+          }
+        })
         .finally(() => {
           if (requestId === sequenceDetailsRequestRef.current) {
             setSequenceDetailsLoading(false);
@@ -1291,8 +1328,8 @@ function HomePage() {
 
       setExpandingSequenceId(sequenceId);
       setExpandedSequenceComplete(null);
-      ipc.client.photos
-        .getSequence({ id: sequenceId })
+      photoSequenceActions
+        .get(sequenceId)
         .then((sequence) => {
           if (!sequence || requestId !== expandSequenceRequestRef.current) {
             return;
@@ -1333,11 +1370,13 @@ function HomePage() {
     setRebuildingSequences(true);
     try {
       const folderId = filter.activeFolderId ?? undefined;
-      const preview = (await ipc.client.photos.rebuildSequences({
-        folderId,
-        dryRun: true,
-      })) as {
+      const preview = (await photoSequenceActions.rebuild(folderId, true)) as {
         candidatePhotos: number;
+        skipped: {
+          missingCaptureTime: number;
+          missingDevice: number;
+          missingHash: number;
+        };
         existingAutomatic: number;
         nextAutomatic: number;
         timelapseSegments: number;
@@ -1346,10 +1385,17 @@ function HomePage() {
         throw new Error("Sequence dry-run did not return a preview");
       }
       if (preview.candidatePhotos === 0) {
-        toast.info(t("sequenceDetectNoPhotos"));
+        toast.info(
+          t("sequenceDetectionSkipped", {
+            time: preview.skipped.missingCaptureTime,
+            device: preview.skipped.missingDevice,
+            hash: preview.skipped.missingHash,
+          })
+        );
         return;
       }
       setSequenceRebuildPreview({
+        skipped: preview.skipped,
         existingAutomatic: preview.existingAutomatic,
         folderId,
         nextAutomatic: preview.nextAutomatic,
@@ -3561,24 +3607,21 @@ function HomePage() {
                       : t("sequenceDetect")}
                   </button>
                 )}
-                {sequenceMode === "sequences" &&
-                  sequenceSuggestions.length > 0 && (
-                    <button
-                      className="order-first rounded px-2 py-1 text-[11px] text-primary hover:bg-muted"
-                      onClick={() => {
-                        const suggestion = sequenceSuggestions[0];
-                        if (!suggestion) {
-                          return;
-                        }
-                        setPendingSequenceMerge(suggestion);
-                      }}
-                      type="button"
-                    >
-                      {t("sequenceSuggestionCount", {
-                        count: sequenceSuggestions.length,
-                      })}
-                    </button>
-                  )}
+                {sequenceMode === "sequences" && (
+                  <button
+                    className="order-first rounded px-2 py-1 text-[11px] text-primary hover:bg-muted"
+                    onClick={() => {
+                      setSuggestionsOpen(true);
+                      suggestionState.refresh();
+                    }}
+                    ref={suggestionsTriggerRef}
+                    type="button"
+                  >
+                    {t("sequenceSuggestionCount", {
+                      count: sequenceSuggestions.length,
+                    })}
+                  </button>
+                )}
                 <SortDropdown
                   onChange={handleSortChange}
                   order={sortOrder}
@@ -3903,13 +3946,26 @@ function HomePage() {
       <ConfirmDialog
         confirmText={t("sequenceRebuildAction")}
         description={
-          sequenceRebuildPreview
-            ? t("sequenceRebuildDescription", {
-                existing: sequenceRebuildPreview.existingAutomatic,
-                next: sequenceRebuildPreview.nextAutomatic,
-                timelapse: sequenceRebuildPreview.timelapseSegments,
-              })
-            : undefined
+          sequenceRebuildPreview ? (
+            <span className="block space-y-2">
+              <span className="block">
+                {t("sequenceRebuildDescription", {
+                  existing: sequenceRebuildPreview.existingAutomatic,
+                  next: sequenceRebuildPreview.nextAutomatic,
+                  timelapse: sequenceRebuildPreview.timelapseSegments,
+                })}
+              </span>
+              {sequenceRebuildPreview.skipped && (
+                <span className="block">
+                  {t("sequenceDetectionSkipped", {
+                    time: sequenceRebuildPreview.skipped.missingCaptureTime,
+                    device: sequenceRebuildPreview.skipped.missingDevice,
+                    hash: sequenceRebuildPreview.skipped.missingHash,
+                  })}
+                </span>
+              )}
+            </span>
+          ) : undefined
         }
         onCancel={() => setSequenceRebuildPreview(null)}
         onConfirm={() => {
@@ -3919,11 +3975,10 @@ function HomePage() {
           }
           setSequenceRebuildPreview(null);
           setRebuildingSequences(true);
-          ipc.client.photos
-            .rebuildSequences({ folderId: preview.folderId })
-            .then(() => {
-              setSequenceRefresh((value) => value + 1);
-              if (preview.nextAutomatic > 0) {
+          photoSequenceActions
+            .rebuild(preview.folderId)
+            .then((result) => {
+              if ("nextAutomatic" in result && result.nextAutomatic > 0) {
                 toast.success(t("sequenceDetectComplete"));
               } else {
                 toast.info(t("sequenceDetectNoMatches"));
@@ -3935,31 +3990,14 @@ function HomePage() {
         open={sequenceRebuildPreview !== null}
         title={t("sequenceRebuildConfirmTitle")}
       />
-      <ConfirmDialog
-        confirmText={t("sequenceMergeAction")}
-        description={t("sequenceMergeDescription")}
-        onCancel={() => setPendingSequenceMerge(null)}
-        onConfirm={() => {
-          const suggestion = pendingSequenceMerge;
-          if (!suggestion) {
-            return;
-          }
-          setPendingSequenceMerge(null);
-          ipc.client.photos
-            .mergeSequences({
-              sequenceIds: [
-                suggestion.firstSequenceId,
-                suggestion.secondSequenceId,
-              ],
-            })
-            .then(() => {
-              setSequenceRefresh((value) => value + 1);
-              toast.success(t("sequenceMergeSuccess"));
-            })
-            .catch(() => toast.error(t("sequenceMergeFailed")));
-        }}
-        open={pendingSequenceMerge !== null}
-        title={t("sequenceMergeConfirmTitle")}
+      <SequenceSuggestionsDialog
+        folderScoped={filter.activeFolderId != null}
+        key={filter.activeFolderId ?? "all"}
+        onOpenChange={setSuggestionsOpen}
+        onOpenSequence={handleOpenSequenceDetails}
+        onReturnFocus={() => suggestionsTriggerRef.current?.focus()}
+        open={suggestionsOpen}
+        state={suggestionState}
       />
       <ConfirmDialog
         confirmText={
@@ -3982,8 +4020,8 @@ function HomePage() {
           setPendingSequenceAction(null);
           const request =
             action.type === "restore"
-              ? ipc.client.photos.restoreAutomaticSequence({ id: action.id })
-              : ipc.client.photos.deleteManualSequence({ id: action.id });
+              ? photoSequenceActions.restoreAutomatic(action.id)
+              : photoSequenceActions.deleteManual(action.id);
           request
             .then(() => {
               setSelectedSequence(null);
