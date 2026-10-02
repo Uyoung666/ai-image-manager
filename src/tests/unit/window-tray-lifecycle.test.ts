@@ -2,10 +2,77 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createBeforeQuitHandler,
   destroyTraySafely,
+  observeWindowLoad,
   prepareForQuit,
   showOrCreateWindow,
   type WindowLifecycleHandle,
 } from "@/services/window-tray-lifecycle";
+
+describe("window loading lifecycle", () => {
+  it("keeps a real load failure actionable while the window is active", async () => {
+    const error = new Error("ERR_FAILED (-2)");
+    const onFailure = vi.fn();
+    const onInactive = vi.fn();
+    await observeWindowLoad({
+      load: Promise.reject(error),
+      isActive: () => true,
+      onFailure,
+      onInactive,
+    });
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith(error);
+    expect(onInactive).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "quitting",
+    "destroyed",
+    "replaced",
+  ])("checks ownership after a pending load rejects when %s", async (reason) => {
+    const loadingWindow = { isDestroyed: () => destroyed };
+    let destroyed = false;
+    let quitting = false;
+    let currentWindow: typeof loadingWindow | null = loadingWindow;
+    let rejectLoad: ((error: Error) => void) | undefined;
+    const load = new Promise<void>((_resolve, reject) => {
+      rejectLoad = reject;
+    });
+    const onFailure = vi.fn();
+    const onInactive = vi.fn();
+    const observed = observeWindowLoad({
+      load,
+      isActive: () =>
+        !(quitting || loadingWindow.isDestroyed()) &&
+        currentWindow === loadingWindow,
+      onFailure,
+      onInactive,
+    });
+    if (reason === "quitting") {
+      quitting = true;
+    } else if (reason === "destroyed") {
+      destroyed = true;
+    } else {
+      currentWindow = null;
+    }
+    const error = new Error("ERR_FAILED (-2)");
+    rejectLoad?.(error);
+    await observed;
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(onInactive).toHaveBeenCalledExactlyOnceWith(error);
+  });
+
+  it("does not report successful loads even after ownership changes", async () => {
+    const onFailure = vi.fn();
+    const onInactive = vi.fn();
+    await observeWindowLoad({
+      load: Promise.resolve(),
+      isActive: () => false,
+      onFailure,
+      onInactive,
+    });
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(onInactive).not.toHaveBeenCalled();
+  });
+});
 
 function createWindowMock(
   overrides: Partial<WindowLifecycleHandle> = {}

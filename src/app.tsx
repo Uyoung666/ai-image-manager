@@ -1,6 +1,5 @@
 import { RouterProvider } from "@tanstack/react-router";
-import React, { useCallback, useEffect, useState } from "react";
-import { createRoot } from "react-dom/client";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Toaster, toast } from "sonner";
 import {
@@ -8,13 +7,11 @@ import {
   cacheAccentColor,
   setAccentColorPreference,
 } from "./actions/accent-color";
-import { initializeAppLanguage } from "./actions/language";
 import { listenSystemThemeChanges, syncWithLocalTheme } from "./actions/theme";
 import { installDownloadedUpdate } from "./actions/update";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { UiPreferencesProvider } from "./contexts/ui-preferences-context";
 import { ipc } from "./ipc/manager";
-import i18n from "./localization/i18n";
 import { PluginBackdropHost, PluginHostProvider } from "./plugins/runtime";
 import { QueryProvider } from "./providers/QueryProvider";
 import { router } from "./utils/routes";
@@ -98,36 +95,3 @@ export default function App() {
     </ErrorBoundary>
   );
 }
-
-const container = document.getElementById("app");
-if (!container) {
-  throw new Error('Root element with id "app" not found');
-}
-
-// 封印浏览器原生 scrollRestoration，防止 SPA 路由切换时与 React
-// 虚拟化状态机争抢 DOM 控制权导致 Scroll Clamping。
-if ("scrollRestoration" in window.history) {
-  window.history.scrollRestoration = "manual";
-}
-
-const root = createRoot(container);
-
-// Load the selected signed locale before mounting React. This prevents the
-// first frame from rendering built-in Chinese/English and then visibly
-// switching to a plugin catalog after the IPC handshake completes.
-async function bootstrapRenderer() {
-  try {
-    await initializeAppLanguage(i18n);
-  } catch {
-    // The action already has a built-in fallback, but a renderer must still
-    // mount if an unexpected adapter/document error escapes that boundary.
-  } finally {
-    root.render(
-      <React.StrictMode>
-        <App />
-      </React.StrictMode>
-    );
-  }
-}
-
-bootstrapRenderer().catch(() => undefined);

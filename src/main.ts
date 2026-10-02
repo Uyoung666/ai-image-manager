@@ -91,6 +91,7 @@ import {
 import {
   createBeforeQuitHandler,
   destroyTraySafely,
+  observeWindowLoad,
   showOrCreateWindow,
 } from "@/services/window-tray-lifecycle";
 import {
@@ -1017,24 +1018,34 @@ function createWindow(httpPort: number, httpAuthToken: string) {
   ipcContext.setMainWindow(mainWindow, trustedRendererUrl);
 
   // typeof guard: prevents ReferenceError in production strict mode
+  const loadingWindow = mainWindow;
   const windowLoad =
     typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined"
-      ? mainWindow.loadFile(rendererEntry)
-      : mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  Promise.resolve(windowLoad).catch((error) => {
-    const incident = recordDiagnosticIncident({
-      message: error instanceof Error ? error.message : String(error),
-      source: "startup-failure",
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    appendDiagnosticLog({
-      incidentId: incident.id,
-      level: "error",
-      message: incident.message,
-      module: "renderer-load",
-      process: "main",
-      stack: incident.stack,
-    });
+      ? loadingWindow.loadFile(rendererEntry)
+      : loadingWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  observeWindowLoad({
+    load: windowLoad,
+    isActive: () =>
+      !(isQuitting || loadingWindow.isDestroyed()) &&
+      mainWindow === loadingWindow,
+    onInactive: (error) => {
+      log.debug({ err: error }, "Renderer load ended after window teardown");
+    },
+    onFailure: (error) => {
+      const incident = recordDiagnosticIncident({
+        message: error instanceof Error ? error.message : String(error),
+        source: "startup-failure",
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      appendDiagnosticLog({
+        incidentId: incident.id,
+        level: "error",
+        message: incident.message,
+        module: "renderer-load",
+        process: "main",
+        stack: incident.stack,
+      });
+    },
   });
 
   const display = screen.getDisplayMatching(mainWindow.getBounds());

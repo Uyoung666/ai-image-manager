@@ -14,6 +14,29 @@ export interface QuitEventHandle {
   preventDefault(): void;
 }
 
+/** Evaluate ownership when loading rejects, since shutdown can race the load. */
+export async function observeWindowLoad({
+  load,
+  isActive,
+  onFailure,
+  onInactive,
+}: {
+  load: Promise<void>;
+  isActive: () => boolean;
+  onFailure: (error: unknown) => void;
+  onInactive: (error: unknown) => void;
+}): Promise<void> {
+  try {
+    await load;
+  } catch (error) {
+    if (isActive()) {
+      onFailure(error);
+    } else {
+      onInactive(error);
+    }
+  }
+}
+
 /**
  * Mark the application as quitting and tear down the tray immediately.
  *
