@@ -27,12 +27,17 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { photoSequenceActions } from "@/actions/photo-sequences";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useSequenceReturnFocus } from "@/hooks/useSequenceReturnFocus";
 import type { SearchMatch } from "@/types/photo";
 import type {
   PhotoSequence,
   PhotoSequenceDetail,
   SequenceOrderChange,
 } from "@/types/photo-sequence";
+import {
+  type GalleryReturnTarget,
+  getGalleryReturnPresentation,
+} from "@/utils/gallery-return";
 import {
   buildPhotoGroupHeaders,
   hasMatchingPhotoGroupPrefix,
@@ -42,6 +47,7 @@ import {
 import type { GroupHeader, MasonryGridHandle } from "./MasonryGrid";
 import { MasonryGrid } from "./MasonryGrid";
 import { type FaceOverlay, PhotoCard } from "./PhotoCard";
+import { RecentlyViewedBadge } from "./RecentlyViewedBadge";
 import { SequenceCard } from "./SequenceCard";
 import { SortDropdown } from "./SortDropdown";
 import { LoadingSpinner } from "./ui/loading-spinner";
@@ -111,6 +117,7 @@ interface PhotoGridProps {
   onOpenSequenceDetails?: (sequenceId: number) => void;
   onRestoreSettled?: (routeKey: string) => void;
   onRetrySequences?: () => void;
+  onReturnLocated?: (request: number) => void;
   onScrollTopChange?: (scrollTop: number) => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSelectSequence?: (memberIds: number[], event: React.MouseEvent) => void;
@@ -127,6 +134,8 @@ interface PhotoGridProps {
   recentlyViewedPhotoId?: number | null;
   recentlyViewedPulseActive?: boolean;
   recentlyViewedPulseKey?: number;
+  recentlyViewedReturnRequest?: number;
+  recentlyViewedTarget?: GalleryReturnTarget | null;
   restoreGateReady?: boolean;
   /**
    * 路由唯一标识，用于区分不同页面的滚动位置
@@ -159,13 +168,19 @@ export function createPhotoGridItemStateVersion(
   selectedIds: ReadonlySet<number>,
   recentlyViewedPhotoId?: number | null,
   recentlyViewedPulseActive?: boolean,
-  recentlyViewedPulseKey?: number
+  recentlyViewedPulseKey?: number,
+  recentlyViewedTarget?: GalleryReturnTarget | null,
+  recentlyViewedReturnRequest?: number,
+  trayReadyRequest?: number
 ) {
   return {
     deletingIds,
     faceOverlayByPhotoId,
     faceOverlaysVisible,
     recentlyViewedPhotoId,
+    recentlyViewedTarget,
+    recentlyViewedReturnRequest,
+    trayReadyRequest,
     recentlyViewedPulseActive,
     recentlyViewedPulseKey,
     selectedIds,
@@ -289,16 +304,23 @@ export interface SequenceFocusTrayProps {
   getDragIds: (id: number) => number[];
   onDoubleClick: (id: number) => void;
   onNameFace?: (id: number) => void;
+  onReturnLocated?: (request: number) => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSelectSequenceMembers?: (memberIds: number[], selectAll: boolean) => void;
   onSequenceMutationComplete?: () => void;
   onSequenceOrderChange?: (change: SequenceOrderChange) => void;
   onToggleFavorite?: (id: number) => void;
   onToggleSequenceExpand?: (sequenceId: number) => void;
+  recentlyViewedMemberId?: number | null;
+  recentlyViewedPulseActive?: boolean;
+  recentlyViewedPulseKey?: number;
+  recentlyViewedSequence?: boolean;
   renderImage: boolean;
+  returnRequest?: number;
   searchQuery?: string;
   selectedIds: Set<number>;
   sequence: PhotoSequenceDetail;
+  topInset?: number;
 }
 
 export function SequenceFocusTray({
@@ -321,6 +343,13 @@ export function SequenceFocusTray({
   searchQuery,
   selectedIds,
   sequence,
+  recentlyViewedMemberId = null,
+  recentlyViewedSequence = false,
+  recentlyViewedPulseActive = false,
+  recentlyViewedPulseKey = 0,
+  returnRequest = 0,
+  onReturnLocated,
+  topInset = 0,
 }: SequenceFocusTrayProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -397,6 +426,26 @@ export function SequenceFocusTray({
       width: containerWidth,
     },
     overscan: 2,
+  });
+  const returnMemberIds = useMemo(
+    () => displayMembers.map((member) => member.id),
+    [displayMembers]
+  );
+  const scrollToReturnRow = useCallback(
+    (row: number) => {
+      virtualizer.scrollToIndex(row, { align: "auto" });
+    },
+    [virtualizer]
+  );
+  useSequenceReturnFocus({
+    scrollRef,
+    memberId: recentlyViewedMemberId,
+    memberIds: returnMemberIds,
+    columns,
+    request: returnRequest,
+    scrollToRow: scrollToReturnRow,
+    onLocated: onReturnLocated,
+    topInset,
   });
   const selectedMemberCount = displayMembers.filter((member) =>
     selectedIds.has(member.id)
@@ -501,7 +550,11 @@ export function SequenceFocusTray({
     selectionLabel = `${selectedMemberCount}/${sequence.members.length}`;
   }
   return (
-    <section className="fade-in-0 slide-in-from-top-2 animate-in rounded-[10px] border-2 border-primary/50 bg-primary/[0.06] p-3 shadow-sm duration-200">
+    <section
+      className={`fade-in-0 slide-in-from-top-2 relative animate-in rounded-[10px] border-2 border-primary/50 bg-primary/[0.06] p-3 shadow-sm duration-200 ${recentlyViewedSequence && recentlyViewedPulseActive ? "photo-card-recently-viewed-pulse" : ""}`}
+      data-sequence-tray-id={sequence.id}
+      tabIndex={-1}
+    >
       <header className="mb-3 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 text-primary">
           {sequence.type === "burst" ? (
@@ -515,6 +568,7 @@ export function SequenceFocusTray({
             )}
             {` · ${sequence.frameCount} ${t("sequenceFrames")}`}
           </span>
+          {recentlyViewedSequence && <RecentlyViewedBadge inline />}
         </div>
         <div className="flex min-w-0 shrink-0 items-center gap-2">
           {moveFeedback && (
@@ -804,6 +858,12 @@ export function SequenceFocusTray({
                         onNameFace={onNameFace}
                         onToggleFavorite={onToggleFavorite}
                         path={member.path}
+                        recentlyViewed={recentlyViewedMemberId === member.id}
+                        recentlyViewedPulseActive={
+                          recentlyViewedMemberId === member.id &&
+                          recentlyViewedPulseActive
+                        }
+                        recentlyViewedPulseKey={recentlyViewedPulseKey}
                         renderImage={renderImage}
                         searchQuery={searchQuery}
                         thumbnailPath={member.thumbnailPath}
@@ -876,6 +936,9 @@ export const PhotoGrid = memo(
     onRestoreSettled,
     onScrollTopChange,
     onBackgroundClick,
+    recentlyViewedTarget = null,
+    recentlyViewedReturnRequest,
+    onReturnLocated,
     recentlyViewedPhotoId = null,
     recentlyViewedPulseActive = false,
     recentlyViewedPulseKey = 0,
@@ -1090,6 +1153,52 @@ export const PhotoGrid = memo(
     ]);
 
     const gridTopInset = Math.max(topInset, showToolbar ? toolbarHeight : 0);
+    const effectiveReturnTarget =
+      recentlyViewedTarget ??
+      (recentlyViewedPhotoId === null
+        ? null
+        : { kind: "photo" as const, photoId: recentlyViewedPhotoId });
+    const returnPresentation = getGalleryReturnPresentation(
+      effectiveReturnTarget,
+      orderedSequences,
+      expandedSequence,
+      expandedSequenceComplete
+    );
+    const keyboardReturnId =
+      returnPresentation.memberId ??
+      (returnPresentation.itemId !== null && returnPresentation.itemId < 0
+        ? (expandedSequence?.members[0]?.id ?? null)
+        : returnPresentation.itemId);
+    const returnRequest = recentlyViewedReturnRequest ?? recentlyViewedPulseKey;
+    const [trayReadyRequest, setTrayReadyRequest] = useState(0);
+    const handleReturnLocated = useCallback(
+      (request: number) => {
+        if (request !== returnRequest || !request) {
+          return;
+        }
+        if (returnPresentation.memberId === null) {
+          if (
+            returnPresentation.itemId !== null &&
+            returnPresentation.itemId < 0
+          ) {
+            containerRef.current
+              ?.querySelector<HTMLElement>(
+                `[data-sequence-tray-id="${-returnPresentation.itemId}"]`
+              )
+              ?.focus({ preventScroll: true });
+          }
+          onReturnLocated?.(request);
+        } else {
+          setTrayReadyRequest(request);
+        }
+      },
+      [
+        returnRequest,
+        returnPresentation.memberId,
+        returnPresentation.itemId,
+        onReturnLocated,
+      ]
+    );
     const keyboardPhotos = useMemo(
       () =>
         displayPhotos.flatMap((photo) =>
@@ -1108,7 +1217,10 @@ export const PhotoGrid = memo(
           selectedIds,
           recentlyViewedPhotoId,
           recentlyViewedPulseActive,
-          recentlyViewedPulseKey
+          recentlyViewedPulseKey,
+          recentlyViewedTarget,
+          recentlyViewedReturnRequest,
+          trayReadyRequest
         ),
       [
         deletingIds,
@@ -1118,6 +1230,9 @@ export const PhotoGrid = memo(
         recentlyViewedPhotoId,
         recentlyViewedPulseActive,
         recentlyViewedPulseKey,
+        recentlyViewedTarget,
+        recentlyViewedReturnRequest,
+        trayReadyRequest,
       ]
     );
     const groupHeaderCacheRef = useRef<{
@@ -1217,9 +1332,7 @@ export const PhotoGrid = memo(
 
         e.preventDefault();
         const currentId =
-          selectedIds.size === 1
-            ? [...selectedIds][0]
-            : (recentlyViewedPhotoId ?? null);
+          selectedIds.size === 1 ? [...selectedIds][0] : keyboardReturnId;
         let currentIdx = currentId
           ? keyboardPhotos.findIndex((p) => p.id === currentId)
           : -1;
@@ -1252,7 +1365,7 @@ export const PhotoGrid = memo(
       selectedIds,
       columnCount,
       onKeyboardSelect,
-      recentlyViewedPhotoId,
+      keyboardReturnId,
     ]);
 
     const skeletonAspects = useCallback(
@@ -1284,16 +1397,28 @@ export const PhotoGrid = memo(
               getDragIds={getDragIds}
               onDoubleClick={onDoubleClick}
               onNameFace={onNameFace}
+              onReturnLocated={onReturnLocated}
               onSelect={onSelect}
               onSelectSequenceMembers={onSelectSequenceMembers}
               onSequenceMutationComplete={onSequenceMutationComplete}
               onSequenceOrderChange={onSequenceOrderChange}
               onToggleFavorite={onToggleFavorite}
               onToggleSequenceExpand={onToggleSequenceExpand}
+              recentlyViewedMemberId={returnPresentation.memberId}
+              recentlyViewedPulseActive={recentlyViewedPulseActive}
+              recentlyViewedPulseKey={recentlyViewedPulseKey}
+              recentlyViewedSequence={
+                returnPresentation.itemId === photo.id &&
+                returnPresentation.memberId === null
+              }
               renderImage={options.renderImage}
+              returnRequest={
+                trayReadyRequest === returnRequest ? returnRequest : 0
+              }
               searchQuery={searchQuery}
               selectedIds={selectedIdsRef.current}
               sequence={photo.sequenceTray}
+              topInset={gridTopInset}
             />
           );
         }
@@ -1338,6 +1463,16 @@ export const PhotoGrid = memo(
               onOpen={onOpenSequence}
               onOpenDetails={onOpenSequenceDetails}
               onToggleExpand={onToggleSequenceExpand}
+              recentlyViewed={returnPresentation.itemId === photo.id}
+              recentlyViewedFrame={
+                returnPresentation.itemId === photo.id
+                  ? returnPresentation.frame
+                  : undefined
+              }
+              recentlyViewedPulseActive={
+                returnPresentation.itemId === photo.id &&
+                recentlyViewedPulseActive
+              }
               sequence={sequence}
             />
           );
@@ -1433,6 +1568,13 @@ export const PhotoGrid = memo(
         recentlyViewedPhotoId,
         recentlyViewedPulseActive,
         recentlyViewedPulseKey,
+        returnPresentation.itemId,
+        returnPresentation.memberId,
+        returnPresentation.frame,
+        trayReadyRequest,
+        returnRequest,
+        onReturnLocated,
+        gridTopInset,
         faceOverlayByPhotoId,
         faceOverlaysVisible,
         t,
@@ -1728,12 +1870,14 @@ export const PhotoGrid = memo(
             onEndReached={onEndReached}
             onMarqueeSelect={handleGridMarqueeSelect}
             onRestoreSettled={onRestoreSettled}
+            onReturnLocated={handleReturnLocated}
             onScrollTopChange={handleGridScrollTopChange}
             ref={gridRef}
             renderItem={renderItem}
             restoreGateReady={restoreGateReady}
-            returnToPhotoId={recentlyViewedPhotoId}
-            returnToPhotoRequest={recentlyViewedPulseKey}
+            returnToMemberId={returnPresentation.memberId}
+            returnToPhotoId={returnPresentation.itemId}
+            returnToPhotoRequest={returnRequest}
             routeKey={routeKey}
             scrollToAlignment={expandedSequence ? "start" : "center"}
             scrollToId={scrollToId}
@@ -1847,6 +1991,14 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.selectedIds !== nextProps.selectedIds) {
+      return false;
+    }
+    if (
+      prevProps.recentlyViewedTarget !== nextProps.recentlyViewedTarget ||
+      prevProps.recentlyViewedReturnRequest !==
+        nextProps.recentlyViewedReturnRequest ||
+      prevProps.onReturnLocated !== nextProps.onReturnLocated
+    ) {
       return false;
     }
     if (prevProps.recentlyViewedPhotoId !== nextProps.recentlyViewedPhotoId) {

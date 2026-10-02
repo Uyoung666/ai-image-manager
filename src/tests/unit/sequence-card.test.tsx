@@ -24,6 +24,42 @@ const sequence: PhotoSequence = {
 };
 
 describe("SequenceCard", () => {
+  it("shows a full-order frame marker without selecting the sequence", () => {
+    const { rerender } = render(
+      <SequenceCard
+        isSelected={false}
+        onClick={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
+        recentlyViewed
+        recentlyViewedFrame={80}
+        recentlyViewedPulseActive
+        sequence={sequence}
+      />
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("刚刚浏览 · 第 80 帧");
+    expect(
+      screen.getByRole("button", { name: "sequenceCardLabel" })
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(
+      screen.getByRole("button", { name: "sequenceCardLabel" })
+    ).toHaveClass("photo-card-recently-viewed-pulse");
+    rerender(
+      <SequenceCard
+        isSelected={false}
+        onClick={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={vi.fn()}
+        recentlyViewed
+        recentlyViewedFrame={80}
+        sequence={sequence}
+      />
+    );
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "sequenceCardLabel" })
+    ).not.toHaveClass("photo-card-recently-viewed-pulse");
+  });
   it("fades the cover in after an eager image load", () => {
     const { container } = render(
       <SequenceCard
@@ -61,11 +97,12 @@ describe("SequenceCard", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "sequenceCardLabel" }));
+    expect(onClick).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(250));
     expect(onClick).toHaveBeenCalledWith(
       sequence.photo.id,
       expect.objectContaining({ ctrlKey: false })
     );
-    act(() => vi.advanceTimersByTime(250));
     expect(onOpenDetails).toHaveBeenCalledWith(sequence.id);
     vi.useRealTimers();
   });
@@ -116,6 +153,31 @@ describe("SequenceCard", () => {
     expect(onOpen).toHaveBeenCalledOnce();
     expect(onOpen).toHaveBeenCalledWith(sequence.id);
     expect(onOpenDetails).not.toHaveBeenCalled();
+  });
+
+  it("cancels pending selection and details when a double click follows real clicks", () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    const onOpenDetails = vi.fn();
+    const onOpen = vi.fn();
+    render(
+      <SequenceCard
+        isSelected={false}
+        onClick={onClick}
+        onOpen={onOpen}
+        onOpenDetails={onOpenDetails}
+        sequence={sequence}
+      />
+    );
+    const card = screen.getByRole("button", { name: "sequenceCardLabel" });
+    fireEvent.click(card, { detail: 1 });
+    fireEvent.click(card, { detail: 2 });
+    fireEvent.doubleClick(card);
+    act(() => vi.advanceTimersByTime(250));
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(sequence.id);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(onOpenDetails).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("expands from its top-right control without opening details", () => {

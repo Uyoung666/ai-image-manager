@@ -29,11 +29,13 @@ import {
   getSequenceMemberIds,
   useCollectionSequences,
 } from "@/hooks/useCollectionSequences";
+import { useGalleryReturn } from "@/hooks/useGalleryReturn";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
+import type { PhotoSequenceDetail } from "@/types/photo-sequence";
 
 interface AlbumDetail {
   coverPhotoId: number | null;
@@ -89,15 +91,6 @@ function AlbumDetailPage() {
   const canEditAlbum = Boolean(activeAlbum && !activeAlbum.isSmart);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
-  const [recentlyViewedPhotoId, setRecentlyViewedPhotoId] = useState<
-    number | null
-  >(null);
-  const [recentlyViewedPulseActive, setRecentlyViewedPulseActive] =
-    useState(false);
-  const [recentlyViewedPulseKey, setRecentlyViewedPulseKey] = useState(0);
-  const recentlyViewedPulseTimerRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const composingRef = useRef(false);
@@ -111,6 +104,8 @@ function AlbumDetailPage() {
     isBatch: false,
     selectionCount: 0,
   });
+  const [sequenceReturnTarget, setSequenceReturnTarget] =
+    useState<PhotoSequenceDetail | null>(null);
   const [sortField, setSortField] = useState<SortField>(loadSortField);
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -267,38 +262,63 @@ function AlbumDetailPage() {
     },
     [addToSelection, removeFromSelection]
   );
-  const clearRecentlyViewed = useCallback((preservePhotoId?: number) => {
-    setRecentlyViewedPhotoId((current) => {
-      if (preservePhotoId !== undefined && current === preservePhotoId) {
-        return current;
-      }
-      return null;
-    });
-    setRecentlyViewedPulseActive(false);
-    if (recentlyViewedPulseTimerRef.current !== null) {
-      clearTimeout(recentlyViewedPulseTimerRef.current);
-      recentlyViewedPulseTimerRef.current = null;
+  const recentlyViewedContextKey = [
+    routeKey,
+    sortField,
+    sortOrder,
+    sequenceView.mode,
+  ].join("|");
+  const returnDetails = useMemo(
+    () => [
+      sequenceView.expandedSequence,
+      sequenceView.expandedSequenceComplete,
+      sequenceView.selectedSequence,
+      sequenceView.openSequence,
+      sequenceReturnTarget,
+    ],
+    [
+      sequenceView.expandedSequence,
+      sequenceView.expandedSequenceComplete,
+      sequenceView.selectedSequence,
+      sequenceView.openSequence,
+      sequenceReturnTarget,
+    ]
+  );
+  const {
+    recentlyViewedTarget,
+    recentlyViewedPhotoId,
+    recentlyViewedPulseActive,
+    recentlyViewedPulseKey,
+    recentlyViewedReturnRequest,
+    clearRecentlyViewed,
+    markRecentlyViewed,
+    markSequence,
+    beginSequence,
+    rememberPhoto,
+    settleReturn,
+    stopPulse,
+  } = useGalleryReturn({
+    contextKey: recentlyViewedContextKey,
+    photos,
+    sequences: sequenceView.sequences,
+    details: returnDetails,
+    ready: !(
+      pageLoading ||
+      sequenceView.sequencesLoading ||
+      sequenceView.sequencesRefreshing
+    ),
+  });
+  const dismissSequenceDetail = useCallback(() => {
+    if (sequenceView.selectedSequence) {
+      markSequence(sequenceView.selectedSequence.id);
     }
-  }, []);
-  const markRecentlyViewed = useCallback((photoId: number) => {
-    setRecentlyViewedPhotoId(photoId);
-    setRecentlyViewedPulseKey((value) => value + 1);
-    setRecentlyViewedPulseActive(true);
-    if (recentlyViewedPulseTimerRef.current !== null) {
-      clearTimeout(recentlyViewedPulseTimerRef.current);
-    }
-    recentlyViewedPulseTimerRef.current = setTimeout(() => {
-      setRecentlyViewedPulseActive(false);
-      recentlyViewedPulseTimerRef.current = null;
-    }, 1500);
-  }, []);
-  useEffect(() => {
-    return () => {
-      if (recentlyViewedPulseTimerRef.current !== null) {
-        clearTimeout(recentlyViewedPulseTimerRef.current);
-      }
-    };
-  }, []);
+    sequenceView.setSelectedSequence(null);
+    setSequenceReturnTarget(null);
+  }, [
+    sequenceView.selectedSequence,
+    sequenceView.setSelectedSequence,
+    markSequence,
+  ]);
   const handleKeyboardPhotoSelect = useCallback(
     (id: number) => {
       clearRecentlyViewed(id);
@@ -319,21 +339,16 @@ function AlbumDetailPage() {
     handleKeyboardPhotoSelect
   );
   const dismissPhotoDetail = useCallback(() => {
-    if (detailPhoto && photos.some((photo) => photo.id === detailPhoto.id)) {
+    if (detailPhoto) {
       markRecentlyViewed(detailPhoto.id);
-    } else if (detailPhoto) {
-      clearRecentlyViewed();
     }
     dismissDetail();
-  }, [
-    clearRecentlyViewed,
-    detailPhoto,
-    dismissDetail,
-    markRecentlyViewed,
-    photos,
-  ]);
+  }, [detailPhoto, dismissDetail, markRecentlyViewed]);
   const handleClearSelection = useCallback(() => {
-    if (detailPhoto) {
+    if (sequenceView.selectedSequence) {
+      dismissSequenceDetail();
+      dismissDetail();
+    } else if (detailPhoto) {
       dismissPhotoDetail();
     } else if (!detailDismissed && selectedIds.size === 1) {
       const selectedPhotoId = selectedIds.values().next().value;
@@ -347,7 +362,11 @@ function AlbumDetailPage() {
       }
     }
     clearSelection();
+    setSequenceReturnTarget(null);
   }, [
+    sequenceView.selectedSequence,
+    dismissSequenceDetail,
+    dismissDetail,
     clearRecentlyViewed,
     clearSelection,
     detailDismissed,
@@ -357,29 +376,6 @@ function AlbumDetailPage() {
     photos,
     selectedIds,
   ]);
-  const recentlyViewedContextKey = [
-    routeKey,
-    sortField,
-    sortOrder,
-    sequenceView.mode,
-  ].join("|");
-  const previousRecentlyViewedContextKeyRef = useRef(recentlyViewedContextKey);
-  useEffect(() => {
-    if (
-      previousRecentlyViewedContextKeyRef.current !== recentlyViewedContextKey
-    ) {
-      clearRecentlyViewed();
-    }
-    previousRecentlyViewedContextKeyRef.current = recentlyViewedContextKey;
-  }, [clearRecentlyViewed, recentlyViewedContextKey]);
-  useEffect(() => {
-    if (
-      recentlyViewedPhotoId !== null &&
-      !photos.some((photo) => photo.id === recentlyViewedPhotoId)
-    ) {
-      clearRecentlyViewed();
-    }
-  }, [clearRecentlyViewed, photos, recentlyViewedPhotoId]);
   useEffect(() => {
     if (
       lightboxIndex >= 0 ||
@@ -842,7 +838,11 @@ function AlbumDetailPage() {
           setConvertDialogOpen(false);
           return;
         }
-        if (selectedIds.size > 0) {
+        if (sequenceView.selectedSequence) {
+          dismissSequenceDetail();
+          return;
+        }
+        if (detailPhoto || selectedIds.size > 0) {
           handleClearSelection();
           return;
         }
@@ -927,6 +927,8 @@ function AlbumDetailPage() {
     detailPhoto,
     handleClearSelection,
     handleKeyboardPhotoSelect,
+    sequenceView.selectedSequence,
+    dismissSequenceDetail,
   ]);
 
   // handleKeyboardSelect, handleMarqueeSelect 由 usePhotoSelection hook 提供
@@ -952,7 +954,7 @@ function AlbumDetailPage() {
       if (detailPhoto) {
         handleClearSelection();
       } else {
-        sequenceView.setSelectedSequence(null);
+        dismissSequenceDetail();
         clearSelection();
       }
     },
@@ -1117,9 +1119,18 @@ function AlbumDetailPage() {
             onDoubleClick={handleDoubleClick}
             onKeyboardSelect={handleKeyboardPhotoSelect}
             onMarqueeSelect={wrappedMarqueeSelect}
-            onOpenSequence={sequenceView.openPlayback}
-            onOpenSequenceDetails={sequenceView.openDetails}
+            onOpenSequence={(id) => {
+              beginSequence(id);
+              dismissDetail();
+              setSequenceReturnTarget(null);
+              sequenceView.openPlayback(id);
+            }}
+            onOpenSequenceDetails={(id) => {
+              beginSequence(id);
+              sequenceView.openDetails(id);
+            }}
             onRetrySequences={sequenceView.refreshSequences}
+            onReturnLocated={settleReturn}
             onSelect={handlePhotoSelect}
             onSelectSequence={handleSequenceSelect}
             onSelectSequenceMembers={handleSelectSequenceMembers}
@@ -1128,12 +1139,25 @@ function AlbumDetailPage() {
             onSequenceOrderChange={sequenceView.updateSequenceOrder}
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
-            onToggleSequenceExpand={sequenceView.toggleExpand}
+            onToggleSequenceExpand={(id) => {
+              if (
+                recentlyViewedTarget &&
+                "sequenceId" in recentlyViewedTarget &&
+                recentlyViewedTarget.sequenceId === id
+              ) {
+                stopPulse();
+              } else {
+                clearRecentlyViewed();
+              }
+              sequenceView.toggleExpand(id);
+            }}
             photos={photos}
             preserveOnSequenceError={sequenceView.sequencesConfirmed}
             recentlyViewedPhotoId={recentlyViewedPhotoId}
             recentlyViewedPulseActive={recentlyViewedPulseActive}
             recentlyViewedPulseKey={recentlyViewedPulseKey}
+            recentlyViewedReturnRequest={recentlyViewedReturnRequest}
+            recentlyViewedTarget={recentlyViewedTarget}
             routeKey={routeKey}
             selectedIds={selectedIds}
             sequenceCount={sequenceView.sequences.length}
@@ -1229,7 +1253,7 @@ function AlbumDetailPage() {
               if (detailPhoto) {
                 handleClearSelection();
               } else {
-                sequenceView.setSelectedSequence(null);
+                dismissSequenceDetail();
                 clearSelection();
               }
             }}
@@ -1243,11 +1267,15 @@ function AlbumDetailPage() {
         >
           {sequenceView.selectedSequence ? (
             <SequenceDetailPanel
-              onClose={() => sequenceView.setSelectedSequence(null)}
+              onClose={dismissSequenceDetail}
               onOpenPhoto={(photoId) => {
                 const member = sequenceView.selectedSequence?.members.find(
                   (m) => m.id === photoId
                 );
+                if (sequenceView.selectedSequence) {
+                  rememberPhoto(photoId, sequenceView.selectedSequence.id);
+                }
+                setSequenceReturnTarget(sequenceView.selectedSequence);
                 sequenceView.setSelectedSequence(null);
                 handleKeyboardPhotoSelect(photoId);
                 if (member) {
@@ -1289,6 +1317,19 @@ function AlbumDetailPage() {
               }}
               onNavigate={navigateDetail}
               onOpenExplorer={handleOpenExplorer}
+              onReturnToSequence={
+                sequenceReturnTarget
+                  ? () => {
+                      if (detailPhoto) {
+                        rememberPhoto(detailPhoto.id, sequenceReturnTarget.id);
+                      }
+                      dismissDetail();
+                      clearSelection();
+                      sequenceView.setSelectedSequence(sequenceReturnTarget);
+                      setSequenceReturnTarget(null);
+                    }
+                  : undefined
+              }
               photo={detailPhoto}
             />
           )}
@@ -1302,11 +1343,7 @@ function AlbumDetailPage() {
           onAddToAlbum={handleAddToAlbum}
           onClose={({ photoId }) => {
             setLightboxIndex(-1);
-            if (photos.some((photo) => photo.id === photoId)) {
-              markRecentlyViewed(photoId);
-            } else {
-              clearRecentlyViewed();
-            }
+            markRecentlyViewed(photoId);
           }}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
@@ -1316,7 +1353,14 @@ function AlbumDetailPage() {
       {sequenceView.openSequence && (
         <PhotoLightbox
           initialIndex={0}
-          onClose={() => sequenceView.setOpenSequence(null)}
+          onClose={({ photoId }) => {
+            const sequenceId = sequenceView.openSequence?.id;
+            rememberPhoto(photoId, sequenceId);
+            sequenceView.setOpenSequence(null);
+            if (!(sequenceView.selectedSequence || detailPhoto)) {
+              markRecentlyViewed(photoId, sequenceId);
+            }
+          }}
           onToggleFavorite={handleToggleFavorite}
           open={true}
           photos={sequenceView.openSequence.members}

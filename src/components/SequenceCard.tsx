@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import type { PhotoSequence } from "@/types/photo-sequence";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 import { type FaceOverlay, getFaceOverlayStyle } from "./PhotoCard";
+import { RecentlyViewedBadge } from "./RecentlyViewedBadge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 interface SequenceCardProps {
@@ -28,6 +29,9 @@ interface SequenceCardProps {
   onOpen: (sequenceId: number) => void;
   onOpenDetails: (sequenceId: number) => void;
   onToggleExpand?: (sequenceId: number) => void;
+  recentlyViewed?: boolean;
+  recentlyViewedFrame?: number;
+  recentlyViewedPulseActive?: boolean;
   sequence: PhotoSequence;
 }
 
@@ -45,6 +49,9 @@ export const SequenceCard = memo(function SequenceCard({
   faceOverlays,
   faceOverlaysVisible = true,
   loading = "lazy",
+  recentlyViewed = false,
+  recentlyViewedFrame,
+  recentlyViewedPulseActive = false,
 }: SequenceCardProps) {
   const { t } = useTranslation();
   const { photo } = sequence;
@@ -96,19 +103,24 @@ export const SequenceCard = memo(function SequenceCard({
         ),
       })}
       aria-pressed={isSelected}
-      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity,box-shadow] duration-200 motion-reduce:transition-none ${isSelected ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
+      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity,box-shadow] duration-200 motion-reduce:transition-none ${recentlyViewedPulseActive ? "photo-card-recently-viewed-pulse" : ""} ${isSelected ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
       data-photo-id={photo.id}
       data-photo-path={photo.path}
+      data-recently-viewed={recentlyViewed ? "true" : undefined}
       data-sequence-id={sequence.id}
       onClick={(event) => {
         cancelPendingClick();
-        onClick(photo.id, event);
-        if (!(event.ctrlKey || event.metaKey)) {
-          clickTimerRef.current = setTimeout(() => {
-            clickTimerRef.current = null;
-            onOpenDetails(sequence.id);
-          }, SINGLE_CLICK_DELAY_MS);
+        if (event.ctrlKey || event.metaKey) {
+          onClick(photo.id, event);
+          return;
         }
+        // Opening the detail overlay on the first click can intercept the second
+        // click on compact windows. Commit both single-click actions together.
+        clickTimerRef.current = setTimeout(() => {
+          clickTimerRef.current = null;
+          onClick(photo.id, event);
+          onOpenDetails(sequence.id);
+        }, SINGLE_CLICK_DELAY_MS);
       }}
       onDoubleClick={() => {
         cancelPendingClick();
@@ -212,6 +224,12 @@ export const SequenceCard = memo(function SequenceCard({
             {t(expanded ? "sequenceCollapse" : "sequenceExpand")}
           </TooltipContent>
         </Tooltip>
+      )}
+      {recentlyViewed && (
+        <RecentlyViewedBadge
+          className="bottom-10"
+          frame={recentlyViewedFrame}
+        />
       )}
       <button
         className="absolute right-2 bottom-2 left-2 flex items-center gap-1 rounded bg-black/65 px-2 py-1 text-left text-[11px] text-white backdrop-blur"

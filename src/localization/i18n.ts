@@ -1278,6 +1278,7 @@ i18n.use(initReactI18next).init({
         cloudSyncScope:
           "仅主动上传你选择的照片，不自动双向同步，也不会修改本地原图。",
         recentlyViewedPhoto: "刚刚浏览",
+        recentlyViewedSequenceFrame: "刚刚浏览 · 第 {{frame}} 帧",
         close: "关闭",
         windowMaximize: "最大化",
         windowMinimize: "最小化",
@@ -3601,6 +3602,7 @@ i18n.use(initReactI18next).init({
         cloudSyncScope:
           "Uploads only the photos you choose. There is no automatic two-way sync, and local originals are not modified.",
         recentlyViewedPhoto: "Just viewed",
+        recentlyViewedSequenceFrame: "Just viewed · Frame {{frame}}",
         close: "Close",
         windowMaximize: "Maximize",
         windowMinimize: "Minimize",

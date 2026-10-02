@@ -153,10 +153,10 @@ describe("getMasonryReturnScrollTop", () => {
         scrollTop: 0,
         topInset: 48,
       })
-    ).toBe(228);
+    ).toBe(56);
   });
 
-  it("centers a short card in the usable viewport below the toolbar", () => {
+  it("reveals only the hidden edge below the toolbar", () => {
     expect(
       getMasonryReturnScrollTop({
         cardHeight: 120,
@@ -165,7 +165,7 @@ describe("getMasonryReturnScrollTop", () => {
         scrollTop: 0,
         topInset: 48,
       })
-    ).toBe(738);
+    ).toBe(576);
   });
 
   it("aligns a tall card to the usable viewport top", () => {

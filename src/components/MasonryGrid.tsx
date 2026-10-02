@@ -38,6 +38,8 @@ import { recordGalleryPerf } from "@/utils/gallery-perf";
 
 export type { GroupHeaderInput as GroupHeader, MasonryGridHandle };
 
+import { getReturnScrollTop } from "@/utils/gallery-return";
+
 const SCROLL_TOP_EPSILON = 0.5;
 const SCROLL_RENDER_STEP_PX = 96;
 const IMAGE_RENDER_OVERSCAN_VIEWPORTS_BEFORE = 1;
@@ -70,32 +72,7 @@ export function shouldUpdateScrollRenderTop(
   );
 }
 
-export function getMasonryReturnScrollTop({
-  cardHeight,
-  cardTop,
-  clientHeight,
-  scrollTop,
-  topInset,
-}: {
-  cardHeight: number;
-  cardTop: number;
-  clientHeight: number;
-  scrollTop: number;
-  topInset: number;
-}): number | null {
-  const topPadding = topInset > 0 ? topInset + 8 : 0;
-  const availableHeight = Math.max(1, clientHeight - topPadding);
-  const visibleTop = scrollTop;
-  const visibleBottom = scrollTop + availableHeight;
-  if (cardTop >= visibleTop && cardTop + cardHeight <= visibleBottom) {
-    return null;
-  }
-  const nextScrollTop =
-    cardHeight > availableHeight
-      ? cardTop
-      : cardTop - (availableHeight - cardHeight) / 2;
-  return Math.max(0, nextScrollTop);
-}
+export const getMasonryReturnScrollTop = getReturnScrollTop;
 
 interface MasonryGridProps {
   className?: string;
@@ -117,6 +94,7 @@ interface MasonryGridProps {
   onEndReached?: () => void;
   onMarqueeSelect?: (ids: Set<number>) => void;
   onRestoreSettled?: (routeKey: string) => void;
+  onReturnLocated?: (request: number) => void;
   onScrollTopChange?: (scrollTop: number) => void;
   overscan?: number;
   renderItem: (
@@ -126,6 +104,7 @@ interface MasonryGridProps {
     options: { renderImage: boolean }
   ) => ReactNode;
   restoreGateReady?: boolean;
+  returnToMemberId?: number | null;
   returnToPhotoId?: number | null;
   returnToPhotoRequest?: number;
   routeKey: string;
@@ -151,6 +130,7 @@ export const MasonryGrid = memo(
       isLoadingMore = false,
       onMarqueeSelect,
       onRestoreSettled,
+      onReturnLocated,
       onScrollTopChange,
       scrollToAlignment = "center",
       scrollToId,
@@ -158,6 +138,7 @@ export const MasonryGrid = memo(
       selectionActive = false,
       showGroupHeaders = true,
       returnToPhotoId = null,
+      returnToMemberId = null,
       returnToPhotoRequest = 0,
       routeKey,
       restoreGateReady = true,
@@ -471,7 +452,9 @@ export const MasonryGrid = memo(
     const prevPositionsRef = useRef(positions);
     const prevScrollToAlignmentRef = useRef(scrollToAlignment);
     const prevScrollToIdRef = useRef(scrollToId);
-    const prevReturnToPhotoRequestRef = useRef(returnToPhotoRequest);
+    const prevReturnToPhotoRequestRef = useRef(0);
+    const prevReturnToPhotoIdRef = useRef(returnToPhotoId);
+    const completedReturnRequestRef = useRef(0);
     const pendingReturnToPhotoRequestRef = useRef<number | null>(null);
     const prevRouteKeyRef = useRef(routeKey);
     const prevContainerWidthRef = useRef(containerWidth);
@@ -483,24 +466,33 @@ export const MasonryGrid = memo(
     latestPositionsRef.current = positions;
     latestIdToIndexMapRef.current = idToIndexMap;
     latestReturnToPhotoIdRef.current = returnToPhotoId;
+    const onReturnLocatedRef = useRef(onReturnLocated);
+    onReturnLocatedRef.current = onReturnLocated;
 
     useLayoutEffect(() => {
       const prevPositions = prevPositionsRef.current;
       const prevScrollToAlignment = prevScrollToAlignmentRef.current;
       const prevScrollToId = prevScrollToIdRef.current;
       const prevReturnToPhotoRequest = prevReturnToPhotoRequestRef.current;
+      const prevReturnToPhotoId = prevReturnToPhotoIdRef.current;
       const prevRouteKey = prevRouteKeyRef.current;
       const prevWidth = prevContainerWidthRef.current;
       prevPositionsRef.current = positions;
       prevScrollToAlignmentRef.current = scrollToAlignment;
       prevScrollToIdRef.current = scrollToId;
       prevReturnToPhotoRequestRef.current = returnToPhotoRequest;
+      prevReturnToPhotoIdRef.current = returnToPhotoId;
       prevRouteKeyRef.current = routeKey;
       prevContainerWidthRef.current = containerWidth;
 
       const returnRequestChanged =
         returnToPhotoRequest !== prevReturnToPhotoRequest;
-      if (returnRequestChanged) {
+      if (
+        returnRequestChanged ||
+        (returnToPhotoId !== prevReturnToPhotoId &&
+          returnToPhotoRequest > 0 &&
+          completedReturnRequestRef.current !== returnToPhotoRequest)
+      ) {
         if (returnToPhotoFocusFrameRef.current) {
           cancelAnimationFrame(returnToPhotoFocusFrameRef.current);
           returnToPhotoFocusFrameRef.current = 0;
@@ -589,13 +581,23 @@ export const MasonryGrid = memo(
           }
 
           const position = targetPositions[targetIndex];
-          const nextScrollTop = getMasonryReturnScrollTop({
-            cardHeight: position.height,
-            cardTop: position.top,
-            clientHeight: el.clientHeight,
-            scrollTop: el.scrollTop,
-            topInset,
-          });
+          // The tray may be taller than the viewport. If it is already mounted
+          // in view, let its member locator reveal the frame without first
+          // jumping back to the tray header.
+          const memberContainerVisible =
+            returnToMemberId !== null &&
+            targetId < 0 &&
+            position.top + position.height > el.scrollTop &&
+            position.top < el.scrollTop + el.clientHeight - topInset;
+          const nextScrollTop = memberContainerVisible
+            ? null
+            : getMasonryReturnScrollTop({
+                cardHeight: position.height,
+                cardTop: position.top,
+                clientHeight: el.clientHeight,
+                scrollTop: el.scrollTop,
+                topInset,
+              });
           if (nextScrollTop !== null) {
             returnToPhotoAutoScrollRef.current = true;
             el.scrollTop = nextScrollTop;
@@ -614,12 +616,20 @@ export const MasonryGrid = memo(
               returnToPhotoFocusFrameRef.current = 0;
               const card = Array.from(
                 scrollRef.current?.querySelectorAll<HTMLElement>(
-                  '[data-photo-id][role="option"]'
+                  '[data-photo-id][role="option"], [data-photo-id][role="button"], [data-sequence-tray-id]'
                 ) ?? []
-              ).find((element) => element.dataset.photoId === String(targetId));
+              ).find((element) =>
+                targetId < 0
+                  ? element.dataset.sequenceTrayId === String(-targetId)
+                  : element.dataset.photoId === String(targetId)
+              );
               if (card) {
-                card.focus({ preventScroll: true });
+                if (targetId >= 0) {
+                  card.focus({ preventScroll: true });
+                }
                 pendingReturnFocusIdRef.current = null;
+                completedReturnRequestRef.current = returnToPhotoRequest;
+                onReturnLocatedRef.current?.(returnToPhotoRequest);
               } else if (attempt < 2) {
                 focusReturnCard(attempt + 1);
               } else {
@@ -689,6 +699,7 @@ export const MasonryGrid = memo(
       scrollToAlignment,
       scrollToId,
       returnToPhotoId,
+      returnToMemberId,
       returnToPhotoRequest,
       routeKey,
       containerWidth,
@@ -1022,9 +1033,11 @@ export const MasonryGrid = memo(
     prevProps.selectionActive === nextProps.selectionActive &&
     prevProps.scrollToId === nextProps.scrollToId &&
     prevProps.returnToPhotoId === nextProps.returnToPhotoId &&
+    prevProps.returnToMemberId === nextProps.returnToMemberId &&
     prevProps.returnToPhotoRequest === nextProps.returnToPhotoRequest &&
     prevProps.onScrollTopChange === nextProps.onScrollTopChange &&
     prevProps.onRestoreSettled === nextProps.onRestoreSettled &&
+    prevProps.onReturnLocated === nextProps.onReturnLocated &&
     prevProps.topInset === nextProps.topInset &&
     prevProps.showGroupHeaders === nextProps.showGroupHeaders &&
     prevProps.routeKey === nextProps.routeKey &&

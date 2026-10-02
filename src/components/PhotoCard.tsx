@@ -1,5 +1,4 @@
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
-import { Eye } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -10,6 +9,7 @@ import {
 import type { SearchMatch } from "@/types/photo";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { RecentlyViewedBadge } from "./RecentlyViewedBadge";
 
 export interface FaceOverlay {
   height: number;
@@ -439,19 +439,7 @@ export const PhotoCard = memo(function PhotoCard({
       : "ring-2 ring-primary ring-offset-1 ring-offset-background";
   }
 
-  const recentlyViewedBadge = recentlyViewed ? (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex h-6 items-center px-2">
-      <span
-        aria-label={t("recentlyViewedPhoto")}
-        className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/30 bg-background/85 px-1.5 py-0.5 font-medium text-[10px] text-primary shadow-sm backdrop-blur-sm"
-        data-recently-viewed="true"
-        role="status"
-      >
-        <Eye aria-hidden="true" className="h-3 w-3 shrink-0" />
-        <span className="truncate">{t("recentlyViewedPhoto")}</span>
-      </span>
-    </div>
-  ) : null;
+  const recentlyViewedBadge = recentlyViewed ? <RecentlyViewedBadge /> : null;
 
   const recentlyViewedClass = isRecentlyViewedPulseActive
     ? "photo-card-recently-viewed-pulse"
