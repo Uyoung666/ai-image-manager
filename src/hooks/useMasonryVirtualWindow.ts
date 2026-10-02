@@ -1,4 +1,4 @@
-import { type CSSProperties, type RefObject, useMemo } from "react";
+import { type CSSProperties, useMemo } from "react";
 import type { HeaderPosition, MasonryItem } from "@/hooks/useMasonryLayout";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 import {
@@ -119,12 +119,9 @@ export function getVisibleMasonryHeaders(
 
 interface UseMasonryVirtualWindowOptions {
   columnCount: number;
-  hasInitialPositionedRef: RefObject<boolean>;
   headerPositions: HeaderPosition[];
-  initialScrollTop: number;
   overscan: number;
   positions: MasonryItem[];
-  scrollRef: RefObject<HTMLDivElement | null>;
   scrollTop: number;
   velocity: number;
   viewportHeight: number;
@@ -133,12 +130,9 @@ interface UseMasonryVirtualWindowOptions {
 
 export function useMasonryVirtualWindow({
   columnCount,
-  hasInitialPositionedRef,
   headerPositions,
-  initialScrollTop,
   overscan,
   positions,
-  scrollRef,
   scrollTop,
   velocity,
   visibilityIndex,
@@ -161,17 +155,10 @@ export function useMasonryVirtualWindow({
   );
 
   const visibleItems = useMemo(() => {
-    const effectiveScrollTop = hasInitialPositionedRef.current
-      ? (scrollRef.current?.scrollTop ?? scrollTop)
-      : initialScrollTop;
-    const effectiveHeight =
-      viewportHeight > 0
-        ? viewportHeight
-        : (scrollRef.current?.clientHeight ?? 0);
     const result = getVisibleMasonryItems(
       positions,
-      effectiveScrollTop,
-      effectiveHeight,
+      scrollTop,
+      viewportHeight,
       velocityOverscanPx,
       visibilityIndex
     );
@@ -182,10 +169,7 @@ export function useMasonryVirtualWindow({
     );
     return result;
   }, [
-    hasInitialPositionedRef,
-    initialScrollTop,
     positions,
-    scrollRef,
     scrollTop,
     velocity,
     velocityOverscanPx,
@@ -194,17 +178,13 @@ export function useMasonryVirtualWindow({
   ]);
 
   const visibleHeaders = useMemo(() => {
-    const effectiveHeight =
-      viewportHeight > 0
-        ? viewportHeight
-        : (scrollRef.current?.clientHeight ?? 0);
     return getVisibleMasonryHeaders(
       headerPositions,
       scrollTop,
-      effectiveHeight,
+      viewportHeight,
       overscanPx
     );
-  }, [headerPositions, scrollRef, scrollTop, viewportHeight, overscanPx]);
+  }, [headerPositions, scrollTop, viewportHeight, overscanPx]);
 
   return { overscanPx, velocityOverscanPx, visibleHeaders, visibleItems };
 }

@@ -965,19 +965,16 @@ export const PhotoGrid = memo(
     const [internalColumnWidth, setInternalColumnWidth] =
       useState(loadGridColumnWidth);
     const targetColWidth = columnWidth ?? internalColumnWidth;
-    const [columnCount, setColumnCount] = useState(4);
     const [containerWidth, setContainerWidth] = useState(0);
+    const columnCount = Math.max(
+      MIN_COLUMNS,
+      Math.floor(containerWidth / targetColWidth)
+    );
     const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const toolbarRef = useRef<HTMLDivElement>(null);
     const [toolbarHeight, setToolbarHeight] = useState(0);
     const observerRef = useRef<ResizeObserver | null>(null);
-    const targetColWidthRef = useRef(targetColWidth);
-    targetColWidthRef.current = targetColWidth;
-    const metricsRef = useRef({
-      columnCount: 4,
-      width: 0,
-    });
     const handleGridScrollTopChange = useCallback(
       (scrollTop: number) => {
         setIsToolbarScrolled((previous) => {
@@ -1243,64 +1240,27 @@ export const PhotoGrid = memo(
       sort: SortField;
     } | null>(null);
 
-    const applyGridMetrics = useCallback((width: number) => {
-      const nextColumnCount = Math.max(
-        MIN_COLUMNS,
-        Math.floor(width / targetColWidthRef.current)
-      );
-      const prev = metricsRef.current;
-      if (prev.width !== width) {
-        metricsRef.current = { ...metricsRef.current, width };
-        setContainerWidth(width);
+    const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
       }
-      if (prev.columnCount !== nextColumnCount) {
-        metricsRef.current = {
-          ...metricsRef.current,
-          columnCount: nextColumnCount,
-        };
-        setColumnCount(nextColumnCount);
-      }
-    }, []);
-
-    const containerCallbackRef = useCallback(
-      (node: HTMLDivElement | null) => {
-        if (observerRef.current) {
-          observerRef.current.disconnect();
-          observerRef.current = null;
-        }
-        containerRef.current = node;
-        if (!node) {
-          return;
-        }
-        // Set initial width synchronously so MasonryGrid never renders with
-        // containerWidth=0 (avoids a blank first frame while waiting for the
-        // async ResizeObserver callback).
-        const w = node.clientWidth;
-        applyGridMetrics(w);
-        // ResizeObserver for subsequent size changes.
-        const observer = new ResizeObserver(([entry]) => {
-          applyGridMetrics(entry.contentRect.width);
-        });
-        observer.observe(node);
-        observerRef.current = observer;
-      },
-      [applyGridMetrics]
-    );
-
-    useEffect(() => {
-      const el = containerRef.current;
-      if (!el) {
+      containerRef.current = node;
+      if (!node) {
         return;
       }
-      const cols = Math.max(
-        MIN_COLUMNS,
-        Math.floor(containerWidth / targetColWidth)
-      );
-      if (metricsRef.current.columnCount !== cols) {
-        metricsRef.current = { ...metricsRef.current, columnCount: cols };
-        setColumnCount(cols);
-      }
-    }, [targetColWidth, containerWidth]);
+      // Set initial width synchronously so MasonryGrid never renders with
+      // containerWidth=0 (avoids a blank first frame while waiting for the
+      // async ResizeObserver callback).
+      const w = node.clientWidth;
+      setContainerWidth(w);
+      // ResizeObserver for subsequent size changes.
+      const observer = new ResizeObserver(([entry]) => {
+        setContainerWidth(entry.contentRect.width);
+      });
+      observer.observe(node);
+      observerRef.current = observer;
+    }, []);
 
     // Track the single selected photo id for scroll-to behavior
     const scrollToId = useMemo(() => {

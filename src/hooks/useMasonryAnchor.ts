@@ -48,6 +48,7 @@ export function useMasonryAnchor<T extends { id: number }>({
   visibilityIndex,
 }: UseMasonryAnchorOptions<T>): {
   getCurrentAnchor: () => MasonryAnchor | null;
+  getEnforcedAnchor: () => { itemId: number; ratio: number } | null;
   gridRef: RefObject<MasonryGridHandle | null>;
 } {
   const latestPositionsRef = useRef(positions);
@@ -60,6 +61,11 @@ export function useMasonryAnchor<T extends { id: number }>({
     ratio: number;
     expiresAt: number;
   } | null>(null);
+
+  const getEnforcedAnchor = useCallback(() => {
+    const lock = enforceLockRef.current;
+    return lock && Date.now() < lock.expiresAt ? lock : null;
+  }, []);
 
   useLayoutEffect(() => {
     latestPositionsRef.current = positions;
@@ -194,5 +200,5 @@ export function useMasonryAnchor<T extends { id: number }>({
     };
   }, [forceUnlockRef, scrollRef]);
 
-  return { getCurrentAnchor, gridRef };
+  return { getCurrentAnchor, getEnforcedAnchor, gridRef };
 }

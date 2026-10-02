@@ -35,6 +35,7 @@ import {
 } from "@/hooks/useMasonryVirtualWindow";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
+import { getMasonryReflowScrollTop } from "@/utils/masonry-reflow";
 
 export type { GroupHeaderInput as GroupHeader, MasonryGridHandle };
 
@@ -45,6 +46,18 @@ const SCROLL_RENDER_STEP_PX = 96;
 const IMAGE_RENDER_OVERSCAN_VIEWPORTS_BEFORE = 1;
 const IMAGE_RENDER_OVERSCAN_VIEWPORTS_AFTER = 2;
 const MIN_SCROLLBAR_THUMB_HEIGHT = 24;
+
+function hasMatchingLayoutWidth(element: HTMLElement, width: number): boolean {
+  if (element.clientWidth === 0) {
+    return true;
+  }
+  const style = getComputedStyle(element);
+  const contentWidth =
+    element.clientWidth -
+    (Number.parseFloat(style.paddingLeft) || 0) -
+    (Number.parseFloat(style.paddingRight) || 0);
+  return Math.abs(contentWidth - width) <= 1;
+}
 
 export function shouldRenderItemImage(
   style: React.CSSProperties,
@@ -72,7 +85,20 @@ export function shouldUpdateScrollRenderTop(
   );
 }
 
-export const getMasonryReturnScrollTop = getReturnScrollTop;
+export function getMasonryReturnScrollTop(
+  input: Parameters<typeof getReturnScrollTop>[0] & { paddingTop?: number }
+): number | null {
+  const { cardTop, cardHeight, scrollTop, clientHeight, topInset, paddingTop } =
+    input;
+  if (
+    paddingTop !== undefined &&
+    cardTop + paddingTop >= scrollTop + topInset &&
+    cardTop + cardHeight + paddingTop <= scrollTop + clientHeight
+  ) {
+    return null;
+  }
+  return getReturnScrollTop(input);
+}
 
 interface MasonryGridProps {
   className?: string;
@@ -168,6 +194,7 @@ export const MasonryGrid = memo(
     const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rafRef = useRef<number>(0);
     const prevScrollYRef = useRef(0);
+    const reflowScrollTopRef = useRef<number | null>(null);
     const returnToPhotoAutoScrollRef = useRef(false);
     const returnToPhotoFocusFrameRef = useRef<number>(0);
     const routeForceUnlockRef = useRef<(() => void) | null>(null);
@@ -195,7 +222,7 @@ export const MasonryGrid = memo(
       [items]
     );
 
-    const { getCurrentAnchor, gridRef } = useMasonryAnchor({
+    const { getCurrentAnchor, getEnforcedAnchor, gridRef } = useMasonryAnchor({
       containerWidth,
       forwardedRef: ref,
       forceUnlockRef: routeForceUnlockRef,
@@ -298,7 +325,13 @@ export const MasonryGrid = memo(
     );
 
     const handleScroll = useCallback(() => {
-      if (returnToPhotoAutoScrollRef.current) {
+      const reflowTop = reflowScrollTopRef.current;
+      const isReflowScroll =
+        reflowTop !== null &&
+        Math.abs((scrollRef.current?.scrollTop ?? 0) - reflowTop) <=
+          SCROLL_TOP_EPSILON;
+      reflowScrollTopRef.current = null;
+      if (returnToPhotoAutoScrollRef.current || isReflowScroll) {
         returnToPhotoAutoScrollRef.current = false;
       } else if (
         pendingReturnToPhotoRequestRef.current !== null ||
@@ -450,6 +483,11 @@ export const MasonryGrid = memo(
     }, [syncScrollMetrics]);
 
     const prevPositionsRef = useRef(positions);
+    const prevItemsRef = useRef(items);
+    const prevColumnCountRef = useRef(columnCount);
+    const prevGapRef = useRef(gap);
+    const prevTopInsetRef = useRef(topInset);
+    const prevPaddingTopRef = useRef(0);
     const prevScrollToAlignmentRef = useRef(scrollToAlignment);
     const prevScrollToIdRef = useRef(scrollToId);
     const prevReturnToPhotoRequestRef = useRef(0);
@@ -469,15 +507,142 @@ export const MasonryGrid = memo(
     const onReturnLocatedRef = useRef(onReturnLocated);
     onReturnLocatedRef.current = onReturnLocated;
 
+    const scrollElement = scrollRef.current;
+    const effectiveViewportHeight =
+      scrollElement?.clientHeight || viewportHeight;
+    const scrollStyle = scrollElement ? getComputedStyle(scrollElement) : null;
+    const paddingTop =
+      topInset > 0
+        ? topInset + 8
+        : Number.parseFloat(scrollStyle?.paddingTop ?? "0") || 0;
+    const paddingBottom =
+      Number.parseFloat(scrollStyle?.paddingBottom ?? "0") || 0;
+    const clampScrollTop = (value: number) =>
+      Math.max(
+        0,
+        Math.min(
+          value,
+          totalHeight + paddingTop + paddingBottom - effectiveViewportHeight
+        )
+      );
+    const plannedScrollTop = (() => {
+      if (
+        !scrollElement ||
+        prevRouteKeyRef.current !== routeKey ||
+        !restoreReady ||
+        !hasInitialPositionedRef.current
+      ) {
+        return null;
+      }
+      const currentScrollTop = scrollElement.scrollTop;
+      const geometryChanged =
+        containerWidth !== prevContainerWidthRef.current ||
+        columnCount !== prevColumnCountRef.current ||
+        gap !== prevGapRef.current ||
+        topInset !== prevTopInsetRef.current;
+      let reflowScrollTop: number | null = null;
+      if (
+        geometryChanged &&
+        containerWidth > 0 &&
+        prevContainerWidthRef.current > 0 &&
+        (positions !== prevPositionsRef.current ||
+          topInset !== prevTopInsetRef.current) &&
+        prevPositionsRef.current.length > 0
+      ) {
+        const enforced = getEnforcedAnchor();
+        const enforcedIndex = enforced
+          ? idToIndexMap.get(enforced.itemId)
+          : undefined;
+        const enforcedPosition =
+          enforcedIndex === undefined ? undefined : positions[enforcedIndex];
+        reflowScrollTop = clampScrollTop(
+          enforced && enforcedPosition
+            ? enforcedPosition.top + enforcedPosition.height * enforced.ratio
+            : getMasonryReflowScrollTop({
+                idToIndexMap,
+                nextPaddingTop: paddingTop,
+                positions,
+                previousItems: prevItemsRef.current,
+                previousPaddingTop: prevPaddingTopRef.current,
+                previousPositions: prevPositionsRef.current,
+                scrollTop: currentScrollTop,
+                topInset: prevTopInsetRef.current,
+              })
+        );
+      }
+      const positionedScrollTop = reflowScrollTop ?? currentScrollTop;
+      const returnPending =
+        returnToPhotoId !== null &&
+        returnToPhotoRequest > 0 &&
+        (returnToPhotoRequest !== prevReturnToPhotoRequestRef.current ||
+          pendingReturnToPhotoRequestRef.current === returnToPhotoRequest ||
+          (returnToPhotoId !== prevReturnToPhotoIdRef.current &&
+            completedReturnRequestRef.current !== returnToPhotoRequest));
+      if (returnPending) {
+        const index = idToIndexMap.get(returnToPhotoId);
+        const position = index === undefined ? undefined : positions[index];
+        if (!position) {
+          return null;
+        }
+        const memberContainerVisible =
+          returnToMemberId !== null &&
+          returnToPhotoId < 0 &&
+          position.top + position.height > positionedScrollTop &&
+          position.top <
+            positionedScrollTop + effectiveViewportHeight - topInset;
+        const target = memberContainerVisible
+          ? null
+          : getMasonryReturnScrollTop({
+              cardHeight: position.height,
+              cardTop: position.top,
+              clientHeight: effectiveViewportHeight,
+              paddingTop,
+              scrollTop: positionedScrollTop,
+              topInset,
+            });
+        return target === null ? reflowScrollTop : clampScrollTop(target);
+      }
+      if (
+        scrollToId != null &&
+        (scrollToId !== prevScrollToIdRef.current ||
+          scrollToAlignment !== prevScrollToAlignmentRef.current)
+      ) {
+        const index = idToIndexMap.get(scrollToId);
+        const position = index === undefined ? undefined : positions[index];
+        if (
+          position &&
+          (position.top < positionedScrollTop + topInset - paddingTop ||
+            position.top + position.height >
+              positionedScrollTop + effectiveViewportHeight - paddingTop)
+        ) {
+          return clampScrollTop(
+            scrollToAlignment === "start"
+              ? position.top + paddingTop - topInset
+              : position.top +
+                  paddingTop -
+                  (effectiveViewportHeight + topInset - position.height) / 2
+          );
+        }
+      }
+      return reflowScrollTop;
+    })();
+    // Select the final virtual window before React can unmount retained cards.
+    const effectiveScrollTop =
+      plannedScrollTop ??
+      (hasInitialPositionedRef.current
+        ? (scrollElement?.scrollTop ?? scrollTop)
+        : initialScrollTop);
+
     useLayoutEffect(() => {
-      const prevPositions = prevPositionsRef.current;
-      const prevScrollToAlignment = prevScrollToAlignmentRef.current;
-      const prevScrollToId = prevScrollToIdRef.current;
       const prevReturnToPhotoRequest = prevReturnToPhotoRequestRef.current;
       const prevReturnToPhotoId = prevReturnToPhotoIdRef.current;
       const prevRouteKey = prevRouteKeyRef.current;
-      const prevWidth = prevContainerWidthRef.current;
       prevPositionsRef.current = positions;
+      prevItemsRef.current = items;
+      prevColumnCountRef.current = columnCount;
+      prevGapRef.current = gap;
+      prevTopInsetRef.current = topInset;
+      prevPaddingTopRef.current = paddingTop;
       prevScrollToAlignmentRef.current = scrollToAlignment;
       prevScrollToIdRef.current = scrollToId;
       prevReturnToPhotoRequestRef.current = returnToPhotoRequest;
@@ -537,20 +702,22 @@ export const MasonryGrid = memo(
         return;
       }
 
-      const positionsChanged = positions !== prevPositions;
-      const scrollToIdChanged = scrollToId !== prevScrollToId;
-      const scrollToAlignmentChanged =
-        scrollToAlignment !== prevScrollToAlignment;
-      const widthChanged =
-        containerWidth !== prevWidth && containerWidth > 0 && prevWidth > 0;
-
-      const syncScrollTopBeforePaint = (nextScrollTop: number) => {
-        const next = Math.max(0, nextScrollTop);
-        el.scrollTop = next;
-        prevScrollYRef.current = next;
-        scrollTopStateRef.current = next;
-        setScrollTop(next);
-      };
+      if (
+        plannedScrollTop !== null &&
+        hasMatchingLayoutWidth(el, containerWidth)
+      ) {
+        el.scrollTop = plannedScrollTop;
+        reflowScrollTopRef.current = el.scrollTop;
+        prevScrollYRef.current = el.scrollTop;
+        scrollTopStateRef.current = el.scrollTop;
+        setScrollTop(el.scrollTop);
+        scrollOverscanMultiplierRef.current = 1;
+        scrollVelocityRef.current = 0;
+        setScrollVelocity(0);
+        syncScrollMetrics(el);
+        updateScrollbarThumbPosition(el);
+        onScrollTopChange?.(el.scrollTop);
+      }
 
       if (
         pendingReturnToPhotoRequestRef.current === returnToPhotoRequest &&
@@ -564,6 +731,11 @@ export const MasonryGrid = memo(
         returnToPhotoFrameRef.current = requestAnimationFrame(() => {
           returnToPhotoFrameRef.current = 0;
           const el = scrollRef.current;
+          // A parent can resize before ResizeObserver supplies the new width.
+          // Keep the request pending until positions describe that final surface.
+          if (el && !hasMatchingLayoutWidth(el, containerWidth)) {
+            return;
+          }
           const targetId = latestReturnToPhotoIdRef.current;
           const targetPositions = latestPositionsRef.current;
           const targetIndex =
@@ -595,6 +767,7 @@ export const MasonryGrid = memo(
                 cardHeight: position.height,
                 cardTop: position.top,
                 clientHeight: el.clientHeight,
+                paddingTop,
                 scrollTop: el.scrollTop,
                 topInset,
               });
@@ -641,60 +814,13 @@ export const MasonryGrid = memo(
         });
         return;
       }
-
-      // A selection change can open the detail panel and resize the grid in
-      // the same frame. Resolve the requested item against the final positions
-      // before preserving the previous width anchor, otherwise the resize
-      // branch consumes the one-shot scroll request.
-      if (
-        scrollToId != null &&
-        (scrollToIdChanged || scrollToAlignmentChanged)
-      ) {
-        const idx = idToIndexMap.get(scrollToId);
-        if (idx !== undefined && positions[idx]) {
-          const pos = positions[idx];
-          const itemTop = pos.top;
-          const itemBottom = pos.top + pos.height;
-          const viewTop = el.scrollTop;
-          const viewBottom = el.scrollTop + el.clientHeight;
-          if (itemTop < viewTop || itemBottom > viewBottom) {
-            syncScrollTopBeforePaint(
-              scrollToAlignment === "start"
-                ? itemTop
-                : itemTop - (el.clientHeight - pos.height) / 2
-            );
-          }
-        }
-        return;
-      }
-
-      if (widthChanged && positionsChanged && prevPositions.length > 0) {
-        const currentScrollTop = el.scrollTop;
-        if (currentScrollTop <= 0) {
-          return;
-        }
-
-        let anchorIdx = -1;
-        let anchorOffset = 0;
-        for (let i = 0; i < prevPositions.length; i++) {
-          const p = prevPositions[i];
-          if (p.top + p.height > currentScrollTop) {
-            anchorIdx = i;
-            anchorOffset = p.top - currentScrollTop;
-            break;
-          }
-        }
-        if (anchorIdx < 0 || !positions[anchorIdx]) {
-          return;
-        }
-
-        const newTop = positions[anchorIdx].top - anchorOffset;
-        if (Math.abs(newTop - currentScrollTop) > 1) {
-          syncScrollTopBeforePaint(newTop);
-        }
-        return;
-      }
     }, [
+      columnCount,
+      gap,
+      items,
+      onScrollTopChange,
+      paddingTop,
+      plannedScrollTop,
       positions,
       scrollToAlignment,
       scrollToId,
@@ -703,8 +829,9 @@ export const MasonryGrid = memo(
       returnToPhotoRequest,
       routeKey,
       containerWidth,
-      idToIndexMap,
       topInset,
+      syncScrollMetrics,
+      updateScrollbarThumbPosition,
     ]);
 
     useEffect(() => {
@@ -722,27 +849,30 @@ export const MasonryGrid = memo(
 
     const { visibleHeaders, visibleItems } = useMasonryVirtualWindow({
       columnCount,
-      hasInitialPositionedRef,
       headerPositions,
-      initialScrollTop,
       overscan,
       positions,
-      scrollRef,
-      scrollTop,
+      scrollTop: effectiveScrollTop,
       velocity: scrollVelocity,
       visibilityIndex,
-      viewportHeight,
+      viewportHeight: effectiveViewportHeight,
     });
 
     useEffect(() => {
       let renderImageCount = 0;
       for (const { style } of visibleItems) {
-        if (shouldRenderItemImage(style, scrollTop, viewportHeight)) {
+        if (
+          shouldRenderItemImage(
+            style,
+            effectiveScrollTop,
+            effectiveViewportHeight
+          )
+        ) {
           renderImageCount++;
         }
       }
       recordGalleryPerf("masonryImageItems", renderImageCount);
-    }, [visibleItems, scrollTop, viewportHeight]);
+    }, [visibleItems, effectiveScrollTop, effectiveViewportHeight]);
 
     const scrollToTop = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
@@ -905,6 +1035,7 @@ export const MasonryGrid = memo(
               height: "100%",
               overflowX: "hidden",
               overflowY: "auto",
+              overflowAnchor: "none",
               paddingTop: topInset > 0 ? topInset + 8 : undefined,
             } as React.CSSProperties
           }
@@ -945,8 +1076,8 @@ export const MasonryGrid = memo(
                   {renderItem(items[index], index, style, {
                     renderImage: shouldRenderItemImage(
                       style,
-                      scrollTop,
-                      viewportHeight
+                      effectiveScrollTop,
+                      effectiveViewportHeight
                     ),
                   })}
                 </div>
