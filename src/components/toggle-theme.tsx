@@ -1,46 +1,82 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { getResolvedTheme, setTheme, type ThemeMode } from "@/actions/theme";
 import {
-  getCurrentTheme,
-  getResolvedTheme,
-  setTheme,
-  type ThemeMode,
-} from "@/actions/theme";
+  cancelThemeViewTransition,
+  startThemeViewTransition,
+} from "@/utils/theme-view-transition";
 
 interface ToggleThemeProps {
   onChange?: (mode: ThemeMode) => void;
 }
 
 export default function ToggleTheme({ onChange }: ToggleThemeProps) {
-  const [_mode, setMode] = useState<ThemeMode>("dark");
-
-  useEffect(() => {
-    getCurrentTheme().then(setMode);
-  }, []);
-
-  const handleToggle = useCallback(async () => {
-    // 二元切换：始终在 dark / light 之间切换
-    // 若当前为 system，先解析实际主题再切换到对面
-    const resolved = await getResolvedTheme();
-    const next = resolved === "dark" ? "light" : "dark";
-    await setTheme(next);
-    setMode(next);
-    setIsDark(next === "dark");
-    onChange?.(next);
-  }, [onChange]);
-
-  // checked = 深色模式；若为 system，解析实际主题来判断
+  const { t } = useTranslation();
+  const controlRef = useRef<HTMLLabelElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const busyRef = useRef(false);
+  const mountedRef = useRef(false);
+  const [isPending, setIsPending] = useState(false);
   const [isDark, setIsDark] = useState(true);
 
   useEffect(() => {
-    getResolvedTheme().then((resolved) => setIsDark(resolved === "dark"));
+    mountedRef.current = true;
+    getResolvedTheme().then((resolved) => {
+      if (mountedRef.current && !busyRef.current) {
+        setIsDark(resolved === "dark");
+      }
+    });
+    return () => {
+      mountedRef.current = false;
+      cancelThemeViewTransition();
+    };
   }, []);
 
+  const handleToggle = useCallback(async () => {
+    if (busyRef.current) {
+      return;
+    }
+    busyRef.current = true;
+    const restoreFocus = document.activeElement === inputRef.current;
+    setIsPending(true);
+    try {
+      const resolved = await getResolvedTheme();
+      const next = resolved === "dark" ? "light" : "dark";
+      await startThemeViewTransition(controlRef.current, async () => {
+        await setTheme(next, { animateColors: false });
+        if (mountedRef.current) {
+          flushSync(() => {
+            setIsDark(next === "dark");
+            onChange?.(next);
+          });
+        }
+      });
+    } catch {
+      if (mountedRef.current) {
+        toast.error(t("saveFailed"));
+      }
+    } finally {
+      busyRef.current = false;
+      if (mountedRef.current) {
+        flushSync(() => setIsPending(false));
+        if (restoreFocus && document.activeElement === document.body) {
+          inputRef.current?.focus({ preventScroll: true });
+        }
+      }
+    }
+  }, [onChange, t]);
+
   return (
-    <label className="theme-toggle-switch">
+    <label className="theme-toggle-switch" ref={controlRef}>
       <input
+        aria-label={t("settingsTheme")}
         checked={isDark}
         className="theme-toggle-input"
+        disabled={isPending}
         onChange={handleToggle}
+        ref={inputRef}
         type="checkbox"
       />
       <div className="theme-toggle-slider">

@@ -11,6 +11,11 @@ interface TemporaryThemeOverride {
 
 let temporaryThemeOverride: TemporaryThemeOverride | null = null;
 let latestSystemResolvedTheme: "dark" | "light" | null = null;
+let themeTransitionTimer: ReturnType<typeof setTimeout> | undefined;
+
+interface ThemeOptions {
+  animateColors?: boolean;
+}
 
 export function getCurrentTheme(): Promise<ThemeMode> {
   const local = localStorage.getItem(
@@ -27,13 +32,16 @@ export async function getResolvedTheme(): Promise<"dark" | "light"> {
   return mode;
 }
 
-export async function setTheme(newTheme: ThemeMode) {
+export async function setTheme(
+  newTheme: ThemeMode,
+  options: ThemeOptions = {}
+) {
   await ipc.client.theme.setThemeMode(newTheme);
   localStorage.setItem(LOCAL_STORAGE_KEYS.THEME, newTheme);
   if (newTheme === "system") {
     latestSystemResolvedTheme = null;
   }
-  applyResolvedTheme();
+  await applyResolvedTheme(options.animateColors);
 }
 
 /**
@@ -81,15 +89,15 @@ export async function syncWithLocalTheme() {
   await setTheme(local || "system");
 }
 
-async function applyResolvedTheme() {
+async function applyResolvedTheme(animateColors = true) {
   if (temporaryThemeOverride?.mode === "dark") {
-    updateDocumentTheme(true);
+    updateDocumentTheme(true, animateColors);
     return;
   }
 
   const mode = await getCurrentTheme();
   if (temporaryThemeOverride?.mode === "dark") {
-    updateDocumentTheme(true);
+    updateDocumentTheme(true, animateColors);
     return;
   }
 
@@ -99,7 +107,7 @@ async function applyResolvedTheme() {
   } else {
     isDark = mode === "dark";
   }
-  updateDocumentTheme(isDark);
+  updateDocumentTheme(isDark, animateColors);
 }
 
 export function listenSystemThemeChanges() {
@@ -132,12 +140,16 @@ function getSystemResolvedTheme(): "dark" | "light" {
   return "light";
 }
 
-function updateDocumentTheme(isDark: boolean) {
+function updateDocumentTheme(isDark: boolean, animateColors = true) {
   const html = document.documentElement;
-  // Enable transition class for smooth color shift
-  html.classList.add("transitioning");
+  clearTimeout(themeTransitionTimer);
+  html.classList.toggle("transitioning", animateColors);
   html.classList.toggle("dark", isDark);
   html.classList.toggle("light", !isDark);
-  // Remove transition class after animation completes
-  setTimeout(() => html.classList.remove("transitioning"), 300);
+  if (animateColors) {
+    themeTransitionTimer = setTimeout(
+      () => html.classList.remove("transitioning"),
+      300
+    );
+  }
 }

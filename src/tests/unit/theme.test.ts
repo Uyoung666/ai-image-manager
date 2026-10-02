@@ -21,6 +21,26 @@ vi.mock("@/ipc/manager", () => ({
 }));
 
 describe("temporary theme override", () => {
+  it("resolves after applying the document theme without color fades", async () => {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.THEME, "light");
+    document.documentElement.classList.add("light", "transitioning");
+    await setTheme("dark", { animateColors: false });
+    expect(document.documentElement).toHaveClass("dark");
+    expect(document.documentElement).not.toHaveClass("light", "transitioning");
+    expect(localStorage.getItem(LOCAL_STORAGE_KEYS.THEME)).toBe("dark");
+  });
+
+  it("preserves the theme and preference when IPC fails", async () => {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.THEME, "light");
+    document.documentElement.classList.add("light");
+    mocks.setThemeMode.mockRejectedValueOnce(new Error("IPC failed"));
+    await expect(setTheme("dark", { animateColors: false })).rejects.toThrow(
+      "IPC failed"
+    );
+    expect(document.documentElement).toHaveClass("light");
+    expect(localStorage.getItem(LOCAL_STORAGE_KEYS.THEME)).toBe("light");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();

@@ -1,6 +1,7 @@
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { isReducedMotionEnabled } from "@/actions/ui-preferences";
 import { routeTree } from "@/routeTree.gen";
+import { cancelThemeViewTransition } from "@/utils/theme-view-transition";
 import { startNavigationViewTransition } from "@/utils/view-transition-navigation";
 
 declare module "@tanstack/react-router" {
@@ -30,6 +31,7 @@ if (typeof window !== "undefined") {
 const _orig = router.navigate;
 // biome-ignore lint/suspicious/noExplicitAny: router.navigate has a complex generic signature; the opaque cast is intentional
 router.navigate = ((opts: any) => {
+  cancelThemeViewTransition();
   if (
     typeof document !== "undefined" &&
     typeof document.startViewTransition === "function" &&
