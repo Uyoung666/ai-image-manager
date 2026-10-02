@@ -254,6 +254,9 @@ test.beforeAll(async () => {
     "INSERT INTO albums(id,name,created_at) VALUES(9001,'GalleryFixture',1)"
   );
   statements.push(
+    'INSERT INTO albums(id,name,is_smart,smart_rules,created_at) VALUES(9002,\'GallerySmartFixture\',1,\'{"rules":[{"type":"fileFormat","value":"png"}]}\',1)'
+  );
+  statements.push(
     "INSERT INTO album_photos(album_id,photo_id) SELECT 9001,id FROM photos"
   );
   statements.push(
@@ -274,6 +277,61 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await app?.close();
 });
+
+for (const albumId of [9001, 9002]) {
+  test(`album ${albumId} preserves an expanded member favorite after returning from Favorites`, async () => {
+    await navigate("/people/9001");
+    await page.locator(".page-toolbar").waitFor();
+    query("UPDATE photos SET is_favorite=0 WHERE id=2", true);
+    await navigate(`/albums/${albumId}`);
+    await page.getByRole("button", { name: SEQUENCES }).click();
+    const group = page.locator('[data-sequence-id="1"]');
+    await expect(group).toBeVisible();
+    await group
+      .getByRole("button", { name: "Expand sequence photos", exact: true })
+      .click();
+    const member = page.locator('[data-photo-id="2"][role="option"]');
+    await expect(member).toBeVisible();
+    await member.getByRole("button", { name: "Favorite", exact: true }).click();
+    await expect
+      .poll(
+        () =>
+          query("SELECT is_favorite favorite FROM photos WHERE id=2")[0]
+            .favorite
+      )
+      .toBe(1);
+    await expect(
+      member.getByRole("button", { name: "Unfavorite", exact: true })
+    ).toHaveAttribute("aria-pressed", "true");
+    await navigate("/");
+    await expect(page.locator(".home-gallery-toolbar-layer")).toBeVisible();
+    await page
+      .getByRole("button", { name: "Favorite", exact: true })
+      .first()
+      .click();
+    await expect(page.locator(".home-gallery-toolbar-layer")).toBeVisible();
+    await page.getByRole("button", { name: SEQUENCES }).click();
+    await page
+      .locator('[data-sequence-id="1"]')
+      .getByRole("button", { name: "Expand sequence photos", exact: true })
+      .click();
+    await expect(
+      member.getByRole("button", { name: "Unfavorite", exact: true })
+    ).toHaveAttribute("aria-pressed", "true");
+    await navigate(`/albums/${albumId}`);
+    await page.getByRole("button", { name: SEQUENCES }).click();
+    await page
+      .locator('[data-sequence-id="1"]')
+      .getByRole("button", { name: "Expand sequence photos", exact: true })
+      .click();
+    await expect(
+      member.getByRole("button", { name: "Unfavorite", exact: true })
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      query("SELECT is_favorite favorite FROM photos WHERE id=2")[0].favorite
+    ).toBe(1);
+  });
+}
 
 for (const size of SIZES) {
   test(`${size.width}x${size.height} preserves toolbar, separation and detail layout`, async () => {

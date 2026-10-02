@@ -3,6 +3,8 @@
  *
  * Regression coverage for soft-deleted photos in manual albums.
  */
+
+import { call } from "@orpc/server";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +24,7 @@ vi.mock("@/services/smart-album-engine", () => ({
 
 import { albumPhotos, albums, photos } from "@/db/schema";
 import { getAlbum } from "@/ipc/albums/handlers";
+import { evaluateSmartAlbum } from "@/services/smart-album-engine";
 
 describe("manual album visibility", () => {
   const sqlite = new Database(":memory:");
@@ -51,6 +54,7 @@ describe("manual album visibility", () => {
         format TEXT,
         thumbnail_path TEXT,
         is_indexed INTEGER NOT NULL DEFAULT 0,
+        is_favorite INTEGER NOT NULL DEFAULT 0,
         deleted_at INTEGER
       );
       CREATE TABLE album_photos (
@@ -74,6 +78,38 @@ describe("manual album visibility", () => {
 
   afterAll(() => {
     sqlite.close();
+  });
+
+  it.each([
+    false,
+    true,
+  ])("reloads current favorite flags for an album (smart=%s)", async (smart) => {
+    sqlite.exec(`
+      UPDATE photos SET is_favorite = 1 WHERE id = 1;
+      INSERT INTO photos (id, path, filename, is_favorite) VALUES (3, '/photos/other.jpg', 'other.jpg', 0);
+      INSERT INTO album_photos (id, album_id, photo_id, sort_order) VALUES (3, 1, 3, 2);
+    `);
+    if (smart) {
+      sqlite
+        .prepare("UPDATE albums SET is_smart = 1, smart_rules = ? WHERE id = 1")
+        .run(JSON.stringify({ rules: [] }));
+      vi.mocked(evaluateSmartAlbum).mockReturnValue([1, 2, 3]);
+    }
+    const loadFlags = async () =>
+      (await call(getAlbum, { id: 1 })).photos
+        .map((photo) => ({ id: photo.id, isFavorite: photo.isFavorite }))
+        .sort((a, b) => a.id - b.id);
+    expect(await loadFlags()).toEqual([
+      { id: 1, isFavorite: true },
+      { id: 3, isFavorite: false },
+    ]);
+    sqlite.exec(
+      "UPDATE photos SET is_favorite = CASE id WHEN 1 THEN 0 WHEN 3 THEN 1 ELSE is_favorite END"
+    );
+    expect(await loadFlags()).toEqual([
+      { id: 1, isFavorite: false },
+      { id: 3, isFavorite: true },
+    ]);
   });
 
   it("hides soft-deleted photos while keeping the album association", async () => {

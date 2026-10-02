@@ -180,6 +180,7 @@ export const getAlbum = os.input(IdSchema).handler(({ input }) => {
             thumbnailPath: photos.thumbnailPath,
             fileDate: photos.fileDate,
             isIndexed: photos.isIndexed,
+            isFavorite: photos.isFavorite,
           })
           .from(photos)
           .where(and(inArray(photos.id, photoIds), isNull(photos.deletedAt)))
@@ -210,6 +211,7 @@ export const getAlbum = os.input(IdSchema).handler(({ input }) => {
       thumbnailPath: photos.thumbnailPath,
       fileDate: photos.fileDate,
       isIndexed: photos.isIndexed,
+      isFavorite: photos.isFavorite,
       sortOrder: albumPhotos.sortOrder,
     })
     .from(albumPhotos)
