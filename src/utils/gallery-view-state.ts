@@ -15,11 +15,33 @@ export function getDisplayedSequenceMode(
   return sequenceViewReady ? mode : currentMode;
 }
 
+/** Do not expose appended search photos until their ownership is confirmed. */
+export function getSequenceResolvedPhotos<T extends { id: number }>({
+  photos,
+  generation,
+  resolvedGeneration,
+  resolvedIds,
+}: {
+  photos: T[];
+  generation: number | null;
+  resolvedGeneration: number | null;
+  resolvedIds: number[];
+}): T[] {
+  if (generation === null || generation !== resolvedGeneration) {
+    return photos;
+  }
+  const isAppend =
+    photos.length > resolvedIds.length &&
+    resolvedIds.every((id, index) => photos[index]?.id === id);
+  return isAppend ? photos.slice(0, resolvedIds.length) : photos;
+}
+
 export function canPaginateGalleryPhotos(
   mode: GallerySequenceMode,
-  hasNextPage: boolean
+  hasNextPage: boolean,
+  isSearching = false
 ): boolean {
-  return mode !== "sequences" && hasNextPage;
+  return hasNextPage && (mode !== "sequences" || isSearching);
 }
 
 export function shouldUseImmediateGalleryPhotos<T>({

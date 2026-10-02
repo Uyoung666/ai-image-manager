@@ -3,6 +3,7 @@ import {
   canPaginateGalleryPhotos,
   createSearchResultSourceKey,
   getDisplayedSequenceMode,
+  getSequenceResolvedPhotos,
   getStableSearchAppendIds,
   isGalleryRevealPending,
   isSequenceSourceReady,
@@ -10,6 +11,33 @@ import {
 } from "@/utils/gallery-view-state";
 
 describe("gallery view state", () => {
+  it("keeps only confirmed search photos until appended ownership resolves", () => {
+    const photos = [1, 2, 3, 4].map((id) => ({ id }));
+    expect(
+      getSequenceResolvedPhotos({
+        photos,
+        generation: 4,
+        resolvedGeneration: 4,
+        resolvedIds: [1, 2],
+      })
+    ).toEqual(photos.slice(0, 2));
+    expect(
+      getSequenceResolvedPhotos({
+        photos,
+        generation: 4,
+        resolvedGeneration: 4,
+        resolvedIds: [1, 2, 3, 4],
+      })
+    ).toBe(photos);
+    expect(
+      getSequenceResolvedPhotos({
+        photos,
+        generation: 5,
+        resolvedGeneration: 4,
+        resolvedIds: [1, 2],
+      })
+    ).toBe(photos);
+  });
   it("keeps the previous presentation while the target query is pending", () => {
     expect(getDisplayedSequenceMode("photos", false, "sequences")).toBe(
       "sequences"
@@ -27,6 +55,8 @@ describe("gallery view state", () => {
     expect(canPaginateGalleryPhotos("photos", true)).toBe(true);
     expect(canPaginateGalleryPhotos("photos", false)).toBe(false);
     expect(canPaginateGalleryPhotos("sequences", true)).toBe(false);
+    expect(canPaginateGalleryPhotos("sequences", true, true)).toBe(true);
+    expect(canPaginateGalleryPhotos("sequences", false, true)).toBe(false);
   });
 
   it("does not render deferred search photos after clearing search", () => {

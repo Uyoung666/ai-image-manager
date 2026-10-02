@@ -29,6 +29,34 @@ function createMouseEvent(
 }
 
 describe("usePhotoSelection", () => {
+  it("preserves valid sequence members missing from loaded pages across appends", () => {
+    const { result, rerender } = renderHook(
+      ({ photos }) =>
+        usePhotoSelection("sequence-pages", photos, {
+          validIds: [1, 2, 3, 99],
+        }),
+      { wrapper, initialProps: { photos: mockPhotos.slice(0, 1) } }
+    );
+    act(() => result.current.selectAllIds([1, 2, 3, 99]));
+    rerender({ photos: mockPhotos.slice(0, 3) });
+    expect(result.current.selectedIds).toEqual(new Set([1, 2, 3, 99]));
+  });
+  it("waits for confirmed ownership before pruning restored selection", () => {
+    sessionStorage.setItem(
+      "browse_session_delayed-ownership",
+      JSON.stringify({ selectedIds: [2], lastClickedIdx: 1, searchQuery: "" })
+    );
+    const { result, rerender } = renderHook(
+      ({ ready }) =>
+        usePhotoSelection("delayed-ownership", mockPhotos, {
+          validIds: ready ? [2] : [],
+          ready,
+        }),
+      { wrapper, initialProps: { ready: false } }
+    );
+    rerender({ ready: true });
+    expect(result.current.selectedIds).toEqual(new Set([2]));
+  });
   beforeEach(() => {
     sessionStorage.clear();
   });

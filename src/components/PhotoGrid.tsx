@@ -122,6 +122,8 @@ interface PhotoGridProps {
   onToggleFavorite?: (id: number) => void;
   onToggleSequenceExpand?: (sequenceId: number) => void;
   photos: Photo[];
+  /** A failed refresh can retain only a previously confirmed gallery. */
+  preserveOnSequenceError?: boolean;
   recentlyViewedPhotoId?: number | null;
   recentlyViewedPulseActive?: boolean;
   recentlyViewedPulseKey?: number;
@@ -883,6 +885,7 @@ export const PhotoGrid = memo(
     sequences = [],
     sequenceCount,
     sequenceError,
+    preserveOnSequenceError = false,
     sequenceLoading = false,
     sequenceMode = "photos",
     showGroupHeaders = true,
@@ -1078,7 +1081,13 @@ export const PhotoGrid = memo(
       const observer = new ResizeObserver(updateHeight);
       observer.observe(element);
       return () => observer.disconnect();
-    }, [displayPhotos.length, loading, showToolbar]);
+    }, [
+      displayPhotos.length,
+      loading,
+      sequenceLoading,
+      sequenceError,
+      showToolbar,
+    ]);
 
     const gridTopInset = Math.max(topInset, showToolbar ? toolbarHeight : 0);
     const keyboardPhotos = useMemo(
@@ -1538,7 +1547,10 @@ export const PhotoGrid = memo(
         Array.from({ length: 3 }, (_, ri) => ci * 3 + ri)
       );
       return (
-        <div className="flex flex-1 flex-col">
+        <div
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          style={{ paddingTop: showToolbar ? undefined : topInset }}
+        >
           {showToolbar && (
             <div className="flex items-center justify-between border-border border-b px-4 py-2">
               <Skeleton className="h-4 w-24 bg-card" />
@@ -1571,11 +1583,18 @@ export const PhotoGrid = memo(
       );
     }
 
-    if (sequenceError || (!loading && displayPhotos.length === 0)) {
+    if (
+      (sequenceError &&
+        (!preserveOnSequenceError || displayPhotos.length === 0)) ||
+      (!loading && displayPhotos.length === 0)
+    ) {
       const displayError = sequenceError ?? error;
       const isError = Boolean(displayError);
       return (
-        <div className="flex flex-1 flex-col">
+        <div
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          style={{ paddingTop: showToolbar ? undefined : topInset }}
+        >
           {showToolbar && (
             <div className="flex items-center justify-between border-border border-b px-4 py-2">
               <span className="truncate text-[12px] text-muted-foreground">
@@ -1725,6 +1744,23 @@ export const PhotoGrid = memo(
         </div>
 
         {/* Loading overlay */}
+        {sequenceError && displayPhotos.length > 0 && (
+          <div
+            className="absolute right-2 bottom-2 left-2 z-30 flex flex-wrap items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-[12px]"
+            role="status"
+          >
+            <span>{sequenceError}</span>
+            {onRetrySequences && (
+              <button
+                className="rounded border border-border px-2 py-1 hover:bg-muted"
+                onClick={onRetrySequences}
+                type="button"
+              >
+                {t("retry")}
+              </button>
+            )}
+          </div>
+        )}
         {loading && displayPhotos.length > 0 && (
           <div className="pointer-events-none absolute top-0 right-0 bottom-0 left-0 flex items-start justify-center bg-background/30 pt-4">
             <LoadingSpinner size="lg" />
@@ -1753,6 +1789,11 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.sequenceError !== nextProps.sequenceError) {
+      return false;
+    }
+    if (
+      prevProps.preserveOnSequenceError !== nextProps.preserveOnSequenceError
+    ) {
       return false;
     }
     if (prevProps.onRetrySequences !== nextProps.onRetrySequences) {

@@ -77,17 +77,19 @@ interface UsePhotoSelectionReturn {
  */
 export function usePhotoSelection(
   routeKey: string,
-  photos: Photo[]
+  photos: Photo[],
+  options: { validIds?: number[]; ready?: boolean } = {}
 ): UsePhotoSelectionReturn {
   const { getSession, saveSession } = useBrowseSession();
+  const ready = options.ready ?? true;
+  const validIds = options.validIds ?? photos.map((photo) => photo.id);
+  const allowedIds = new Set(validIds);
 
   // 初始化：从 BrowseSessionContext 恢复选中状态（仅首次挂载）
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => {
     const session = getSession(routeKey);
     if (session.selectedIds.length > 0) {
-      const validIds = session.selectedIds.filter((id) =>
-        photos.some((p) => p.id === id)
-      );
+      const validIds = session.selectedIds.filter((id) => allowedIds.has(id));
       return new Set(validIds);
     }
     return new Set<number>();
@@ -96,19 +98,20 @@ export function usePhotoSelection(
   const [lastClickedIdx, setLastClickedIdx] = useState<number>(
     () => getSession(routeKey).lastClickedIdx
   );
-  const photoIdsKey = photos.map((photo) => photo.id).join(",");
+  const photoIdsKey = validIds.join(",");
 
   // 当 routeKey 在同一个组件实例内变化时（如首页切换文件夹/排序），
   // 重新从 session 加载对应路由的选中状态，避免跨 filter 的选中污染。
   // biome-ignore lint/correctness/useExhaustiveDependencies: photoIdsKey tracks async photo list changes without depending on Array.prototype.some.
   useEffect(() => {
+    if (!ready) {
+      return;
+    }
     const session = getSession(routeKey);
-    const validIds = session.selectedIds.filter((id) =>
-      photos.some((p) => p.id === id)
-    );
+    const validIds = session.selectedIds.filter((id) => allowedIds.has(id));
     setSelectedIds(new Set(validIds));
     setLastClickedIdx(session.lastClickedIdx);
-  }, [routeKey, getSession, photoIdsKey]);
+  }, [routeKey, getSession, photoIdsKey, ready]);
 
   // 持久化：selectedIds 变化时保存
   const selectedIdsRef = useRef(selectedIds);

@@ -13,6 +13,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { imageSearchActions } from "@/actions/image-search";
+import { setPhotoFavorites } from "@/actions/photo-favorites";
 import { searchPhotos } from "@/actions/photo-search";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
@@ -68,6 +69,7 @@ import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { usePhotos } from "@/hooks/usePhotos";
 import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
+import { useSequenceSelectionPhotos } from "@/hooks/useSequenceSelectionPhotos";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo, PhotoListResponse, SearchResponse } from "@/types/photo";
@@ -86,6 +88,7 @@ import {
   canPaginateGalleryPhotos,
   createSearchResultSourceKey,
   getDisplayedSequenceMode,
+  getSequenceResolvedPhotos,
   getStableSearchAppendIds,
   isGalleryRevealPending,
   isSequenceSourceReady,
@@ -338,6 +341,9 @@ function HomePage() {
   );
   const [sequenceDataSource, setSequenceDataSource] =
     useState<SequenceDataSource | null>(null);
+  const sequenceDataSourceRef = useRef(sequenceDataSource);
+  sequenceDataSourceRef.current = sequenceDataSource;
+  const [sequenceRetry, setSequenceRetry] = useState(0);
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
   const [sequenceError, setSequenceError] = useState<string | null>(null);
   const [gallerySequenceCount, setGallerySequenceCount] = useState(0);
@@ -888,10 +894,22 @@ function HomePage() {
     [isSearching, rawPhotos]
   );
   const lastSearchPhotosRef = useRef<Photo[] | null>(null);
+  const resolvedRawPhotos = useMemo(
+    () =>
+      isSearching
+        ? getSequenceResolvedPhotos({
+            photos: rawPhotos,
+            generation: searchResultGeneration,
+            resolvedGeneration: sequenceDataSource?.searchGeneration ?? null,
+            resolvedIds: sequenceDataSource?.photoIds ?? [],
+          })
+        : rawPhotos,
+    [isSearching, rawPhotos, searchResultGeneration, sequenceDataSource]
+  );
+  const deferredPhotos = useDeferredValue(resolvedRawPhotos);
   if (isSearching) {
-    lastSearchPhotosRef.current = rawPhotos;
+    lastSearchPhotosRef.current = resolvedRawPhotos;
   }
-  const deferredPhotos = useDeferredValue(rawPhotos);
   // Do not briefly render the previous search result when clearing search.
   // Browse updates can still stay deferred, but the deferred value may be the
   // last committed search array for one or more renders after the source
@@ -902,7 +920,7 @@ function HomePage() {
     lastSearchPhotos: lastSearchPhotosRef.current,
     rawPhotos,
   });
-  const photos = useImmediateGalleryPhotos ? rawPhotos : deferredPhotos;
+  const photos = useImmediateGalleryPhotos ? resolvedRawPhotos : deferredPhotos;
   // Only show stale overlay when the data *source* changes (search↔browse),
   // not during pagination or in-place refreshes.
   const prevIsSearching = useRef(isSearching);
@@ -910,15 +928,25 @@ function HomePage() {
     rawPhotos !== photos && prevIsSearching.current !== isSearching;
   prevIsSearching.current = isSearching;
   const actionPhotos = useMemo(() => {
-    if (!expandedSequence) {
-      return photos;
-    }
     const existingIds = new Set(photos.map((photo) => photo.id));
+    const additional = [
+      ...sequences.flatMap((sequence) => [
+        sequence.photo,
+        ...(sequence.matchedPhoto ? [sequence.matchedPhoto] : []),
+      ]),
+      ...(expandedSequence?.members ?? []),
+    ];
     return [
       ...photos,
-      ...expandedSequence.members.filter((photo) => !existingIds.has(photo.id)),
+      ...additional.filter((photo) => {
+        if (existingIds.has(photo.id)) {
+          return false;
+        }
+        existingIds.add(photo.id);
+        return true;
+      }),
     ];
-  }, [photos, expandedSequence]);
+  }, [photos, expandedSequence, sequences]);
   const photosRef = useRef(actionPhotos);
   photosRef.current = actionPhotos;
   const sequenceScopeKey = isSearching
@@ -981,14 +1009,13 @@ function HomePage() {
   );
   // The masonry end sentinel is based on the currently rendered items. When
   // switching to the usually shorter sequence view it immediately intersects,
-  // so it must not continue paginating the underlying photo list.
+  // so browse mode must not paginate its underlying photo list. Search must
+  // still consume later result pages to discover their matching sequences.
   const isPhotoPaginationActive = canPaginateGalleryPhotos(
     sequenceMode,
-    isSearching ? searchHasMore : Boolean(hasNextPage)
+    isSearching ? searchHasMore : Boolean(hasNextPage),
+    isSearching
   );
-  const previousSequencePhotoIdsRef = useRef<number[]>([]);
-  const previousSequenceSearchKeyRef = useRef("");
-  const previousSequenceRefreshRef = useRef(sequenceRefresh);
   const handleSequenceModeChange = useCallback(
     (mode: "photos" | "sequences") => {
       const currentMode = displayedSequenceModeRef.current;
@@ -1010,6 +1037,7 @@ function HomePage() {
     [saveBrowseSession, sequenceMode]
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sequenceRetry intentionally reissues a failed request without discarding confirmed data.
   useEffect(() => {
     let cancelled = false;
     setSequenceError(null);
@@ -1019,24 +1047,21 @@ function HomePage() {
     // folder until pagination happens to reach one of their members.
     const useGalleryScope = !isSearching;
     const searchKey = isSearching ? String(searchResultGeneration) : "";
-    const previousIds = previousSequencePhotoIdsRef.current;
-    const refreshUnchanged =
-      previousSequenceRefreshRef.current === sequenceRefresh;
+    const completedSource = sequenceDataSourceRef.current;
+    const previousIds = completedSource?.photoIds ?? [];
+    const refreshUnchanged = completedSource?.refresh === sequenceRefresh;
     const appendedPhotoIds = getStableSearchAppendIds({
       currentIds: sequencePhotoIds,
       currentSearchKey: searchKey,
       isSearching,
       previousIds,
-      previousSearchKey: previousSequenceSearchKeyRef.current,
+      previousSearchKey: completedSource?.searchGeneration?.toString() ?? "",
       refreshUnchanged,
     });
     const isSearchAppend = appendedPhotoIds !== null;
     const requestedPhotoIds = appendedPhotoIds ?? sequencePhotoIds;
-    previousSequencePhotoIdsRef.current = sequencePhotoIds;
-    previousSequenceSearchKeyRef.current = searchKey;
-    previousSequenceRefreshRef.current = sequenceRefresh;
 
-    if (!(useGalleryScope || sequencePhotoIds.length)) {
+    if (!useGalleryScope && sequencePhotoIds.length === 0) {
       setSequences([]);
       setSequenceDataSource({
         key: sequenceQuerySourceKey,
@@ -1044,9 +1069,6 @@ function HomePage() {
         refresh: sequenceRefresh,
         searchGeneration: isSearching ? searchResultGeneration : null,
       });
-      return;
-    }
-    if (isSearchAppend && requestedPhotoIds.length === 0) {
       return;
     }
     ipc.client.photos
@@ -1112,17 +1134,20 @@ function HomePage() {
         }
       })
       .catch(() => {
-        if (!cancelled) {
-          if (!isSearchAppend) {
-            setSequences([]);
-            if (useGalleryScope) {
-              setGallerySequenceCount(0);
-            }
+        if (cancelled) {
+          return;
+        }
+        if (!isSearchAppend) {
+          setSequences([]);
+          if (useGalleryScope) {
+            setGallerySequenceCount(0);
           }
-          setSequenceError(t("loadFailedRetry"));
+        }
+        setSequenceError(t("loadFailedRetry"));
+        if (!isSearchAppend) {
           setSequenceDataSource({
             key: sequenceQuerySourceKey,
-            photoIds: sequencePhotoIds,
+            photoIds: [],
             refresh: sequenceRefresh,
             searchGeneration: isSearching ? searchResultGeneration : null,
           });
@@ -1141,6 +1166,7 @@ function HomePage() {
     sequencePhotoIds,
     sequenceQuerySourceKey,
     sequenceRefresh,
+    sequenceRetry,
     t,
   ]);
 
@@ -1694,6 +1720,16 @@ function HomePage() {
     [actionPhotos, displayedSequenceMode, photos, sequenceMemberIdSet]
   );
 
+  const visibleSelectionIds = useMemo(
+    () =>
+      displayedSequenceMode === "sequences"
+        ? [...sequenceMemberIdSet]
+        : selectionPhotos.map((photo) => photo.id),
+    [displayedSequenceMode, selectionPhotos, sequenceMemberIdSet]
+  );
+  const selectionReady =
+    sequenceViewReady &&
+    (displayedSequenceMode === "sequences" || !photosIsPlaceholder);
   // 共享 Hooks：选中状态、详情面板
   const {
     selectedIds,
@@ -1705,19 +1741,135 @@ function HomePage() {
     clearSelection,
     removeFromSelection,
     selectAllIds,
-  } = usePhotoSelection(routeKey, selectionPhotos);
-  const visibleSelectionIds = useMemo(
-    () =>
-      displayedSequenceMode === "sequences"
-        ? [...sequenceMemberIdSet]
-        : selectionPhotos.map((photo) => photo.id),
-    [displayedSequenceMode, selectionPhotos, sequenceMemberIdSet]
+  } = usePhotoSelection(routeKey, selectionPhotos, {
+    validIds: visibleSelectionIds,
+    ready: selectionReady,
+  });
+  const sequenceSelection = useSequenceSelectionPhotos(
+    selectedIds,
+    selectionPhotos,
+    sequences
   );
+  const previewPhotos = useMemo(() => {
+    if (displayedSequenceMode !== "sequences") {
+      return selectionPhotos;
+    }
+    const byId = new Map(selectionPhotos.map((photo) => [photo.id, photo]));
+    for (const photo of sequenceSelection.resolvedPhotos) {
+      if (sequenceMemberIdSet.has(photo.id) && !byId.has(photo.id)) {
+        byId.set(photo.id, photo);
+      }
+    }
+    return byId.size === selectionPhotos.length
+      ? selectionPhotos
+      : [...byId.values()];
+  }, [
+    selectionPhotos,
+    displayedSequenceMode,
+    sequenceSelection.resolvedPhotos,
+    sequenceMemberIdSet,
+  ]);
+  const selectionOperationKey = `${sequenceQuerySourceKey}:${displayedSequenceMode}:${[...selectedIds].join(",")}`;
+  const selectionOperationRef = useRef(selectionOperationKey);
+  selectionOperationRef.current = selectionOperationKey;
+  const favoriteOperationPendingRef = useRef(false);
+  const applyFavoriteState = useCallback(
+    (ids: number[], favorite: boolean) => {
+      const targets = new Set(ids);
+      const updatePhoto = (photo: Photo) =>
+        targets.has(photo.id) ? { ...photo, isFavorite: favorite } : photo;
+      const updateDetail = (detail: PhotoSequenceDetail | null) =>
+        detail ? { ...detail, members: detail.members.map(updatePhoto) } : null;
+      setSearchResults((current) => current?.map(updatePhoto) ?? current);
+      setExpandedSequence(updateDetail);
+      setExpandedSequenceComplete(updateDetail);
+      setSelectedSequence(updateDetail);
+      setOpenSequence(updateDetail);
+      setSequences((current) =>
+        current.map((sequence) => ({
+          ...sequence,
+          photo: updatePhoto(sequence.photo),
+          matchedPhoto: sequence.matchedPhoto
+            ? updatePhoto(sequence.matchedPhoto)
+            : undefined,
+        }))
+      );
+      expandedSequenceCacheRef.current.clear();
+      sequenceSelection.updateFavorites(ids, favorite);
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
+    },
+    [sequenceSelection.updateFavorites]
+  );
+  const handleBatchToggleFavorite = useCallback(async () => {
+    if (
+      !selectionReady ||
+      favoriteOperationPendingRef.current ||
+      selectedIds.size === 0
+    ) {
+      return;
+    }
+    favoriteOperationPendingRef.current = true;
+    const operationKey = selectionOperationKey;
+    try {
+      const targets = await sequenceSelection.resolvePhotos();
+      if (selectionOperationRef.current !== operationKey) {
+        return;
+      }
+      const allowed = new Set(visibleSelectionIds);
+      if (targets.some((photo) => !allowed.has(photo.id))) {
+        return;
+      }
+      const ids = targets.map((photo) => photo.id);
+      const favorite = !targets.every((photo) => photo.isFavorite);
+      await setPhotoFavorites(ids, favorite);
+      applyFavoriteState(ids, favorite);
+      toast.success(
+        favorite
+          ? t("toastFavoriteAddedCount", { count: ids.length })
+          : t("toastFavoriteRemoved"),
+        {
+          action: {
+            label: t("toastUndo"),
+            onClick: async () => {
+              try {
+                for (const previous of [true, false]) {
+                  const originalIds = targets
+                    .filter((photo) => photo.isFavorite === previous)
+                    .map((photo) => photo.id);
+                  if (originalIds.length > 0) {
+                    await setPhotoFavorites(originalIds, previous);
+                    applyFavoriteState(originalIds, previous);
+                  }
+                }
+              } catch {
+                toast.error(t("favoriteUpdateFailed"));
+              }
+            },
+          },
+        }
+      );
+    } catch {
+      toast.error(t("favoriteUpdateFailed"));
+    } finally {
+      favoriteOperationPendingRef.current = false;
+    }
+  }, [
+    selectionReady,
+    selectedIds,
+    selectionOperationKey,
+    sequenceSelection.resolvePhotos,
+    visibleSelectionIds,
+    applyFavoriteState,
+    t,
+  ]);
   const selectAllVisible = useCallback(() => {
     selectAllIds(visibleSelectionIds);
   }, [selectAllIds, visibleSelectionIds]);
   useEffect(() => {
-    if (!sequenceViewReady) {
+    if (!selectionReady) {
       return;
     }
     const allowed = new Set(visibleSelectionIds);
@@ -1725,12 +1877,7 @@ function HomePage() {
     if (hidden.length > 0) {
       removeFromSelection(hidden);
     }
-  }, [
-    removeFromSelection,
-    selectedIds,
-    sequenceViewReady,
-    visibleSelectionIds,
-  ]);
+  }, [removeFromSelection, selectedIds, selectionReady, visibleSelectionIds]);
   const clearRecentlyViewed = useCallback((preservePhotoId?: number) => {
     setRecentlyViewedPhotoId((current) => {
       if (preservePhotoId !== undefined && current === preservePhotoId) {
@@ -1810,7 +1957,7 @@ function HomePage() {
     });
   }, []);
   const handleSequenceRetry = useCallback(() => {
-    setSequenceRefresh((value) => value + 1);
+    setSequenceRetry((value) => value + 1);
   }, []);
   const {
     detailDismissed,
@@ -1820,7 +1967,7 @@ function HomePage() {
     showPhoto,
   } = usePhotoDetailPanel(
     selectedIds,
-    selectionPhotos,
+    previewPhotos,
     routeKey,
     handleKeyboardPhotoSelect
   );
@@ -2230,6 +2377,8 @@ function HomePage() {
       isSearching &&
       searchResults &&
       searchHasMore &&
+      sequenceDataSource?.key === sequenceQuerySourceKey &&
+      sequenceError === null &&
       !searchLoadingMoreRef.current
     ) {
       // Search pages are relevance-bounded, not capped by the UI. Continue
@@ -2362,6 +2511,9 @@ function HomePage() {
     fetchNextPage,
     searchResults,
     searchHasMore,
+    sequenceDataSource,
+    sequenceQuerySourceKey,
+    sequenceError,
     t,
   ]);
 
@@ -2379,17 +2531,17 @@ function HomePage() {
         (sequence) => sequence.matchedPhotoIds ?? sequence.memberPhotoIds ?? []
       )
     );
-    return (searchResults ?? []).filter(
-      (photo) => !sequenceMemberIds.has(photo.id)
-    ).length;
-  }, [isSearching, searchResults, sequences]);
+    return photos.filter((photo) => !sequenceMemberIds.has(photo.id)).length;
+  }, [isSearching, photos, sequences]);
 
   useEffect(() => {
     if (
-      !isSearching ||
-      displayedSequenceMode !== "photos" ||
-      !sequenceViewReady ||
-      searchUngroupedPhotoCount >= 100 ||
+      !(isSearching && sequenceViewReady) ||
+      sequenceDataSource?.key !== sequenceQuerySourceKey ||
+      sequenceError !== null ||
+      (displayedSequenceMode === "photos"
+        ? searchUngroupedPhotoCount >= 100
+        : sequences.length > 0) ||
       !searchHasMore ||
       searchLoadingMoreRef.current
     ) {
@@ -2398,11 +2550,15 @@ function HomePage() {
     handleEndReached();
   }, [
     displayedSequenceMode,
+    sequences.length,
     handleEndReached,
     isSearching,
     searchHasMore,
     searchUngroupedPhotoCount,
     sequenceViewReady,
+    sequenceDataSource,
+    sequenceQuerySourceKey,
+    sequenceError,
   ]);
 
   const handleToggleFavorite = useCallback(
@@ -2489,14 +2645,14 @@ function HomePage() {
 
   const handleDoubleClick = useCallback(
     (id: number) => {
-      const idx = selectionPhotos.findIndex((p) => p.id === id);
+      const idx = previewPhotos.findIndex((p) => p.id === id);
       if (idx >= 0) {
         clearSelection();
         dismissPhotoDetail();
         setLightboxIndex(idx);
       }
     },
-    [clearSelection, dismissPhotoDetail, selectionPhotos]
+    [clearSelection, dismissPhotoDetail, previewPhotos]
   );
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: search fallback and semantic refresh share one request lifecycle
   async function performSearch(
@@ -3095,7 +3251,7 @@ function HomePage() {
       if (e.key === " " && selectedIds.size > 0 && quickPreviewIndex < 0) {
         e.preventDefault();
         const firstId = selectedIds.values().next().value as number;
-        const idx = selectionPhotos.findIndex((p) => p.id === firstId);
+        const idx = previewPhotos.findIndex((p) => p.id === firstId);
         if (idx >= 0) {
           setQuickPreviewIndex(idx);
         }
@@ -3104,88 +3260,7 @@ function HomePage() {
 
       if (e.key === "f" && selectedIds.size > 0 && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        const ids = [...selectedIds];
-        const allFav = ids.every(
-          (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
-        );
-        const newVal = !allFav;
-        ipc.client.photos
-          .toggleFavorite({ ids, favorite: newVal })
-          .then(() => {
-            for (const favId of ids) {
-              setExpandedSequence((prev) => {
-                if (!prev) {
-                  return prev;
-                }
-                return {
-                  ...prev,
-                  members: prev.members.map((m) =>
-                    m.id === favId ? { ...m, isFavorite: newVal } : m
-                  ),
-                };
-              });
-              setExpandedSequenceComplete((prev) => {
-                if (!prev) {
-                  return prev;
-                }
-                return {
-                  ...prev,
-                  members: prev.members.map((m) =>
-                    m.id === favId ? { ...m, isFavorite: newVal } : m
-                  ),
-                };
-              });
-            }
-            queryClient.invalidateQueries({
-              queryKey: ["photos"],
-              refetchType: "active",
-            });
-            toast.success(
-              newVal
-                ? t("toastFavoriteAddedCount", { count: ids.length })
-                : t("toastFavoriteRemoved"),
-              {
-                action: {
-                  label: t("toastUndo"),
-                  onClick: async () => {
-                    await ipc.client.photos.toggleFavorite({
-                      ids,
-                      favorite: allFav,
-                    });
-                    for (const favId of ids) {
-                      setExpandedSequence((prev) => {
-                        if (!prev) {
-                          return prev;
-                        }
-                        return {
-                          ...prev,
-                          members: prev.members.map((m) =>
-                            m.id === favId ? { ...m, isFavorite: allFav } : m
-                          ),
-                        };
-                      });
-                      setExpandedSequenceComplete((prev) => {
-                        if (!prev) {
-                          return prev;
-                        }
-                        return {
-                          ...prev,
-                          members: prev.members.map((m) =>
-                            m.id === favId ? { ...m, isFavorite: allFav } : m
-                          ),
-                        };
-                      });
-                    }
-                    queryClient.invalidateQueries({
-                      queryKey: ["photos"],
-                      refetchType: "active",
-                    });
-                  },
-                },
-              }
-            );
-          })
-          .catch(() => undefined);
+        handleBatchToggleFavorite();
         return;
       }
 
@@ -3209,6 +3284,8 @@ function HomePage() {
     renameDialogOpen,
     convertDialogOpen,
     quickPreviewIndex,
+    previewPhotos,
+    handleBatchToggleFavorite,
     detailPhoto,
     handleClearSelection,
   ]);
@@ -3547,6 +3624,11 @@ function HomePage() {
                   onToggleFavorite={handleToggleFavorite}
                   onToggleSequenceExpand={handleScopedSequenceExpand}
                   photos={photos}
+                  preserveOnSequenceError={
+                    isSearching &&
+                    sequenceDataSource?.key !== sequenceQuerySourceKey &&
+                    sequenceViewReady
+                  }
                   recentlyViewedPhotoId={recentlyViewedPhotoId}
                   recentlyViewedPulseActive={recentlyViewedPulseActive}
                   recentlyViewedPulseKey={recentlyViewedPulseKey}
@@ -3575,12 +3657,7 @@ function HomePage() {
                 )}
               />
               <SelectionActionBar
-                allFavorite={
-                  selectedIds.size > 0 &&
-                  [...selectedIds].every(
-                    (id) => photos.find((p) => p.id === id)?.isFavorite
-                  )
-                }
+                allFavorite={sequenceSelection.allFavorite}
                 bottomOffset={showAiTaskStatus ? 44 : 16}
                 onAddToAlbum={() => {
                   setAddToAlbumIds(Array.from(selectedIds));
@@ -3599,40 +3676,7 @@ function HomePage() {
                   }
                   setCullPhotoIds(ids);
                 }}
-                onToggleFavorite={() => {
-                  const ids = [...selectedIds];
-                  const allFav = ids.every(
-                    (id) => photos.find((p) => p.id === id)?.isFavorite
-                  );
-                  const newVal = !allFav;
-                  ipc.client.photos
-                    .toggleFavorite({ ids, favorite: newVal })
-                    .then(() => {
-                      queryClient.invalidateQueries({
-                        queryKey: ["photos"],
-                        refetchType: "active",
-                      });
-                      toast.success(
-                        newVal
-                          ? t("toastFavoriteAddedCount", { count: ids.length })
-                          : t("toastFavoriteRemoved"),
-                        {
-                          action: {
-                            label: t("toastUndo"),
-                            onClick: async () => {
-                              await ipc.client.photos.toggleFavorite({
-                                ids,
-                                favorite: allFav,
-                              });
-                              queryClient.invalidateQueries({
-                                queryKey: ["photos"],
-                              });
-                            },
-                          },
-                        }
-                      );
-                    });
-                }}
+                onToggleFavorite={handleBatchToggleFavorite}
                 onUploadToCloud={handleUploadSelectedToCloud}
                 selectedCount={selectedIds.size}
               />
@@ -3910,7 +3954,7 @@ function HomePage() {
           }}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
-          photos={selectionPhotos}
+          photos={previewPhotos}
         />
       )}
       {openSequence && (
@@ -3925,16 +3969,16 @@ function HomePage() {
           showThumbnailsInitially={true}
         />
       )}
-      {quickPreviewIndex >= 0 && selectionPhotos[quickPreviewIndex] && (
+      {quickPreviewIndex >= 0 && previewPhotos[quickPreviewIndex] && (
         <QuickPreview
           onClose={() => setQuickPreviewIndex(-1)}
           onNavigate={(dir) => {
             setQuickPreviewIndex((prev) => {
               const next = prev + dir;
-              if (next < 0 || next >= selectionPhotos.length) {
+              if (next < 0 || next >= previewPhotos.length) {
                 return prev;
               }
-              handleKeyboardSelect(selectionPhotos[next].id);
+              handleKeyboardSelect(previewPhotos[next].id);
               return next;
             });
           }}
@@ -3942,7 +3986,7 @@ function HomePage() {
             setLightboxIndex(quickPreviewIndex);
             setQuickPreviewIndex(-1);
           }}
-          photo={selectionPhotos[quickPreviewIndex]}
+          photo={previewPhotos[quickPreviewIndex]}
         />
       )}
       <PhotoContextMenu
@@ -3956,42 +4000,7 @@ function HomePage() {
         onBatchDelete={handleDeleteSelected}
         onBatchExport={handleExportSelected}
         onBatchShare={handleShareSelected}
-        onBatchToggleFavorite={() => {
-          const ids = [...selectedIds];
-          const allFav = ids.every(
-            (id) => photos.find((p) => p.id === id)?.isFavorite
-          );
-          const newVal = !allFav;
-          ipc.client.photos
-            .toggleFavorite({ ids, favorite: newVal })
-            .then(() => {
-              queryClient.invalidateQueries({
-                queryKey: ["photos"],
-                refetchType: "active",
-              });
-              toast.success(
-                newVal
-                  ? t("toastFavoriteAddedCount", { count: ids.length })
-                  : t("toastFavoriteRemoved"),
-                {
-                  action: {
-                    label: t("toastUndo"),
-                    onClick: async () => {
-                      await ipc.client.photos.toggleFavorite({
-                        ids,
-                        favorite: allFav,
-                      });
-                      queryClient.invalidateQueries({
-                        queryKey: ["photos"],
-                        refetchType: "active",
-                      });
-                    },
-                  },
-                }
-              );
-            })
-            .catch(() => undefined);
-        }}
+        onBatchToggleFavorite={handleBatchToggleFavorite}
         onBatchUploadToCloud={handleUploadSelectedToCloud}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}
         onDelete={handleDeletePhoto}
