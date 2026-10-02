@@ -219,7 +219,9 @@ function AlbumDetailPage() {
     clearSelection,
     removeFromSelection,
     selectAllIds,
-  } = usePhotoSelection(routeKey, selectionPhotos);
+  } = usePhotoSelection(routeKey, selectionPhotos, {
+    ready: !sequenceView.sequencesLoading,
+  });
   selectionActionsRef.current = { clearSelection, removeFromSelection };
   const visibleSelectionIds = useMemo(
     () =>
@@ -1128,6 +1130,7 @@ function AlbumDetailPage() {
             onToggleFavorite={handleToggleFavorite}
             onToggleSequenceExpand={sequenceView.toggleExpand}
             photos={photos}
+            preserveOnSequenceError={sequenceView.sequencesConfirmed}
             recentlyViewedPhotoId={recentlyViewedPhotoId}
             recentlyViewedPulseActive={recentlyViewedPulseActive}
             recentlyViewedPulseKey={recentlyViewedPulseKey}

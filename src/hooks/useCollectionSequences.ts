@@ -33,6 +33,7 @@ export function shouldShowSequenceEmptyState({
 }
 
 const EMPTY_IDS: number[] = [];
+const EMPTY_SEQUENCES: PhotoSequence[] = [];
 
 function readMode(storageKey: string): CollectionSequenceMode {
   try {
@@ -142,7 +143,9 @@ export function useCollectionSequences({
   const requestRef = useRef(0);
   const detailsRequestRef = useRef(0);
   const detailCacheRef = useRef(new Map<number, PhotoSequenceDetail>());
-  const preserveSequencesDuringRefreshRef = useRef(false);
+  const [loadedSequenceScopeKey, setLoadedSequenceScopeKey] = useState<
+    string | null
+  >(null);
 
   const updateSequenceOrder = useCallback((change: SequenceOrderChange) => {
     const applyOrder = (detail: PhotoSequenceDetail) => ({
@@ -168,10 +171,77 @@ export function useCollectionSequences({
     );
   }, []);
 
-  const photoIds = useMemo(() => photos.map((photo) => photo.id), [photos]);
-  const sequenceRequestKey = `${refreshVersion}:${photoIds.join(",")}`;
+  // Ownership depends on membership, not object identity or gallery sorting.
+  const photoIdsKey = [...new Set(photos.map((photo) => photo.id))]
+    .sort((a, b) => a - b)
+    .join(",");
+  const photoIds = useMemo(
+    () => (photoIdsKey ? photoIdsKey.split(",").map(Number) : []),
+    [photoIdsKey]
+  );
+  const sequenceScopeKey = `${storageKey}:${photoIdsKey}`;
+  const sequenceRequestKey = `${refreshVersion}:${sequenceScopeKey}`;
   const sequencesLoading =
-    photoIds.length > 0 && loadedSequenceRequestKey !== sequenceRequestKey;
+    photoIds.length > 0 && loadedSequenceScopeKey !== sequenceScopeKey;
+  const loadedScopeRef = useRef(loadedSequenceScopeKey);
+  loadedScopeRef.current = loadedSequenceScopeKey;
+  const [confirmedSequenceScopeKey, setConfirmedSequenceScopeKey] = useState<
+    string | null
+  >(null);
+  const photosById = useMemo(
+    () => new Map(photos.map((photo) => [photo.id, photo])),
+    [photos]
+  );
+  const hydratePhoto = useCallback(
+    (photo: Photo): Photo => {
+      const current = photosById.get(photo.id);
+      return current
+        ? {
+            ...photo,
+            ...current,
+            isFavorite: current.isFavorite ?? photo.isFavorite,
+          }
+        : photo;
+    },
+    [photosById]
+  );
+  const visibleSequences = useMemo(() => {
+    if (loadedSequenceScopeKey !== sequenceScopeKey) {
+      return EMPTY_SEQUENCES;
+    }
+    return sequences.map((sequence) => ({
+      ...sequence,
+      photo: hydratePhoto(sequence.photo),
+      matchedPhoto: sequence.matchedPhoto
+        ? hydratePhoto(sequence.matchedPhoto)
+        : undefined,
+    }));
+  }, [sequences, hydratePhoto, loadedSequenceScopeKey, sequenceScopeKey]);
+  const hydrateDetail = useCallback(
+    (detail: PhotoSequenceDetail | null) =>
+      detail
+        ? {
+            ...detail,
+            members: detail.members.map(hydratePhoto),
+          }
+        : null,
+    [hydratePhoto]
+  );
+  const visibleDetails = useMemo(
+    () => ({
+      expandedSequence: hydrateDetail(expandedSequence),
+      expandedSequenceComplete: hydrateDetail(expandedSequenceComplete),
+      selectedSequence: hydrateDetail(selectedSequence),
+      openSequence: hydrateDetail(openSequence),
+    }),
+    [
+      hydrateDetail,
+      expandedSequence,
+      expandedSequenceComplete,
+      selectedSequence,
+      openSequence,
+    ]
+  );
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -188,7 +258,6 @@ export function useCollectionSequences({
           return;
         }
         detailCacheRef.current.clear();
-        preserveSequencesDuringRefreshRef.current = true;
         setRefreshVersion((value) => value + 1);
       }
     };
@@ -199,50 +268,66 @@ export function useCollectionSequences({
   useEffect(() => {
     const requestedVersion = refreshVersion;
     let cancelled = false;
+    const preserveExistingSequences =
+      loadedScopeRef.current === sequenceScopeKey;
+    if (!preserveExistingSequences) {
+      setSequences([]);
+      requestRef.current += 1;
+      detailsRequestRef.current += 1;
+      detailCacheRef.current.clear();
+      setExpandedSequence(null);
+      setExpandedSequenceComplete(null);
+      setSelectedSequence(null);
+      setOpenSequence(null);
+    }
+    setSequencesError(false);
     if (photoIds.length === 0) {
       setSequences([]);
-      setSequencesError(false);
+      setConfirmedSequenceScopeKey(sequenceScopeKey);
+      setLoadedSequenceScopeKey(sequenceScopeKey);
       setLoadedSequenceRequestKey(sequenceRequestKey);
       return;
     }
-    const preserveExistingSequences = preserveSequencesDuringRefreshRef.current;
-    preserveSequencesDuringRefreshRef.current = false;
-    if (!preserveExistingSequences) {
-      setSequences([]);
-    }
-    setSequencesError(false);
     ipc.client.photos
       .listSequences({ photoIds, scope: "members" })
       .then((result) => {
         if (!cancelled && requestedVersion === refreshVersion) {
           setSequences(result as PhotoSequence[]);
+          setConfirmedSequenceScopeKey(sequenceScopeKey);
+          setLoadedSequenceScopeKey(sequenceScopeKey);
           setLoadedSequenceRequestKey(sequenceRequestKey);
         }
       })
       .catch((error) => {
         console.error("[useCollectionSequences] list failed", error);
         if (!cancelled) {
-          setSequences([]);
+          if (!preserveExistingSequences) {
+            setSequences([]);
+          }
           setSequencesError(true);
+          setLoadedSequenceScopeKey(sequenceScopeKey);
           setLoadedSequenceRequestKey(sequenceRequestKey);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [photoIds, refreshVersion, sequenceRequestKey]);
+  }, [photoIds, refreshVersion, sequenceRequestKey, sequenceScopeKey]);
 
   const loadDetail = useCallback(async (sequenceId: number) => {
     const cached = detailCacheRef.current.get(sequenceId);
     if (cached) {
       return cached;
     }
+    const cacheGeneration = requestRef.current;
     const result = await ipc.client.photos.getSequence({ id: sequenceId });
     if (!result) {
       throw new Error("Sequence not found");
     }
     const detail = result as unknown as PhotoSequenceDetail;
-    detailCacheRef.current.set(sequenceId, detail);
+    if (cacheGeneration === requestRef.current) {
+      detailCacheRef.current.set(sequenceId, detail);
+    }
     return detail;
   }, []);
 
@@ -349,6 +434,7 @@ export function useCollectionSequences({
 
   const refreshSequences = useCallback(() => {
     requestRef.current += 1;
+    detailsRequestRef.current += 1;
     detailCacheRef.current.clear();
     setExpandedSequence(null);
     setExpandedSequenceComplete(null);
@@ -386,18 +472,17 @@ export function useCollectionSequences({
   );
 
   return {
-    expandedSequence,
-    expandedSequenceComplete,
+    ...visibleDetails,
     expandingSequenceId,
     mode,
     openDetails,
     openPlayback,
-    openSequence,
     refreshSequences,
-    selectedSequence,
     sequencesLoading,
     sequencesError,
-    sequences,
+    sequences: visibleSequences,
+    sequencesRefreshing: loadedSequenceRequestKey !== sequenceRequestKey,
+    sequencesConfirmed: confirmedSequenceScopeKey === sequenceScopeKey,
     setMode,
     setOpenSequence,
     setSelectedSequence,

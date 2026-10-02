@@ -344,7 +344,9 @@ function PersonDetailPage() {
     clearSelection,
     removeFromSelection,
     selectAllIds,
-  } = usePhotoSelection(routeKey, selectionPhotos);
+  } = usePhotoSelection(routeKey, selectionPhotos, {
+    ready: !sequenceView.sequencesLoading,
+  });
   selectionActionsRef.current = { clearSelection, removeFromSelection };
   const visibleSelectionIds = useMemo(
     () =>
@@ -1190,6 +1192,7 @@ function PersonDetailPage() {
             onToggleFavorite={handleToggleFavorite}
             onToggleSequenceExpand={sequenceView.toggleExpand}
             photos={photos}
+            preserveOnSequenceError={sequenceView.sequencesConfirmed}
             routeKey={routeKey}
             selectedIds={selectedIds}
             sequenceCount={sequenceView.sequences.length}
