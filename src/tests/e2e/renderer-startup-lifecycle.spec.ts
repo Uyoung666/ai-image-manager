@@ -1,14 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { _electron, expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
 const APP_PATH = path.resolve(".");
 const LOAD_FAILURE = "Controlled renderer load failure";
 
 function createFixture(mode: "quit" | "fail") {
-  const base = path.resolve(".test-runtime");
-  fs.mkdirSync(base, { recursive: true });
-  const root = fs.mkdtempSync(path.join(base, `renderer-load-${mode}-`));
+  const root = createTestRuntime(`renderer-load-${mode}`);
   const profile = path.join(root, "profile");
   const hook = path.join(root, "isolation.cjs");
   fs.writeFileSync(
@@ -39,7 +38,7 @@ test.setTimeout(60_000);
 
 test("a real renderer load failure remains actionable", async () => {
   const fixture = createFixture("fail");
-  const app = await _electron.launch({
+  const app = await launchTestApp(fixture.root, {
     args: ["-r", fixture.hook, "--e2e", APP_PATH],
     env: {
       ...process.env,
@@ -61,17 +60,15 @@ test("quitting during the initial renderer load does not create a startup fault"
   const fixture = createFixture("quit");
   // The early quit can beat Playwright's launch handshake; the process and its
   // shutdown logs are the observable result rather than a loaded page.
-  const app = await _electron
-    .launch({
-      args: ["-r", fixture.hook, "--e2e", APP_PATH],
-      env: {
-        ...process.env,
-        AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: fixture.profile,
-        CI: "e2e",
-      },
-      timeout: 20_000,
-    })
-    .catch(() => undefined);
+  const app = await launchTestApp(fixture.root, {
+    args: ["-r", fixture.hook, "--e2e", APP_PATH],
+    env: {
+      ...process.env,
+      AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: fixture.profile,
+      CI: "e2e",
+    },
+    timeout: 20_000,
+  }).catch(() => undefined);
   try {
     const cleanupLog = path.join(fixture.profile, "logs", "migrate.log");
     await expect

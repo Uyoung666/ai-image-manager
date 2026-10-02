@@ -1,22 +1,14 @@
-import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import {
-  _electron,
-  type ElectronApplication,
-  expect,
-  test,
-} from "@playwright/test";
+import { type ElectronApplication, expect } from "@playwright/test";
 import electronPath from "electron";
 import sharp from "sharp";
+import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
-const PROTECTED_EXTENSION = /\.(csv|xlsx)$/i;
 test("first move into a new directory updates filesystem, database, folder tree and UI", async () => {
   test.setTimeout(180_000);
-  const base = path.resolve(".test-runtime");
-  fs.mkdirSync(base, { recursive: true });
-  const root = fs.mkdtempSync(path.join(base, "f04-e2e-"));
+  const root = createTestRuntime("f04-e2e");
   const source = path.join(root, "fixture");
   const oldPath = path.join(source, "A/photo.jpg");
   const target = path.join(source, "B/深层/photo.jpg");
@@ -64,7 +56,7 @@ test("first move into a new directory updates filesystem, database, folder tree 
           { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
         )
       );
-    app = await _electron.launch({
+    app = await launchTestApp(root, {
       args: ["-r", preload, "--e2e", "--lang=zh-CN", path.resolve(".")],
       env,
     });
@@ -187,24 +179,5 @@ test("first move into a new directory updates filesystem, database, folder tree 
     });
   } finally {
     await app?.close();
-    assert.equal(path.dirname(root), base);
-    assert.equal(
-      fs
-        .readdirSync(root, { recursive: true, withFileTypes: true })
-        .find(
-          (entry) =>
-            PROTECTED_EXTENSION.test(entry.name) ||
-            (entry.isDirectory() && entry.name.toLowerCase() === "temp") ||
-            entry.isSymbolicLink()
-        ),
-      undefined
-    );
-    fs.rmSync(root, {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 100,
-    });
-    save("cleanup.json", { root, exists: fs.existsSync(root) });
   }
 });

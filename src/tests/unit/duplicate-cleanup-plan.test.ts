@@ -60,21 +60,19 @@ import {
   restoreDuplicateCleanupBatch,
 } from "@/services/duplicate-cleanup-plan";
 import { applyDuplicateKeepCount } from "@/services/duplicate-review";
+import { TestRuntime } from "../helpers/test-runtime";
 
 describe("duplicate cleanup deletion plans", () => {
   let sqlite: Database.Database;
   let fixtureDir: string;
+  let runtime: TestRuntime | undefined;
 
   beforeEach(() => {
     sqlite = new Database(":memory:");
     state.db = drizzle(sqlite);
     migrate(state.db, { migrationsFolder: "drizzle" });
-    fixtureDir = path.join(
-      process.cwd(),
-      ".cache",
-      `duplicate-cleanup-plan-${crypto.randomUUID()}`
-    );
-    fs.mkdirSync(fixtureDir, { recursive: true });
+    runtime = new TestRuntime("duplicate-cleanup-plan", path.resolve(".cache"));
+    fixtureDir = runtime.root;
 
     state.db
       .insert(folders)
@@ -172,6 +170,11 @@ describe("duplicate cleanup deletion plans", () => {
   afterEach(() => {
     state.db = null;
     sqlite?.close();
+    const result = runtime?.cleanup();
+    runtime = undefined;
+    if (result?.status === "skipped") {
+      throw new Error(`${result.reason}: ${result.root}`);
+    }
   });
 
   it("creates, executes, and restores a plan with multiple keepers", async () => {

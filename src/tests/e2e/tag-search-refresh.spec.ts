@@ -3,16 +3,11 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import {
-  _electron,
-  type ElectronApplication,
-  expect,
-  test,
-} from "@playwright/test";
+import { type ElectronApplication, expect } from "@playwright/test";
 import sharp from "sharp";
+import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
 const electronPath = createRequire(import.meta.url)("electron") as string;
-const PROTECTED_EXTENSION = /\.(csv|xlsx)$/i;
 const NUMERIC_TAG_PATTERN = /55555/;
 const TAG = "FSevenMarker";
 
@@ -30,9 +25,7 @@ declare global {
 
 test("tag removal refreshes active results and rejects a delayed old response across restart", async () => {
   test.setTimeout(240_000);
-  const base = path.resolve(".test-runtime");
-  fs.mkdirSync(base, { recursive: true });
-  const root = fs.mkdtempSync(path.join(base, "f07-"));
+  const root = createTestRuntime("f07");
   const fixture = path.join(root, "fixture");
   const profile = path.join(root, "profile");
   fs.mkdirSync(fixture);
@@ -93,7 +86,7 @@ test("tag removal refreshes active results and rejects a delayed old response ac
         )
       );
     const launch = async () => {
-      app = await _electron.launch({
+      app = await launchTestApp(root, {
         args: ["-r", preload, "--e2e", "--lang=zh-CN", path.resolve(".")],
         env,
       });
@@ -358,19 +351,5 @@ test("tag removal refreshes active results and rejects a delayed old response ac
     });
   } finally {
     await app?.close();
-    assert.equal(path.dirname(root), base);
-    assert.equal(
-      fs
-        .readdirSync(root, { recursive: true, withFileTypes: true })
-        .find(
-          (entry) =>
-            PROTECTED_EXTENSION.test(entry.name) ||
-            (entry.isDirectory() && entry.name.toLowerCase() === "temp") ||
-            entry.isSymbolicLink()
-        ),
-      undefined
-    );
-    fs.rmSync(root, { recursive: true, force: true });
-    save("cleanup.json", { root, exists: fs.existsSync(root) });
   }
 });

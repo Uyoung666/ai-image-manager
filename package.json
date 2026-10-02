@@ -35,6 +35,8 @@
     "diagnostics:ai": "node scripts/run-ai-device-diagnostics.mjs",
     "diagnostics:ai:memory-summary": "node scripts/summarize-ai-memory-localization.mjs",
     "test:e2e": "node scripts/run-e2e.mjs",
+    "test:runtime:cleanup": "node --experimental-strip-types scripts/cleanup-test-runtime.mjs",
+    "test:runtime:lifecycle": "node --experimental-strip-types --test src/tests/integration/test-runtime-lifecycle.test.mjs",
     "test:all": "node scripts/run-vitest.mjs run && node scripts/run-e2e.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "ts-node ./scripts/migrate.ts",

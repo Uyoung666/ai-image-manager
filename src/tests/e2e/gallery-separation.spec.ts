@@ -2,14 +2,9 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import {
-  _electron,
-  type ElectronApplication,
-  expect,
-  type Page,
-  test,
-} from "@playwright/test";
+import { type ElectronApplication, expect, type Page } from "@playwright/test";
 import sharp from "sharp";
+import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
 const electronPath = createRequire(import.meta.url)("electron") as string;
 const SEQUENCES = /^Sequences/;
@@ -59,7 +54,7 @@ function query(sql: string, write = false) {
 }
 
 async function launch() {
-  app = await _electron.launch({
+  app = await launchTestApp(root, {
     args: [
       "-r",
       path.join(root, "isolation.cjs"),
@@ -192,9 +187,7 @@ async function navigate(route: string) {
 test.describe.configure({ mode: "serial" });
 test.setTimeout(120_000);
 test.beforeAll(async () => {
-  const base = path.resolve(".test-runtime");
-  fs.mkdirSync(base, { recursive: true });
-  root = fs.mkdtempSync(path.join(base, "gallery-separation-"));
+  root = createTestRuntime("gallery-separation");
   profile = path.join(root, "profile");
   fs.writeFileSync(
     path.join(root, "isolation.cjs"),

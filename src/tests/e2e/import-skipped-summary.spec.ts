@@ -3,23 +3,16 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import {
-  _electron,
-  type ElectronApplication,
-  expect,
-  test,
-} from "@playwright/test";
+import { type ElectronApplication, expect } from "@playwright/test";
 import sharp from "sharp";
+import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
 const require = createRequire(import.meta.url);
 const electronPath = require("electron") as string;
-const PROTECTED_EXTENSION = /\.(csv|xlsx)$/i;
 
 test("mixed media import explains skipped files and survives restart", async () => {
   test.setTimeout(180_000);
-  const base = path.resolve(".test-runtime");
-  fs.mkdirSync(base, { recursive: true });
-  const root = fs.mkdtempSync(path.join(base, "round46-batch-a-"));
+  const root = createTestRuntime("round46-batch-a");
   const fixture = path.join(root, "fixture");
   const profile = path.join(root, "profile");
   fs.mkdirSync(fixture);
@@ -86,7 +79,7 @@ test("mixed media import explains skipped files and survives restart", async () 
         )
       );
     const launch = async () => {
-      app = await _electron.launch({
+      app = await launchTestApp(root, {
         args: ["-r", preload, "--e2e", "--lang=zh-CN", path.resolve(".")],
         env,
       });
@@ -151,24 +144,5 @@ test("mixed media import explains skipped files and survives restart", async () 
     expect(query("pragma foreign_key_check")).toEqual([]);
   } finally {
     await app?.close();
-    assert.equal(path.dirname(root), base);
-    const protectedEntry = fs
-      .readdirSync(root, { recursive: true, withFileTypes: true })
-      .find(
-        (entry) =>
-          PROTECTED_EXTENSION.test(entry.name) ||
-          (entry.isDirectory() && entry.name.toLowerCase() === "temp") ||
-          entry.isSymbolicLink()
-      );
-    assert.equal(protectedEntry, undefined);
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.writeFileSync(
-      test.info().outputPath("cleanup.json"),
-      JSON.stringify({ root, exists: fs.existsSync(root) }, null, 2)
-    );
-    await test.info().attach("cleanup", {
-      body: JSON.stringify({ root, exists: fs.existsSync(root) }),
-      contentType: "application/json",
-    });
   }
 });
