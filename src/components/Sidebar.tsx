@@ -7,6 +7,7 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/useSemanticElements: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
+
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Album,
@@ -50,6 +51,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -1521,9 +1523,9 @@ export function Sidebar({
                 <div className="mb-1 flex flex-shrink-0 items-center gap-1 px-1">
                   <div className="relative min-w-0 flex-1">
                     <Search className="pointer-events-none absolute top-1/2 left-2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60" />
-                    <input
+                    <SmoothInput
                       aria-label={t("folderSearchPlaceholder")}
-                      className="w-full rounded-[4px] bg-card py-1 pr-6 pl-7 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:ring-1 focus:ring-primary/50"
+                      className="rounded-[4px] bg-card py-1 pr-6 pl-7 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:ring-1 focus:ring-primary/50"
                       data-surface="control"
                       onChange={(event) => setFolderSearch(event.target.value)}
                       onKeyDown={(event) => {
@@ -1536,6 +1538,7 @@ export function Sidebar({
                       ref={folderSearchRef}
                       role="searchbox"
                       value={folderSearch}
+                      wrapperClassName="w-full"
                     />
                     {folderSearch && (
                       <Tooltip>
@@ -1687,9 +1690,9 @@ export function Sidebar({
                         )}
                         <div className="px-1 pb-1">
                           <div className="relative">
-                            <input
+                            <SmoothInput
                               aria-label={t("tagSearchPlaceholder")}
-                              className="w-full rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                              className="rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
                               data-surface="control"
                               onChange={(e) => setTagSearch(e.target.value)}
                               onKeyDown={(e) => {
@@ -1708,6 +1711,7 @@ export function Sidebar({
                               placeholder={t("tagSearchPlaceholder")}
                               role="searchbox"
                               value={tagSearch}
+                              wrapperClassName="w-full"
                             />
                             {tagSearch && (
                               <button
@@ -2086,9 +2090,9 @@ export function Sidebar({
               {t("parentTag", { name: childTagParent?.parentName ?? "" })}
             </DialogDescription>
           </DialogHeader>
-          <input
+          <SmoothInput
             autoFocus
-            className="w-full rounded-[6px] border border-border bg-card px-3 py-2 text-[13px] text-foreground outline-none focus:border-primary/50"
+            className="rounded-[6px] border border-border bg-card px-3 py-2 text-[13px] text-foreground outline-none focus:border-primary/50"
             onChange={(e) => setNewChildTagName(e.target.value)}
             onCompositionEnd={(e) => {
               childComposingRef.current = false;
@@ -2108,6 +2112,7 @@ export function Sidebar({
             placeholder={t("childTagPlaceholder")}
             ref={childInputRef}
             value={newChildTagName}
+            wrapperClassName="w-full"
           />
           <DialogFooter>
             <button

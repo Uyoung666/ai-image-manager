@@ -7,6 +7,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -255,8 +256,8 @@ export function FilterPresets({
               sideOffset={4}
             >
               <div className="flex flex-wrap items-center gap-1.5">
-                <input
-                  className="h-7 min-w-0 flex-[1_1_9rem] rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40"
+                <SmoothInput
+                  className="h-7 rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40"
                   onChange={(e) => setPresetName(e.target.value)}
                   onCompositionEnd={() => {
                     presetNameComposingRef.current = false;
@@ -280,6 +281,7 @@ export function FilterPresets({
                   }}
                   placeholder={t("filterPresetNamePlaceholder")}
                   value={presetName}
+                  wrapperClassName="min-w-0 flex-[1_1_9rem]"
                 />
                 <button
                   className="rounded-[4px] bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20"

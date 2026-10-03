@@ -94,4 +94,31 @@ describe("AlbumsPage", () => {
     expect(screen.getByText("Cached album")).toBeInTheDocument();
     expect(mocks.listAlbums).toHaveBeenCalledTimes(1);
   });
+
+  it("confirms an IME candidate without creating an album, then accepts Enter", async () => {
+    mocks.listAlbums.mockResolvedValue([]);
+    mocks.createAlbum.mockResolvedValue({ id: 5 });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <AlbumsPage />
+      </QueryClientProvider>
+    );
+    await screen.findByText("noAlbumsTitle");
+    fireEvent.click(screen.getAllByRole("button", { name: "新建相册" })[0]);
+    const input = screen.getByPlaceholderText("smartAlbumNamePlaceholder");
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "中文相册" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(mocks.createAlbum).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(input);
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(mocks.createAlbum).toHaveBeenCalledOnce());
+    expect(mocks.createAlbum).toHaveBeenCalledWith({
+      name: "中文相册",
+      description: undefined,
+    });
+  });
 });

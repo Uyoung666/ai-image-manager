@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -156,12 +157,16 @@ export function FaceReassignDialog({
         </div>
 
         <div className="border-border border-t pt-3">
-          <label className="block text-[12px] text-muted-foreground">
+          <label
+            className="block text-[12px] text-muted-foreground"
+            htmlFor="face-reassign-new-name"
+          >
             <span className="mb-1.5 block">{t("faceReassignCreateNew")}</span>
-            <input
+            <SmoothInput
               autoFocus
               className="w-full rounded-md border border-input bg-background px-2.5 py-2 text-[13px] text-foreground outline-none focus:border-primary"
               disabled={busy || loading}
+              id="face-reassign-new-name"
               onChange={(event) => setNewName(event.target.value)}
               onCompositionEnd={() => {
                 composingRef.current = false;

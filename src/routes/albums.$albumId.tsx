@@ -22,6 +22,7 @@ import { RouteError } from "@/components/RouteError";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import { ShareDialog } from "@/components/ShareDialog";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
@@ -981,7 +982,7 @@ function AlbumDetailPage() {
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               {editingName ? (
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <input
+                  <SmoothInput
                     autoFocus
                     className="h-8 min-w-0 max-w-full rounded-[6px] border border-input bg-card px-3 font-semibold text-[16px] text-foreground outline-none focus:border-primary"
                     onChange={(e) => setNameInput(e.target.value)}
@@ -1004,6 +1005,7 @@ function AlbumDetailPage() {
                       }
                     }}
                     value={nameInput}
+                    wrapperClassName="w-auto"
                   />
                   <button
                     className="rounded-[4px] px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10"

@@ -42,6 +42,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -243,7 +244,7 @@ const PersonCard = memo(function PersonCard({
       </div>
       <div className="p-3">
         {isEditing ? (
-          <input
+          <SmoothInput
             autoFocus
             className="w-full truncate rounded-[3px] border border-primary/40 bg-background px-1 py-px font-medium text-[13px] text-foreground outline-none"
             onBlur={() => onRename(identity.id)}
@@ -968,11 +969,15 @@ export function PeoplePage() {
             </button>
           </div>
           {(identities.length > 0 || hiddenIdentities.length > 0) && (
-            <label className="relative w-full min-w-0 flex-1 sm:min-w-[200px] sm:max-w-[280px]">
+            <label
+              className="relative w-full min-w-0 flex-1 sm:min-w-[200px] sm:max-w-[280px]"
+              htmlFor="people-search"
+            >
               <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
+              <SmoothInput
                 aria-label={t("peopleSearch")}
                 className="h-8 w-full rounded-[6px] border border-input bg-card pr-8 pl-8 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
+                id="people-search"
                 onChange={(event) => updatePersonQuery(event.target.value)}
                 placeholder={t("peopleSearch")}
                 type="search"

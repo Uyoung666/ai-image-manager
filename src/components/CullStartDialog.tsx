@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import { ipc } from "@/ipc/manager";
 
 interface CullStartDialogProps {
@@ -103,7 +104,7 @@ export function CullStartDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <input
+          <SmoothInput
             className="w-full rounded-[6px] border border-input bg-transparent px-3 py-2 text-[13px] outline-none focus:border-primary"
             onChange={(event) => setName(event.target.value)}
             placeholder={t("cullSessionNamePlaceholder")}

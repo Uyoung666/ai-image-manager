@@ -20,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { filterSettingsNavigationItems } from "@/components/settings/SettingsSidebar";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { SmoothCaret } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -355,13 +356,15 @@ export function SpotlightSearch() {
         >
           <div className="flex min-w-0 shrink-0 items-center border-border border-b px-3 sm:px-4">
             <Search className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
-            <Command.Input
-              className="flex h-12 w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-none"
-              onValueChange={setQuery}
-              placeholder={t("spotlightSearchPlaceholder")}
-              ref={inputRef}
-              value={query}
-            />
+            <SmoothCaret className="flex-1" inputRef={inputRef} value={query}>
+              <Command.Input
+                className="flex h-12 w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-none"
+                onValueChange={setQuery}
+                placeholder={t("spotlightSearchPlaceholder")}
+                ref={inputRef}
+                value={query}
+              />
+            </SmoothCaret>
             <kbd className="ml-2 flex h-5 shrink-0 items-center rounded-[4px] border border-border bg-card px-1.5 font-mono text-[10px] text-muted-foreground">
               ESC
             </kbd>

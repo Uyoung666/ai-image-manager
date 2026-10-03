@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
@@ -337,7 +338,7 @@ function CullListPage() {
               >
                 {t("cullSessionName")}
               </label>
-              <input
+              <SmoothInput
                 className="w-full rounded-[6px] border border-input bg-transparent px-3 py-2 text-[13px] text-foreground outline-none focus:border-primary"
                 id="cull-session-name"
                 onChange={(e) => setNewName(e.target.value)}
@@ -534,7 +535,7 @@ function CullListPage() {
           <DialogHeader>
             <DialogTitle>{t("cullRenameSession")}</DialogTitle>
           </DialogHeader>
-          <input
+          <SmoothInput
             className="rounded-[6px] border border-input bg-transparent px-3 py-2 text-[13px] outline-none focus:border-primary"
             onChange={(event) =>
               setRenameSession((current) =>

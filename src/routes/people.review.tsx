@@ -22,6 +22,7 @@ import {
 import { RouteError } from "@/components/RouteError";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip as AppTooltip,
   TooltipContent as AppTooltipContent,
@@ -817,12 +818,13 @@ function FaceReviewPage() {
                   >
                     {t("faceReviewAssignExisting")}
                   </label>
-                  <input
-                    className="mb-2 h-8 w-full rounded-[6px] border border-input bg-background px-2.5 text-[12px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
+                  <SmoothInput
+                    className="h-8 w-full rounded-[6px] border border-input bg-background px-2.5 text-[12px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
                     id="identity-search"
                     onChange={(event) => setIdentityQuery(event.target.value)}
                     placeholder={t("peopleSearch")}
                     value={identityQuery}
+                    wrapperClassName="mb-2"
                   />
                   <div className="-mx-1 max-h-[200px] overflow-y-auto">
                     {identityOptions.length === 0 ? (
@@ -894,12 +896,13 @@ function FaceReviewPage() {
                     {t("faceReviewCreateNew")}
                   </label>
                   <div className="grid grid-cols-1 gap-2 2xl:grid-cols-[minmax(0,1fr)_auto]">
-                    <input
-                      className="h-9 min-w-0 flex-1 rounded-[6px] border border-input bg-background px-2.5 text-[12px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
+                    <SmoothInput
+                      className="h-9 rounded-[6px] border border-input bg-background px-2.5 text-[12px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
                       id="new-person-name"
                       onChange={(event) => setNewName(event.target.value)}
                       placeholder={t("personNamePlaceholder")}
                       value={newName}
+                      wrapperClassName="flex-1"
                     />
                     <Button
                       className="w-full"

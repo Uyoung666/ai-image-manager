@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -299,9 +300,9 @@ export function AddToAlbumDialog({
         </DialogHeader>
 
         <div className="min-w-0">
-          <input
+          <SmoothInput
             aria-label={t("albumFilterLabel")}
-            className="h-8 w-full min-w-0 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+            className="h-8 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
             onChange={(event) => setAlbumFilter(event.target.value)}
             onCompositionEnd={(event) => {
               filterComposingRef.current = false;
@@ -328,6 +329,7 @@ export function AddToAlbumDialog({
             ref={filterInputRef}
             type="text"
             value={albumFilter}
+            wrapperClassName="w-full min-w-0"
           />
         </div>
 
@@ -336,8 +338,8 @@ export function AddToAlbumDialog({
 
           {showCreate ? (
             <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-              <input
-                className="h-8 min-w-0 flex-[1_1_12rem] rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+              <SmoothInput
+                className="h-8 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                 disabled={creating}
                 onChange={(e) => setNewName(e.target.value)}
                 onCompositionEnd={(e) => {
@@ -363,6 +365,7 @@ export function AddToAlbumDialog({
                 placeholder={t("albumNamePlaceholder")}
                 ref={inputRef}
                 value={newName}
+                wrapperClassName="min-w-0 flex-[1_1_12rem]"
               />
               <button
                 className="flex h-8 max-w-full shrink-0 items-center gap-1 rounded-[6px] bg-primary px-3 text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"

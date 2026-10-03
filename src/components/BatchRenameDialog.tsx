@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -295,12 +296,13 @@ export function BatchRenameDialog({
               >
                 {t("batchRenamePattern")}
               </label>
-              <input
-                className="w-full rounded-md border border-border bg-secondary px-3 py-2 font-mono text-[14px] text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              <SmoothInput
+                className="rounded-md border border-border bg-secondary px-3 py-2 font-mono text-[14px] text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                 id="batch-rename-pattern"
                 onChange={(e) => setPattern(e.target.value)}
                 placeholder={t("batchRenamePatternPlaceholder")}
                 value={pattern}
+                wrapperClassName="w-full"
               />
             </div>
 

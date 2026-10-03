@@ -1,0 +1,63 @@
+.smooth-input__measure-clip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.smooth-input__measure {
+  display: inline-block;
+  width: max-content;
+  white-space: pre;
+}
+
+.smooth-input__viewport {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.smooth-input__caret {
+  position: absolute;
+  left: 0;
+  width: 1.5px;
+  background: var(--primary);
+  transition: transform 100ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: smooth-input-blink 1s step-end infinite;
+}
+
+.smooth-input input[data-smooth-caret-active="true"] {
+  caret-color: transparent;
+}
+
+@keyframes smooth-input-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .smooth-input__viewport {
+    display: none;
+  }
+  .smooth-input input[data-smooth-caret-active="true"] {
+    caret-color: auto;
+  }
+}
+
+:root[data-reduced-motion="true"] .smooth-input__viewport {
+  display: none;
+}
+:root[data-reduced-motion="true"]
+  .smooth-input
+  input[data-smooth-caret-active="true"] {
+  caret-color: auto;
+}

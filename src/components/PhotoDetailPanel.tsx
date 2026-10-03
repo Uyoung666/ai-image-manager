@@ -2,6 +2,7 @@
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/noStaticElementInteractions: scoped component lint cleanup preserves existing UI behavior
+
 import {
   ArrowLeft,
   ChevronDown,
@@ -26,6 +27,7 @@ import {
   savePhotoDetailAdvancedMetadataExpanded,
 } from "@/actions/photo-detail-panel-preferences";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -964,8 +966,8 @@ export function PhotoDetailPanel({
                   </div>
                 )}
                 <div className="flex items-center gap-1">
-                  <input
-                    className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  <SmoothInput
+                    className="h-7 rounded-[4px] border border-input bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                     onChange={(e) => {
                       setNewTagName(e.target.value);
                       setShowAllTags(false);
@@ -974,6 +976,7 @@ export function PhotoDetailPanel({
                     placeholder={t("newTagPlaceholder")}
                     ref={tagInputRef}
                     value={newTagName}
+                    wrapperClassName="flex-1"
                   />
                   <button
                     aria-label={t("addTag")}

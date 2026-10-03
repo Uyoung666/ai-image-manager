@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { RouteError } from "@/components/RouteError";
 import { SmartAlbumDialog } from "@/components/SmartAlbumDialog";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
@@ -346,9 +347,9 @@ export function AlbumsPage() {
       {showCreate && (
         <div className="border-border border-b px-4 py-3 sm:px-6 sm:py-4">
           <div className="flex flex-wrap gap-3">
-            <input
+            <SmoothInput
               autoFocus
-              className="h-8 min-w-[min(100%,12rem)] flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+              className="h-8 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -360,11 +361,18 @@ export function AlbumsPage() {
               }}
               placeholder={t("smartAlbumNamePlaceholder")}
               value={newName}
+              wrapperClassName="min-w-[min(100%,12rem)] flex-1"
             />
             <input
               className="h-8 min-w-[min(100%,12rem)] flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setNewDesc(e.target.value)}
               onKeyDown={(e) => {
+                if (
+                  e.nativeEvent.isComposing ||
+                  e.nativeEvent.keyCode === 229
+                ) {
+                  return;
+                }
                 if (e.key === "Enter") {
                   handleCreate();
                 }

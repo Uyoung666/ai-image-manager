@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -1186,12 +1187,16 @@ function TrashPage() {
               </span>
             </div>
             <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
-              <label className="relative min-w-[min(100%,9rem)] flex-1 sm:flex-none">
+              <label
+                className="relative min-w-[min(100%,9rem)] flex-1 sm:flex-none"
+                htmlFor="trash-search"
+              >
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
+                <SmoothInput
                   aria-keyshortcuts="Control+F Meta+F Escape"
                   aria-label={t("trashSearchPlaceholder")}
-                  className="h-8 w-full rounded-[6px] border border-border bg-background pr-8 pl-8 text-[12px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 sm:w-48"
+                  className="h-8 rounded-[6px] border border-border bg-background pr-8 pl-8 text-[12px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
+                  id="trash-search"
                   onChange={(event) => setSearchInput(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Escape" && searchInput) {
@@ -1203,6 +1208,7 @@ function TrashPage() {
                   ref={searchInputRef}
                   type="search"
                   value={searchInput}
+                  wrapperClassName="sm:w-48"
                 />
                 {searchInput && (
                   <Tooltip>

@@ -2,6 +2,7 @@
 // biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/correctness/useExhaustiveDependencies: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/suspicious/noArrayIndexKey: scoped component lint cleanup preserves existing UI behavior
+
 import { Check, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -20,6 +21,7 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -273,11 +275,12 @@ function TagSelector({
 
   return (
     <div className="min-w-0 flex-[1_1_14rem] flex-col gap-1">
-      <input
-        className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+      <SmoothInput
+        className="h-7 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
         onChange={(e) => setFilterText(e.target.value)}
         placeholder={t("smartAlbumSearchTags")}
         value={filterText}
+        wrapperClassName="w-full"
       />
       {existingTags.length > 0 ? (
         <div className="flex max-h-[80px] flex-wrap gap-1 overflow-y-auto rounded-[4px] border border-input bg-card p-1.5">
@@ -576,12 +579,13 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
         </DialogHeader>
 
         <div className="space-y-2">
-          <input
+          <SmoothInput
             autoFocus
-            className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+            className="h-8 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
             onChange={(e) => setName(e.target.value)}
             placeholder={t("smartAlbumNamePlaceholder")}
             value={name}
+            wrapperClassName="w-full"
           />
           <input
             className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"

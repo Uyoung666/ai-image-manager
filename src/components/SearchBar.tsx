@@ -18,6 +18,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
@@ -960,7 +961,7 @@ export const SearchBar = memo(
                     >
                       <Search className="h-4 w-4 shrink-0" strokeWidth={2} />
                     </span>
-                    <input
+                    <SmoothInput
                       aria-activedescendant={
                         suggestionIndex >= 0
                           ? `search-suggestion-${suggestionIndex}`
