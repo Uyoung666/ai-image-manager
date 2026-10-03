@@ -1,8 +1,8 @@
-# AI Image Manager v2.0.0 User Guide
+# AI Image Manager v2.2.3 User Guide
 
 > A local-first photo manager for Windows. Build an index over your existing folders, then search, organize, curate, analyze, export, and share your library.
 
-This guide follows the normal user workflow. v2.0.0 is the new public starting point; it describes the current release and makes no upgrade or data-format promise for historical releases.
+This guide follows the normal user workflow and describes v2.2.3. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
 
 ---
 
@@ -68,7 +68,7 @@ RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews r
 ### 0. Choose an installation method
 
 - Download `Setup.exe` for a one-click per-user installation with in-app updates. This is the recommended option for most users.
-- Download the `.msi` when the program itself must be installed on another drive. Its auto-update component is installed by default. Choose a directory writable by the current user; protected locations such as Program Files may still require administrator access.
+- Download the `.msi` when the program itself must be installed on another drive. Its auto-update component is installed by default. MSI installs system-wide and requires administrator access.
 - Do not install both packages. Existing `Setup.exe` users should keep using in-app updates and do not need to migrate to MSI.
 
 The program installation directory contains the app itself. The data directory selected during first-run onboarding contains the database, thumbnails, vector indexes, logs, and models. Changing one does not automatically change the other.
@@ -437,6 +437,16 @@ Sequences organize burst and timelapse photos and reduce repetitive browsing.
 
 Strict favors fewer false positives. Relaxed favors recall. Balanced is the default.
 
+### Photo and sequence views
+
+Switch between **Photos** and **Sequences** on the home page to browse individual photos or sequence cards. Returning from sequence details restores the list position and highlights the recently viewed sequence. Folder changes, photo-attribute refreshes and favorite changes keep sequence relationships and selections synchronized.
+
+### Continuation suggestions
+
+Open **Continuation suggestions** in the home sequence view to review segments that may belong to the same timelapse. Suggestions use camera and lens information, capture rhythm and boundary images. Preview both segments and their gap before confirming a merge.
+
+The scope is all photos or the current folder and its subfolders; search, tag and favorite filters do not narrow the merge. Every photo in both segments is included. The result is manually locked and preserved during automatic detection. Suggestions that become stale or are handled in another window are refreshed.
+
 ### Review and adjust
 
 Open a sequence to:
@@ -465,7 +475,8 @@ Open **Settings → Wander** and click **Start Now**. Wander requires at least t
 Enable **Wander when idle**, then choose:
 
 - Idle time: 10, 15, or 30 minutes
-- Photo interval: 3, 5, or 10 seconds
+- Presentation: parallax photo wall or slideshow, with a preview in settings
+- Parallax flow speed: slow, normal, or fast; slideshow interval: 3, 5, or 10 seconds
 - Content mode: automatic rotation, time capsule, theme, rediscovery, or hamster wheel
 
 Automatic Wander starts only while the app is visible, no dialog is open, and no background task is running.
@@ -888,7 +899,7 @@ Typical causes are automatic updates, manual update checks, model recovery, user
 3. Check whether antivirus software quarantined `.dll`, `.node`, or ONNX files.
 4. Re-detect the GPU and retry with GPU acceleration disabled if needed.
 5. If using the portable build, try a short path without special characters.
-6. Reinstall v2.0.0 and inspect the diagnostic bundle before filing an Issue.
+6. Reinstall the latest stable release from GitHub Releases and inspect the diagnostic bundle before filing an Issue.
 
 ### How do I report a problem?
 

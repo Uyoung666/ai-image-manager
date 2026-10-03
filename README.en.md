@@ -6,22 +6,30 @@
 
 Index, search, organize, curate, analyze, and share your photo library on your own computer without moving the original files.
 
-[![Release](https://img.shields.io/badge/release-v2.0.0-2563EB?style=flat-square)](https://github.com/Uyoung666/ai-image-manager/releases/latest)
+[![Release](https://img.shields.io/github/v/release/Uyoung666/ai-image-manager?style=flat-square)](https://github.com/Uyoung666/ai-image-manager/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](#system-requirements)
 [![License](https://img.shields.io/github/license/Uyoung666/ai-image-manager?style=flat-square)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-41-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 
-[Website](https://ai-image-manager.uyoungvision.cn) · [Download v2.0.0](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [User Guide](GUIDE.en.md) · [简体中文](README.md)
+[Website](https://ai-image-manager.uyoungvision.cn) · [Download latest stable release](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [User Guide](GUIDE.en.md) · [简体中文](README.md)
 
 </div>
 
 ---
 
-## v2.0.0: a new public baseline
+## Current source version: v2.2.3
 
-v2.0.0 is the new public starting point for AI Image Manager. It is designed for photographers, creators, designers, and anyone with a long-lived photo library on Windows. The workflow is built around your existing folders: index them in place, find photos with natural language, visual similarity, metadata, or folders, then organize, curate, analyze, export, or share them.
+v2.0.0 was the new public starting point for AI Image Manager. This document covers v2.2.3; GitHub Releases identifies the available stable release. It is designed for photographers, creators, designers, and anyone with a long-lived photo library on Windows. The workflow is built around your existing folders: index them in place, find photos with natural language, visual similarity, metadata, or folders, then organize, curate, analyze, export, or share them.
 
-The v2.0.0 documentation, performance data, and privacy statements describe the current release only. They do not make an upgrade, data-format, or feature-continuity promise for historical releases.
+The current feature and privacy statements describe v2.2.3. The v2.0.0 screenshots and performance data retain their actual measurement version; this documentation does not make an upgrade, data-format, or feature-continuity promise for historical releases.
+
+### v2.2.3 highlights
+
+- Separate photo and sequence views with improved folder switching, return navigation, scroll restoration, selections and favorite synchronization.
+- Timelapse continuation suggestions with previews and confirmed merging; merged sequences are manually locked.
+- Parallax Wander with flow-speed controls and a settings preview, alongside the existing slideshow.
+- Circular theme transitions, smooth input carets, and an About page with a photo gallery and interactive animation.
+- Clearer update progress, installation, restart and recovery, plus offline release notes for 2.2.2 and 2.2.3.
 
 ## Product principles
 
@@ -37,10 +45,10 @@ The v2.0.0 documentation, performance data, and privacy statements describe the 
 
 ### Download and install
 
-Download v2.0.0 from [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest):
+Download the latest stable release from [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest):
 
 - **One-click installer (`Setup.exe`)**: recommended for most users. It installs for the current Windows user without a wizard and supports in-app updates.
-- **Custom-location installer (`.msi`)**: provides a wizard and lets you choose a writable location on another drive. It installs per user with in-app auto-updates enabled by default and does not require administrator access for user-writable folders.
+- **Custom-location installer (`.msi`)**: provides a wizard and lets you choose a location on another drive. It installs system-wide, requires administrator access and enables in-app auto-updates by default.
 - **Portable build (`.zip`)**: extract and run without installing into the system installation directory.
 
 `Setup.exe` and `.msi` are alternative installation methods; do not install both on the same computer. Existing `Setup.exe` users should keep using in-app updates and do not need to migrate to MSI. The program installation directory contains the application itself, while the application data directory selected on first launch stores the database, thumbnails, vector index, and local models.
@@ -235,7 +243,7 @@ The app does not take ownership of or automatically migrate your original photos
 - When WebDAV/S3 is configured and an upload or share action is initiated, the corresponding data is sent to the selected service.
 - **Settings → Help & Diagnostics** creates a strictly redacted diagnostic bundle locally. It is not uploaded automatically; it leaves the device only if the user exports it or attaches it to an Issue. Native crash dumps are off by default.
 
-These statements describe the current v2.0.0 implementation and do not replace the privacy policies of connected cloud or update services.
+These statements describe the current v2.2.3 implementation. Screenshots and performance data retain their actual measurement versions and do not replace the privacy policies of connected cloud or update services.
 
 ## Bundled AI models and licenses
 

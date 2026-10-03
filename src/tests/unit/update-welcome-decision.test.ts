@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { hasChangelog } from "@/content/changelogs";
 import { decideUpdateWelcomeVersion } from "@/services/update-welcome-decision";
+import { version as appVersion } from "../../../package.json";
 
 const baseInput = {
   currentVersion: "1.5.0",
@@ -10,6 +12,16 @@ const baseInput = {
 };
 
 describe("decideUpdateWelcomeVersion", () => {
+  it("shows bundled current release notes after upgrading from 2.2.2", () => {
+    expect(
+      decideUpdateWelcomeVersion({
+        ...baseInput,
+        currentVersion: appVersion,
+        hasChangelog: hasChangelog(appVersion),
+        lastLaunchedVersion: "2.2.2",
+      }).version
+    ).toBe(appVersion);
+  });
   it("shows the current version after an upgrade", () => {
     expect(decideUpdateWelcomeVersion(baseInput)).toEqual({
       nextLaunchedVersion: "1.5.0",

@@ -6,22 +6,30 @@
 
 在自己的电脑上索引、搜索、整理、选片、分析和分享照片；照片库不需要迁移到应用专用目录。
 
-[![Release](https://img.shields.io/badge/release-v2.0.0-2563EB?style=flat-square)](https://github.com/Uyoung666/ai-image-manager/releases/latest)
+[![Release](https://img.shields.io/github/v/release/Uyoung666/ai-image-manager?style=flat-square)](https://github.com/Uyoung666/ai-image-manager/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](#系统要求)
 [![License](https://img.shields.io/github/license/Uyoung666/ai-image-manager?style=flat-square)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-41-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 
-[官方网站](https://ai-image-manager.uyoungvision.cn) · [下载 v2.0.0](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [使用指南](GUIDE.md) · [English](README.en.md)
+[官方网站](https://ai-image-manager.uyoungvision.cn) · [下载最新正式版](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [使用指南](GUIDE.md) · [English](README.en.md)
 
 </div>
 
 ---
 
-## v2.0.0 首版定位
+## 当前代码版本（v2.2.3）
 
-v2.0.0 是 AI Image Manager 的全新公开发布起点。本项目面向摄影师、内容创作者、设计师和拥有长期照片库的 Windows 用户，提供一套围绕本地文件夹工作的照片管理流程：先就地索引，再通过自然语言、相似图片、元数据和文件夹结构找到照片，最后完成整理、选片、分析、导出或分享。
+v2.0.0 是 AI Image Manager 的公开发布起点；本文对应 v2.2.3，可下载的正式版本以 GitHub Releases 为准。本项目面向摄影师、内容创作者、设计师和拥有长期照片库的 Windows 用户，提供一套围绕本地文件夹工作的照片管理流程：先就地索引，再通过自然语言、相似图片、元数据和文件夹结构找到照片，最后完成整理、选片、分析、导出或分享。
 
-v2.0.0 的文档、性能数据和隐私说明均以当前版本实际行为为准，不对历史版本作升级兼容、数据格式或功能连续性承诺。
+当前版本的功能和隐私说明以 v2.2.3 实际行为为准；v2.0.0 截图与性能数据保留其真实测量版本，不对历史版本作升级兼容、数据格式或功能连续性承诺。
+
+### v2.2.3 更新重点
+
+- 照片与序列独立浏览，改善文件夹切换、详情返回、滚动恢复、选中状态与收藏同步。
+- 新增延时序列续段建议，可预览前后段并确认合并；合并结果手动锁定。
+- 漫游新增视差照片墙、流动速度选项和设置预览，同时保留幻灯片。
+- 新增圆形主题切换过渡和平滑输入光标，关于页加入作品画廊与互动动画。
+- 改进应用内更新进度、安装重启与异常恢复，补齐 2.2.2 和 2.2.3 的离线更新日志。
 
 ## 核心理念
 
@@ -37,10 +45,10 @@ v2.0.0 的文档、性能数据和隐私说明均以当前版本实际行为为�
 
 ### 下载与安装
 
-从 [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest) 下载 v2.0.0：
+从 [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest) 下载最新正式版：
 
 - **一键安装版（`Setup.exe`）**：适合大多数用户，无安装向导，按当前 Windows 用户安装并支持应用内更新。
-- **自定义目录安装版（`.msi`）**：提供安装向导，可选择有写入权限的 D/E 盘目录；默认按当前用户安装并启用应用内自动更新，不要求管理员权限。
+- **自定义目录安装版（`.msi`）**：提供安装向导，可选择其他磁盘目录；按系统级方式安装，需要管理员权限，默认启用应用内自动更新。
 - **便携版（`.zip`）**：解压后直接运行，适合临时使用或不希望写入系统安装目录的场景。
 
 `Setup.exe` 与 `.msi` 是并行提供的两种安装方式，请勿在同一台电脑上同时安装。已经使用 `Setup.exe` 的用户继续通过应用内更新即可，无需切换到 MSI。程序安装目录只存放应用本体；首次启动选择的应用数据目录用于数据库、缩略图、向量索引和本地模型，两者互不等同。
@@ -234,7 +242,7 @@ Setup 和启用自动更新的 MSI 支持应用内更新；禁用更新器的 MS
 - 如果配置 WebDAV/S3 并主动上传照片或分享页面，对应数据会发送到用户选择的服务。
 - **设置 → 帮助与诊断** 可在本地生成严格脱敏的诊断包。诊断包不会自动上传，只有用户主动导出或附加到 Issue 时才会离开设备；原生崩溃转储默认关闭。
 
-以上说明描述的是 v2.0.0 当前实现边界，不替代所连接云服务或更新服务的隐私政策。
+以上说明描述的是 v2.2.3 当前实现边界；截图和性能数据会保留各自的真实测量版本，不替代所连接云服务或更新服务的隐私政策。
 
 ## 内置 AI 模型与许可
 

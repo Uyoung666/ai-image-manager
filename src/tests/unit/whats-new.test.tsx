@@ -7,13 +7,14 @@ import {
   getLocalizedText,
   hasChangelog,
 } from "@/content/changelogs";
+import { version as appVersion } from "../../../package.json";
 
 const mocks = vi.hoisted(() => ({
   language: "zh",
   navigate: vi.fn(),
   openExternalLink: vi.fn(),
   source: undefined as string | undefined,
-  version: "2.2.1" as string | undefined,
+  version: "2.2.3" as string | undefined,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -49,19 +50,42 @@ describe("WhatsNewPage", () => {
     mocks.navigate.mockReset();
     mocks.openExternalLink.mockReset();
     mocks.source = undefined;
-    mocks.version = "2.2.1";
+    mocks.version = appVersion;
   });
 
   it("registers the current release before previous versions", () => {
     expect(changelogEntries.map((entry) => entry.version)).toEqual([
+      "2.2.3",
+      "2.2.2",
       "2.2.1",
       "2.2.0",
       "2.1.1",
       "2.1.0",
       "2.0.0",
     ]);
-    expect(getChangelog("2.2.1")).toBe(getLatestChangelog());
-    expect(hasChangelog("2.2.1")).toBe(true);
+    expect(getChangelog(appVersion)).toBe(getLatestChangelog());
+    expect(hasChangelog(appVersion)).toBe(true);
+    expect(hasChangelog("2.2.2")).toBe(true);
+  });
+
+  it.each([
+    "zh",
+    "en",
+  ])("renders the restored 2.2.2 notes in %s", (language) => {
+    const entry = getChangelog("2.2.2");
+    if (!entry) {
+      throw new Error("Expected restored 2.2.2 release notes");
+    }
+    mocks.version = entry.version;
+    mocks.language = language;
+    render(<WhatsNewPage />);
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      getLocalizedText(entry.title, language)
+    );
+    expect(screen.getAllByRole("article")).toHaveLength(
+      entry.highlights.length
+    );
   });
 
   it("renders localized highlights and continues to the gallery", () => {
