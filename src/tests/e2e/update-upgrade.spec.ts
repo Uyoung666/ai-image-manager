@@ -10,6 +10,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { version as appVersion } from "../../../package.json";
 
 const require = createRequire(import.meta.url);
 const executable = process.env.AIM_PACKAGED_E2E_EXECUTABLE;
@@ -203,7 +204,7 @@ for (const [version, previous] of previousExecutables) {
       });
       await expect(
         current.page.locator(".whats-new-release-visual-version")
-      ).toHaveText("v2.2.1");
+      ).toHaveText(`v${appVersion}`);
       expect(
         await current.page.evaluate(() => window.electronAPI?.isE2E)
       ).toBeFalsy();
