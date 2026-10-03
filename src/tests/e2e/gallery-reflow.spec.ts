@@ -126,7 +126,65 @@ test.afterAll(async () => {
   await app?.close();
 });
 
-async function startProbe() {
+async function startProbe(prepareClick = false) {
+  if (prepareClick) {
+    const targetId = await page.evaluate(() => {
+      const scroll = document.querySelector<HTMLElement>(
+        "[data-masonry-scroll]"
+      );
+      if (!scroll) {
+        throw new Error("Missing masonry scroll surface");
+      }
+      const bounds = scroll.getBoundingClientRect();
+      const inset =
+        document
+          .querySelector(".home-gallery-toolbar-layer")
+          ?.getBoundingClientRect().height ?? 0;
+      const top = bounds.top + inset + 3;
+      const bottom = bounds.bottom - 3;
+      const candidates = Array.from(
+        scroll.querySelectorAll<HTMLElement>('[data-photo-id][role="option"]')
+      ).filter((card) => card.getBoundingClientRect().height <= bottom - top);
+      const distance = (card: HTMLElement) => {
+        const rect = card.getBoundingClientRect();
+        return Math.max(top - rect.top, rect.bottom - bottom, 0);
+      };
+      const target = candidates.sort((a, b) => distance(a) - distance(b))[0];
+      if (!target) {
+        throw new Error("No fixture card fits the available viewport");
+      }
+      const rect = target.getBoundingClientRect();
+      if (rect.top < top) {
+        scroll.scrollTop += rect.top - top;
+      } else if (rect.bottom > bottom) {
+        scroll.scrollTop += rect.bottom - bottom;
+      }
+      return target.dataset.photoId;
+    });
+    // Selected-photo scrolling is intentional. Prepare a fully visible target
+    // before measuring only the detail panel's layout transition.
+    await expect
+      .poll(async () =>
+        page
+          .locator(`[data-photo-id="${targetId}"][role="option"]`)
+          .evaluate((card) => {
+            const bounds = card
+              .closest("[data-masonry-scroll]")
+              ?.getBoundingClientRect();
+            const rect = card.getBoundingClientRect();
+            const inset =
+              document
+                .querySelector(".home-gallery-toolbar-layer")
+                ?.getBoundingClientRect().height ?? 0;
+            return (
+              bounds &&
+              rect.top >= bounds.top + inset &&
+              rect.bottom <= bounds.bottom
+            );
+          })
+      )
+      .toBe(true);
+  }
   return await page.evaluate(() => {
     const scroll = document.querySelector<HTMLElement>("[data-masonry-scroll]");
     if (!scroll) {
@@ -154,7 +212,15 @@ async function startProbe() {
     if (!(anchor && clickTarget)) {
       throw new Error("No visible fixture cards");
     }
-    const initialOffset = anchor.getBoundingClientRect().top - bounds.top;
+    const getAnchorOffset = (viewportTop: number) => {
+      // The intentional two-pixel hover lift is separate from masonry geometry.
+      const translateY =
+        Number.parseFloat(
+          getComputedStyle(anchor).translate.split(" ")[1] ?? "0"
+        ) || 0;
+      return anchor.getBoundingClientRect().top - viewportTop - translateY;
+    };
+    const initialOffset = getAnchorOffset(bounds.top);
     const initialScrollTop = scroll.scrollTop;
     const images = new Map(
       visible.map((card) => [card.dataset.photoId, card.querySelector("img")])
@@ -191,9 +257,7 @@ async function startProbe() {
         }
       }
       frames.push({
-        anchorOffset: anchor.isConnected
-          ? anchor.getBoundingClientRect().top - rect.top
-          : null,
+        anchorOffset: anchor.isConnected ? getAnchorOffset(rect.top) : null,
         loaded,
         scrollTop: scroll.scrollTop,
         width: rect.width,
@@ -336,7 +400,7 @@ for (const size of sizes) {
       }, depth);
       await page.waitForTimeout(700);
       for (let repeat = 0; repeat < 2; repeat++) {
-        const id = await startProbe();
+        const id = await startProbe(true);
         await openProbeTarget(id);
         await expect(
           page.locator(".home-detail-panel-container")
@@ -351,7 +415,7 @@ for (const size of sizes) {
       }
     }
     if (!overlay) {
-      const id = await startProbe();
+      const id = await startProbe(true);
       await openProbeTarget(id);
       await expect(page.locator(".home-detail-panel-container")).toBeVisible();
       await finishProbe("drag-open", false);

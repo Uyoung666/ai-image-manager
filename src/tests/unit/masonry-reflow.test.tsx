@@ -292,6 +292,41 @@ describe("masonry reflow continuity", () => {
     expect(position(card).top - scroll.scrollTop).toBeCloseTo(anchor.offset, 4);
   });
 
+  it("keeps the same anchor through a continuous resize across column counts", () => {
+    const view = render(
+      <MasonryGrid {...props} columnCount={4} containerWidth={910} />
+    );
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    scrollTo(scroll, 35_119);
+    const anchor = capture(scroll)[0];
+    for (const containerWidth of [896, 882, 869, 855, 841, 828]) {
+      view.rerender(
+        <MasonryGrid
+          {...props}
+          columnCount={containerWidth >= 860 ? 4 : 3}
+          containerWidth={containerWidth}
+        />
+      );
+      const card = requireElement(scroll, `[data-photo-id="${anchor.id}"]`);
+      expect(position(card).top - scroll.scrollTop).toBeCloseTo(
+        anchor.offset,
+        4
+      );
+      act(() => vi.advanceTimersByTime(40));
+    }
+    // A real scroll must release the previous resize anchor.
+    scrollTo(scroll, 10_000);
+    const nextAnchor = capture(scroll)[0];
+    view.rerender(
+      <MasonryGrid {...props} columnCount={3} containerWidth={810} />
+    );
+    const card = requireElement(scroll, `[data-photo-id="${nextAnchor.id}"]`);
+    expect(position(card).top - scroll.scrollTop).toBeCloseTo(
+      nextAnchor.offset,
+      4
+    );
+  });
+
   it("keeps grouped layouts and full-width sequence trays continuous", () => {
     const items = photos.map((photo, index) =>
       index % 100 === 0

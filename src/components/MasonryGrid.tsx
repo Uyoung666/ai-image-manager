@@ -35,7 +35,11 @@ import {
 } from "@/hooks/useMasonryVirtualWindow";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
-import { getMasonryReflowScrollTop } from "@/utils/masonry-reflow";
+import {
+  getMasonryReflowAnchor,
+  getMasonryReflowScrollTop,
+  type MasonryReflowAnchor,
+} from "@/utils/masonry-reflow";
 
 export type { GroupHeaderInput as GroupHeader, MasonryGridHandle };
 
@@ -43,6 +47,7 @@ import { getReturnScrollTop } from "@/utils/gallery-return";
 
 const SCROLL_TOP_EPSILON = 0.5;
 const SCROLL_RENDER_STEP_PX = 96;
+const REFLOW_ANCHOR_MAX_WIDTH_STEP = 64;
 const IMAGE_RENDER_OVERSCAN_VIEWPORTS_BEFORE = 1;
 const IMAGE_RENDER_OVERSCAN_VIEWPORTS_AFTER = 2;
 const MIN_SCROLLBAR_THUMB_HEIGHT = 24;
@@ -195,6 +200,9 @@ export const MasonryGrid = memo(
     const rafRef = useRef<number>(0);
     const prevScrollYRef = useRef(0);
     const reflowScrollTopRef = useRef<number | null>(null);
+    const reflowAnchorRef = useRef<
+      (MasonryReflowAnchor & { expiresAt: number }) | null
+    >(null);
     const returnToPhotoAutoScrollRef = useRef(false);
     const returnToPhotoFocusFrameRef = useRef<number>(0);
     const routeForceUnlockRef = useRef<(() => void) | null>(null);
@@ -331,6 +339,9 @@ export const MasonryGrid = memo(
         Math.abs((scrollRef.current?.scrollTop ?? 0) - reflowTop) <=
           SCROLL_TOP_EPSILON;
       reflowScrollTopRef.current = null;
+      if (!(returnToPhotoAutoScrollRef.current || isReflowScroll)) {
+        reflowAnchorRef.current = null;
+      }
       if (returnToPhotoAutoScrollRef.current || isReflowScroll) {
         returnToPhotoAutoScrollRef.current = false;
       } else if (
@@ -525,6 +536,7 @@ export const MasonryGrid = memo(
           totalHeight + paddingTop + paddingBottom - effectiveViewportHeight
         )
       );
+    let pendingReflowAnchor: MasonryReflowAnchor | null = null;
     const plannedScrollTop = (() => {
       if (
         !scrollElement ||
@@ -555,10 +567,25 @@ export const MasonryGrid = memo(
           : undefined;
         const enforcedPosition =
           enforcedIndex === undefined ? undefined : positions[enforcedIndex];
+        const existingAnchor = reflowAnchorRef.current;
+        pendingReflowAnchor =
+          existingAnchor &&
+          existingAnchor.expiresAt > Date.now() &&
+          Math.abs(containerWidth - prevContainerWidthRef.current) <=
+            REFLOW_ANCHOR_MAX_WIDTH_STEP
+            ? existingAnchor
+            : getMasonryReflowAnchor({
+                previousItems: prevItemsRef.current,
+                previousPaddingTop: prevPaddingTopRef.current,
+                previousPositions: prevPositionsRef.current,
+                scrollTop: currentScrollTop,
+                topInset: prevTopInsetRef.current,
+              });
         reflowScrollTop = clampScrollTop(
           enforced && enforcedPosition
             ? enforcedPosition.top + enforcedPosition.height * enforced.ratio
             : getMasonryReflowScrollTop({
+                anchor: pendingReflowAnchor,
                 idToIndexMap,
                 nextPaddingTop: paddingTop,
                 positions,
@@ -579,6 +606,7 @@ export const MasonryGrid = memo(
           (returnToPhotoId !== prevReturnToPhotoIdRef.current &&
             completedReturnRequestRef.current !== returnToPhotoRequest));
       if (returnPending) {
+        pendingReflowAnchor = null;
         const index = idToIndexMap.get(returnToPhotoId);
         const position = index === undefined ? undefined : positions[index];
         if (!position) {
@@ -607,6 +635,7 @@ export const MasonryGrid = memo(
         (scrollToId !== prevScrollToIdRef.current ||
           scrollToAlignment !== prevScrollToAlignmentRef.current)
       ) {
+        pendingReflowAnchor = null;
         const index = idToIndexMap.get(scrollToId);
         const position = index === undefined ? undefined : positions[index];
         if (
@@ -637,6 +666,7 @@ export const MasonryGrid = memo(
       const prevReturnToPhotoRequest = prevReturnToPhotoRequestRef.current;
       const prevReturnToPhotoId = prevReturnToPhotoIdRef.current;
       const prevRouteKey = prevRouteKeyRef.current;
+      const scrollTargetChanged = scrollToId !== prevScrollToIdRef.current;
       prevPositionsRef.current = positions;
       prevItemsRef.current = items;
       prevColumnCountRef.current = columnCount;
@@ -652,6 +682,9 @@ export const MasonryGrid = memo(
 
       const returnRequestChanged =
         returnToPhotoRequest !== prevReturnToPhotoRequest;
+      if (scrollTargetChanged || returnRequestChanged) {
+        reflowAnchorRef.current = null;
+      }
       if (
         returnRequestChanged ||
         (returnToPhotoId !== prevReturnToPhotoId &&
@@ -688,6 +721,7 @@ export const MasonryGrid = memo(
       const el = scrollRef.current;
       if (!el || prevRouteKey !== routeKey) {
         if (prevRouteKey !== routeKey) {
+          reflowAnchorRef.current = null;
           pendingReturnToPhotoRequestRef.current = null;
           pendingReturnFocusIdRef.current = null;
           if (returnToPhotoFrameRef.current) {
@@ -707,6 +741,11 @@ export const MasonryGrid = memo(
         hasMatchingLayoutWidth(el, containerWidth)
       ) {
         el.scrollTop = plannedScrollTop;
+        // Keep one ID and screen offset through a continuous resize, even when
+        // its column changes. User scrolling or explicit navigation releases it.
+        reflowAnchorRef.current = pendingReflowAnchor
+          ? { ...pendingReflowAnchor, expiresAt: Date.now() + 800 }
+          : null;
         reflowScrollTopRef.current = el.scrollTop;
         prevScrollYRef.current = el.scrollTop;
         scrollTopStateRef.current = el.scrollTop;
@@ -820,6 +859,7 @@ export const MasonryGrid = memo(
       items,
       onScrollTopChange,
       paddingTop,
+      pendingReflowAnchor,
       plannedScrollTop,
       positions,
       scrollToAlignment,
