@@ -25,3 +25,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## About page: Skiper UI and Open Peeps
+
+The free Skiper UI components 52 (gallery), 58 (rolling text) and 39 (crowd)
+are credited on the about page. The crowd was adapted by Gurvinder Singh
+(@gurvinder-singh02) from Zadvorsky's animation and uses Open Peeps
+illustrations by Pablo Stanley (CC0 1.0). GSAP uses its Standard License.
+See the bundled licenses/About-UI.txt for source and license references.

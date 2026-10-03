@@ -1,0 +1,20 @@
+About page animation and illustration notices
+
+The gallery and rolling text are inspired by free Skiper UI components 52 and 58.
+Canvas crowd is adapted from free Skiper UI component 39 by Gurvinder Singh
+(@gurvinder-singh02), inspired by Zadvorsky's crowd.
+https://skiper-ui.com/v1/skiper39
+https://skiper-ui.com/v1/skiper52
+https://skiper-ui.com/v1/skiper58
+https://codepen.io/zadvorsky/pen/xxwbBQV
+
+Skiper UI permits personal and commercial use and modification and requires
+attribution for the free version. Attribution appears on the about page.
+
+The sprite sheet uses Open Peeps illustrations by Pablo Stanley (CC0 1.0).
+https://www.openpeeps.com/
+https://creativecommons.org/publicdomain/zero/1.0/
+Obtained from https://skiper-ui.com/images/peeps/all-peeps.png.
+
+GSAP: Copyright (c) 2008-2026, GreenSock. All rights reserved.
+Distributed under the Standard License: https://gsap.com/standard-license/

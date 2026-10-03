@@ -1,7 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ChevronDown, Sparkles } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
+import { AboutAuthor } from "@/components/about/about-author";
+import { AboutGallery } from "@/components/about/about-gallery";
+import "@/components/about/about.css";
 import { AnimatedGitHubButton } from "@/components/animated-github-button";
 import { AnimatedNameLoader } from "@/components/animated-name-loader";
 import { ConfettiOverlay } from "@/components/ConfettiOverlay";
@@ -29,9 +39,11 @@ const DEPENDENCIES = [
   { name: "ONNX Runtime", version: "1.26" },
   { name: "LanceDB", version: "0.18" },
   { name: "i18next", version: "26" },
+  { name: "GSAP", version: "3" },
 ];
 
 const EASTER_EGG_CLICKS = 7;
+const AboutCrowd = lazy(() => import("@/components/about/about-crowd"));
 
 function AboutSettingsPage() {
   const { t } = useTranslation();
@@ -49,6 +61,11 @@ function AboutSettingsPage() {
 
   useEffect(() => {
     ipc.client.app.appVersion({}).then((v) => setAppVersion(v as string));
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
   }, []);
 
   const handleVersionClick = useCallback(() => {
@@ -131,20 +148,24 @@ function AboutSettingsPage() {
               <span className="text-[13px] text-muted-foreground">
                 {t("settingsAuthor")}
               </span>
-              <span className="text-[13px] text-foreground">Uyoung</span>
+              <AboutAuthor />
             </div>
           </div>
-
-          {/* GitHub — standalone 3D flip button + animated name loader */}
-          <div className="flex min-w-0 flex-wrap items-center gap-3 pt-1">
-            <AnimatedGitHubButton href="https://github.com/Uyoung666/ai-image-manager" />
-            <AnimatedNameLoader />
-          </div>
         </section>
+
+        <AboutGallery />
+
+        {/* GitHub — standalone 3D flip button + animated name loader */}
+        <div className="flex min-w-0 flex-wrap items-center gap-3 pt-1">
+          <AnimatedGitHubButton href="https://github.com/Uyoung666/ai-image-manager" />
+          <AnimatedNameLoader />
+        </div>
 
         {/* Dependencies (collapsible) */}
         <section className="space-y-3">
           <button
+            aria-controls="about-dependencies"
+            aria-expanded={depsExpanded}
             className="flex w-full items-center gap-1.5 text-left font-semibold text-[14px] text-foreground hover:text-foreground/80"
             onClick={() => setDepsExpanded(!depsExpanded)}
             type="button"
@@ -160,7 +181,10 @@ function AboutSettingsPage() {
             </span>
           </button>
           {depsExpanded && (
-            <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
+            <div
+              className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4"
+              id="about-dependencies"
+            >
               <div className="space-y-1">
                 {DEPENDENCIES.map((dep) => (
                   <div
@@ -179,6 +203,9 @@ function AboutSettingsPage() {
             </div>
           )}
         </section>
+        <Suspense fallback={<div className="h-[220px]" />}>
+          <AboutCrowd />
+        </Suspense>
       </div>
     </SettingsPageShell>
   );
