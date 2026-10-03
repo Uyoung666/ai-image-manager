@@ -320,12 +320,18 @@ for (const size of SIZES) {
         .click();
       await expect(returned).toBeFocused();
       await expect(returned).toHaveClass(PULSE_CLASS);
-      expect(
-        await tray.evaluate((element) => [
-          element.closest("[data-masonry-scroll]")?.scrollTop,
-          element.querySelector("[data-sequence-virtual-scroll]")?.scrollTop,
-        ])
-      ).toEqual(scrollBefore);
+      const scrollAfter = await tray.evaluate((element) => [
+        element.closest("[data-masonry-scroll]")?.scrollTop,
+        element.querySelector("[data-sequence-virtual-scroll]")?.scrollTop,
+      ]);
+      for (const [index, before] of scrollBefore.entries()) {
+        expect(before).toBeDefined();
+        expect(scrollAfter[index]).toBeDefined();
+        // Chromium can round a fractional virtual-row offset by one CSS pixel.
+        expect(
+          Math.abs((scrollAfter[index] ?? 0) - (before ?? 0))
+        ).toBeLessThanOrEqual(1);
+      }
       await tray
         .getByRole("button", { name: "Collapse sequence", exact: true })
         .click();

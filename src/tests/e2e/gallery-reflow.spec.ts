@@ -145,10 +145,12 @@ async function startProbe() {
       return rect.bottom > bounds.top + inset && rect.top < bounds.bottom;
     });
     const anchor = visible[0];
-    const clickTarget = visible.find((card) => {
-      const rect = card.getBoundingClientRect();
-      return rect.top >= bounds.top + inset && rect.bottom <= bounds.bottom;
-    });
+    // A portrait card can be taller than the available narrow-window viewport.
+    const clickTarget =
+      visible.find((card) => {
+        const rect = card.getBoundingClientRect();
+        return rect.top >= bounds.top + inset && rect.bottom <= bounds.bottom;
+      }) ?? anchor;
     if (!(anchor && clickTarget)) {
       throw new Error("No visible fixture cards");
     }
@@ -232,6 +234,37 @@ async function startProbe() {
   });
 }
 
+async function openProbeTarget(id: string | undefined) {
+  const point = await page
+    .locator(`[data-photo-id="${id}"][role="option"]`)
+    .evaluate((card) => {
+      const scroll = card.closest("[data-masonry-scroll]");
+      if (!scroll) {
+        throw new Error("Missing masonry scroll surface");
+      }
+      const bounds = scroll.getBoundingClientRect();
+      const rect = card.getBoundingClientRect();
+      const inset =
+        document
+          .querySelector(".home-gallery-toolbar-layer")
+          ?.getBoundingClientRect().height ?? 0;
+      const top = Math.max(rect.top, bounds.top + inset);
+      const bottom = Math.min(rect.bottom, bounds.bottom);
+      if (bottom <= top) {
+        throw new Error("Fixture card has no clickable visible area");
+      }
+      return {
+        x:
+          (Math.max(rect.left, bounds.left) +
+            Math.min(rect.right, bounds.right)) /
+          2,
+        y: (top + bottom) / 2,
+      };
+    });
+  // Click the visible area without Playwright scrolling a tall card into view.
+  await page.mouse.click(point.x, point.y);
+}
+
 async function finishProbe(label: string, overlay: boolean) {
   await page.waitForTimeout(350);
   const result = await page.evaluate(() => window.masonryReflowProbe.stop());
@@ -304,7 +337,7 @@ for (const size of sizes) {
       await page.waitForTimeout(700);
       for (let repeat = 0; repeat < 2; repeat++) {
         const id = await startProbe();
-        await page.locator(`[data-photo-id="${id}"][role="option"]`).click();
+        await openProbeTarget(id);
         await expect(
           page.locator(".home-detail-panel-container")
         ).toBeVisible();
@@ -319,7 +352,7 @@ for (const size of sizes) {
     }
     if (!overlay) {
       const id = await startProbe();
-      await page.locator(`[data-photo-id="${id}"][role="option"]`).click();
+      await openProbeTarget(id);
       await expect(page.locator(".home-detail-panel-container")).toBeVisible();
       await finishProbe("drag-open", false);
       await startProbe();

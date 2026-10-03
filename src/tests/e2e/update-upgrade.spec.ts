@@ -10,9 +10,11 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { version as appVersion } from "../../../package.json";
 
 const require = createRequire(import.meta.url);
+const { version: appVersion } = require("../../../package.json") as {
+  version: string;
+};
 const executable = process.env.AIM_PACKAGED_E2E_EXECUTABLE;
 const previousExecutables = [
   ["2.1.0", process.env.AIM_UPGRADE_FROM_210],
