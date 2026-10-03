@@ -8,6 +8,7 @@ import {
   installUpdate,
   isUpdateInstallationActive,
   isUpdateQuitAllowed,
+  resumeUpdateDownload,
 } from "@/services/update-manager";
 import { getUpdateState } from "@/services/update-state";
 import { consumeUpdateWelcome as consumeUpdateWelcomeState } from "@/services/update-welcome-state";
@@ -50,12 +51,19 @@ export const checkForUpdates = os.handler((): UpdateResult => {
 });
 
 export const getUpdateStatus = os.handler((): UpdateStatus => {
-  return getUpdateState(app.getVersion());
+  return getUpdateState();
 });
 
 export const installDownloadedUpdate = os.handler((): UpdateResult => {
   return installUpdate();
 });
+
+export const resumeUpdate = os.handler(
+  (): UpdateResult => resumeUpdateDownload()
+);
+export const downloadFullUpdate = os.handler(
+  (): UpdateResult => resumeUpdateDownload(true)
+);
 
 export const consumeUpdateWelcome = os.handler(() => {
   return consumeUpdateWelcomeState();
@@ -71,7 +79,7 @@ export const getHttpPort = os.handler(() => {
 });
 
 export const openReleasePage = os.handler(() => {
-  const status = getUpdateState(app.getVersion());
+  const status = getUpdateState();
   const target =
     status.version && STABLE_VERSION_RE.test(status.version)
       ? `https://github.com/Uyoung666/ai-image-manager/releases/tag/v${status.version}`

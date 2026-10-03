@@ -27,22 +27,29 @@ export interface UpdateResult {
 }
 
 export interface UpdateStatus {
+  attempt?: number;
   bytesPerSecond?: number;
+  canResume?: boolean;
+  canUseFull?: boolean;
   etag?: string;
   fallbackReason?: string;
+  installCompletedAt?: string;
   installerPath?: string;
   installerPid?: number;
   installStartedAt?: string;
   lastCheckedAt?: string;
   lastCheckResult?: "up-to-date" | "update-available";
+  maxAttempts?: number;
   message?: UpdateErrorCode;
-  operation?: "check" | "install";
+  networkWaiting?: boolean;
+  operation?: "check" | "download" | "install";
   percent?: number;
   phase:
     | "idle"
     | "checking"
     | "up-to-date"
     | "downloading"
+    | "retry-wait"
     | "downloaded"
     | "installing"
     | "recovering"
@@ -52,8 +59,12 @@ export interface UpdateStatus {
   relaunchToken?: string;
   releaseDate?: string;
   releaseNotes?: string;
+  restartAttempts?: number;
+  resumeInstallation?: boolean;
   retryAfter?: string;
+  sourceVersion?: string;
   total?: number;
+  transactionId?: string;
   transferred?: number;
   updateMethod?: "delta" | "full";
   updateURL?: string;

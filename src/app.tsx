@@ -1,15 +1,14 @@
 import { RouterProvider } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { Toaster, toast } from "sonner";
+import { useEffect, useState } from "react";
+import { Toaster } from "sonner";
 import {
   applyAccentColor,
   cacheAccentColor,
   setAccentColorPreference,
 } from "./actions/accent-color";
 import { listenSystemThemeChanges, syncWithLocalTheme } from "./actions/theme";
-import { installDownloadedUpdate } from "./actions/update";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { UpdateNotification } from "./components/update-notification";
 import { UiPreferencesProvider } from "./contexts/ui-preferences-context";
 import { ipc } from "./ipc/manager";
 import { PluginBackdropHost, PluginHostProvider } from "./plugins/runtime";
@@ -17,7 +16,6 @@ import { QueryProvider } from "./providers/QueryProvider";
 import { router } from "./utils/routes";
 
 export default function App() {
-  const { t } = useTranslation();
   const [updateReminder, setUpdateReminder] = useState(true);
 
   useEffect(() => {
@@ -49,29 +47,6 @@ export default function App() {
     return listenSystemThemeChanges();
   }, []);
 
-  // Listen for update availability
-  const handleUpdate = useCallback(
-    (event: MessageEvent) => {
-      if (updateReminder && event.data?.channel === "update:available") {
-        toast(t("updateDownloaded", { version: event.data.version }), {
-          duration: 30_000,
-          action: {
-            label: t("updateRestart"),
-            onClick: async () => {
-              await installDownloadedUpdate();
-            },
-          },
-        });
-      }
-    },
-    [t, updateReminder]
-  );
-
-  useEffect(() => {
-    window.addEventListener("message", handleUpdate);
-    return () => window.removeEventListener("message", handleUpdate);
-  }, [handleUpdate]);
-
   return (
     <ErrorBoundary>
       <UiPreferencesProvider>
@@ -79,6 +54,7 @@ export default function App() {
           <PluginBackdropHost />
           <QueryProvider>
             <RouterProvider router={router} />
+            <UpdateNotification reminder={updateReminder} />
             <Toaster
               position="bottom-right"
               toastOptions={{

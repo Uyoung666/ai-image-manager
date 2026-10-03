@@ -31,12 +31,13 @@ describe("cached update errors", () => {
     expect(mocks.log).toHaveBeenCalledWith(
       expect.objectContaining({ message, action: "restore-status" })
     );
-    expect(mocks.set).toHaveBeenCalledOnce();
+    expect(mocks.set).not.toHaveBeenCalled();
   });
 
-  it("clears the completed version lock after an upgrade", async () => {
+  it("leaves completion reconciliation to the update manager", async () => {
     mocks.get.mockReturnValue({ phase: "downloaded", version: "2.2.1" });
     const { getUpdateState } = await import("@/services/update-state");
-    expect(getUpdateState("2.2.1")).toEqual({ phase: "idle" });
+    expect(getUpdateState()).toEqual({ phase: "downloaded", version: "2.2.1" });
+    expect(mocks.set).not.toHaveBeenCalled();
   });
 });

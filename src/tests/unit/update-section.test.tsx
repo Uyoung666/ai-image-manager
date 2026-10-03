@@ -9,12 +9,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateSection } from "@/components/settings/UpdateSection";
 
 const UPDATE_INSTALLING_LABEL_RE = /updateInstalling/i;
+const UPDATE_NETWORK_WAITING_LABEL_RE = /updateNetworkWaiting/i;
 
 const mocks = vi.hoisted(() => ({
   getUpdateStatus: vi.fn(),
   checkForUpdates: vi.fn(),
   installDownloadedUpdate: vi.fn(),
   openReleasePage: vi.fn(),
+  resumeUpdate: vi.fn(),
+  downloadFullUpdate: vi.fn(),
 }));
 vi.mock("@/actions/update", () => mocks);
 vi.mock("@/ipc/manager", () => ({
@@ -39,6 +42,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.getUpdateStatus.mockResolvedValue({ phase: "idle" });
   mocks.checkForUpdates.mockResolvedValue({ ok: true });
+  mocks.resumeUpdate.mockResolvedValue({ ok: true });
+  mocks.downloadFullUpdate.mockResolvedValue({ ok: true });
 });
 
 function status(data: Record<string, unknown>) {
@@ -52,6 +57,51 @@ function status(data: Record<string, unknown>) {
 }
 
 describe("update settings errors", () => {
+  it("keeps retry on the interrupted package and exposes explicit full download", async () => {
+    mocks.getUpdateStatus.mockResolvedValue({
+      phase: "error",
+      operation: "download",
+      message: "NETWORK_ERROR",
+      canResume: true,
+      canUseFull: true,
+      updateMethod: "delta",
+    });
+    render(<UpdateSection appVersion="2.2.3" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "updateUseFull" })
+    );
+    await waitFor(() =>
+      expect(mocks.downloadFullUpdate).toHaveBeenCalledOnce()
+    );
+    status({
+      phase: "error",
+      operation: "download",
+      message: "NETWORK_ERROR",
+      canResume: true,
+      canUseFull: true,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "updateRetry" }));
+    await waitFor(() => expect(mocks.resumeUpdate).toHaveBeenCalledOnce());
+    expect(mocks.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it("shows network waits and retry countdown, then clears an idle snapshot", async () => {
+    render(<UpdateSection appVersion="2.2.3" />);
+    await waitFor(() => expect(mocks.getUpdateStatus).toHaveBeenCalledOnce());
+    status({ phase: "downloading", networkWaiting: true });
+    expect(
+      screen.getByRole("button", { name: UPDATE_NETWORK_WAITING_LABEL_RE })
+    ).toBeDisabled();
+    status({
+      phase: "retry-wait",
+      attempt: 1,
+      maxAttempts: 4,
+      retryAfter: new Date(Date.now() + 5000).toISOString(),
+    });
+    expect(screen.getByText("updateRetryCountdown")).toBeInTheDocument();
+    status({ phase: "idle" });
+    expect(screen.queryByText("updateRetryCountdown")).not.toBeInTheDocument();
+  });
   it.each([
     [
       "System.Net.WebException: ���� at System.Net.TlsStream.EndWrite",

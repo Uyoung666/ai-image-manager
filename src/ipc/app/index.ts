@@ -3,11 +3,13 @@ import {
   checkForUpdates,
   consumeUpdateWelcome,
   currentPlatform,
+  downloadFullUpdate,
   getHttpPort,
   getUpdateStatus,
   installDownloadedUpdate,
   openReleasePage,
   restartApp,
+  resumeUpdate,
 } from "./handlers";
 
 export const app = {
@@ -20,4 +22,6 @@ export const app = {
   getHttpPort,
   installDownloadedUpdate,
   openReleasePage,
+  resumeUpdate,
+  downloadFullUpdate,
 };

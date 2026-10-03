@@ -26,24 +26,15 @@ function getStore() {
 
 let state: UpdateStatus | null = null;
 
-export function getUpdateState(currentVersion?: string): UpdateStatus {
+export function getUpdateState(): UpdateStatus {
   if (!state) {
     state = getStore().get("state", { phase: "idle" });
-  }
-  if (
-    currentVersion &&
-    state.phase === "downloaded" &&
-    state.version === currentVersion
-  ) {
-    state = { phase: "idle" };
-    getStore().set("state", state);
   }
   if (state.phase === "error") {
     const code = classifyUpdateError(state.message);
     if (state.message !== code) {
       recordUpdateError(state.message, "restore-status");
       state = { ...state, message: code };
-      getStore().set("state", state);
     }
   }
   return { ...state };

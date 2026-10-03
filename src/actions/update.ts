@@ -16,3 +16,11 @@ export function installDownloadedUpdate(): Promise<UpdateResult> {
 export function openReleasePage() {
   return ipc.client.app.openReleasePage({});
 }
+
+export function resumeUpdate(): Promise<UpdateResult> {
+  return ipc.client.app.resumeUpdate({});
+}
+
+export function downloadFullUpdate(): Promise<UpdateResult> {
+  return ipc.client.app.downloadFullUpdate({});
+}

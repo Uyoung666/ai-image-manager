@@ -23,6 +23,8 @@ describe("update error classification", () => {
     ["HTTP_STATUS_403", "UPDATE_ACCESS_DENIED"],
     ["HTTP_STATUS_403 x-ratelimit-remaining=0", "UPDATE_RATE_LIMITED"],
     ["status code: 404", "UPDATE_NOT_FOUND"],
+    ["HTTP_STATUS_408", "NETWORK_ERROR"],
+    ["HTTP_STATUS_410", "UPDATE_NOT_FOUND"],
     ["HTTP_STATUS_429", "UPDATE_RATE_LIMITED"],
     ["HTTP_STATUS_503", "UPDATE_SERVICE_UNAVAILABLE"],
     ["HTTP/1.1 503 Service Unavailable", "UPDATE_SERVICE_UNAVAILABLE"],

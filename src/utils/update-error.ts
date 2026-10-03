@@ -14,8 +14,10 @@ const RATE_LIMITED_RE =
   /rate[-_ ]?limit|too many requests|x[-_]?ratelimit|retry[-_]?after|secondary rate/i;
 const INSTALL_INTERRUPTED_RE =
   /install(?:ation)? interrupted|installer.*(?:crash|exit)|Squirrel update exited|UPDATE_INSTALL_INTERRUPTED/i;
-const INSTALL_PERMISSION_RE = /permission|access denied|EACCES|EPERM/i;
-const INSTALL_DISK_RE = /disk full|not enough space|ENOSPC/i;
+const INSTALL_PERMISSION_RE =
+  /permission|access denied|UnauthorizedAccessException|EACCES|EPERM|拒绝访问|权限不足/i;
+const INSTALL_DISK_RE =
+  /disk full|not enough space|ENOSPC|0x80070070|磁盘空间不足|磁盘已满|没有足够的空间/i;
 const TLS_ERROR_RE =
   /TlsStream|AuthenticationException|SecureChannelFailure|TrustFailure|\bTLS\b|\bSSL\b|ERR_CERT_|CERT_HAS_EXPIRED|UNABLE_TO_VERIFY|certificate|身份验证失败|安全通道|证书/i;
 const NETWORK_ERROR_RE =
@@ -51,7 +53,10 @@ export function classifyUpdateError(error: unknown): UpdateErrorCode {
     if (status === 403) {
       return "UPDATE_ACCESS_DENIED";
     }
-    if (status === 404) {
+    if (status === 408) {
+      return "NETWORK_ERROR";
+    }
+    if (status === 404 || status === 410) {
       return "UPDATE_NOT_FOUND";
     }
     if (status >= 500) {
@@ -64,9 +69,6 @@ export function classifyUpdateError(error: unknown): UpdateErrorCode {
   if (INSTALL_PERMISSION_RE.test(raw)) {
     return "UPDATE_INSTALL_ACCESS_DENIED";
   }
-  if (INSTALL_INTERRUPTED_RE.test(raw)) {
-    return "UPDATE_INSTALL_INTERRUPTED";
-  }
   if (HTTP_ERROR_RE.test(raw) && RATE_LIMITED_RE.test(raw)) {
     return "UPDATE_RATE_LIMITED";
   }
@@ -75,6 +77,9 @@ export function classifyUpdateError(error: unknown): UpdateErrorCode {
   }
   if (NETWORK_ERROR_RE.test(raw)) {
     return "NETWORK_ERROR";
+  }
+  if (INSTALL_INTERRUPTED_RE.test(raw)) {
+    return "UPDATE_INSTALL_INTERRUPTED";
   }
   return "UPDATE_UNKNOWN_ERROR";
 }

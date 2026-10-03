@@ -1110,6 +1110,10 @@ i18n.use(initReactI18next).init({
         updateError: "更新失败，请重试或手动下载。",
         updateCheckBtn: "检查更新",
         updateRetry: "重试",
+        updateRetryCountdown:
+          "{{seconds}} 秒后重试（第 {{attempt}}/{{total}} 次尝试）",
+        updateNetworkWaiting: "网络暂时没有响应，正在等待连接恢复…",
+        updateUseFull: "改用完整包",
         updateRestartNow: "重启更新",
         updateLastCheck: "上次检查：{{time}}",
         updateProgressBar: "下载进度",
@@ -3503,6 +3507,11 @@ i18n.use(initReactI18next).init({
           "Auto-update is not available in dev mode. Use the packaged app.",
         updateCheckBtn: "Check for Updates",
         updateRetry: "Retry",
+        updateRetryCountdown:
+          "Retrying in {{seconds}}s (attempt {{attempt}}/{{total}})",
+        updateNetworkWaiting:
+          "The network is not responding. Waiting for the connection…",
+        updateUseFull: "Use full package",
         updateRestartNow: "Restart to Update",
         updateLastCheck: "Last checked: {{time}}",
         updateProgressBar: "Download progress",
