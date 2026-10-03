@@ -40,6 +40,12 @@ vi.mock("@/actions/wander", () => ({
   setWanderSettings: vi.fn(),
 }));
 
+vi.mock("@/components/wander/wander-media", () => ({
+  prepareWanderSession: vi.fn((session: WanderSession) =>
+    Promise.resolve(session)
+  ),
+}));
+
 vi.mock("@/hooks/use-global-ai-status", () => ({
   useGlobalAiStatus: () => aiStatus,
 }));
@@ -372,6 +378,37 @@ describe("WanderProvider", () => {
     });
     expect(screen.getByTestId("wander-overlay")).toBeInTheDocument();
     expect(api?.active).toBe(true);
+  });
+
+  it("defers a round change until an in-flight album save finishes", async () => {
+    let finishSave!: (value: { albumId: number }) => void;
+    vi.mocked(saveWanderSessionToAlbum).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        })
+    );
+    renderProvider();
+    await flush();
+    await act(async () => {
+      await requireApi().start();
+    });
+    await runOverlayAction(() => {
+      overlayProps?.onSave?.();
+    });
+    await runOverlayAction(() => {
+      overlayProps?.onRoundComplete?.();
+    });
+    expect(overlayProps?.roundNumber).toBe(1);
+    await act(async () => {
+      finishSave({ albumId: 1 });
+      await Promise.resolve();
+    });
+    expect(overlayProps?.roundNumber).toBe(2);
+    expect(saveWanderSessionToAlbum).toHaveBeenCalledWith({
+      photoIds: [1, 2],
+      title: "wander.title.rediscovery",
+    });
   });
 
   it("closes after consecutive round failures", async () => {

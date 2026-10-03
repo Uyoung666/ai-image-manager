@@ -19,13 +19,18 @@ import {
   setWanderSettings,
 } from "@/actions/wander";
 import { WanderOverlay } from "@/components/wander/WanderOverlay";
+import {
+  type PreparedWanderSession,
+  prepareWanderSession,
+} from "@/components/wander/wander-media";
 import { IPC_CHANNELS, type WanderLifecycleState } from "@/constants";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import {
   DEFAULT_WANDER_SETTINGS,
   type WanderContentMode,
   type WanderMode,
-  type WanderSession,
   type WanderSettings,
 } from "@/types/wander";
 
@@ -76,7 +81,7 @@ export function WanderProvider({ children }: { children: ReactNode }) {
   const [preferences, setPreferences] = useState<WanderSettings>(
     DEFAULT_WANDER_SETTINGS
   );
-  const [session, setSession] = useState<WanderSession | null>(null);
+  const [session, setSession] = useState<PreparedWanderSession | null>(null);
   const [roundSeq, setRoundSeq] = useState(0);
   const [loading, setLoading] = useState(false);
   const [startError, setStartError] = useState<
@@ -91,8 +96,17 @@ export function WanderProvider({ children }: { children: ReactNode }) {
   const preferencesRef = useRef(preferences);
   const aiRunningRef = useRef(aiStatus.isRunning);
   const sessionRef = useRef(session);
-  const nextSessionRef = useRef<WanderSession | null>(null);
-  const prefetchPromiseRef = useRef<Promise<WanderSession | null> | null>(null);
+  const nextSessionRef = useRef<PreparedWanderSession | null>(null);
+  const prefetchPromiseRef =
+    useRef<Promise<PreparedWanderSession | null> | null>(null);
+  const savingRef = useRef(false);
+  const deferredRoundRef = useRef(false);
+  const advancingRef = useRef(false);
+  const systemReduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const appReduceMotion = useReducedMotion();
+  const reduceMotion = systemReduceMotion || appReduceMotion;
+  const reduceMotionRef = useRef(reduceMotion);
+  reduceMotionRef.current = reduceMotion;
   const consecutiveFailuresRef = useRef(0);
   const scheduleIdleRef = useRef<(() => void) | null>(null);
   const [lifecycleEligible, setLifecycleEligible] = useState(() => {
@@ -127,11 +141,18 @@ export function WanderProvider({ children }: { children: ReactNode }) {
       mode: WanderMode,
       requestId: number,
       opts?: { excludeMode?: WanderContentMode }
-    ): Promise<WanderSession | null> => {
+    ): Promise<PreparedWanderSession | null> => {
       const roundSizeOverride = readOverrideMs("wander.roundSize");
+      const defaultSize =
+        preferencesRef.current.presentation === "parallax" &&
+        !reduceMotionRef.current
+          ? 12
+          : ROUND_SIZE;
       const roundSize =
-        roundSizeOverride > 0 ? Math.floor(roundSizeOverride) : ROUND_SIZE;
-      const result = await getWanderSession({
+        roundSizeOverride > 0
+          ? Math.min(12, Math.max(2, Math.floor(roundSizeOverride)))
+          : defaultSize;
+      let result: PreparedWanderSession = await getWanderSession({
         allowedModes: preferencesRef.current.modes,
         excludeMode: opts?.excludeMode,
         limit: roundSize,
@@ -139,6 +160,25 @@ export function WanderProvider({ children }: { children: ReactNode }) {
       });
       if (requestId !== requestRef.current) {
         return null;
+      }
+      result = {
+        ...result,
+        photos: [
+          ...new Map(result.photos.map((photo) => [photo.id, photo])).values(),
+        ],
+      };
+      if (
+        preferencesRef.current.presentation === "parallax" &&
+        !reduceMotionRef.current &&
+        result.photos.length > 0
+      ) {
+        result = await prepareWanderSession(
+          result,
+          () => requestId !== requestRef.current
+        );
+        if (requestId !== requestRef.current) {
+          return null;
+        }
       }
       return result.mode === "hamsterWheel" ||
         result.photos.length >= MIN_ROUND_SIZE
@@ -149,7 +189,7 @@ export function WanderProvider({ children }: { children: ReactNode }) {
   );
 
   const prefetchNextRound = useCallback(
-    (requestId: number): Promise<WanderSession | null> => {
+    (requestId: number): Promise<PreparedWanderSession | null> => {
       const promise = fetchRound("auto", requestId, {
         excludeMode: sessionRef.current?.mode,
       })
@@ -196,6 +236,8 @@ export function WanderProvider({ children }: { children: ReactNode }) {
     prefetchPromiseRef.current = null;
     consecutiveFailuresRef.current = 0;
     loadingRef.current = false;
+    advancingRef.current = false;
+    deferredRoundRef.current = false;
     if (retryTimerRef.current) {
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
@@ -210,7 +252,13 @@ export function WanderProvider({ children }: { children: ReactNode }) {
   }, [resetWanderState]);
 
   const promoteNext = useCallback(
-    (next: WanderSession) => {
+    (next: PreparedWanderSession) => {
+      if (savingRef.current) {
+        nextSessionRef.current = next;
+        deferredRoundRef.current = true;
+        return;
+      }
+      advancingRef.current = false;
       nextSessionRef.current = null;
       consecutiveFailuresRef.current = 0;
       sessionRef.current = next;
@@ -231,7 +279,7 @@ export function WanderProvider({ children }: { children: ReactNode }) {
     const pending = prefetchPromiseRef.current;
     (pending ?? prefetchNextRound(requestId))
       .then((result) => {
-        if (!sessionRef.current) {
+        if (!sessionRef.current || requestId !== requestRef.current) {
           return;
         }
         if (result) {
@@ -253,9 +301,14 @@ export function WanderProvider({ children }: { children: ReactNode }) {
   }, [close, prefetchNextRound, promoteNext, t]);
 
   const handleRoundComplete = useCallback(() => {
-    if (!sessionRef.current) {
+    if (!sessionRef.current || advancingRef.current) {
       return;
     }
+    if (savingRef.current) {
+      deferredRoundRef.current = true;
+      return;
+    }
+    advancingRef.current = true;
     const next = nextSessionRef.current;
     if (next) {
       promoteNext(next);
@@ -425,9 +478,10 @@ export function WanderProvider({ children }: { children: ReactNode }) {
   );
 
   const save = useCallback(async () => {
-    if (!session || saving || session.mode === "hamsterWheel") {
+    if (!session || savingRef.current || session.mode === "hamsterWheel") {
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     try {
       const title = t(session.titleKey, session.titleParams ?? {});
@@ -439,9 +493,15 @@ export function WanderProvider({ children }: { children: ReactNode }) {
     } catch {
       toast.error(t("wander.saveFailed"));
     } finally {
+      savingRef.current = false;
       setSaving(false);
+      if (deferredRoundRef.current) {
+        deferredRoundRef.current = false;
+        advancingRef.current = false;
+        handleRoundComplete();
+      }
     }
-  }, [saving, session, t]);
+  }, [handleRoundComplete, session, t]);
 
   const value = useMemo<WanderContextValue>(
     () => ({
@@ -466,12 +526,15 @@ export function WanderProvider({ children }: { children: ReactNode }) {
       {children}
       {session && (
         <WanderOverlay
+          flowSpeed={preferences.flowSpeed}
           intervalMs={intervalMs}
           key={roundSeq}
           onClose={close}
           onRoundComplete={handleRoundComplete}
           onSave={save}
           preparingNext={preparingNext}
+          presentation={preferences.presentation}
+          previews={session.previews}
           roundNumber={roundSeq}
           saving={saving}
           session={session}

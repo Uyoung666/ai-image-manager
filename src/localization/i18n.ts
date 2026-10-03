@@ -727,6 +727,33 @@ i18n.use(initReactI18next).init({
         settingsWander: "漫游",
         wander: {
           label: "漫游",
+          presentation: "展示方式",
+          presentationHint: "选择照片的展示方式；松鼠轮屏保保留独立效果",
+          presentationOption: { parallax: "视差画廊", slideshow: "经典放映" },
+          preview: {
+            label: "展示方式预览",
+            parallaxDescription: "多列交错流动，可滚动浏览",
+            slideshowDescription: "单张完整展示，依次切换",
+            accelerated: "加速示意",
+            pause: "暂停预览",
+            resume: "继续预览",
+            replay: "重播预览",
+            reducedMotion: "已减少动态效果；实际漫游使用经典放映",
+          },
+          flowSpeed: "流动速度",
+          flowSpeedHint: "控制一轮照片墙的流动节奏；滚动可暂停并手动浏览",
+          flowSpeedOption: {
+            slow: "舒缓 · 约 90 秒/轮",
+            normal: "标准 · 约 60 秒/轮",
+            fast: "轻快 · 约 45 秒/轮",
+          },
+          parallaxControlsHint:
+            "滚动手动浏览 · 点击查看大图 · 空格播放/暂停 · Esc 退出",
+          openPhoto: "查看照片：{{filename}}",
+          backToGallery: "返回画廊",
+          nextRound: "下一轮",
+          play: "继续播放",
+          pause: "暂停播放",
           experience: "漫游体验",
           startHint: "从图库中开启一次意外重逢",
           enabled: "闲置时自动漫游",
@@ -3032,6 +3059,40 @@ i18n.use(initReactI18next).init({
         settingsWander: "Wander",
         wander: {
           label: "Wander",
+          presentation: "Presentation",
+          presentationHint:
+            "Choose how photos are displayed; the hamster wheel keeps its own appearance",
+          presentationOption: {
+            parallax: "Parallax gallery",
+            slideshow: "Classic slideshow",
+          },
+          preview: {
+            label: "Presentation preview",
+            parallaxDescription:
+              "Columns flow in alternating directions; scroll to browse",
+            slideshowDescription: "Full photos displayed one at a time",
+            accelerated: "Accelerated illustration",
+            pause: "Pause preview",
+            resume: "Resume preview",
+            replay: "Replay preview",
+            reducedMotion:
+              "Motion is reduced; wandering uses the classic slideshow",
+          },
+          flowSpeed: "Flow speed",
+          flowSpeedHint:
+            "Set the pace of each round; scroll to pause and browse manually",
+          flowSpeedOption: {
+            slow: "Gentle · about 90s/round",
+            normal: "Normal · about 60s/round",
+            fast: "Lively · about 45s/round",
+          },
+          parallaxControlsHint:
+            "Scroll to browse · Click to inspect · Space to play/pause · Esc to exit",
+          openPhoto: "View photo: {{filename}}",
+          backToGallery: "Back to gallery",
+          nextRound: "Next round",
+          play: "Resume playback",
+          pause: "Pause playback",
           experience: "Wander experience",
           startHint: "Rediscover something unexpected in your library",
           enabled: "Wander when idle",

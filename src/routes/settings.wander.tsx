@@ -6,6 +6,7 @@ import { FilterDropdown } from "@/components/filter-dropdown";
 import { SettingRow } from "@/components/settings/setting-row";
 import { SettingsPageShell } from "@/components/settings/settings-page-shell";
 import { Switch } from "@/components/ui/switch";
+import { WanderPresentationPreview } from "@/components/wander/WanderPresentationPreview";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { useWander } from "@/providers/WanderProvider";
 import type { WanderContentMode, WanderSettings } from "@/types/wander";
@@ -107,25 +108,79 @@ function WanderSettingsPage() {
         <SettingRow
           action={
             <FilterDropdown
-              ariaLabel={t("wander.intervalSeconds")}
+              ariaLabel={t("wander.presentation")}
               className="max-w-full"
               onChange={(value) =>
                 updatePreference(
-                  "intervalSeconds",
-                  Number(value) as WanderSettings["intervalSeconds"]
+                  "presentation",
+                  value as WanderSettings["presentation"]
                 ).catch(() => undefined)
               }
-              options={INTERVAL_OPTIONS.map((value) => ({
-                label: t("wander.seconds", { count: value }),
-                value: String(value),
+              options={(["parallax", "slideshow"] as const).map((value) => ({
+                value,
+                label: t(`wander.presentationOption.${value}`),
               }))}
-              placeholder={t("wander.intervalSeconds")}
-              value={String(preferences.intervalSeconds)}
+              placeholder={t("wander.presentation")}
+              value={preferences.presentation}
             />
           }
-          description={t("wander.intervalSecondsHint")}
-          title={t("wander.intervalSeconds")}
+          description={t("wander.presentationHint")}
+          title={t("wander.presentation")}
         />
+        <WanderPresentationPreview
+          flowSpeed={preferences.flowSpeed}
+          intervalSeconds={preferences.intervalSeconds}
+          key={`${preferences.presentation}-${preferences.presentation === "parallax" ? preferences.flowSpeed : preferences.intervalSeconds}`}
+          presentation={preferences.presentation}
+          suspended={wanderActive}
+        />
+        {preferences.presentation === "parallax" ? (
+          <SettingRow
+            action={
+              <FilterDropdown
+                ariaLabel={t("wander.flowSpeed")}
+                className="max-w-full"
+                onChange={(value) =>
+                  updatePreference(
+                    "flowSpeed",
+                    value as WanderSettings["flowSpeed"]
+                  ).catch(() => undefined)
+                }
+                options={(["slow", "normal", "fast"] as const).map((value) => ({
+                  value,
+                  label: t(`wander.flowSpeedOption.${value}`),
+                }))}
+                placeholder={t("wander.flowSpeed")}
+                value={preferences.flowSpeed}
+              />
+            }
+            description={t("wander.flowSpeedHint")}
+            title={t("wander.flowSpeed")}
+          />
+        ) : (
+          <SettingRow
+            action={
+              <FilterDropdown
+                ariaLabel={t("wander.intervalSeconds")}
+                className="max-w-full"
+                onChange={(value) =>
+                  updatePreference(
+                    "intervalSeconds",
+                    Number(value) as WanderSettings["intervalSeconds"]
+                  ).catch(() => undefined)
+                }
+                options={INTERVAL_OPTIONS.map((value) => ({
+                  label: t("wander.seconds", { count: value }),
+                  value: String(value),
+                }))}
+                placeholder={t("wander.intervalSeconds")}
+                value={String(preferences.intervalSeconds)}
+              />
+            }
+            description={t("wander.intervalSecondsHint")}
+            title={t("wander.intervalSeconds")}
+          />
+        )}
       </div>
 
       <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">

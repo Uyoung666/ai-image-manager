@@ -379,7 +379,7 @@ describe("WanderOverlay", () => {
     });
     fireEvent(window, regularKey);
     expect(onClose).not.toHaveBeenCalled();
-    expect(regularKey.defaultPrevented).toBe(true);
+    expect(regularKey.defaultPrevented).toBe(false);
 
     const escapeKey = new KeyboardEvent("keydown", {
       bubbles: true,

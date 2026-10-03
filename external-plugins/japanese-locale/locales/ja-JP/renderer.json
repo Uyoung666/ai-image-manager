@@ -642,7 +642,36 @@
     "notEnoughPhotos": "利用可能な写真が 2 枚以上必要です",
     "settingsSaveFailed": "ワンダーの設定を保存できませんでした",
     "minutes": "{{count}} 分",
-    "seconds": "{{count}} 秒"
+    "seconds": "{{count}} 秒",
+    "presentation": "表示方法",
+    "presentationHint": "写真の表示方法を選びます。ハムスターホイールは専用の表示を維持します",
+    "presentationOption": {
+      "parallax": "パララックスギャラリー",
+      "slideshow": "クラシックスライドショー"
+    },
+    "preview": {
+      "label": "表示方法のプレビュー",
+      "parallaxDescription": "列が交互の方向に流れ、スクロールで閲覧できます",
+      "slideshowDescription": "写真全体を1枚ずつ表示します",
+      "accelerated": "速度を上げたイメージ",
+      "pause": "プレビューを一時停止",
+      "resume": "プレビューを再開",
+      "replay": "プレビューを最初から再生",
+      "reducedMotion": "動きを軽減しています。漫遊には従来のスライドショーを使用します"
+    },
+    "flowSpeed": "流れる速さ",
+    "flowSpeedHint": "各ラウンドの速さを設定します。スクロールすると一時停止し、手動で閲覧できます",
+    "flowSpeedOption": {
+      "slow": "ゆったり · 約90秒/ラウンド",
+      "normal": "標準 · 約60秒/ラウンド",
+      "fast": "軽快 · 約45秒/ラウンド"
+    },
+    "parallaxControlsHint": "スクロールで閲覧 · クリックで拡大 · Spaceで再生/一時停止 · Escで終了",
+    "openPhoto": "写真を表示：{{filename}}",
+    "backToGallery": "ギャラリーに戻る",
+    "nextRound": "次のラウンド",
+    "play": "再生を再開",
+    "pause": "再生を一時停止"
   },
   "settingsStorage": "ストレージ",
   "settingsSequenceDetection": "シーケンス検出",

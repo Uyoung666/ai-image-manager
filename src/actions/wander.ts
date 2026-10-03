@@ -9,6 +9,8 @@ import { parseWanderSettings } from "@/types/wander";
 
 const WANDER_SETTING_KEYS = {
   enabled: "wander.enabled",
+  presentation: "wander.presentation",
+  flowSpeed: "wander.flowSpeed",
   idleMinutes: "wander.idleMinutes",
   intervalSeconds: "wander.intervalSeconds",
   modes: "wander.modes",
@@ -35,6 +37,14 @@ export async function setWanderSettings(
   settings: WanderSettings
 ): Promise<void> {
   await Promise.all([
+    ipc.client.settings.setAppSetting({
+      key: WANDER_SETTING_KEYS.presentation,
+      value: settings.presentation,
+    }),
+    ipc.client.settings.setAppSetting({
+      key: WANDER_SETTING_KEYS.flowSpeed,
+      value: settings.flowSpeed,
+    }),
     ipc.client.settings.setAppSetting({
       key: WANDER_SETTING_KEYS.enabled,
       value: String(settings.enabled),

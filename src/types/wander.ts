@@ -31,13 +31,17 @@ export interface WanderSession {
 
 export interface WanderSettings {
   enabled: boolean;
+  flowSpeed: "slow" | "normal" | "fast";
   idleMinutes: 10 | 15 | 30;
   intervalSeconds: 3 | 5 | 10;
   modes: WanderContentMode[];
+  presentation: "parallax" | "slideshow";
 }
 
 export const DEFAULT_WANDER_SETTINGS: WanderSettings = {
   enabled: false,
+  presentation: "parallax",
+  flowSpeed: "normal",
   idleMinutes: 15,
   intervalSeconds: 5,
   modes: ["timeCapsule", "theme", "rediscovery", "hamsterWheel"],
@@ -88,6 +92,11 @@ export function parseWanderSettings(
   }
   return {
     enabled: parsedEnabled,
+    presentation:
+      values.get("wander.presentation") === "slideshow"
+        ? "slideshow"
+        : "parallax",
+    flowSpeed: parseFlowSpeed(values.get("wander.flowSpeed")),
     idleMinutes: choice(
       "wander.idleMinutes",
       [10, 15, 30] as const,
@@ -117,4 +126,10 @@ export interface RecordWanderExposureInput {
 export interface SaveWanderSessionToAlbumInput {
   photoIds: number[];
   title: string;
+}
+
+function parseFlowSpeed(
+  value: string | undefined
+): WanderSettings["flowSpeed"] {
+  return value === "slow" || value === "fast" ? value : "normal";
 }

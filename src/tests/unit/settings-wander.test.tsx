@@ -17,6 +17,9 @@ const { wanderState } = vi.hoisted(() => ({
 vi.mock("@/providers/WanderProvider", () => ({
   useWander: () => wanderState,
 }));
+vi.mock("@/components/wander/WanderPresentationPreview", () => ({
+  WanderPresentationPreview: () => <div data-testid="presentation-preview" />,
+}));
 
 vi.mock("@/hooks/useRouteScrollRestoration", () => ({
   useRouteScrollRestoration: () => undefined,
@@ -90,6 +93,28 @@ describe("settings.wander", () => {
     expect(wanderState.start).toHaveBeenCalledTimes(1);
   });
 
+  it("shows flow speed only for the gallery and saves presentation choices", () => {
+    renderPage();
+    expect(
+      screen.getByRole("combobox", { name: "wander.flowSpeed" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "wander.intervalSeconds" })
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "wander.presentation" })
+    );
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: "wander.presentationOption.slideshow",
+      })
+    );
+    expect(wanderState.updatePreference).toHaveBeenCalledWith(
+      "presentation",
+      "slideshow"
+    );
+  });
+
   it("shows a visible start error", () => {
     wanderState.startError = "notEnoughPhotos";
     renderPage();
@@ -100,12 +125,13 @@ describe("settings.wander", () => {
   });
 
   it("converts dropdown values back to numeric wander preferences", () => {
+    wanderState.preferences.presentation = "slideshow";
     renderPage();
 
     const dropdowns = screen.getAllByRole("combobox");
     fireEvent.click(dropdowns[0]);
     fireEvent.click(screen.getAllByRole("option")[1]);
-    fireEvent.click(dropdowns[1]);
+    fireEvent.click(dropdowns[2]);
     fireEvent.click(screen.getAllByRole("option")[1]);
 
     expect(wanderState.updatePreference).toHaveBeenCalledWith(

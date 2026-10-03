@@ -100,6 +100,8 @@ describe("wander settings parser", () => {
       ])
     ).toEqual({
       enabled: true,
+      presentation: "parallax",
+      flowSpeed: "normal",
       idleMinutes: 30,
       intervalSeconds: 3,
       modes: ["theme", "rediscovery"],
