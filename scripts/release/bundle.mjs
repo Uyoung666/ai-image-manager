@@ -10,6 +10,13 @@ import {
   verifySha256Sums,
 } from "./checksums.mjs";
 import {
+  localeFilename,
+  localeReportFilename,
+  validateLocaleSmoke,
+  verifyLocaleBundle,
+  verifyLocaleRelease,
+} from "./locale.mjs";
+import {
   compareVersions,
   isStableVersion,
   parseStableVersion,
@@ -59,7 +66,7 @@ async function copy(source, destination) {
   await fsp.copyFile(source, destination);
 }
 
-export async function prepareBundle(makeRoot, root, identity) {
+export async function prepareBundle(makeRoot, root, identity, localeRoot) {
   assertIdentity(identity);
   const all = await collectFileRecords(makeRoot);
   const binaries = all.filter((record) =>
@@ -73,6 +80,26 @@ export async function prepareBundle(makeRoot, root, identity) {
     }
     seen.add(name.toLowerCase());
     await copy(record.sourcePath, path.join(root, "files", name));
+  }
+  if (identity.localeRequired) {
+    if (!localeRoot) {
+      throw new Error("Japanese locale release directory is required");
+    }
+    await verifyLocaleRelease(localeRoot, identity);
+    for (const name of [
+      localeFilename(identity.version),
+      localeReportFilename(identity.version),
+    ]) {
+      await copy(path.join(localeRoot, name), path.join(root, "files", name));
+    }
+    await copy(
+      path.join(localeRoot, "locale-smoke.json"),
+      path.join(root, "evidence/locale-smoke.json")
+    );
+    await copy(
+      path.join(localeRoot, "locale-baseline.aim-plugin"),
+      path.join(root, "evidence/locale-baseline.aim-plugin")
+    );
   }
   const sourceReleases = path.join(
     makeRoot,
@@ -186,6 +213,7 @@ export async function verifyBundle(root, expected = {}) {
       throw new Error(`Bundle hash mismatch: ${record.relativePath}`);
     }
   }
+  await verifyLocaleBundle(root, manifest, expected);
   const feed = await fsp.readFile(path.join(root, "feed", "RELEASES"), "utf8");
   const binaryMap = new Map(
     actual
@@ -317,6 +345,7 @@ export async function downloadRecords(root, manifest) {
 }
 
 export function validateSmoke(smoke, identity, bundleSha256) {
+  validateLocaleSmoke(smoke, identity);
   if (
     ![2, 3].includes(smoke.schemaVersion) ||
     smoke.version !== identity.version ||

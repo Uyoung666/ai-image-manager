@@ -855,6 +855,15 @@ function createWindow(httpPort: number, httpAuthToken: string) {
       return;
     }
 
+    if (
+      isE2E &&
+      e2eUserDataDir &&
+      app.commandLine.hasSwitch("e2e-locale-smoke")
+    ) {
+      event.preventDefault();
+      app.quit();
+      return;
+    }
     const { closeBehavior } = getWindowPreferences();
     if (closeBehavior === "quit" || !tray) {
       event.preventDefault();

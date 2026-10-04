@@ -21,6 +21,17 @@ function managerOrNull() {
   }
 }
 
+export function recordVerifiedLocaleSelection(
+  bundle: LocaleBundle | null
+): void {
+  if (bundle?.version) {
+    managerOrNull()?.recordLocaleSelection(
+      bundle.providerPluginId,
+      bundle.version
+    );
+  }
+}
+
 export async function listVerifiedLocaleProviders(): Promise<
   LocaleProviderSummary[]
 > {

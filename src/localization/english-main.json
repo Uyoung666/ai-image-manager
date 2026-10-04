@@ -1,0 +1,9 @@
+{
+  "closeWindowQuestion": "What should happen when the window is closed?",
+  "closeWindowTitle": "Close window",
+  "launchAtStartup": "Launch at Startup",
+  "minimizeToTray": "Minimize to tray",
+  "quit": "Quit",
+  "showWindow": "Show Window",
+  "tooltip": "AI Image Manager"
+}

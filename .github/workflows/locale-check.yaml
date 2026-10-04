@@ -1,0 +1,31 @@
+name: Japanese locale compatibility
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  locale:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install check tooling without native rebuild
+        run: npm ci --ignore-scripts
+      - name: Resolve last formal release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $baseline = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name
+          if ($LASTEXITCODE -ne 0 -or -not $baseline) { throw "Cannot resolve formal locale baseline" }
+          "LOCALE_BASELINE_REF=$baseline" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Check Japanese against the formal release
+        run: npm run locale:check

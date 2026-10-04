@@ -19,6 +19,7 @@ import {
 import {
   listVerifiedLocaleProviders,
   loadVerifiedLocaleProvider,
+  recordVerifiedLocaleSelection,
 } from "./plugin-adapter";
 
 const LEGACY_LOCALE_SETTING_KEYS = ["ui.locale", "ui.language"] as const;
@@ -259,6 +260,7 @@ async function ensureInitialized(
     providerPluginId: selection.providerPluginId,
     selectedLocale: selection.selectedLocale,
   };
+  recordVerifiedLocaleSelection(selection.bundle);
   // Migrate the old tray store/renderer hint, and repair a persisted provider
   // that disappeared or failed validation. A system default is deliberately
   // kept in memory until the first renderer handshake so an old
@@ -297,6 +299,7 @@ async function revalidateCurrentSelection(force = false): Promise<boolean> {
       previous.selectedLocale,
       previous.providerPluginId
     );
+    recordVerifiedLocaleSelection(selection.bundle);
     currentState = {
       bundle: selection.bundle,
       providerPluginId: selection.providerPluginId,
@@ -421,12 +424,18 @@ export async function commitMainLocaleSelection(input: {
   token: string;
 }): Promise<LocaleRuntimeState> {
   await initializeMainLocalization();
-  const selection = preparedSelections.get(input.token);
-  if (!selection) {
+  const prepared = preparedSelections.get(input.token);
+  if (!prepared) {
     throw new Error("Locale selection has expired");
   }
   preparedSelections.delete(input.token);
+  // A package may be updated/uninstalled while the confirmation is open.
+  const selection = await resolveSelection(
+    prepared.selectedLocale,
+    prepared.providerPluginId
+  );
   persistSelection(selection);
+  recordVerifiedLocaleSelection(selection.bundle);
   currentState = {
     bundle: selection.bundle,
     providerPluginId: selection.providerPluginId,

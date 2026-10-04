@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import LangToggle from "@/components/lang-toggle";
-import type { LocaleOption } from "@/localization/catalog";
+import {
+  LOCALE_OPTIONS_CHANGED_EVENT,
+  type LocaleOption,
+} from "@/localization/catalog";
 
 const localizationMocks = vi.hoisted(() => ({
   getAvailableLocales: vi.fn(),
@@ -51,6 +54,24 @@ describe("LangToggle", () => {
     expect(dropdown).toHaveAttribute("readonly");
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
 
+    await waitFor(() => expect(dropdown).not.toBeDisabled());
+    fireEvent.click(dropdown);
+    expect(
+      await screen.findByRole("option", { name: "日本語 (ja-JP)" })
+    ).toBeInTheDocument();
+  });
+
+  it("refreshes installed languages after a plugin lifecycle change", async () => {
+    localizationMocks.getAvailableLocales.mockResolvedValueOnce([]);
+    render(<LangToggle />);
+    const dropdown = screen.getByRole("combobox", { name: "settingsLanguage" });
+    await waitFor(() => expect(dropdown).not.toBeDisabled());
+    fireEvent.click(dropdown);
+    expect(
+      screen.queryByRole("option", { name: "日本語 (ja-JP)" })
+    ).not.toBeInTheDocument();
+    fireEvent.click(dropdown);
+    fireEvent(window, new Event(LOCALE_OPTIONS_CHANGED_EVENT));
     await waitFor(() => expect(dropdown).not.toBeDisabled());
     fireEvent.click(dropdown);
     expect(

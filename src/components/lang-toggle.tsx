@@ -4,6 +4,7 @@ import { getAvailableLocales, setAppLocale } from "@/actions/localization";
 import { FilterDropdown } from "@/components/filter-dropdown";
 import {
   BUILTIN_LOCALE_OPTIONS,
+  LOCALE_OPTIONS_CHANGED_EVENT,
   type LocaleOption,
 } from "@/localization/catalog";
 import { cn } from "@/utils/tailwind";
@@ -100,25 +101,31 @@ export default function LangToggle({
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    getAvailableLocales()
-      .then((nextLanguages) => {
-        if (!cancelled) {
-          setLoadedLanguages(nextLanguages);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          onError?.(error);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
+    const refresh = () => {
+      setSelectedOverride(undefined);
+      setLoading(true);
+      getAvailableLocales()
+        .then((nextLanguages) => {
+          if (!cancelled) {
+            setLoadedLanguages(nextLanguages);
+          }
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            onError?.(error);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLoading(false);
+          }
+        });
+    };
+    refresh();
+    window.addEventListener(LOCALE_OPTIONS_CHANGED_EVENT, refresh);
     return () => {
       cancelled = true;
+      window.removeEventListener(LOCALE_OPTIONS_CHANGED_EVENT, refresh);
     };
   }, [languages, onError]);
 

@@ -16,6 +16,7 @@ vi.mock("@/services/settings-manager", () => ({
 vi.mock("@/localization/plugin-adapter", () => ({
   listVerifiedLocaleProviders: async () => providers.list,
   loadVerifiedLocaleProvider: providers.load,
+  recordVerifiedLocaleSelection: vi.fn(),
 }));
 
 vi.mock("electron-store", () => ({
@@ -133,6 +134,12 @@ describe("main localization runtime", () => {
     } as const;
     providers.list = [provider];
     providers.load
+      .mockResolvedValueOnce({
+        ...provider,
+        main: { tooltip: "Old tooltip" },
+        providerPluginId: provider.pluginId,
+        renderer: { appName: "Old name" },
+      })
       .mockResolvedValueOnce({
         ...provider,
         main: { tooltip: "Old tooltip" },

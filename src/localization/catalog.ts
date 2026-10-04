@@ -1,3 +1,7 @@
+import englishMain from "./english-main.json";
+
+export const LOCALE_OPTIONS_CHANGED_EVENT = "aim:locale-options-changed";
+
 /**
  * The data contract shared by the main and renderer localization runtimes.
  *
@@ -82,15 +86,7 @@ export const BUILTIN_LOCALE_OPTIONS: readonly LocaleOption[] = [
 ] as const;
 
 const BUILTIN_MAIN_CATALOGS: Record<string, MainLocaleCatalog> = {
-  en: {
-    closeWindowQuestion: "What should happen when the window is closed?",
-    closeWindowTitle: "Close window",
-    launchAtStartup: "Launch at Startup",
-    minimizeToTray: "Minimize to tray",
-    quit: "Quit",
-    showWindow: "Show Window",
-    tooltip: "AI Image Manager",
-  },
+  en: englishMain,
   zh: {
     closeWindowQuestion: "关闭窗口时要如何处理？",
     closeWindowTitle: "关闭窗口",

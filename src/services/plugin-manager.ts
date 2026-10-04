@@ -12,6 +12,7 @@ import { Readable } from "node:stream";
 import { app, dialog, protocol } from "electron";
 import yauzl from "yauzl";
 import { z } from "zod";
+import { HOST_LOCALE_CATALOG } from "@/localization/host-catalog";
 import {
   migrateNebulaGlassSettings,
   NEBULA_GLASS_PLUGIN_ID,
@@ -1229,7 +1230,7 @@ async function loadLocaleProviderFromDirectory(
   directory: string,
   manifest: NormalizedPluginManifestV3Locale,
   verification: LocaleVerification,
-  catalog?: PluginLocaleCatalog
+  catalog: PluginLocaleCatalog = HOST_LOCALE_CATALOG
 ): Promise<PluginLocaleProvider> {
   const files = [manifest.locale.rendererFile, manifest.locale.mainFile];
   const bundles: LocaleBundleValue[] = [];
@@ -1897,12 +1898,20 @@ export class PluginManager {
     const byId = new Map<string, InstalledManifestEntry>();
     for (const entry of candidates) {
       const existing = byId.get(entry.manifest.id);
+      const preference = this.tryStore(
+        (store) => store.getPreference(entry.manifest.id),
+        null
+      );
       if (
         !existing ||
-        compareVersions(entry.manifest.version, existing.manifest.version) >
-          0 ||
-        (entry.origin === "dev" &&
-          entry.manifest.version === existing.manifest.version)
+        entry.origin === "dev" ||
+        (existing.origin !== "dev" &&
+          (entry.manifest.version === preference?.selectedVersion ||
+            (existing.manifest.version !== preference?.selectedVersion &&
+              compareVersions(
+                entry.manifest.version,
+                existing.manifest.version
+              ) > 0)))
       ) {
         byId.set(entry.manifest.id, entry);
       }
@@ -1912,7 +1921,7 @@ export class PluginManager {
 
   /** List safe locale providers without exposing package directories. */
   async listLocaleProviders(
-    catalog?: PluginLocaleCatalog
+    catalog: PluginLocaleCatalog = HOST_LOCALE_CATALOG
   ): Promise<PluginLocaleProvider[]> {
     const providers: PluginLocaleProvider[] = [];
     for (const entry of await this.localeEntries()) {
@@ -1920,25 +1929,8 @@ export class PluginManager {
         continue;
       }
       try {
-        const manifest = entry.manifest as NormalizedPluginManifestV3Locale;
-        if (!appCompatible(manifest)) {
-          continue;
-        }
-        const allowUnsigned = entry.origin === "dev" && this.developerMode;
-        await validatePackageLayout(entry.directory, manifest, allowUnsigned);
-        await validateManifestResources(entry.directory, manifest);
-        const verification = await verifyLocaleSignature(
-          entry.directory,
-          this.trustedKeys,
-          allowUnsigned
-        );
         providers.push(
-          await loadLocaleProviderFromDirectory(
-            entry.directory,
-            manifest,
-            verification,
-            catalog
-          )
+          await this.loadLocaleProvider(entry.manifest.id, undefined, catalog)
         );
       } catch (error) {
         log.warn(
@@ -1957,7 +1949,7 @@ export class PluginManager {
   async loadLocaleProvider(
     pluginId: string,
     version?: string,
-    catalog?: PluginLocaleCatalog
+    catalog: PluginLocaleCatalog = HOST_LOCALE_CATALOG
   ): Promise<PluginLocaleProvider> {
     if (!PLUGIN_ID_PATTERN.test(pluginId)) {
       throw new PluginManagerError("invalid-input", "语言包 ID 无效");
@@ -1965,14 +1957,86 @@ export class PluginManager {
     if (version !== undefined && !isValidSemVer(version)) {
       throw new PluginManagerError("invalid-input", "语言包版本无效");
     }
-    const entries = (await this.localeEntries(version !== undefined)).filter(
+    const entries = (await this.localeEntries(true)).filter(
       (entry) =>
         entry.manifest.id === pluginId &&
         (version === undefined || entry.manifest.version === version)
     );
-    const entry = entries.sort((left, right) =>
-      compareVersions(right.manifest.version, left.manifest.version)
-    )[0];
+    const preference = this.tryStore(
+      (store) => store.getPreference(pluginId),
+      null
+    );
+    const developer = entries.find((entry) => entry.origin === "dev");
+    const selected = preference?.selectedVersion
+      ? entries.find(
+          (entry) => entry.manifest.version === preference.selectedVersion
+        )
+      : undefined;
+    const entry =
+      developer ??
+      (version || !preference?.selectedVersion ? entries[0] : selected);
+    try {
+      if (!version && preference?.selectedVersion && !developer && !selected) {
+        throw new PluginManagerError("plugin-invalid", "已选语言包版本不可用");
+      }
+      return await this.readLocaleEntry(entry, catalog);
+    } catch (error) {
+      if (version || developer) {
+        throw error;
+      }
+      const fallbacks = entries
+        .filter(
+          (candidate) =>
+            candidate !== entry &&
+            (candidate.manifest.version === preference?.lastKnownGoodVersion ||
+              candidate.installation?.status === "locale-verified")
+        )
+        .sort((left, right) => {
+          if (left.manifest.version === preference?.lastKnownGoodVersion) {
+            return -1;
+          }
+          if (right.manifest.version === preference?.lastKnownGoodVersion) {
+            return 1;
+          }
+          return compareVersions(right.manifest.version, left.manifest.version);
+        });
+      for (const fallback of fallbacks) {
+        try {
+          const provider = await this.readLocaleEntry(fallback, catalog);
+          this.recordLocaleSelection(pluginId, provider.version);
+          return provider;
+        } catch {
+          // Every previously successful version is verified again before use.
+        }
+      }
+      throw error;
+    }
+  }
+
+  /** A committed selection protects this verified version from pruning. */
+  recordLocaleSelection(pluginId: string, version: string): void {
+    const store = this.optionalStore();
+    const installation = store?.getInstallation(pluginId, version);
+    if (!(store && installation) || installation.origin === "dev") {
+      return;
+    }
+    const preference = store.getPreference(pluginId);
+    if (installation.status !== "locale-verified") {
+      store.upsertInstallation({ ...installation, status: "locale-verified" });
+    }
+    store.upsertPreference({
+      pluginId,
+      selectedVersion: version,
+      lastKnownGoodVersion: version,
+      settings: preference?.settings ?? {},
+      settingsSchemaVersion: preference?.settingsSchemaVersion ?? 1,
+    });
+  }
+
+  private async readLocaleEntry(
+    entry: InstalledManifestEntry | undefined,
+    catalog: PluginLocaleCatalog
+  ): Promise<PluginLocaleProvider> {
     if (!entry?.directory) {
       throw new PluginManagerError("plugin-not-found", "语言包不存在");
     }
@@ -2121,16 +2185,24 @@ export class PluginManager {
   }
 
   async inspectFromDialog(): Promise<PluginInstallPreview | null> {
-    const result = await dialog.showOpenDialog({
-      filters: [
-        { extensions: ["aim-plugin"], name: "AI Image Manager Plugin" },
-      ],
-      properties: ["openFile"],
-      title: getLocalizedText(
-        { en: "Install plugin", zh: "安装插件" },
-        app.getLocale()
-      ),
-    });
+    // Packaged tests use the real importer; only the native file picker is bypassed.
+    const smokePackage =
+      app.commandLine?.hasSwitch("e2e-locale-smoke") &&
+      process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR
+        ? app.commandLine.getSwitchValue("e2e-locale-package")
+        : "";
+    const result = smokePackage
+      ? { canceled: false, filePaths: [smokePackage] }
+      : await dialog.showOpenDialog({
+          filters: [
+            { extensions: ["aim-plugin"], name: "AI Image Manager Plugin" },
+          ],
+          properties: ["openFile"],
+          title: getLocalizedText(
+            { en: "Install plugin", zh: "安装插件" },
+            app.getLocale()
+          ),
+        });
     if (result.canceled || !result.filePaths[0]) {
       return null;
     }

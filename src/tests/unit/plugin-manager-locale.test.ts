@@ -29,7 +29,11 @@ vi.mock("electron", () => ({
   protocol: { handle: vi.fn() },
 }));
 
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { pluginInstallations, pluginPreferences } from "@/db/schema";
 import { PluginManager } from "@/services/plugin-manager";
+import { PluginStore } from "@/services/plugin-store";
 
 let testRoot: string;
 let userData: string;
@@ -64,12 +68,16 @@ function manifest() {
 
 async function writeLocaleDirectory(
   signed: boolean,
-  directory = path.join(userData, "plugins", manifest().id, "1.0.0")
+  directory = path.join(userData, "plugins", manifest().id, "1.0.0"),
+  version = "1.0.0"
 ): Promise<string> {
   const localeDirectory = path.join(directory, "locales", "ja-JP");
   await fs.mkdir(localeDirectory, { recursive: true });
   const files = new Map<string, Buffer>([
-    ["plugin.json", Buffer.from(JSON.stringify(manifest()), "utf8")],
+    [
+      "plugin.json",
+      Buffer.from(JSON.stringify({ ...manifest(), version }), "utf8"),
+    ],
     [
       "locales/ja-JP/renderer.json",
       Buffer.from(JSON.stringify({ close: "閉じる" }), "utf8"),
@@ -143,7 +151,7 @@ describe("PluginManager locale provider trust boundary", () => {
     const snapshot = await manager.list();
     expect(snapshot.plugins[0]?.locale).toMatchObject({
       catalogVersion: "1.0.0",
-      coverage: { available: false, percentage: null },
+      coverage: { available: true, total: expect.any(Number), translated: 1 },
       nativeName: "日本語",
       signed: true,
       signerKeyId: "test",
@@ -195,5 +203,66 @@ describe("PluginManager locale provider trust boundary", () => {
       signed: false,
       trust: "developer",
     });
+  });
+
+  it("honors the selected version and restores a verified last good version after a corrupt upgrade", async () => {
+    const sqlite = new Database(":memory:");
+    try {
+      const migration = await fs.readFile(
+        path.resolve("drizzle/0044_add_plugin_persistence.sql"),
+        "utf8"
+      );
+      for (const sql of migration.split("--> statement-breakpoint")) {
+        if (sql.trim()) {
+          sqlite.exec(sql);
+        }
+      }
+      const store = new PluginStore(
+        drizzle(sqlite, { schema: { pluginInstallations, pluginPreferences } })
+      );
+      const id = manifest().id;
+      const first = await writeLocaleDirectory(true);
+      const second = await writeLocaleDirectory(
+        true,
+        path.join(userData, "plugins", id, "1.1.0"),
+        "1.1.0"
+      );
+      for (const version of ["1.0.0", "1.1.0"]) {
+        store.upsertInstallation({
+          pluginId: id,
+          version,
+          origin: "local",
+          status: "installed",
+          manifest: { ...manifest(), version },
+          relativeLocation: `plugins/${id}/${version}`,
+        });
+      }
+      const manager = new PluginManager([], store, { test: publicKey });
+      manager.recordLocaleSelection(id, "1.0.0");
+      expect((await manager.loadLocaleProvider(id)).version).toBe("1.0.0");
+      store.upsertPreference({
+        pluginId: id,
+        selectedVersion: "1.1.0",
+        lastKnownGoodVersion: "1.0.0",
+        settings: {},
+      });
+      expect((await manager.loadLocaleProvider(id)).version).toBe("1.1.0");
+      manager.recordLocaleSelection(id, "1.1.0");
+      expect(store.getPreference(id)?.lastKnownGoodVersion).toBe("1.1.0");
+      await fs.writeFile(
+        path.join(second, "locales/ja-JP/renderer.json"),
+        JSON.stringify({ close: "Tampered" })
+      );
+      expect((await manager.loadLocaleProvider(id)).version).toBe("1.0.0");
+      expect(store.getPreference(id)?.selectedVersion).toBe("1.0.0");
+      expect((await manager.listLocaleProviders())[0]?.version).toBe("1.0.0");
+      await fs.writeFile(
+        path.join(first, "locales/ja-JP/main.json"),
+        JSON.stringify({ open: "Tampered too" })
+      );
+      await expect(manager.loadLocaleProvider(id)).rejects.toThrow();
+    } finally {
+      sqlite.close();
+    }
   });
 });

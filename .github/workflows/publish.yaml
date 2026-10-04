@@ -81,6 +81,7 @@ jobs:
     - preflight
     runs-on: windows-2022
     timeout-minutes: 40
+    environment: release-stable
     steps:
     - name: Preserve repository line endings
       run: git config --global core.autocrlf false
@@ -152,6 +153,25 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw "Release build gate failed" }
       if: inputs.source_run_id == ''
       working-directory: app
+    - name: Gate - Japanese locale and official signed package
+      if: inputs.source_run_id == ''
+      working-directory: app
+      env:
+        LOCALE_SIGNING_PRIVATE_KEY: ${{ secrets.LOCALE_SIGNING_PRIVATE_KEY }}
+      run: |
+        $context = Get-Content -LiteralPath $env:RELEASE_CONTEXT -Raw | ConvertFrom-Json
+        if (-not $context.localeRequired) { exit 0 }
+        if (-not $env:LOCALE_SIGNING_PRIVATE_KEY) { throw "Official Japanese locale signing secret is missing" }
+        $env:LOCALE_BASELINE_REF = "v$($context.baseline.version)"
+        $keyPath = Join-Path $env:RUNNER_TEMP "official-locale-signing.pem"
+        try {
+          [System.IO.File]::WriteAllText($keyPath, $env:LOCALE_SIGNING_PRIVATE_KEY, [System.Text.UTF8Encoding]::new($false))
+          Remove-Item Env:LOCALE_SIGNING_PRIVATE_KEY
+          node scripts/locale-release.mjs build --sign-key $keyPath --out dist/plugins
+          if ($LASTEXITCODE -ne 0) { throw "Japanese locale release gate failed" }
+        } finally {
+          if (Test-Path -LiteralPath $keyPath) { Remove-Item -LiteralPath $keyPath }
+        }
     - name: Build Forge artifacts and save dry-run metadata
       shell: pwsh
       env:
@@ -183,6 +203,33 @@ jobs:
         }
       if: inputs.source_run_id == ''
       working-directory: app
+    - name: Gate - packaged Japanese locale installation
+      if: inputs.source_run_id == ''
+      working-directory: app
+      run: |
+        $context = Get-Content -LiteralPath $env:RELEASE_CONTEXT -Raw | ConvertFrom-Json
+        if (-not $context.localeRequired) { exit 0 }
+        $executables = @(Get-ChildItem -LiteralPath out -Recurse -File -Filter ai-image-manager.exe | Where-Object { $_.FullName -notmatch "\\publish-dry-run\\" })
+        if ($executables.Count -ne 1) { throw "Expected one packaged locale test executable" }
+        $env:AIM_PACKAGED_E2E_EXECUTABLE = $executables[0].FullName
+        $env:AIM_LOCALE_PACKAGE = Join-Path $PWD "dist/plugins/com.aiimagemanager.japanese-locale-$env:RELEASE_VERSION.aim-plugin"
+        $env:AIM_LOCALE_BASELINE_PACKAGE = Join-Path $PWD "dist/plugins/locale-baseline.aim-plugin"
+        $env:AIM_LOCALE_SMOKE_OUTPUT = Join-Path $PWD "dist/plugins/locale-smoke.json"
+        $zips = @(Get-ChildItem -LiteralPath out/make -Recurse -File -Filter "*-$env:RELEASE_VERSION.zip")
+        if ($zips.Count -ne 1) { throw "Expected one current app ZIP for locale evidence" }
+        $env:AIM_LOCALE_APP_ZIP = $zips[0].FullName
+        node node_modules/@playwright/test/cli.js test src/tests/e2e/japanese-locale.spec.ts --workers=1
+        if ($LASTEXITCODE -ne 0) { throw "Packaged Japanese locale installation failed" }
+    - name: Save Japanese locale installation diagnostics
+      if: always() && inputs.source_run_id == ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: japanese-locale-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          app/test-results/
+          app/playwright-report/
+        retention-days: 7
+        if-no-files-found: ignore
     - name: Verify Squirrel and WiX release payload
       id: payload
       shell: pwsh

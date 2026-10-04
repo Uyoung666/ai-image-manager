@@ -6,7 +6,7 @@ AI Image Manager 的公开插件是只读的声明式主题包或语言包。插
 
 v2 主题包只允许使用 `plugin.json`、`theme.json` 和 `assets/` 下的图片/视频；v3 语言包只允许使用 `plugin.json`、`signature.json` 以及 `locales/<tag>/renderer.json` 和 `locales/<tag>/main.json`。包内不允许 JavaScript、HTML、CSS、字体、可执行文件、网络 URL、`data:` URL 或脚本注入语法。应用会在导入时重新校验 ZIP 路径、重复条目、符号链接、资源扩展名、资源 MIME、解压大小、语言资源结构和签名；CLI 的校验不能替代宿主的最终校验。
 
-正式 v3 语言包必须由应用构建时注入的官方 Ed25519 keyring 验签；源码默认不信任任何临时公钥。发布构建应在受审计的版本化模块中维护公钥，并把该模块导出的公钥映射传给 `configurePluginManager(builtins, keyring)`（可先用 `createPluginTrustedKeyring(keyring)` 校验并冻结）；不要从运行时环境变量或插件目录读取信任锚。当前源码默认 keyring 为空，因此未注入发布 keyring 的构建会拒绝所有正式语言包。开发者目录可以没有签名，但只在开发者模式中加载，并始终标记为 `developer` 信任级别。
+正式 v3 语言包必须由官方 Ed25519 keyring 验签。应用入口已注入 `src/plugins/official-locale-public-keys.json` 中受版本控制的官方公钥；`PluginManager` 的通用默认 keyring 仍为空，不信任临时或测试公钥。不要从运行时环境变量或插件目录读取信任锚。私钥只在发布机读取，绝不进入应用。开发者目录可以没有签名，但只在开发者模式中加载，并始终标记为 `developer` 信任级别。
 
 不要把用户私密图片、凭据或绝对路径放入包中。`image`/`video` 设置表示“让用户在应用内选择资源”，不是把用户文件复制进插件；主题中应使用 `{"setting":"id"}` 绑定这类设置。
 
@@ -191,6 +191,21 @@ npm run plugin:validate -- .\dist\plugins\com.aiimagemanager.layered-aurora-1.0.
 - [ ] 执行 `npm run plugin:validate -- <目录>` 与 `npm run plugin:pack -- <目录> --out <输出目录>`，保存生成的 `.aim-plugin` 和校验日志。
 
 ## 错误排查
+
+官方日语包在 [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases) 单独分发，文件名为 `com.aiimagemanager.japanese-locale-<软件版本>.aim-plugin`。仅从已正式发布且有该附件的版本下载；旧 Release 没有附件时，不能把源码 ZIP 当安装包。
+
+在设置 → 插件中导入文件，核对版本、官方签名和翻译覆盖率，再确认安装。新安装不切换当前语言，点击“使用此语言”或在语言下拉中选择 `日本語 (ja-JP)` 后生效。升级下载更高版本的包，再次导入；同版本覆盖与降级被拒绝。语言选择在重启后保留，升级损坏时恢复经过重新验签的最后成功版本，没有可用版本时回退内置语言。
+
+### 日语包维护与发布门槛
+
+1. 软件版本更新后执行 `npm run locale:sync-version`，同步插件 `version` 和 `engine.minAppVersion`；最低宿主版本为当次软件版本。
+2. 执行 `npm run locale:check -- --baseline <上一正式版本Tag>`。英文源目录为 `src/localization/english-renderer.json` 与 `english-main.json`。缺失、多余、空翻译、结构和插值错误都会失败；英文原文变化但日语未变化时，必须更新翻译或留下审校记录。
+3. 审校记录位于包目录外的 `external-plugins/japanese-locale-maintenance.json`，每个条目包含英文原文的 SHA-256 与具体审校理由。原文再次变化会使旧记录失效。保留英文产品名、标准缩写等同样必须在该白名单中明确记录。
+4. 本地执行 `npm run locale:build -- --baseline <Tag> --sign-key <私钥文件路径> --out dist/plugins`。脚本生成正式签名包、兼容性报告及仅用于升级验收的 `locale-baseline.aim-plugin`；不要把基线测试包作为当次正式下载附件。
+5. GitHub `release-stable` 环境使用 Secret `LOCALE_SIGNING_PRIVATE_KEY`。普通 PR 不接触该 Secret；测试密钥不能加入正式 keyring。发布工作流校验完整翻译、真实官方签名和打包应用中的导入、升级、重启、损坏恢复、卸载及窗口矩阵；任一失败阻止正式发布。
+6. 当次签名包和兼容性报告进入 Release、SHA256SUMS 与来源记录；基线测试包和安装证据进入不可变 bundle。恢复发布复用原始字节与证据，不能重新打包覆盖。
+
+首次完整流程随下一正式版本交付；当前源码的版本对齐和本地验收包不代表已有 Release 增添了附件。
 
 | 报错 | 处理 |
 | --- | --- |

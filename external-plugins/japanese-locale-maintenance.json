@@ -1,0 +1,41 @@
+{
+  "baselineRef": "v2.2.3",
+  "reviews": {
+    "renderer.appName": {
+      "sourceSha256": "68c9649a610a7a19208afbc5d595b2389ad06163b0a3d80ad850e5a377f95901",
+      "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    },
+    "renderer.searchShortcut": {
+      "sourceSha256": "199f6f88d1fcf30bc81695cae0515cde3333d8e892fa63aac2dfc3837af3658f",
+      "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    },
+    "renderer.iso": {
+      "sourceSha256": "6dc87bf3ac7649b799be35cdd8b3a0bdae66a0447c69c286e01df5c87c589859",
+      "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    },
+    "renderer.wander.title.theme": {
+      "sourceSha256": "6d243c2c0c97ad57c40541024b16d406618437d1e2208b0ab828c026378d2e54",
+      "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    },
+    "renderer.tokenIso": {
+      "sourceSha256": "6dc87bf3ac7649b799be35cdd8b3a0bdae66a0447c69c286e01df5c87c589859",
+      "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    },
+    "renderer.aiMirrorModelScope": {
+      "sourceSha256": "40abb443931894932666885077ec98a86cdc30e9bf91311bf187d17a145d6d0e",
+      "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    },
+    "renderer.dateHourValue": {
+      "sourceSha256": "1fac712768d199b7590d5f852d5c2504606e175a1d9acd5ae13faa862201f5d9",
+      "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    },
+    "renderer.duplicateScanProgress": {
+      "sourceSha256": "e1a21cd8c846acbd941f6fafe956f514530168207293f541f55ccbc617d9baaa",
+      "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    },
+    "main.tooltip": {
+      "sourceSha256": "68c9649a610a7a19208afbc5d595b2389ad06163b0a3d80ad850e5a377f95901",
+      "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    }
+  }
+}

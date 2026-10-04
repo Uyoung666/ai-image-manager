@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { vi } from "vitest";
+import packageJson from "../../../package.json";
 
 vi.unmock("react-i18next");
 
@@ -128,7 +129,7 @@ describe("Japanese locale plugin contract", () => {
         en: "Japanese UI translation for AI Image Manager.",
         "ja-JP": "AI Image Manager の日本語 UI 翻訳です。",
       },
-      engine: { minAppVersion: "2.1.1" },
+      engine: { minAppVersion: packageJson.version },
       homepage: "https://github.com/Uyoung666/ai-image-manager",
       id: "com.aiimagemanager.japanese-locale",
       license: "MIT",
@@ -143,7 +144,7 @@ describe("Japanese locale plugin contract", () => {
       },
       manifestVersion: 3,
       name: { en: "Japanese", "ja-JP": "日本語" },
-      version: "1.0.1",
+      version: packageJson.version,
     });
   });
 

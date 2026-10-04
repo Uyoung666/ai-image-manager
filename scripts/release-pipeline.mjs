@@ -33,6 +33,7 @@ import {
   verifyGitHubTransitionAssets,
 } from "./release/github.mjs";
 import { startLocalFeed } from "./release/local-feed.mjs";
+import { validateLocaleSmoke } from "./release/locale.mjs";
 import {
   assertPackageLockVersion,
   parseStableVersion,
@@ -113,6 +114,16 @@ export async function preflight() {
     sourceDateEpoch,
     generatedAt: new Date(Number(sourceDateEpoch) * 1000).toISOString(),
     sourceRunId,
+    localeRequired: Boolean(
+      (
+        await command("git", [
+          "ls-tree",
+          "--name-only",
+          commit,
+          "external-plugins/japanese-locale-maintenance.json",
+        ])
+      ).trim()
+    ),
   };
   assertIdentity(identity);
   const releaseNotes = await loadReleaseNotes(identity);
@@ -131,7 +142,9 @@ export async function preflight() {
   const config = {
     ...identity,
     repository: repo(),
-    releaseNotes,
+    releaseNotes: identity.localeRequired
+      ? `${releaseNotes}\n\n日语插件 ${version}（适配软件 ${version}）：[独立下载](https://github.com/${repo()}/releases/download/${tag}/com.aiimagemanager.japanese-locale-${version}.aim-plugin)。下载后在设置 → 插件中导入并选择日本語。`
+      : releaseNotes,
     baseline,
     updateBaseUrl,
   };
@@ -359,6 +372,13 @@ async function smokeTest(identity) {
       `Reusing verified installer smoke from run ${smoke.sourceRunId}`
     );
   } else {
+    let localeEvidence = {};
+    if (manifest.localeRequired) {
+      localeEvidence = await readJson(
+        path.join(root(), "evidence/locale-smoke.json")
+      );
+      validateLocaleSmoke(localeEvidence, manifest);
+    }
     const feedDirectory = path.join(evidenceRoot(), "local-feed");
     await fsp.mkdir(feedDirectory, { recursive: true });
     await fsp.copyFile(
@@ -411,6 +431,7 @@ async function smokeTest(identity) {
       await server.close();
     }
     smoke = {
+      ...localeEvidence,
       version: manifest.version,
       tag: manifest.tag,
       commit: manifest.commit,
@@ -452,7 +473,8 @@ export async function runPipeline(operation) {
     return prepareBundle(
       process.env.RELEASE_MAKE ?? "out/make",
       root(),
-      identity
+      identity,
+      process.env.RELEASE_LOCALE ?? "dist/plugins"
     );
   }
   if (operation === "recover") {

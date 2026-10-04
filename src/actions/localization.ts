@@ -1,7 +1,10 @@
 import type { i18n as I18nInstance } from "i18next";
 import { LOCAL_STORAGE_KEYS } from "@/constants";
 import { ipc } from "@/ipc/manager";
-import type { LocaleRuntimeState } from "@/localization/catalog";
+import {
+  LOCALE_OPTIONS_CHANGED_EVENT,
+  type LocaleRuntimeState,
+} from "@/localization/catalog";
 
 function readLegacyLocale(): "zh" | "en" | undefined {
   try {
@@ -56,6 +59,7 @@ function applyLocaleState(i18n: I18nInstance, state: LocaleRuntimeState): void {
   changeLanguageSafely(i18n, state.selectedLocale);
   document.documentElement.lang = state.selectedLocale;
   document.documentElement.dir = state.direction;
+  window.dispatchEvent(new Event(LOCALE_OPTIONS_CHANGED_EVENT));
   try {
     localStorage.setItem(LOCAL_STORAGE_KEYS.LANGUAGE, state.selectedLocale);
   } catch {

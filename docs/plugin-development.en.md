@@ -6,7 +6,7 @@ Public AI Image Manager plugins are read-only, declarative theme or locale packa
 
 A v2 theme package may contain only `plugin.json`, `theme.json`, and image/video files below `assets/`. A v3 locale package may contain only `plugin.json`, `signature.json`, and `locales/<tag>/renderer.json` plus `locales/<tag>/main.json`. JavaScript, HTML, CSS, fonts, executables, network URLs, `data:` URLs, and script-injection syntax are not part of the public API. On import, the application re-checks ZIP paths, duplicate entries, symlinks, asset extensions, media MIME, extraction limits, locale structure, and signatures. CLI validation is a developer aid, not a replacement for the host's final validation.
 
-Release v3 locale packages must verify against the official Ed25519 keyring injected by the application build. The source default trusts no temporary public key. A release build should keep its public keys in an audited, versioned module and pass that map to `configurePluginManager(builtins, keyring)` (optionally after `createPluginTrustedKeyring(keyring)` validates and freezes it); never read a runtime environment variable or plugin directory as a trust anchor. Because the source default keyring is empty, a build that does not inject the release keyring rejects every release locale package. A developer directory may omit the signature, but is loaded only in developer mode and is always marked with `developer` trust.
+Release v3 locale packages must verify against the official Ed25519 keyring. The application entry point already injects the versioned public keys from `src/plugins/official-locale-public-keys.json`. The generic PluginManager default remains empty and trusts no temporary or test key. Never read runtime environment variables or plugin directories as trust anchors. Private keys remain on the release machine and never enter the application. Unsigned directories are available only in developer mode with `developer` trust.
 
 Never ship a user's private image, credential, or absolute path. An `image`/`video` setting means “let the user choose a resource in the app”; it does not copy the user's file into the plugin. Bind such settings with `{"setting":"id"}`.
 
@@ -191,6 +191,18 @@ npm run plugin:validate -- .\dist\plugins\com.aiimagemanager.layered-aurora-1.0.
 - [ ] Run `npm run plugin:validate -- <directory>` and `npm run plugin:pack -- <directory> --out <output-directory>`, and keep the package and validation log.
 
 ## Troubleshooting
+
+### Official Japanese downloads and maintenance
+
+Download `com.aiimagemanager.japanese-locale-<app-version>.aim-plugin` from a [formal GitHub Release](https://github.com/Uyoung666/ai-image-manager/releases). The plugin version and minimum supported app version match that release. A historical release without the attachment does not provide an installable Japanese package; the repository source ZIP is not an installation package. The complete distribution workflow begins with the next formal release.
+
+Import the file in Settings → Plugins, inspect its official signature, version and coverage, then confirm installation. Installation does not change your active language. Choose “Use this language” or `日本語 (ja-JP)` in the language selector. Import a higher version to upgrade; same-version replacement and downgrades are rejected. A selected Japanese locale survives restart; a damaged upgrade restores the last successful version after verifying its signature, or falls back to a built-in language if none remains valid.
+
+After changing the app version, run `npm run locale:sync-version`, then `npm run locale:check -- --baseline <previous-formal-tag>`. The pure English renderer/main JSON catalogs are the shared source of truth. Missing/extra keys, empty translations, structure and interpolation mismatches fail the check. Changed English with unchanged Japanese requires an updated translation or a review entry in `external-plugins/japanese-locale-maintenance.json`, outside the package directory. Review entries bind a reason to the exact SHA-256 of the English text; a later source change invalidates them. Literal English product names and standard abbreviations require the same explicit whitelist.
+
+Use `npm run locale:build -- --baseline <tag> --sign-key <private-key-path> --out dist/plugins` to produce the signed package, compatibility report and `locale-baseline.aim-plugin` upgrade fixture. The baseline fixture is not a current public download. GitHub's `release-stable` environment provides `LOCALE_SIGNING_PRIVATE_KEY`; ordinary PRs never receive it, and test public keys are never trusted by production builds.
+
+Formal publication requires compatibility checks, official signature verification, and packaged Electron tests for import, upgrade, restart, corrupt-version recovery, uninstall and responsive window sizes. Package/report bytes enter checksums and provenance; baseline fixtures and installation evidence enter the immutable bundle. Recovery reuses those exact bytes and evidence rather than rebuilding or resigning.
 
 | Error | Fix |
 | --- | --- |

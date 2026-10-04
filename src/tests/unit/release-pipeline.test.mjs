@@ -60,7 +60,11 @@ afterAll(async () => {
   await fsp.rm(fixtures, { recursive: true, force: true });
 });
 
-async function fixture(name) {
+async function fixture(
+  name,
+  releaseIdentity = identity,
+  localeRoot = undefined
+) {
   const make = path.join(fixtures, name, "make");
   const squirrel = path.join(make, "squirrel.windows", "x64");
   await fsp.mkdir(squirrel, { recursive: true });
@@ -84,11 +88,74 @@ async function fixture(name) {
     await fsp.writeFile(path.join(make, file), `fixture ${file}`);
   }
   const root = path.join(fixtures, name, "bundle");
-  const manifest = await prepareBundle(make, root, identity);
+  const manifest = await prepareBundle(make, root, releaseIdentity, localeRoot);
   return { root, manifest };
 }
 
 describe("immutable release bundle", () => {
+  it("requires Japanese artifacts and keeps them outside the Squirrel feed", async () => {
+    const current = { ...identity, localeRequired: true };
+    await expect(fixture("missing-locale", current)).rejects.toThrow(
+      /Japanese locale/
+    );
+    const locale = path.join(fixtures, "signed-locale");
+    await fsp.mkdir(locale);
+    const pluginName = `com.aiimagemanager.japanese-locale-${identity.version}.aim-plugin`;
+    const reportName = `japanese-locale-${identity.version}-compatibility.json`;
+    await fsp.writeFile(path.join(locale, pluginName), "signed plugin fixture");
+    await fsp.writeFile(
+      path.join(locale, "locale-baseline.aim-plugin"),
+      "baseline fixture"
+    );
+    await writeJson(path.join(locale, reportName), {
+      schemaVersion: 1,
+      status: "passed",
+      signature: "verified",
+      pluginId: "com.aiimagemanager.japanese-locale",
+      appVersion: identity.version,
+      pluginVersion: identity.version,
+      minimumAppVersion: identity.version,
+      sourceCommit: identity.commit,
+      packageSha256: digest("signed plugin fixture"),
+      signerKeyId: "test-key",
+      sourceCatalogSha256: digest("catalog"),
+      reviewSha256: digest("reviews"),
+      total: 2081,
+    });
+    await writeJson(path.join(locale, "locale-smoke.json"), {
+      localeSmoke: "passed",
+      localePackageSha256: digest("signed plugin fixture"),
+      localeBaselineSha256: digest("baseline fixture"),
+      localeAppZipSha256: digest(
+        "fixture AI Image Manager-win32-x64-2.2.0.zip"
+      ),
+    });
+    const { root, manifest } = await fixture("locale-assets", current, locale);
+    await expect(verifyBundle(root, current)).resolves.toMatchObject(current);
+    const sums = await fsp.readFile(
+      path.join(root, "download/SHA256SUMS.txt"),
+      "utf8"
+    );
+    expect(sums).toContain(pluginName);
+    expect(sums).toContain(reportName);
+    expect(
+      await fsp.readFile(path.join(root, "github/RELEASES"), "utf8")
+    ).not.toContain("aim-plugin");
+    expect(
+      manifest.files.some(
+        (file) => file.relativePath === "evidence/locale-smoke.json"
+      )
+    ).toBe(true);
+    await writeJson(path.join(root, "bundle.json"), {
+      ...manifest,
+      localeRequired: false,
+    });
+    await expect(verifyBundle(root, current)).rejects.toThrow(/cannot bypass/);
+    await writeJson(path.join(root, "bundle.json"), manifest);
+    await fsp.appendFile(path.join(root, "files", pluginName), "tampered");
+    await expect(verifyBundle(root, current)).rejects.toThrow(/hash mismatch/);
+  });
+
   it("records a fixed GitHub manifest and a continuous delta baseline", async () => {
     const { root } = await fixture("github-manifest");
     const updateManifest = await readJson(
