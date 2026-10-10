@@ -84,6 +84,16 @@ describe("search session pagination", () => {
     expect(nextPage.map(({ id }) => id)).toEqual([4, 3]);
   });
 
+  it("removes an invalidated cursor without consuming its frozen pool", () => {
+    const store = new SearchSessionStore();
+    const session = store.create("query", 200);
+    appendToFrozenSearchPool(session, [{ id: 1 }, { id: 2 }]);
+    store.delete(session.cursor);
+    expect(store.get(session.cursor)).toBeNull();
+    expect(session.rankedPool.map(({ id }) => id)).toEqual([1, 2]);
+    expect(session.emittedIds.size).toBe(0);
+  });
+
   it("keeps the frozen un-emitted prefix ahead of expanded candidates", () => {
     const store = new SearchSessionStore({
       createCursor: () => "cursor",

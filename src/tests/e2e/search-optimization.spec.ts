@@ -191,6 +191,19 @@ test("search partial results, request timing, stale queries and responsive windo
       await page.screenshot({
         path: test.info().outputPath(`search-${size.width}x${size.height}.png`),
       });
+      // Literal and wildcard filename searches finish using local evidence.
+      await input.fill('"SearchFixture-008.png"');
+      await input.press("Enter");
+      await expect(page.locator('[data-photo-id="8"]')).toBeVisible();
+      await expect(
+        page.getByRole("status").filter({ hasText: PARTIAL_RESULTS_TEXT })
+      ).toHaveCount(0);
+      await input.fill("SearchFixture-00?.png");
+      await input.press("Enter");
+      await expect(page.locator('[data-photo-id="9"]')).toBeVisible();
+      await expect(
+        page.getByRole("status").filter({ hasText: PARTIAL_RESULTS_TEXT })
+      ).toHaveCount(0);
       await input.fill("DefinitelyMissingSearchFixture");
       await input.press("Enter");
       await expect(

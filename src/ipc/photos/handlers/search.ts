@@ -40,6 +40,7 @@ import {
   fuseGatedHybridSearchEvidence,
   fuseHybridSearchEvidence,
   type GatedHybridResult,
+  type HybridSearchResult,
 } from "@/services/rerank";
 import {
   beginSearchRequest,
@@ -51,7 +52,10 @@ import {
   SearchInterrupted,
   waitForSearch,
 } from "@/services/search-control";
-import { getSearchDatabaseRevision } from "@/services/search-revision";
+import {
+  getSearchDatabaseRevision,
+  getVectorSearchRevision,
+} from "@/services/search-revision";
 import {
   buildPhotoSearchScope,
   getPhotoSearchScope,
@@ -64,7 +68,7 @@ import {
   takeFrozenSearchPage,
 } from "@/services/search-session";
 import { getTagSearchRevision } from "@/services/tag-search-revision";
-import type { SearchResponse } from "@/types/photo";
+import type { SearchMatch, SearchResponse } from "@/types/photo";
 import {
   COLOR_MATCH_MAX_DISTANCE_SQUARED,
   colorDistanceToMatchScore,
@@ -140,6 +144,29 @@ function isExactSource(
   source: string
 ): source is "person" | "tag" | "filename" {
   return ["person", "tag", "filename"].includes(source);
+}
+
+function toSearchMatch(
+  result: GatedHybridResult | HybridSearchResult
+): SearchMatch {
+  if ("hybridEvidence" in result) {
+    if (result.hybridEvidence.length > 0) {
+      return {
+        kind: "hybrid",
+        evidence: result.hybridEvidence,
+        tagNames: result.tagNames,
+        ...(result.hybridEvidence.includes("semantic")
+          ? { score: result.similarity }
+          : {}),
+      };
+    }
+    return isExactSource(result._source)
+      ? { kind: "exact", source: result._source }
+      : { kind: "semantic", score: result.similarity };
+  }
+  return result._source === "ai" || result._source === "autoTag"
+    ? { kind: "semantic", score: result.similarity }
+    : { kind: "exact", source: result._source };
 }
 
 function withoutInternalSearchScores<
@@ -394,10 +421,15 @@ function _buildTemporalBoost(
 }
 
 // Compound search: text + EXIF filters
+interface CompoundSearchExecution extends SearchExecution {
+  /** The response was finalized in a synchronous SQLite read snapshot. */
+  snapshotValidated?: boolean;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Compound search coordinates independent search branches and ranking.
 async function performCompoundSearch(
   input: z.output<typeof CompoundSearchSchema>,
-  execution: SearchExecution,
+  execution: CompoundSearchExecution,
   sourceRevision: string
 ) {
   const db = getDatabase();
@@ -426,6 +458,7 @@ async function performCompoundSearch(
     offset,
   } = input;
   checkSearch(execution);
+  const vectorRevision = getVectorSearchRevision();
   const sqliteBranch = <T>(task: () => T) =>
     deferSearchBranch(() => measureSearch(execution, "sqliteMs", task));
   const hydratePage = <T extends { id: number }>(page: T[]) => {
@@ -466,19 +499,28 @@ async function performCompoundSearch(
     sourceRevision,
   });
   const activeSearchSession = cursor ? searchSessions.get(cursor) : null;
-  if (
-    cursor &&
-    (!activeSearchSession || activeSearchSession.fingerprint !== fingerprint)
-  ) {
+  const expireCursor = () => {
+    if (cursor) {
+      searchSessions.delete(cursor);
+    }
     return {
       cursorExpired: true,
       hasMore: false,
       nextCursor: null,
+      nextOffset: null,
       results: [],
       snapshotVersion: activeSearchSession?.snapshotVersion,
       total: 0,
       totalExact: false,
+      completion: "partial" as const,
+      incompleteReason: "changed" as const,
     };
+  };
+  if (
+    cursor &&
+    (!activeSearchSession || activeSearchSession.fingerprint !== fingerprint)
+  ) {
+    return expireCursor();
   }
   if (
     activeSearchSession?.responseBase &&
@@ -486,32 +528,46 @@ async function performCompoundSearch(
       (activeSearchSession.rankedPool.length > 0 &&
         !activeSearchSession.upstreamHasMore))
   ) {
-    const page = takeFrozenSearchPage(activeSearchSession, limit);
-    for (const result of page) {
-      activeSearchSession.emittedIds.add(result.id);
-    }
-    const hasMore =
-      activeSearchSession.upstreamHasMore ||
-      activeSearchSession.rankedPool.length > 0;
-    const cachedSemantic = activeSearchSession.responseBase.semantic;
-    return {
-      ...activeSearchSession.responseBase,
-      hasMore,
-      nextCursor: hasMore ? activeSearchSession.cursor : null,
-      nextOffset: hasMore ? activeSearchSession.emittedIds.size : null,
-      results: hydratePage(page),
-      ...(cachedSemantic &&
-      typeof cachedSemantic === "object" &&
-      !Array.isArray(cachedSemantic)
-        ? {
-            semantic: {
-              ...cachedSemantic,
-              searchSessionHit: true,
-            },
-          }
-        : {}),
-      snapshotVersion: activeSearchSession.snapshotVersion,
-    };
+    const responseBase = activeSearchSession.responseBase;
+    return db.transaction(() => {
+      if (
+        getSearchDatabaseRevision(db, needsVectorRevision(input)) !==
+        sourceRevision
+      ) {
+        execution.snapshotValidated = true;
+        return expireCursor();
+      }
+      if (execution.signal?.aborted) {
+        throw new SearchInterrupted("cancelled");
+      }
+      const page = takeFrozenSearchPage(activeSearchSession, limit);
+      for (const result of page) {
+        activeSearchSession.emittedIds.add(result.id);
+      }
+      const hasMore =
+        activeSearchSession.upstreamHasMore ||
+        activeSearchSession.rankedPool.length > 0;
+      const cachedSemantic = responseBase.semantic;
+      execution.snapshotValidated = true;
+      return {
+        ...responseBase,
+        hasMore,
+        nextCursor: hasMore ? activeSearchSession.cursor : null,
+        nextOffset: hasMore ? activeSearchSession.emittedIds.size : null,
+        results: hydratePage(page),
+        ...(cachedSemantic &&
+        typeof cachedSemantic === "object" &&
+        !Array.isArray(cachedSemantic)
+          ? {
+              semantic: {
+                ...cachedSemantic,
+                searchSessionHit: true,
+              },
+            }
+          : {}),
+        snapshotVersion: activeSearchSession.snapshotVersion,
+      };
+    });
   }
   const effectiveOffset = activeSearchSession?.candidateDepth ?? offset;
   const resultWindowEnd = activeSearchSession
@@ -528,8 +584,20 @@ async function performCompoundSearch(
     allResults: T[],
     base: R,
     upstreamHasMore: boolean,
-    candidateDepth = resultWindowEnd
+    candidateDepth = resultWindowEnd,
+    retainSession = true
   ) => {
+    if (!retainSession) {
+      return {
+        ...base,
+        results: hydratePage(allResults.slice(offset, offset + limit)),
+        total: allResults.length,
+        totalExact: false,
+        hasMore: false,
+        nextCursor: null,
+        nextOffset: null,
+      };
+    }
     const session =
       activeSearchSession ?? searchSessions.create(fingerprint, candidateDepth);
     appendToFrozenSearchPool(session, allResults);
@@ -744,42 +812,67 @@ async function performCompoundSearch(
       (match) => match[1]
     );
     const isGlob = quotedNames.length === 0 && GLOB_WILDCARD_RE.test(q);
-    const scoped = getPhotoSearchScope(
-      db,
-      { ...filters, filenameGlob: isGlob ? q : undefined },
-      metadataRevision
-    );
-    const scope = [...scoped.rows];
-    const scopeById = scoped.byId;
-    const allowedPhotoIds = scoped.allowedPhotoIds;
+    const textFilters = { ...filters, filenameGlob: isGlob ? q : undefined };
+    const readScope = () =>
+      getPhotoSearchScope(
+        db,
+        textFilters,
+        getSearchDatabaseRevision(db, false)
+      );
+    let scoped = db.transaction(readScope);
+    let scopeById = scoped.byId;
+    let allowedPhotoIds = scoped.allowedPhotoIds;
     if (execution.diagnostics) {
       execution.diagnostics.timings.sqliteMs = performance.now() - scopeStarted;
     }
-    checkSearch(execution);
-    if (allowedPhotoIds.length === 0) {
-      return {
-        results: [],
-        total: 0,
-        totalExact: true,
-        query: q,
-        semanticRequired: false,
-      };
+    if (execution.signal?.aborted) {
+      throw new SearchInterrupted("cancelled");
     }
-    if (isGlob) {
-      scope.sort(
-        (left, right) =>
-          (right.fileDate ?? 0) - (left.fileDate ?? 0) || left.id - right.id
-      );
-      return finalizeSearchPage(
-        scope,
-        { query: q, total: scope.length, totalExact: true },
-        false
-      );
+    if (isGlob || allowedPhotoIds.length === 0) {
+      const localPage = db.transaction(() => {
+        const changed =
+          getSearchDatabaseRevision(db, needsVectorRevision(input)) !==
+          sourceRevision;
+        scoped = readScope();
+        scopeById = scoped.byId;
+        allowedPhotoIds = scoped.allowedPhotoIds;
+        if (!isGlob && allowedPhotoIds.length > 0) {
+          return null;
+        }
+        execution.snapshotValidated = true;
+        if (changed && cursor) {
+          return expireCursor();
+        }
+        const scope = [...scoped.rows].sort(
+          (left, right) =>
+            (right.fileDate ?? 0) - (left.fileDate ?? 0) || left.id - right.id
+        );
+        return finalizeSearchPage(
+          scope,
+          {
+            query: q,
+            total: scope.length,
+            totalExact: !changed,
+            semanticRequired: false,
+            ...(changed
+              ? {
+                  completion: "partial" as const,
+                  incompleteReason: "changed" as const,
+                }
+              : {}),
+          },
+          false,
+          resultWindowEnd,
+          !changed
+        );
+      });
+      if (localPage) {
+        return localPage;
+      }
     }
-    const aiReadiness = await waitForSearch(
-      getAiReadiness({ loadModel: false }),
-      execution
-    );
+    const semanticRequired = Boolean(q.replace(EXACT_NAME_RE, "").trim());
+    let aiReadiness: Awaited<ReturnType<typeof getAiReadiness>> | undefined;
+    let semanticAvailable = false;
     let semantic = {
       candidateMinimum: 0,
       candidateDepth: 0,
@@ -787,12 +880,14 @@ async function performCompoundSearch(
       cutoffReason: "not-run",
       finalCutoff: 0,
       hasMore: false,
-      indexedPhotos: aiReadiness.indexedPhotos,
+      indexedPhotos: 0,
       intent: "unknown" as "object" | "scene" | "composed" | "unknown",
       promptGroupCount: 0,
-      reason: aiReadiness.lastError as string | undefined,
+      reason: undefined as string | undefined,
       rejectedWeak: 0,
-      state: aiReadiness.coverageState,
+      state: "unavailable" as Awaited<
+        ReturnType<typeof getAiReadiness>
+      >["coverageState"],
       strongAccepted: 0,
       strongCutoff: 0,
       sensitivity: activeSensitivity,
@@ -805,8 +900,8 @@ async function performCompoundSearch(
       autoTagRescued: 0,
       ignoredLowConfidenceTags: 0,
       topSimilarity: 0,
-      totalPhotos: aiReadiness.totalPhotos,
-      required: Boolean(q.replace(EXACT_NAME_RE, "").trim()),
+      totalPhotos: 0,
+      required: semanticRequired,
       used: false,
     };
 
@@ -844,439 +939,470 @@ async function performCompoundSearch(
       return conditions;
     }
 
-    // ── 四路并行召回（Promise.allSettled + 硬超时） ─────────────────
-    // 替代脆弱的 Promise.all：单路故障不影响其他路结果。
-    // 已预热的语义搜索限制为 2s；冷启动允许 10s 完成模型和数据库初始化。
+    // Keep these synchronous collectors reusable for a changed-data read snapshot.
+    const collectTags = () =>
+      db
+        .select({
+          id: photos.id,
+          name: tags.name,
+          confidence: photoTags.confidence,
+          origin: photoTags.origin,
+          userConfirmed: photoTags.userConfirmed,
+        })
+        .from(photos)
+        .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
+        .innerJoin(tags, eq(tags.id, photoTags.tagId))
+        .where(
+          and(
+            scopePredicate,
+            or(...buildTokenConditions(nameTokens, tags.name, literalQuery))
+          )
+        )
+        .all();
+    const collectFilenames = () => {
+      // Glob queries already took the local path; quotes use literal LIKE.
+      if (!FTS5_QUOTE_RE.test(q)) {
+        try {
+          const terms = q
+            .replace(WHITESPACE_RE, " ")
+            .split(WHITESPACE_SPLIT_RE)
+            .map((term) => `"${term}"*`)
+            .join(" ");
+          const ftsResults = db.all(
+            sql`SELECT photos.id AS id, photos.filename AS filename
+              FROM photos_fts JOIN photos ON photos.id = photos_fts.rowid
+              WHERE photos_fts MATCH ${terms} AND (${scopePredicate})`
+          ) as Array<{ id: number; filename: string }>;
+          if (ftsResults.length > 0) {
+            return ftsResults;
+          }
+        } catch {
+          // FTS5 syntax error: fall back to literal LIKE.
+        }
+      }
+      return db
+        .select({ id: photos.id, filename: photos.filename })
+        .from(photos)
+        .where(
+          and(
+            scopePredicate,
+            or(
+              ...buildTokenConditions(
+                quotedNames,
+                photos.filename,
+                literalQuery
+              )
+            )
+          )
+        )
+        .all();
+    };
+    const collectPeople = () =>
+      db
+        .select({ id: photos.id, name: faceIdentities.name })
+        .from(photos)
+        .innerJoin(faceVectors, eq(faceVectors.photoId, photos.id))
+        .innerJoin(
+          faceIdentityMembers,
+          eq(faceIdentityMembers.faceVectorId, faceVectors.id)
+        )
+        .innerJoin(
+          faceIdentities,
+          eq(faceIdentities.id, faceIdentityMembers.identityId)
+        )
+        .where(
+          and(
+            scopePredicate,
+            or(
+              ...buildTokenConditions(
+                nameTokens,
+                faceIdentities.name,
+                literalQuery
+              )
+            )
+          )
+        )
+        .all();
 
-    const semanticAvailable =
-      aiReadiness.coverageState === "ready" ||
-      aiReadiness.coverageState === "partial";
-    // Quoted names are resolved by exact evidence, with no visual description.
-    const semanticRequired = Boolean(q.replace(EXACT_NAME_RE, "").trim());
     let partialAiSearch:
       | Awaited<ReturnType<typeof aiSearchByTextWithPlan>>
       | undefined;
     let candidateDepth = requestedCandidateDepth;
+    const semanticBranch = async () => {
+      if (!semanticRequired) {
+        return null;
+      }
+      checkSearch(execution);
+      aiReadiness ??= await waitForSearch(
+        getAiReadiness({ loadModel: false }),
+        execution
+      );
+      checkSearch(execution);
+      semanticAvailable =
+        aiReadiness.coverageState === "ready" ||
+        aiReadiness.coverageState === "partial";
+      if (!semanticAvailable) {
+        return null;
+      }
+      return waitForSearch(
+        aiSearchByTextWithPlan(
+          input.query?.trim() || q,
+          activeSearchSession ? limit : offset + limit,
+          {
+            ...execution,
+            get finished() {
+              return execution.finished;
+            },
+            allowedPhotoIds,
+            candidateDepth,
+            scopeKey: scoped.key,
+            sourceRevision,
+            rewritten: rewrittenQuery,
+            onCandidates: (partial) => {
+              if (
+                !(execution.finished || execution.signal?.aborted) &&
+                performance.now() < execution.deadline
+              ) {
+                partialAiSearch = partial;
+              }
+            },
+          }
+        ),
+        execution
+      );
+    };
+    // AI readiness belongs to the timed semantic branch. Local recall must
+    // still settle when the vector lease, initialization or inference stalls.
     for (;;) {
       const settled = await Promise.allSettled([
-        // 路 1：SigLIP 文本推理 + LanceDB 向量召回
-        semanticAvailable && semanticRequired
-          ? aiSearchByTextWithPlan(
-              input.query?.trim() || q,
-              activeSearchSession ? limit : offset + limit,
-              {
-                ...execution,
-                get finished() {
-                  return execution.finished;
-                },
-                allowedPhotoIds,
-                candidateDepth,
-                scopeKey: scoped.key,
-                sourceRevision,
-                rewritten: rewrittenQuery,
-                onCandidates: (partial) => {
-                  partialAiSearch = partial;
-                },
-              }
-            )
-          : Promise.resolve(null),
-        // 路 2：标签库 LIKE 搜索（原始 query token + 改写后 query 双路）
+        semanticBranch(),
         (activeSearchSession?.tagEvidence ?? searchSessionTagEvidence)
           ? Promise.resolve(
               activeSearchSession?.tagEvidence ?? searchSessionTagEvidence
             )
-          : sqliteBranch(() =>
-              db
-                .select({
-                  id: photos.id,
-                  name: tags.name,
-                  confidence: photoTags.confidence,
-                  origin: photoTags.origin,
-                  userConfirmed: photoTags.userConfirmed,
-                })
-                .from(photos)
-                .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
-                .innerJoin(tags, eq(tags.id, photoTags.tagId))
-                .where(
-                  and(
-                    scopePredicate,
-                    or(
-                      ...buildTokenConditions(
-                        nameTokens,
-                        tags.name,
-                        literalQuery
-                      )
-                    )
-                  )
-                )
-                .all()
-            ),
-        // 路 3：文件名搜索 — FTS5 MATCH 优先，LIKE 回退
-        sqliteBranch(() => {
-          // FTS5 简单模式下仅 " 为特殊字符；
-          // * 和 ? 已由上方的 glob 短路路径处理，不会到达此处。
-          const needsFts5Escape = FTS5_QUOTE_RE.test(q);
-          if (!needsFts5Escape && q.trim().length > 0) {
-            try {
-              const normalized = q.trim().replace(WHITESPACE_RE, " ");
-              const terms = normalized
-                .split(WHITESPACE_SPLIT_RE)
-                .map((t) => `"${t}"*`)
-                .join(" ");
-              const ftsResults = db.all(
-                sql`SELECT photos.id AS id, photos.filename AS filename
-                  FROM photos_fts JOIN photos ON photos.id = photos_fts.rowid
-                  WHERE photos_fts MATCH ${terms} AND (${scopePredicate})`
-              ) as Array<{ id: number; filename: string }>;
-              if (ftsResults.length > 0) {
-                return ftsResults;
-              }
-            } catch {
-              // FTS5 语法错误 → 回退到 LIKE
-            }
-          }
-          // LIKE 回退
-          return db
-            .select({ id: photos.id, filename: photos.filename })
-            .from(photos)
-            .where(
-              and(
-                scopePredicate,
-                or(
-                  ...buildTokenConditions(
-                    quotedNames,
-                    photos.filename,
-                    literalQuery
-                  )
-                )
-              )
-            )
-            .all();
-        }),
-        // 路 4：人脸识别名搜索（token 化匹配中文姓名）
-        sqliteBranch(() =>
-          db
-            .select({ id: photos.id, name: faceIdentities.name })
-            .from(photos)
-            .innerJoin(faceVectors, eq(faceVectors.photoId, photos.id))
-            .innerJoin(
-              faceIdentityMembers,
-              eq(faceIdentityMembers.faceVectorId, faceVectors.id)
-            )
-            .innerJoin(
-              faceIdentities,
-              eq(faceIdentities.id, faceIdentityMembers.identityId)
-            )
-            .where(
-              and(
-                scopePredicate,
-                or(
-                  ...buildTokenConditions(
-                    nameTokens,
-                    faceIdentities.name,
-                    literalQuery
-                  )
-                )
-              )
-            )
-            .all()
-        ),
+          : sqliteBranch(collectTags),
+        sqliteBranch(collectFilenames),
+        sqliteBranch(collectPeople),
       ]);
 
-      // 拆解 allSettled 结果，记录降级日志
-      const aiSearch =
-        settled[0].status === "fulfilled"
-          ? (settled[0].value as Awaited<
-              ReturnType<typeof aiSearchByTextWithPlan>
-            >)
-          : (partialAiSearch ?? null);
-      const aiResults = (aiSearch?.results ?? []).filter((row) =>
-        scopeById.has(row.photoId)
-      );
-      let semanticReason = semantic.reason;
-      if (settled[0].status === "rejected") {
-        semanticReason =
-          (settled[0].reason as Error)?.message ?? "semantic-search-failed";
-      } else if (
-        aiSearch?.plan.translationMode === "dictionary-fallback" &&
-        aiSearch.plan.language !== "en"
-      ) {
-        semanticReason = "advanced-chinese-search-degraded";
-      }
-      semantic = {
-        ...semantic,
-        candidateMinimum: aiSearch?.candidateMinimum ?? 0,
-        candidateDepth: aiSearch?.candidateDepth ?? 0,
-        consensusCutoff: aiSearch?.consensusCutoff ?? 0,
-        cutoffReason: aiSearch?.cutoffReason ?? "not-run",
-        finalCutoff: aiSearch?.finalCutoff ?? 0,
-        hasMore: aiSearch?.hasMore ?? false,
-        intent: aiSearch?.plan.intent ?? "unknown",
-        promptGroupCount: aiSearch?.promptGroupCount ?? 0,
-        reason: semanticReason,
-        rejectedWeak: aiSearch?.rejectedWeak ?? 0,
-        strongAccepted: aiSearch?.strongAccepted ?? 0,
-        strongCutoff: aiSearch?.strongCutoff ?? 0,
-        sensitivity: aiSearch?.sensitivity ?? activeSensitivity,
-        sensitivityMultiplier:
-          aiSearch?.sensitivityMultiplier ??
-          getSensitivityMultiplier(activeSensitivity),
-        supportedAccepted: aiSearch?.supportedAccepted ?? 0,
-        supportCutoff: aiSearch?.supportCutoff ?? 0,
-        topSimilarity: aiSearch?.topSimilarity ?? 0,
-        used:
-          semanticAvailable &&
-          settled[0].status === "fulfilled" &&
-          (aiSearch?.plan.prompts.length ?? 0) > 0,
-      };
-      const tagPhotoRows =
-        settled[1].status === "fulfilled"
-          ? (settled[1].value as Array<{
-              confidence: number | null;
-              id: number;
-              name: string;
-              origin: "manual" | "auto";
-              userConfirmed: boolean;
-            }>)
-          : [];
-      const allowedTagRows = tagPhotoRows.filter((row) =>
-        scopeById.has(row.id)
-      );
-      searchSessionTagEvidence = allowedTagRows;
-      const filenamePhotoRows =
-        settled[2].status === "fulfilled"
-          ? (settled[2].value as { id: number; filename?: string }[])
-          : [];
-      const personPhotoRows =
-        settled[3].status === "fulfilled"
-          ? (settled[3].value as { id: number; name: string }[])
-          : [];
-
-      if (settled[0].status === "rejected") {
-        console.warn(
-          `[Search] AI semantic recall degraded: ${settled[0].reason?.message ?? "timeout"}. Proceeding with SQLite-only results.`
-        );
-      }
-      if (settled[1].status === "rejected") {
-        console.warn(
-          "[Search] Tag search degraded:",
-          settled[1].reason?.message
-        );
-      }
-      if (settled[2].status === "rejected") {
-        console.warn(
-          "[Search] Filename search degraded:",
-          settled[2].reason?.message
-        );
-      }
-      if (settled[3].status === "rejected") {
-        console.warn(
-          "[Search] Person search degraded:",
-          settled[3].reason?.message
-        );
-      }
-
-      const rankingStarted = performance.now();
-      const normalizedExactQuery = q
-        .trim()
-        .replace(/^[“"]|[”"]$/g, "")
-        .toLocaleLowerCase();
-      const isFullMatch = (value: string): boolean => {
-        const normalized = value.trim().toLocaleLowerCase();
-        return (
-          normalized === normalizedExactQuery ||
-          quotedNames.some(
-            (name) => name.trim().toLocaleLowerCase() === normalized
-          )
-        );
-      };
-      const semanticPhotoIds = new Set(aiResults.map(({ photoId }) => photoId));
-      const semanticCandidates =
-        SEARCH_PIPELINE_VERSION === "hybrid-v3"
-          ? [
-              ...aiResults,
-              ...(aiSearch?.supportCandidates ?? []).filter(
-                (candidate) => !semanticPhotoIds.has(candidate.photoId)
-              ),
-            ]
-          : aiResults;
-      const exactEvidence: ExactSearchEvidence[] = [
-        ...personPhotoRows
-          .filter((row) => scopeById.has(row.id))
-          .map((row) => ({
-            exact: isFullMatch(row.name),
-            photoId: row.id,
-            source: "person" as const,
-          })),
-        ...buildTagSearchEvidence(
-          allowedTagRows,
-          SEARCH_PIPELINE_VERSION === "hybrid-v3"
-            ? new Set<number>()
-            : semanticPhotoIds,
-          isFullMatch
-        ),
-        ...filenamePhotoRows
-          .filter((row) => scopeById.has(row.id))
-          .map((row) => ({
-            exact: isFullMatch(row.filename ?? ""),
-            photoId: row.id,
-            source: "filename" as const,
-          })),
-      ];
-      const gated =
-        SEARCH_PIPELINE_VERSION === "hybrid-v3"
-          ? fuseGatedHybridSearchEvidence(
-              semanticCandidates,
-              exactEvidence,
-              allowedTagRows,
-              {
-                acceptedSemanticPhotoIds: semanticPhotoIds,
-                intent: aiSearch?.plan.intent ?? "unknown",
-                promptGroupCount: aiSearch?.promptGroupCount ?? 0,
-                strongCutoff: aiSearch?.strongCutoff ?? 0,
-                supportCutoff: aiSearch?.supportCutoff ?? 0,
-                topSimilarity: aiSearch?.topSimilarity ?? 0,
-              }
-            )
-          : null;
-      const rerankedList =
-        gated?.results ??
-        fuseHybridSearchEvidence(
-          aiResults,
-          exactEvidence,
-          aiResults.length + exactEvidence.length
-        );
-      if (gated) {
-        semantic = { ...semantic, ...gated.diagnostics };
-        console.log(
-          `[Search] pipeline=hybrid-v3 manualExact=${gated.diagnostics.manualExactAccepted} semanticOnly=${gated.diagnostics.semanticOnlyAccepted} tagSupported=${gated.diagnostics.tagSupportedAccepted} autoRescued=${gated.diagnostics.autoTagRescued} ignoredLowConfidenceTags=${gated.diagnostics.ignoredLowConfidenceTags}`
-        );
-      }
-
-      // hybrid 的 similarity 在 rerank 里取自语义分（含 semantic 证据时），
-      // 带上它让前端能把「语义 + 标签」也归一化为匹配百分比。
-      const hybridSemanticScore = (
-        evidence: readonly string[],
-        similarity: number
-      ) => (evidence.includes("semantic") ? { score: similarity } : {});
-      const toSearchMatch = (result: (typeof rerankedList)[number]) => {
-        if ("hybridEvidence" in result) {
-          const hybridResult = result as GatedHybridResult;
-          if (hybridResult.hybridEvidence.length === 0) {
-            return isExactSource(hybridResult._source)
-              ? {
-                  kind: "exact" as const,
-                  source: hybridResult._source,
-                }
-              : { kind: "semantic" as const, score: result.similarity };
-          }
-          return {
-            kind: "hybrid" as const,
-            evidence: hybridResult.hybridEvidence,
-            tagNames: hybridResult.tagNames,
-            ...hybridSemanticScore(
-              hybridResult.hybridEvidence,
-              result.similarity
-            ),
-          };
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Evidence revalidation, fusion and page commit must share a synchronous read snapshot.
+      const page = db.transaction(() => {
+        if (execution.signal?.aborted) {
+          throw new SearchInterrupted("cancelled");
         }
-        return result._source === "ai" || result._source === "autoTag"
-          ? { kind: "semantic" as const, score: result.similarity }
-          : { kind: "exact" as const, source: result._source };
-      };
-
-      const combined = rerankedList.flatMap((result) => {
-        const photo = scopeById.get(result.photoId);
-        return photo
-          ? [
-              {
-                ...photo,
-                exactMatch: result.exact,
-                match: toSearchMatch(result),
-                rankScore: result.rankScore,
-                similarity: result.similarity,
-              },
-            ]
-          : [];
-      });
-      combined.sort(
-        (left, right) =>
-          Number(right.exactMatch) - Number(left.exactMatch) ||
-          right.rankScore - left.rankScore ||
-          right.similarity - left.similarity ||
-          (right.fileDate ?? 0) - (left.fileDate ?? 0) ||
-          left.id - right.id
-      );
-      if (execution.diagnostics) {
-        execution.diagnostics.timings.rankingMs =
-          (execution.diagnostics.timings.rankingMs ?? 0) +
-          performance.now() -
-          rankingStarted;
-      }
-      const failed = settled.find((branch) => branch.status === "rejected");
-      let incompleteReason: SearchResponse["incompleteReason"] =
-        failed || (semanticRequired && !semanticAvailable)
-          ? "semantic-unavailable"
-          : undefined;
-      if (
-        failed?.status === "rejected" &&
-        failed.reason instanceof SearchInterrupted
-      ) {
-        incompleteReason = failed.reason.reason;
-      }
-      if (
-        aiSearch &&
-        ([
-          "model-load-failed",
-          "ai-not-initialized",
-          "missing-primary-query",
-          "missing-negative-query",
-          "missing-photo-vector",
-        ].includes(aiSearch.cutoffReason) ||
-          aiSearch.cutoffReason?.startsWith("vector-"))
-      ) {
-        incompleteReason = "semantic-unavailable";
-      }
-      const emitted = activeSearchSession?.emittedIds ?? new Set<number>();
-      const availableIds = new Set([
-        ...(activeSearchSession?.rankedPool.map((row) => row.id) ?? []),
-        ...combined.filter((row) => !emitted.has(row.id)).map((row) => row.id),
-      ]);
-      const actualDepth = aiSearch?.candidateDepth ?? candidateDepth;
-      if (
-        !incompleteReason &&
-        aiSearch?.hasMore &&
-        availableIds.size < (activeSearchSession ? limit : offset + limit) &&
-        actualDepth < allowedPhotoIds.length
-      ) {
-        candidateDepth = Math.min(
-          allowedPhotoIds.length,
-          Math.max(actualDepth + 200, actualDepth * 2)
+        const changed =
+          getSearchDatabaseRevision(db, needsVectorRevision(input)) !==
+          sourceRevision;
+        if (changed && cursor) {
+          execution.snapshotValidated = true;
+          return expireCursor();
+        }
+        if (changed) {
+          // Re-read all local evidence in this same snapshot; cached tag
+          // evidence and the original scope may no longer justify a hit.
+          scoped = readScope();
+          scopeById = scoped.byId;
+          allowedPhotoIds = scoped.allowedPhotoIds;
+          settled[1] = { status: "fulfilled", value: collectTags() };
+          settled[2] = { status: "fulfilled", value: collectFilenames() };
+          settled[3] = { status: "fulfilled", value: collectPeople() };
+        }
+        const localBranches = settled.slice(1);
+        const localFailure = localBranches.find(
+          (branch) => branch.status === "rejected"
         );
-        checkSearch(execution);
-        continue;
-      }
-      return finalizeSearchPage(
-        withoutInternalSearchScores(combined),
-        {
-          query: q,
-          total: combined.length,
-          totalExact: !(incompleteReason || aiSearch?.hasMore),
-          completion: incompleteReason
-            ? ("partial" as const)
-            : ("complete" as const),
-          ...(incompleteReason ? { incompleteReason } : {}),
-          semantic: {
-            ...semantic,
-            searchSessionHit: Boolean(activeSearchSession),
+        if (
+          localFailure?.status === "rejected" &&
+          localBranches.every((branch) => branch.status === "rejected")
+        ) {
+          // An unavailable SQLite store is a search error, rather than an
+          // empty partial result attributed to optional semantic inference.
+          throw localFailure.reason;
+        }
+        // 拆解 allSettled 结果，记录降级日志
+        let aiSearch =
+          settled[0].status === "fulfilled"
+            ? (settled[0].value as Awaited<
+                ReturnType<typeof aiSearchByTextWithPlan>
+              >)
+            : (partialAiSearch ?? null);
+        if (vectorRevision !== getVectorSearchRevision()) {
+          aiSearch = null;
+        }
+        const aiResults = (aiSearch?.results ?? []).filter((row) =>
+          scopeById.has(row.photoId)
+        );
+        let semanticReason = aiReadiness?.lastError ?? semantic.reason;
+        if (settled[0].status === "rejected") {
+          semanticReason =
+            (settled[0].reason as Error)?.message ?? "semantic-search-failed";
+        } else if (
+          aiSearch?.plan.translationMode === "dictionary-fallback" &&
+          aiSearch.plan.language !== "en"
+        ) {
+          semanticReason = "advanced-chinese-search-degraded";
+        }
+        semantic = {
+          ...semantic,
+          indexedPhotos: aiReadiness?.indexedPhotos ?? 0,
+          totalPhotos: aiReadiness?.totalPhotos ?? 0,
+          state: aiReadiness?.coverageState ?? "unavailable",
+          candidateMinimum: aiSearch?.candidateMinimum ?? 0,
+          candidateDepth: aiSearch?.candidateDepth ?? 0,
+          consensusCutoff: aiSearch?.consensusCutoff ?? 0,
+          cutoffReason: aiSearch?.cutoffReason ?? "not-run",
+          finalCutoff: aiSearch?.finalCutoff ?? 0,
+          hasMore: aiSearch?.hasMore ?? false,
+          intent: aiSearch?.plan.intent ?? "unknown",
+          promptGroupCount: aiSearch?.promptGroupCount ?? 0,
+          reason: semanticReason,
+          rejectedWeak: aiSearch?.rejectedWeak ?? 0,
+          strongAccepted: aiSearch?.strongAccepted ?? 0,
+          strongCutoff: aiSearch?.strongCutoff ?? 0,
+          sensitivity: aiSearch?.sensitivity ?? activeSensitivity,
+          sensitivityMultiplier:
+            aiSearch?.sensitivityMultiplier ??
+            getSensitivityMultiplier(activeSensitivity),
+          supportedAccepted: aiSearch?.supportedAccepted ?? 0,
+          supportCutoff: aiSearch?.supportCutoff ?? 0,
+          topSimilarity: aiSearch?.topSimilarity ?? 0,
+          used:
+            semanticAvailable &&
+            settled[0].status === "fulfilled" &&
+            (aiSearch?.plan.prompts.length ?? 0) > 0,
+        };
+        const tagPhotoRows =
+          settled[1].status === "fulfilled"
+            ? (settled[1].value as Array<{
+                confidence: number | null;
+                id: number;
+                name: string;
+                origin: "manual" | "auto";
+                userConfirmed: boolean;
+              }>)
+            : [];
+        const allowedTagRows = tagPhotoRows.filter((row) =>
+          scopeById.has(row.id)
+        );
+        searchSessionTagEvidence = allowedTagRows;
+        const filenamePhotoRows =
+          settled[2].status === "fulfilled"
+            ? (settled[2].value as { id: number; filename?: string }[])
+            : [];
+        const personPhotoRows =
+          settled[3].status === "fulfilled"
+            ? (settled[3].value as { id: number; name: string }[])
+            : [];
+
+        if (settled[0].status === "rejected") {
+          console.warn(
+            `[Search] AI semantic recall degraded: ${settled[0].reason?.message ?? "timeout"}. Proceeding with SQLite-only results.`
+          );
+        }
+        if (settled[1].status === "rejected") {
+          console.warn(
+            "[Search] Tag search degraded:",
+            settled[1].reason?.message
+          );
+        }
+        if (settled[2].status === "rejected") {
+          console.warn(
+            "[Search] Filename search degraded:",
+            settled[2].reason?.message
+          );
+        }
+        if (settled[3].status === "rejected") {
+          console.warn(
+            "[Search] Person search degraded:",
+            settled[3].reason?.message
+          );
+        }
+
+        const rankingStarted = performance.now();
+        const normalizedExactQuery = q
+          .trim()
+          .replace(/^[“"]|[”"]$/g, "")
+          .toLocaleLowerCase();
+        const isFullMatch = (value: string): boolean => {
+          const normalized = value.trim().toLocaleLowerCase();
+          return (
+            normalized === normalizedExactQuery ||
+            quotedNames.some(
+              (name) => name.trim().toLocaleLowerCase() === normalized
+            )
+          );
+        };
+        const semanticPhotoIds = new Set(
+          aiResults.map(({ photoId }) => photoId)
+        );
+        const semanticCandidates =
+          SEARCH_PIPELINE_VERSION === "hybrid-v3"
+            ? [
+                ...aiResults,
+                ...(aiSearch?.supportCandidates ?? []).filter(
+                  (candidate) => !semanticPhotoIds.has(candidate.photoId)
+                ),
+              ]
+            : aiResults;
+        const exactEvidence: ExactSearchEvidence[] = [
+          ...personPhotoRows
+            .filter((row) => scopeById.has(row.id))
+            .map((row) => ({
+              exact: isFullMatch(row.name),
+              photoId: row.id,
+              source: "person" as const,
+            })),
+          ...buildTagSearchEvidence(
+            allowedTagRows,
+            SEARCH_PIPELINE_VERSION === "hybrid-v3"
+              ? new Set<number>()
+              : semanticPhotoIds,
+            isFullMatch
+          ),
+          ...filenamePhotoRows
+            .filter((row) => scopeById.has(row.id))
+            .map((row) => ({
+              exact: isFullMatch(row.filename ?? ""),
+              photoId: row.id,
+              source: "filename" as const,
+            })),
+        ];
+        const gated =
+          SEARCH_PIPELINE_VERSION === "hybrid-v3"
+            ? fuseGatedHybridSearchEvidence(
+                semanticCandidates,
+                exactEvidence,
+                allowedTagRows,
+                {
+                  acceptedSemanticPhotoIds: semanticPhotoIds,
+                  intent: aiSearch?.plan.intent ?? "unknown",
+                  promptGroupCount: aiSearch?.promptGroupCount ?? 0,
+                  strongCutoff: aiSearch?.strongCutoff ?? 0,
+                  supportCutoff: aiSearch?.supportCutoff ?? 0,
+                  topSimilarity: aiSearch?.topSimilarity ?? 0,
+                }
+              )
+            : null;
+        const rerankedList =
+          gated?.results ??
+          fuseHybridSearchEvidence(
+            aiResults,
+            exactEvidence,
+            aiResults.length + exactEvidence.length
+          );
+        if (gated) {
+          semantic = { ...semantic, ...gated.diagnostics };
+          console.log(
+            `[Search] pipeline=hybrid-v3 manualExact=${gated.diagnostics.manualExactAccepted} semanticOnly=${gated.diagnostics.semanticOnlyAccepted} tagSupported=${gated.diagnostics.tagSupportedAccepted} autoRescued=${gated.diagnostics.autoTagRescued} ignoredLowConfidenceTags=${gated.diagnostics.ignoredLowConfidenceTags}`
+          );
+        }
+
+        const combined = rerankedList.flatMap((result) => {
+          const photo = scopeById.get(result.photoId);
+          return photo
+            ? [
+                {
+                  ...photo,
+                  exactMatch: result.exact,
+                  match: toSearchMatch(result),
+                  rankScore: result.rankScore,
+                  similarity: result.similarity,
+                },
+              ]
+            : [];
+        });
+        combined.sort(
+          (left, right) =>
+            Number(right.exactMatch) - Number(left.exactMatch) ||
+            right.rankScore - left.rankScore ||
+            right.similarity - left.similarity ||
+            (right.fileDate ?? 0) - (left.fileDate ?? 0) ||
+            left.id - right.id
+        );
+        if (execution.diagnostics) {
+          execution.diagnostics.timings.rankingMs =
+            (execution.diagnostics.timings.rankingMs ?? 0) +
+            performance.now() -
+            rankingStarted;
+        }
+        const failed = settled.find((branch) => branch.status === "rejected");
+        let incompleteReason: SearchResponse["incompleteReason"] =
+          failed || (semanticRequired && !semanticAvailable)
+            ? "semantic-unavailable"
+            : undefined;
+        if (
+          failed?.status === "rejected" &&
+          failed.reason instanceof SearchInterrupted
+        ) {
+          incompleteReason = failed.reason.reason;
+        }
+        if (
+          aiSearch &&
+          ([
+            "model-load-failed",
+            "ai-not-initialized",
+            "missing-primary-query",
+            "missing-negative-query",
+            "missing-photo-vector",
+          ].includes(aiSearch.cutoffReason) ||
+            aiSearch.cutoffReason?.startsWith("vector-"))
+        ) {
+          incompleteReason = "semantic-unavailable";
+        }
+        if (performance.now() >= execution.deadline) {
+          incompleteReason = "deadline";
+        }
+        if (changed) {
+          incompleteReason = "changed";
+        }
+        const emitted = activeSearchSession?.emittedIds ?? new Set<number>();
+        const availableIds = new Set([
+          ...(activeSearchSession?.rankedPool.map((row) => row.id) ?? []),
+          ...combined
+            .filter((row) => !emitted.has(row.id))
+            .map((row) => row.id),
+        ]);
+        const actualDepth = aiSearch?.candidateDepth ?? candidateDepth;
+        if (
+          !incompleteReason &&
+          aiSearch?.hasMore &&
+          availableIds.size < (activeSearchSession ? limit : offset + limit) &&
+          actualDepth < allowedPhotoIds.length
+        ) {
+          candidateDepth = Math.min(
+            allowedPhotoIds.length,
+            Math.max(actualDepth + 200, actualDepth * 2)
+          );
+          return null;
+        }
+        execution.snapshotValidated = true;
+        return finalizeSearchPage(
+          withoutInternalSearchScores(combined),
+          {
+            query: q,
+            semanticRequired,
+            total: combined.length,
+            totalExact: !(incompleteReason || aiSearch?.hasMore),
+            completion: incompleteReason
+              ? ("partial" as const)
+              : ("complete" as const),
+            ...(incompleteReason ? { incompleteReason } : {}),
+            semantic: {
+              ...semantic,
+              searchSessionHit: Boolean(activeSearchSession),
+            },
+            ...(rewrittenTimeFilter
+              ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+              : {}),
           },
-          ...(rewrittenTimeFilter
-            ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
-            : {}),
-        },
-        Boolean(aiSearch?.hasMore),
-        actualDepth
-      );
+          Boolean(aiSearch?.hasMore),
+          actualDepth,
+          !changed
+        );
+      });
+      if (page) {
+        return page;
+      }
     }
   }
 
@@ -1336,6 +1462,7 @@ async function performCompoundSearch(
 
 export const searchCompound = os
   .input(CompoundSearchSchema)
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Request cancellation, validated snapshots and deadline reporting share this handler.
   .handler(async ({ input }): Promise<SearchResponse> => {
     const started = performance.now();
     const cold =
@@ -1348,7 +1475,7 @@ export const searchCompound = os
       ipcContext.mainWindow?.webContents.id ?? 0,
       diagnostics.requestId
     );
-    const execution: SearchExecution = {
+    const execution: CompoundSearchExecution = {
       signal: request.signal,
       deadline:
         started + (cold ? AI_SEARCH_COLD_TIMEOUT_MS : AI_SEARCH_TIMEOUT_MS),
@@ -1374,7 +1501,10 @@ export const searchCompound = os
           diagnostics,
         };
       }
-      if (getSearchDatabaseRevision(db, includeVectors) !== sourceRevision) {
+      if (
+        !execution.snapshotValidated &&
+        getSearchDatabaseRevision(db, includeVectors) !== sourceRevision
+      ) {
         return {
           results: [],
           total: 0,
@@ -1385,7 +1515,9 @@ export const searchCompound = os
           diagnostics,
         };
       }
-      const deadlineExceeded = performance.now() >= execution.deadline;
+      const deadlineExceeded =
+        response.incompleteReason !== "changed" &&
+        performance.now() >= execution.deadline;
       return {
         ...response,
         semanticRequired:

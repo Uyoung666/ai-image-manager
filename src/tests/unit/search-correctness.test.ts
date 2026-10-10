@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { performance } from "node:perf_hooks";
 import { call } from "@orpc/server";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -22,18 +23,16 @@ const state = vi.hoisted(() => ({
   search: vi.fn(),
   colorSearch: vi.fn(),
   coverage: "ready",
+  readiness: vi.fn(),
+  aiReady: true,
 }));
 vi.mock("@/db", () => ({ getDatabase: () => state.db }));
 vi.mock("@/services/ai-embedder", () => ({
   searchByTextWithPlan: state.search,
-  isAiSearchReady: () => true,
+  isAiSearchReady: () => state.aiReady,
 }));
 vi.mock("@/services/ai/health", () => ({
-  getAiReadiness: async () => ({
-    coverageState: state.coverage,
-    indexedPhotos: 3,
-    totalPhotos: 3,
-  }),
+  getAiReadiness: state.readiness,
 }));
 vi.mock("@/services/image-search-preview", () => ({}));
 vi.mock("@/services/ai/vector-db", () => ({
@@ -50,6 +49,12 @@ beforeEach(() => {
   state.search.mockReset();
   state.colorSearch.mockReset().mockResolvedValue(null);
   state.coverage = "ready";
+  state.aiReady = true;
+  state.readiness.mockReset().mockImplementation(async () => ({
+    coverageState: state.coverage,
+    indexedPhotos: 3,
+    totalPhotos: 3,
+  }));
   sqlite = new Database(":memory:");
   db = drizzle(sqlite);
   migrate(db, { migrationsFolder: "drizzle" });
@@ -92,9 +97,385 @@ beforeEach(() => {
     },
   }));
 });
-afterEach(() => sqlite.close());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  sqlite.close();
+});
+
+function useSearchClock() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  vi.setSystemTime(0);
+  vi.spyOn(performance, "now").mockImplementation(() => Date.now());
+}
+
+const emptySemanticResult = {
+  results: [],
+  hasMore: false,
+  plan: { prompts: [], language: "en", translationMode: "none" },
+};
 
 describe("search correctness", () => {
+  it("keeps filename hits when an unrelated photo changes during recall", async () => {
+    state.search.mockImplementation(async () => {
+      await Promise.resolve();
+      sqlite.prepare("UPDATE exif_data SET iso = 50 WHERE photo_id = 2").run();
+      return emptySemanticResult;
+    });
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const result = await call(searchCompound, { query: "fixture-1.jpg" });
+    expect(result.results.map((row) => row.id)).toEqual([1]);
+    expect(result.results[0].match).toEqual({
+      kind: "exact",
+      source: "filename",
+    });
+    expect(result).toMatchObject({
+      completion: "partial",
+      incompleteReason: "changed",
+      totalExact: false,
+      hasMore: false,
+      nextCursor: null,
+      nextOffset: null,
+    });
+    expect(state.search).toHaveBeenCalledTimes(1);
+    expect(
+      (await call(searchCompound, { query: "fixture-1.jpg" })).completion
+    ).toBe("complete");
+  });
+
+  it("reuses semantic candidates with current metadata and hard filters", async () => {
+    const originalSearch = state.search.getMockImplementation();
+    state.search.mockImplementation(async (...args) => {
+      const result = await originalSearch?.(...args);
+      sqlite.prepare("UPDATE exif_data SET iso = 50 WHERE photo_id = 2").run();
+      return result;
+    });
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const result = await call(searchCompound, {
+      query: "mountain",
+      isoMin: 100,
+    });
+    expect(result.results.map((row) => row.id)).toEqual([1]);
+    expect(result.results[0].match).toMatchObject({
+      kind: "hybrid",
+      evidence: ["semantic"],
+    });
+    expect(result.incompleteReason).toBe("changed");
+    expect(state.search).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards stale vector evidence while keeping current filename hits", async () => {
+    const { invalidateVectorSearch } = await import(
+      "@/services/search-revision"
+    );
+    const originalSearch = state.search.getMockImplementation();
+    state.search.mockImplementation(async (...args) => {
+      const result = await originalSearch?.(...args);
+      invalidateVectorSearch();
+      return result;
+    });
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const result = await call(searchCompound, { query: "fixture-1.jpg" });
+    expect(result.results.map((row) => row.id)).toEqual([1]);
+    expect(result.semantic?.used).toBe(false);
+    expect(result).toMatchObject({
+      completion: "partial",
+      incompleteReason: "changed",
+      nextCursor: null,
+    });
+    expect(state.search).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "UPDATE photos SET deleted_at = 1 WHERE id = 1",
+    "UPDATE photos SET filename = 'renamed.jpg' WHERE id = 1",
+    "UPDATE exif_data SET iso = 50 WHERE photo_id = 1",
+    "UPDATE exif_data SET date_taken = 50 WHERE photo_id = 1",
+  ])("revalidates a filename hit after %s", async (mutation) => {
+    state.search.mockImplementation(async () => {
+      await Promise.resolve();
+      sqlite.exec(mutation);
+      return emptySemanticResult;
+    });
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const result = await call(searchCompound, {
+      query: "fixture-1.jpg",
+      isoMin: 100,
+      dateFrom: 100,
+      dateTo: 200,
+    });
+    expect(result.results).toEqual([]);
+    expect(result.incompleteReason).toBe("changed");
+  });
+
+  it("includes new local matches when the hard-filter scope expands", async () => {
+    state.search.mockImplementation(async () => {
+      await Promise.resolve();
+      sqlite.prepare("UPDATE exif_data SET iso = 900 WHERE photo_id = 1").run();
+      return emptySemanticResult;
+    });
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const result = await call(searchCompound, {
+      query: "fixture",
+      isoMin: 800,
+    });
+    expect(result.results.map((row) => row.id).sort()).toEqual([1, 2]);
+    expect(result.incompleteReason).toBe("changed");
+    expect(state.search).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "tag",
+    "person",
+  ])("replaces stale %s name evidence before committing results", async (source) => {
+    if (source === "tag") {
+      const tag = db
+        .insert(tags)
+        .values({ name: "ExactAlpha" })
+        .returning()
+        .get();
+      db.insert(photoTags)
+        .values({ photoId: 1, tagId: tag.id, origin: "manual" })
+        .run();
+    } else {
+      const person = db
+        .insert(faceIdentities)
+        .values({ name: "ExactAlpha" })
+        .returning()
+        .get();
+      const face = db
+        .insert(faceVectors)
+        .values({ photoId: 1, bboxX: 0, bboxY: 0, bboxWidth: 1, bboxHeight: 1 })
+        .returning()
+        .get();
+      db.insert(faceIdentityMembers)
+        .values({ identityId: person.id, faceVectorId: face.id })
+        .run();
+    }
+    state.search.mockImplementation(async () => {
+      await Promise.resolve();
+      sqlite.exec(
+        source === "tag"
+          ? "UPDATE tags SET name = 'ExactBeta'"
+          : "UPDATE face_identities SET name = 'ExactBeta'"
+      );
+      return emptySemanticResult;
+    });
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const result = await call(searchCompound, { query: "ExactAlpha" });
+    expect(result.results).toEqual([]);
+    expect(result.incompleteReason).toBe("changed");
+    const fresh = await call(searchCompound, { query: '"ExactBeta"' });
+    expect(fresh.results.map((row) => row.id)).toEqual([1]);
+  });
+
+  it.each([
+    { cold: false, budget: 2000 },
+    { cold: true, budget: 10_000 },
+  ])("retains local hits at the readiness deadline ($budget ms)", async ({
+    cold,
+    budget,
+  }) => {
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    useSearchClock();
+    state.aiReady = !cold;
+    state.readiness.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ coverageState: "ready" }), budget + 300)
+        )
+    );
+    const pending = call(searchCompound, { query: "fixture-1.jpg" });
+    await vi.advanceTimersByTimeAsync(budget + 1);
+    const result = await pending;
+    expect(result.results.map((row) => row.id)).toEqual([1]);
+    expect(result).toMatchObject({
+      completion: "partial",
+      incompleteReason: "deadline",
+      totalExact: false,
+    });
+    expect(result.diagnostics?.cold).toBe(cold);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(state.search).not.toHaveBeenCalled();
+  });
+
+  it("bounds a never-settling readiness check without discarding filename hits", async () => {
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    useSearchClock();
+    state.readiness.mockImplementation(() => new Promise(() => undefined));
+    const pending = call(searchCompound, { query: "fixture", isoMin: 800 });
+    await vi.advanceTimersByTimeAsync(2001);
+    const result = await pending;
+    expect(result.results.map((row) => row.id)).toEqual([2]);
+    expect(result.incompleteReason).toBe("deadline");
+    expect(state.search).not.toHaveBeenCalled();
+  });
+
+  it("reports readiness failures while retaining local hits", async () => {
+    state.readiness.mockRejectedValue(new Error("vector lease unavailable"));
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const result = await call(searchCompound, { query: "fixture-1.jpg" });
+    expect(result.results.map((row) => row.id)).toEqual([1]);
+    expect(result).toMatchObject({
+      completion: "partial",
+      incompleteReason: "semantic-unavailable",
+      totalExact: false,
+    });
+    expect(state.search).not.toHaveBeenCalled();
+  });
+
+  it("reports an unavailable SQLite store as an error after a scope cache hit", async () => {
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    await call(searchCompound, { query: "fixture" });
+    sqlite.exec("ALTER TABLE photos RENAME TO unavailable_search_photos");
+    try {
+      await expect(
+        call(searchCompound, { query: "fixture" })
+      ).rejects.toThrow();
+    } finally {
+      sqlite.exec("ALTER TABLE unavailable_search_photos RENAME TO photos");
+    }
+  });
+
+  it("skips AI readiness for quoted and wildcard filename searches", async () => {
+    state.readiness.mockImplementation(() => new Promise(() => undefined));
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    for (const query of ['"fixture-1.jpg"', "fixture-1.*"]) {
+      const result = await call(searchCompound, { query });
+      expect(result.results.map((row) => row.id)).toEqual([1]);
+      expect(result).toMatchObject({
+        completion: "complete",
+        semanticRequired: false,
+      });
+    }
+    expect(state.readiness).not.toHaveBeenCalled();
+    expect(state.search).not.toHaveBeenCalled();
+  });
+
+  it("revalidates local hits when data changes and readiness times out together", async () => {
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    useSearchClock();
+    state.readiness.mockImplementation(() => new Promise(() => undefined));
+    const pending = call(searchCompound, { query: "fixture", isoMin: 100 });
+    await vi.advanceTimersByTimeAsync(100);
+    sqlite.prepare("UPDATE exif_data SET iso = 50 WHERE photo_id = 2").run();
+    await vi.advanceTimersByTimeAsync(1901);
+    const result = await pending;
+    expect(result.results.map((row) => row.id)).toEqual([1]);
+    expect(result).toMatchObject({
+      completion: "partial",
+      incompleteReason: "changed",
+      nextCursor: null,
+    });
+  });
+
+  it("cancels a stalled readiness subscriber without publishing local or late AI results", async () => {
+    let resolveReadiness!: (value: unknown) => void;
+    state.readiness.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveReadiness = resolve;
+        })
+    );
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const { cancelSearchRequest } = await import("@/services/search-control");
+    const requestId = "00000000-0000-4000-8000-000000000001";
+    const pending = call(searchCompound, { query: "fixture", requestId });
+    await vi.waitFor(() => expect(state.readiness).toHaveBeenCalledTimes(1));
+    expect(cancelSearchRequest(0, requestId)).toBe(true);
+    expect(await pending).toMatchObject({
+      results: [],
+      completion: "cancelled",
+    });
+    const fresh = await call(searchCompound, { query: '"fixture-2.jpg"' });
+    expect(fresh.results.map((row) => row.id)).toEqual([2]);
+    resolveReadiness({ coverageState: "ready" });
+    await Promise.resolve();
+    expect(state.search).not.toHaveBeenCalled();
+  });
+
+  it("does not change a frozen local pool after late semantic completion", async () => {
+    let finishSearch!: (value: unknown) => void;
+    let publishCandidates!: (value: unknown) => void;
+    state.search.mockImplementation((_query, _limit, options) => {
+      publishCandidates = options.onCandidates;
+      return new Promise((resolve) => {
+        finishSearch = resolve;
+      });
+    });
+    useSearchClock();
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const pending = call(searchCompound, { query: "fixture", limit: 1 });
+    await vi.advanceTimersByTimeAsync(2001);
+    const first = await pending;
+    expect(first.nextCursor).toBeTruthy();
+    const late = {
+      ...emptySemanticResult,
+      results: [{ photoId: 1, similarity: 0.9, primarySimilarity: 0.9 }],
+    };
+    const snapshot = JSON.stringify(first);
+    publishCandidates(late);
+    finishSearch(late);
+    await Promise.resolve();
+    const next = await call(searchCompound, {
+      query: "fixture",
+      limit: 1,
+      cursor: first.nextCursor ?? undefined,
+    });
+    expect(JSON.stringify(first)).toBe(snapshot);
+    expect(next.cursorExpired).not.toBe(true);
+    expect(next.results.map((row) => row.id)).toEqual([1]);
+    expect([...first.results, ...next.results].map((row) => row.id)).toEqual([
+      2, 1,
+    ]);
+    expect(next.hasMore).toBe(false);
+    expect(state.search).toHaveBeenCalledTimes(1);
+  });
+
+  it("expires an in-flight cursor before consuming a changed candidate pool", async () => {
+    const originalSearch = state.search.getMockImplementation();
+    state.search.mockImplementationOnce(async (...args) => {
+      const result = await originalSearch?.(...args);
+      return {
+        ...result,
+        results: result.results.slice(0, 1),
+        hasMore: true,
+        candidateDepth: 1,
+      };
+    });
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const first = await call(searchCompound, { query: "mountain", limit: 1 });
+    expect(first.nextCursor).toBeTruthy();
+    state.search.mockImplementationOnce(async (...args) => {
+      const result = await originalSearch?.(...args);
+      sqlite.prepare("UPDATE exif_data SET iso = 50 WHERE photo_id = 2").run();
+      return result;
+    });
+    const next = await call(searchCompound, {
+      query: "mountain",
+      limit: 1,
+      cursor: first.nextCursor ?? undefined,
+    });
+    expect(next).toMatchObject({
+      cursorExpired: true,
+      results: [],
+      completion: "partial",
+      incompleteReason: "changed",
+      nextCursor: null,
+    });
+    expect(
+      (
+        await call(searchCompound, {
+          query: "mountain",
+          limit: 1,
+          cursor: first.nextCursor ?? undefined,
+        })
+      ).cursorExpired
+    ).toBe(true);
+    const fresh = await call(searchCompound, { query: "mountain" });
+    expect(fresh.results.map((row) => row.id).sort()).toEqual([1, 2]);
+  });
+
   it("keeps every tag-supported result reachable regardless of page size", async () => {
     sqlite.prepare("UPDATE photos SET deleted_at = NULL WHERE id = 3").run();
     const tag = db.insert(tags).values({ name: "cat" }).returning().get();

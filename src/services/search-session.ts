@@ -122,6 +122,10 @@ export class SearchSessionStore {
     return session;
   }
 
+  delete(cursor: string): void {
+    this.sessions.delete(cursor);
+  }
+
   private prune(): void {
     const now = this.now();
     for (const [cursor, session] of this.sessions) {
