@@ -31,6 +31,11 @@ import {
   _resetTagEmbeddingCacheForTest,
   batchSuggestTags,
 } from "@/services/ai/tag-suggester";
+import {
+  evaluateSmartAlbum,
+  invalidateSmartAlbumCache,
+  type SmartAlbumRules,
+} from "@/services/smart-album-engine";
 import { getTagSearchRevision } from "@/services/tag-search-revision";
 
 let sqlite: Database.Database;
@@ -42,6 +47,7 @@ function oneHot(index: number): number[] {
 }
 
 beforeEach(() => {
+  invalidateSmartAlbumCache();
   sqlite = new Database(":memory:");
   const db = drizzle(sqlite);
   state.db = db;
@@ -65,6 +71,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  invalidateSmartAlbumCache();
   setEmbeddingModel(null);
   setLocalModelPath(null);
   sqlite.close();
@@ -123,8 +130,15 @@ describe("batch tag refresh", () => {
       ])
       .run();
     const revisionBefore = getTagSearchRevision();
+    const rulesFor = (name: string): SmartAlbumRules => ({
+      rules: [{ type: "tags", operator: "包含任一", value: [name] }],
+    });
+    expect(evaluateSmartAlbum(rulesFor("旧自动"))).toEqual([1]);
+    expect(evaluateSmartAlbum(rulesFor("室内"))).toEqual([]);
 
     await batchSuggestTags([1], undefined, "refresh");
+    expect(evaluateSmartAlbum(rulesFor("旧自动"))).toEqual([]);
+    expect(evaluateSmartAlbum(rulesFor("室内"))).toEqual([1]);
 
     const rows = db
       .select({
@@ -192,6 +206,27 @@ describe("batch tag refresh", () => {
         .where(eq(photoTags.photoId, 1))
         .all()
     ).toEqual([{ name: "待保留自动" }]);
+  });
+
+  it("invalidates committed tags before reporting a later batch failure", async () => {
+    const rules: SmartAlbumRules = {
+      rules: [{ type: "tags", operator: "包含任一", value: ["室内"] }],
+    };
+    expect(evaluateSmartAlbum(rules)).toEqual([]);
+    const revisionBefore = getTagSearchRevision();
+
+    await expect(
+      batchSuggestTags(
+        [1],
+        () => {
+          throw new Error("fixture progress failure");
+        },
+        "refresh"
+      )
+    ).rejects.toThrow("fixture progress failure");
+
+    expect(evaluateSmartAlbum(rules)).toEqual([1]);
+    expect(getTagSearchRevision()).toBeGreaterThan(revisionBefore);
   });
 
   it("rolls back a failed association write and keeps old automatic tags", async () => {

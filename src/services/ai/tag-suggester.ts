@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photoTags, tags } from "@/db/schema";
+import { invalidateSmartAlbumCache } from "../smart-album-engine";
 import { invalidateTagSearch } from "../tag-search-revision";
 import { cosineSimilarity } from "./constants";
 import { getActiveEmbeddingModel } from "./model-config";
@@ -1025,11 +1026,12 @@ async function runBatchSuggestTags(
       }
     }
   } finally {
+    // A later failure may still leave earlier photo transactions committed.
+    if (tagsMutated) {
+      invalidateTagSearch();
+      invalidateSmartAlbumCache();
+    }
     finishAutoTagging(toProcess);
-  }
-
-  if (tagsMutated) {
-    invalidateTagSearch();
   }
 
   return { tagged, skipped };

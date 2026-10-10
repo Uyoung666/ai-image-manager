@@ -671,6 +671,9 @@ export function Sidebar({
         failed++;
       }
     }
+    if (failed < ids.length) {
+      window.dispatchEvent(new CustomEvent("tags-changed"));
+    }
     queryClient.invalidateQueries({
       queryKey: ["photos"],
       refetchType: "active",

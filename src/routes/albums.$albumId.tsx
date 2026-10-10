@@ -26,6 +26,7 @@ import { SmoothInput } from "@/components/ui/smooth-input";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
+import { useAlbumDetail } from "@/hooks/useAlbumDetail";
 import {
   getSequenceMemberIds,
   useCollectionSequences,
@@ -35,18 +36,7 @@ import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
-import type { Photo } from "@/types/photo";
 import type { PhotoSequenceDetail } from "@/types/photo-sequence";
-
-interface AlbumDetail {
-  coverPhotoId: number | null;
-  description: string | null;
-  id: number;
-  isSmart?: boolean;
-  matchCount?: number;
-  name: string;
-  photos: Photo[];
-}
 
 const GRID_SORT_FIELD_KEY = "album_grid_sort_field";
 const GRID_SORT_ORDER_KEY = "album_grid_sort_order";
@@ -82,11 +72,10 @@ function AlbumDetailPage() {
   const detailOverlayRef = useRef<HTMLDivElement>(null);
   const { albumId } = Route.useParams() as { albumId: string };
   const navigate = useNavigate();
-  const [album, setAlbum] = useState<AlbumDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  const albumNumber = Number(albumId);
+  const { album, setAlbum, loading, loadAlbum } = useAlbumDetail(albumNumber);
   const { markRouteDirty } = useScrollPosition();
   const routeKey = `album-${albumId}`;
-  const albumNumber = Number(albumId);
   const activeAlbum = album?.id === albumNumber ? album : null;
   const pageLoading = loading || !activeAlbum;
   const canEditAlbum = Boolean(activeAlbum && !activeAlbum.isSmart);
@@ -125,36 +114,11 @@ function AlbumDetailPage() {
   const [pendingDeleteSequenceGroup, setPendingDeleteSequenceGroup] =
     useState(false);
 
-  const cancelledRef = useRef(false);
-
-  const loadAlbum = useCallback(async () => {
-    try {
-      const result = await ipc.client.albums.getAlbum({
-        id: Number(albumId),
-      });
-      if (!cancelledRef.current) {
-        setAlbum(result as unknown as AlbumDetail);
-        setLoading(false);
-      }
-    } catch (err) {
-      if (!cancelledRef.current) {
-        console.error("[loadAlbum] failed:", err);
-        setLoading(false);
-      }
-    }
-  }, [albumId]);
-
+  // biome-ignore lint/correctness/useExhaustiveDependencies: album navigation resets route-local editing controls.
   useEffect(() => {
-    cancelledRef.current = false;
-    setAlbum(null);
     setConfirmDelete(false);
     setEditingName(false);
-    setLoading(true);
-    loadAlbum();
-    return () => {
-      cancelledRef.current = true;
-    };
-  }, [loadAlbum]);
+  }, [albumId]);
 
   const photos = useMemo(() => {
     const raw = activeAlbum?.photos || [];
@@ -490,7 +454,7 @@ function AlbumDetailPage() {
         }
       );
     },
-    [t, sequenceView.updateMemberFavorite]
+    [t, sequenceView.updateMemberFavorite, setAlbum]
   );
 
   function handleDeleteSelected() {

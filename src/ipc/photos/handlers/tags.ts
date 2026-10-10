@@ -10,6 +10,7 @@ import {
 } from "@/services/ai/state";
 import { suggestTags as aiSuggestTags } from "@/services/ai-embedder";
 import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
+import { invalidateSmartAlbumCache } from "@/services/smart-album-engine";
 import { invalidateTagSearch } from "@/services/tag-search-revision";
 import { IdSchema } from "./shared";
 
@@ -264,6 +265,8 @@ export const setPhotoTag = os
         },
       })
       .run();
+    invalidateTagSearch();
+    invalidateSmartAlbumCache();
     return { ok: true };
   });
 
@@ -277,6 +280,7 @@ export const removePhotoTag = os
       )
       .run();
     invalidateTagSearch();
+    invalidateSmartAlbumCache();
     return { ok: true };
   });
 
@@ -303,5 +307,6 @@ export const deleteTag = os.input(IdSchema).handler(({ input }) => {
   db.delete(photoTags).where(eq(photoTags.tagId, input.id)).run();
   db.delete(tags).where(eq(tags.id, input.id)).run();
   invalidateTagSearch();
+  invalidateSmartAlbumCache();
   return { ok: true };
 });

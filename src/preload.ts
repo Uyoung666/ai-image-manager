@@ -117,6 +117,10 @@ ipcRenderer.on("ai-embedding-done", () => {
   postToRenderer({ channel: "ai-embedding-done" });
 });
 
+ipcRenderer.on("ai-tags-done", () => {
+  postToRenderer({ channel: "ai-tags-done" });
+});
+
 ipcRenderer.on("ai-progress", (_event, payload) => {
   postToRenderer({ channel: "ai-progress", ...payload });
 });
