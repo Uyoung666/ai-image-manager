@@ -169,8 +169,13 @@ async function runProductionWorkerSmoke(
 ): Promise<WorkerSmokeResult> {
   const layoutImageWorker = path.join(layoutWorkerRoot, "embed-worker.mjs");
   const layoutTextWorker = path.join(layoutWorkerRoot, "text-embed-worker.mjs");
+  const layoutPreprocessor = path.join(
+    layoutWorkerRoot,
+    "image-preprocessing.mjs"
+  );
   expect(fs.existsSync(layoutImageWorker)).toBe(true);
   expect(fs.existsSync(layoutTextWorker)).toBe(true);
+  expect(fs.existsSync(layoutPreprocessor)).toBe(true);
 
   const activeAdapter = getActiveEmbeddingAdapter();
   const runtimeInfo = getActiveEmbeddingRuntimeInfo();
@@ -367,6 +372,9 @@ describe.sequential("SigLIP v1 production worker smoke", () => {
       );
       expect(fileSha256(textWorkerPath)).toBe(
         fileSha256(path.join(sourceWorkerRoot, "text-embed-worker.mjs"))
+      );
+      expect(fileSha256(path.join(workerRoot, "image-preprocessing.mjs"))).toBe(
+        fileSha256(path.join(sourceWorkerRoot, "image-preprocessing.mjs"))
       );
 
       const sourceResult = await runProductionWorkerSmoke(

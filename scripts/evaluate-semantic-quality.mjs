@@ -96,12 +96,12 @@ const latencyPhaseNames = [
 
 function getLatencyPhases(actual) {
   const phases = actual.latencyPhases ?? {};
-  const endToEndSearchMs = phases.endToEndSearchMs ?? actual.latencyMs ?? 0;
+  const endToEndSearchMs = phases.endToEndSearchMs ?? actual.latencyMs ?? null;
   return {
-    textEncodingMs: phases.textEncodingMs ?? 0,
-    scoringMs: phases.scoringMs ?? 0,
-    filteringMs: phases.filteringMs ?? 0,
-    sortingMs: phases.sortingMs ?? 0,
+    textEncodingMs: phases.textEncodingMs ?? null,
+    scoringMs: phases.scoringMs ?? null,
+    filteringMs: phases.filteringMs ?? null,
+    sortingMs: phases.sortingMs ?? null,
     endToEndSearchMs,
   };
 }
@@ -138,6 +138,7 @@ export function evaluateSemanticRun(manifest, run) {
       recallAt50: recallAt(results, relevant, 50),
       recallAt200: recallAt(results, relevant, 200),
       ndcgAt50: ndcgAt(results, relevant, 50),
+      ndcgAt10: ndcgAt(results, relevant, 10),
       hitAt1: hitAt(results, relevant, 1),
       hitAt3: hitAt(results, relevant, 3),
       hitAt5: hitAt(results, relevant, 5),
@@ -186,9 +187,11 @@ export function evaluateSemanticRun(manifest, run) {
   const phaseDistributions = Object.fromEntries(
     latencyPhaseNames.map((phase) => [
       phase,
-      summarizeDistribution(
-        perQuery.map((query) => query.latencyPhases[phase])
-      ),
+      perQuery.some((query) => typeof query.latencyPhases[phase] === "number")
+        ? summarizeDistribution(
+            perQuery.map((query) => query.latencyPhases[phase])
+          )
+        : { count: 0, p50: null, p95: null, max: null },
     ])
   );
   const hardNegativeQueries = perQuery.filter(
@@ -203,6 +206,7 @@ export function evaluateSemanticRun(manifest, run) {
       recallAt50: mean(perQuery.map((query) => query.recallAt50)),
       recallAt200: mean(perQuery.map((query) => query.recallAt200)),
       ndcgAt50: mean(perQuery.map((query) => query.ndcgAt50)),
+      ndcgAt10: mean(perQuery.map((query) => query.ndcgAt10)),
       returned: mean(perQuery.map((query) => query.returned)),
       p95LatencyMs: phaseDistributions.endToEndSearchMs.p95,
       emptyResults: perQuery.filter((query) => query.emptyResult).length,

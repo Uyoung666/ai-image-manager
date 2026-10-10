@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { imageSearchActions } from "@/actions/image-search";
 import { setPhotoFavorites } from "@/actions/photo-favorites";
-import { searchPhotos } from "@/actions/photo-search";
 import { photoSequenceActions } from "@/actions/photo-sequences";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
@@ -45,6 +44,7 @@ import {
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
 import { SearchBar } from "@/components/SearchBar";
+import { SearchCompletionNotice } from "@/components/SearchCompletionNotice";
 import { SearchEmptyState } from "@/components/SearchEmptyState";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
@@ -65,6 +65,7 @@ import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
+import { usePhotoSearch } from "@/hooks/use-photo-search";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { useFolders } from "@/hooks/useFolders";
 import { useGalleryReturn } from "@/hooks/useGalleryReturn";
@@ -104,7 +105,11 @@ import {
   cancelGalleryViewTransition,
   startGalleryViewTransition,
 } from "@/utils/gallery-view-transition";
-import { shouldRestoreSavedSearch } from "@/utils/search-state";
+import {
+  EMPTY_SEARCH_RESULT_METADATA,
+  getSearchResultMetadata,
+  shouldRestoreSavedSearch,
+} from "@/utils/search-state";
 import { notifyStartupHomeReady } from "@/utils/startup-readiness";
 import { shouldShowHomeGallery } from "./-home-gallery-state";
 import {
@@ -112,29 +117,6 @@ import {
   loadSortOrder,
   saveSortPreference,
 } from "./home-sort-storage";
-
-interface SemanticSearchMeta {
-  candidateDepth?: number;
-  candidateMinimum?: number;
-  consensusCutoff?: number;
-  cutoffReason?: string;
-  finalCutoff?: number;
-  hasMore?: boolean;
-  indexedPhotos: number;
-  intent?: "object" | "scene" | "composed" | "unknown";
-  promptGroupCount?: number;
-  reason?: string;
-  rejectedWeak?: number;
-  sensitivity?: "relaxed" | "standard" | "precise";
-  sensitivityMultiplier?: number;
-  state: "ready" | "partial" | "unavailable" | "error";
-  strongAccepted?: number;
-  strongCutoff?: number;
-  supportedAccepted?: number;
-  topSimilarity?: number;
-  totalPhotos: number;
-  used: boolean;
-}
 
 interface SequenceDataSource {
   key: string;
@@ -289,7 +271,16 @@ function HomePage() {
   const searchFilters = filter.appliedSearch?.filters ?? {};
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
-  const [searchExactTotal, setSearchExactTotal] = useState<number | null>(null);
+  const [searchMetadata, setSearchMetadata] = useState(
+    EMPTY_SEARCH_RESULT_METADATA
+  );
+  const {
+    exactTotal: searchExactTotal,
+    incomplete: searchIncomplete,
+    semantic: searchSemantic,
+    semanticRequired: searchSemanticRequired,
+    timeFilter: parsedTimeFilter,
+  } = searchMetadata;
   const [searchError, setSearchError] = useState<"image" | "search" | null>(
     null
   );
@@ -297,8 +288,6 @@ function HomePage() {
     string | null
   >(null);
   const [searchResultGeneration, setSearchResultGeneration] = useState(0);
-  const [searchSemantic, setSearchSemantic] =
-    useState<SemanticSearchMeta | null>(null);
   const pendingSemanticRefreshRef = useRef<{
     colorHex?: string;
     filters?: ExifFilters;
@@ -306,6 +295,39 @@ function HomePage() {
     query: string;
   } | null>(null);
   const [searchHasMore, setSearchHasMore] = useState(false);
+  const [paintMeasurement, setPaintMeasurement] = useState<{
+    completion: SearchResponse["completion"];
+    diagnostics: NonNullable<SearchResponse["diagnostics"]>;
+    incompleteReason: SearchResponse["incompleteReason"];
+    query: string;
+    started: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!paintMeasurement) {
+      return;
+    }
+    let nextFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      nextFrame = requestAnimationFrame(() => {
+        paintMeasurement.diagnostics.timings.firstPaintMs =
+          performance.now() - paintMeasurement.started;
+        window.dispatchEvent(
+          new CustomEvent("photo-search-diagnostics", {
+            detail: {
+              ...paintMeasurement.diagnostics,
+              completion: paintMeasurement.completion,
+              incompleteReason: paintMeasurement.incompleteReason,
+              query: paintMeasurement.query,
+            },
+          })
+        );
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(nextFrame);
+    };
+  }, [paintMeasurement]);
   const searchLoadingMoreRef = useRef(false);
   const searchNextCursorRef = useRef<string | null>(null);
   const searchNextOffsetRef = useRef(0);
@@ -335,6 +357,13 @@ function HomePage() {
   const pendingModeScrollRestoreRef = useRef<"photos" | "sequences" | null>(
     null
   );
+  const modeScrollRestoreIdRef = useRef(0);
+  const [modeScrollRestore, setModeScrollRestore] = useState<{
+    id: number;
+    mode: "photos" | "sequences";
+    routeKey: string | null;
+    scrollTop: number;
+  } | null>(null);
   const [sequenceDataSource, setSequenceDataSource] =
     useState<SequenceDataSource | null>(null);
   const sequenceDataSourceRef = useRef(sequenceDataSource);
@@ -477,11 +506,6 @@ function HomePage() {
     useState<DashboardReturnTarget | null>(
       () => getBrowseSession("home-search").dashboardReturn ?? null
     );
-  const [parsedTimeFilter, setParsedTimeFilter] = useState<{
-    dateFrom: string;
-    dateTo: string;
-    keyword: string;
-  } | null>(null);
 
   // --- TanStack Query hooks ---
   const isSearching = searchMode !== null;
@@ -490,6 +514,8 @@ function HomePage() {
   const drillParams = Route.useSearch();
   const drillConsumed = useRef(false);
   const searchGenerationRef = useRef(0);
+  const { runSearch: searchPhotos, cancelPending: cancelPendingPhotoSearch } =
+    usePhotoSearch();
 
   const clearDashboardReturnTarget = useCallback(() => {
     setDashboardReturnTarget(null);
@@ -509,6 +535,7 @@ function HomePage() {
   ]);
 
   const resetHomeSearchState = useCallback(() => {
+    cancelPendingPhotoSearch();
     searchGenerationRef.current += 1;
     pendingSemanticRefreshRef.current = null;
     searchLoadingMoreRef.current = false;
@@ -523,10 +550,10 @@ function HomePage() {
     setSearchError(null);
     setSearchResultSourceKey(null);
     setSearchResultGeneration(0);
-    setSearchSemantic(null);
+    setSearchMetadata(EMPTY_SEARCH_RESULT_METADATA);
+    setPaintMeasurement(null);
     setSearchLoading(false);
     setImageSearchPreviewDataUrl(null);
-    setParsedTimeFilter(null);
     setShowDrillBanner(false);
     setDrillDownFilters(undefined);
     clearDashboardReturnTarget();
@@ -538,7 +565,12 @@ function HomePage() {
       searchQuery: "",
     });
     navigate({ to: "/", search: {}, replace: true });
-  }, [clearDashboardReturnTarget, navigate, saveBrowseSession]);
+  }, [
+    cancelPendingPhotoSearch,
+    clearDashboardReturnTarget,
+    navigate,
+    saveBrowseSession,
+  ]);
 
   const searchHandlerRef = useRef<SearchHandler | null>(null);
   const handleSearch = useCallback<SearchHandler>(
@@ -811,17 +843,9 @@ function HomePage() {
       }
       handleSequenceMessage(event);
     };
-    const onFocus = () => {
-      expandSequenceRequestRef.current += 1;
-      sequenceDetailsRequestRef.current += 1;
-      expandedSequenceCacheRef.current.clear();
-      setSequenceRefresh((value) => value + 1);
-    };
-    window.addEventListener("focus", onFocus);
     window.addEventListener("message", handler);
     return () => {
       window.removeEventListener("message", handler);
-      window.removeEventListener("focus", onFocus);
     };
   }, [handleSequenceOrderChange, t]);
 
@@ -926,14 +950,14 @@ function HomePage() {
         : rawPhotos,
     [isSearching, rawPhotos, searchResultGeneration, sequenceDataSource]
   );
-  const deferredPhotos = useDeferredValue(resolvedRawPhotos);
+  // Search results are already committed immediately below. Deferring their
+  // unused copy would schedule another HomePage render for every response.
+  const deferredPhotos = useDeferredValue(pagedPhotos);
   if (isSearching) {
     lastSearchPhotosRef.current = resolvedRawPhotos;
   }
-  // Do not briefly render the previous search result when clearing search.
-  // Browse updates can still stay deferred, but the deferred value may be the
-  // last committed search array for one or more renders after the source
-  // switches back to the paginated gallery.
+  // Search responses use their resolved array immediately; browse transitions
+  // use the deferred paginated gallery, including after search is cleared.
   const useImmediateGalleryPhotos = shouldUseImmediateGalleryPhotos({
     deferredPhotos,
     isSearching,
@@ -1051,6 +1075,13 @@ function HomePage() {
           scrollElement.scrollTop;
       }
       pendingModeScrollRestoreRef.current = mode;
+      modeScrollRestoreIdRef.current += 1;
+      setModeScrollRestore({
+        id: modeScrollRestoreIdRef.current,
+        mode,
+        routeKey: galleryScrollRouteKeyRef.current,
+        scrollTop: galleryScrollPositionsRef.current[mode],
+      });
       setSequenceMode(mode);
       saveBrowseSession("home-search", { sequenceMode: mode });
     },
@@ -2239,51 +2270,25 @@ function HomePage() {
     });
   }, []);
 
+  const handleModeScrollRestored = useCallback((request: number) => {
+    if (request !== modeScrollRestoreIdRef.current) {
+      return;
+    }
+    pendingModeScrollRestoreRef.current = null;
+    setModeScrollRestore((current) =>
+      current?.id === request ? null : current
+    );
+  }, []);
+
   useLayoutEffect(() => {
     if (galleryScrollRouteKeyRef.current !== routeKey) {
       galleryScrollRouteKeyRef.current = routeKey;
       galleryScrollPositionsRef.current.photos = 0;
       galleryScrollPositionsRef.current.sequences = 0;
+      pendingModeScrollRestoreRef.current = null;
+      setModeScrollRestore(null);
     }
-    const scrollElement = gridRef.current?.scrollElement;
-    if (
-      !scrollElement ||
-      photosIsPlaceholder ||
-      !sequenceViewReady ||
-      rawPhotos !== photos
-    ) {
-      return;
-    }
-    if (pendingModeScrollRestoreRef.current !== displayedSequenceMode) {
-      return;
-    }
-    const requestedTop =
-      galleryScrollPositionsRef.current[displayedSequenceMode] ?? 0;
-    // Masonry measures the new items in its own layout pass. Restore after
-    // that pass so the previous mode's shorter surface cannot clamp the target.
-    let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => {
-        const current = gridRef.current?.scrollElement;
-        if (
-          !current ||
-          pendingModeScrollRestoreRef.current !== displayedSequenceMode
-        ) {
-          return;
-        }
-        const maxTop = Math.max(0, current.scrollHeight - current.clientHeight);
-        current.scrollTop = Math.min(Math.max(0, requestedTop), maxTop);
-        pendingModeScrollRestoreRef.current = null;
-      });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [
-    displayedSequenceMode,
-    routeKey,
-    photosIsPlaceholder,
-    sequenceViewReady,
-    rawPhotos,
-    photos,
-  ]);
+  }, [routeKey]);
 
   useEffect(() => {
     const element = galleryToolbarRef.current;
@@ -2332,14 +2337,17 @@ function HomePage() {
             }
           }}
           onClearSearch={filter.clearSearch}
-          onGoToAiSettings={() => navigate({ to: "/settings" })}
+          onGoToAiSettings={() => navigate({ to: "/settings/ai-index" })}
           onRetry={
-            searchError === "image" ? handleImageSearchRetry : handleSearchRetry
+            searchMode === "image" ? handleImageSearchRetry : handleSearchRetry
           }
           parsedTimeFilter={parsedTimeFilter}
           query={searchQuery}
+          rebuildRequired={aiStatus?.rebuildRequired}
           searchError={searchError}
+          searchIncomplete={searchIncomplete}
           searchMode={searchMode}
+          semanticRequired={searchSemanticRequired}
           semanticState={searchSemantic?.state}
           totalPhotos={searchSemantic?.totalPhotos ?? 0}
         />
@@ -2437,10 +2445,13 @@ function HomePage() {
     searchMode,
     searchQuery,
     searchError,
+    searchIncomplete,
     parsedTimeFilter,
     hasActiveExifFilters,
     aiStatus?.hasVectors,
+    aiStatus?.rebuildRequired,
     searchSemantic?.indexedPhotos,
+    searchSemanticRequired,
     searchSemantic?.state,
     searchSemantic?.totalPhotos,
     navigate,
@@ -2555,11 +2566,17 @@ function HomePage() {
             return;
           }
           if (result.cursorExpired) {
+            setSearchMetadata((current) => ({
+              ...current,
+              exactTotal: null,
+              incomplete: true,
+            }));
             setSearchHasMore(false);
             searchNextCursorRef.current = null;
             toast.info(t("searchCursorExpired"));
             return;
           }
+          setSearchMetadata(getSearchResultMetadata(result, p.query));
           const newResults = result.results || [];
           if (newResults.length > 0) {
             setSearchResults((current) => {
@@ -2581,6 +2598,11 @@ function HomePage() {
         .catch(() => {
           if (generation === searchGenerationRef.current) {
             setSearchHasMore(false);
+            setSearchMetadata((current) => ({
+              ...current,
+              exactTotal: null,
+              incomplete: true,
+            }));
           }
         })
         .finally(() => {
@@ -2592,6 +2614,7 @@ function HomePage() {
         });
     }
   }, [
+    searchPhotos,
     isSearching,
     hasNextPage,
     isFetchingNextPage,
@@ -2760,12 +2783,14 @@ function HomePage() {
     const hasColorHex = !!effectiveColorHex;
 
     if (!(query.trim() || hasFilters || hasColorHex)) {
+      cancelPendingPhotoSearch();
+      searchGenerationRef.current += 1;
+      setPaintMeasurement(null);
       filter.clearSearch();
       pendingSemanticRefreshRef.current = null;
       setSearchError(null);
-      setSearchSemantic(null);
+      setSearchMetadata(EMPTY_SEARCH_RESULT_METADATA);
       setSearchTime(undefined);
-      setSearchExactTotal(null);
       setSearchResults(null);
       setSearchResultSourceKey(null);
       setSearchResultGeneration(0);
@@ -2774,8 +2799,12 @@ function HomePage() {
     }
 
     // 递增代数，使前一个未完成的请求变成 stale
+    cancelPendingPhotoSearch();
     const gen = ++searchGenerationRef.current;
-    setSearchExactTotal(null);
+    setPaintMeasurement(null);
+    setSearchMetadata(EMPTY_SEARCH_RESULT_METADATA);
+    setSearchTime(undefined);
+    pendingSemanticRefreshRef.current = null;
     const startTime = performance.now();
     const nextSearchMode = resolveSearchMode(query, effectiveColorHex);
     const appliedFilters = filters ?? {};
@@ -2877,14 +2906,23 @@ function HomePage() {
       }
 
       const results = result.results || [];
-      setSearchExactTotal(result.totalExact ? result.total : null);
+      setSearchMetadata(getSearchResultMetadata(result, query));
+      if (result.diagnostics) {
+        setPaintMeasurement({
+          completion: result.completion,
+          diagnostics: result.diagnostics,
+          incompleteReason: result.incompleteReason,
+          query,
+          started: startTime,
+        });
+      }
       searchNextCursorRef.current = result.nextCursor ?? null;
       searchNextOffsetRef.current = result.nextOffset ?? results.length;
       setSearchHasMore(Boolean(result.hasMore));
-      const semantic = (result.semantic ?? null) as SemanticSearchMeta | null;
-      setSearchSemantic(semantic);
+      const semantic = result.semantic;
       if (
         semantic &&
+        semantic.required !== false &&
         (semantic.state === "partial" || semantic.state === "unavailable") &&
         query.trim()
       ) {
@@ -2896,32 +2934,6 @@ function HomePage() {
         };
       } else {
         pendingSemanticRefreshRef.current = null;
-      }
-
-      if (result.timeFilter) {
-        const tf = result.timeFilter as { dateFrom: string; dateTo: string };
-        const TIME_KEYWORDS = [
-          "今天",
-          "昨天",
-          "前天",
-          "上周",
-          "上个月",
-          "本月",
-          "这个月",
-          "今年",
-          "去年",
-          "本周",
-          "这个星期",
-          "上星期",
-        ];
-        const matched = TIME_KEYWORDS.find((kw) => query.includes(kw));
-        setParsedTimeFilter({
-          dateFrom: tf.dateFrom,
-          dateTo: tf.dateTo,
-          keyword: matched || "",
-        });
-      } else {
-        setParsedTimeFilter(null);
       }
 
       setSearchResults(results);
@@ -2938,50 +2950,15 @@ function HomePage() {
       if (gen !== searchGenerationRef.current) {
         return;
       }
-      // 颜色搜索失败不降级到全量查询
-      if (effectiveColorHex) {
-        setSearchHasMore(false);
-        setSearchResults([]);
-        setSearchError("search");
-        setSearchResultGeneration(gen);
-        setSearchResultSourceKey(createSearchResultSourceKey(gen, []));
-        setSearchTime(Math.round(performance.now() - startTime));
-      } else {
-        try {
-          const fallback = await ipc.client.photos.listPhotos({
-            search: query.trim() || undefined,
-            sort: "date",
-            order: "desc",
-            offset: 0,
-            limit: 500,
-          });
-          if (gen !== searchGenerationRef.current) {
-            return;
-          }
-          const fallbackResults = (fallback as { items?: Photo[] }).items ?? [];
-          setSearchResults(fallbackResults);
-          setSearchError(null);
-          setSearchResultGeneration(gen);
-          setSearchResultSourceKey(
-            createSearchResultSourceKey(
-              gen,
-              fallbackResults.map((photo: Photo) => photo.id)
-            )
-          );
-          setSearchHasMore(false);
-          setSearchTime(Math.round(performance.now() - startTime));
-        } catch {
-          if (gen !== searchGenerationRef.current) {
-            return;
-          }
-          toast.error(t("toastSearchFailed"));
-          setSearchHasMore(false);
-          setSearchResults([]);
-          setSearchError("search");
-          setSearchResultGeneration(gen);
-          setSearchResultSourceKey(createSearchResultSourceKey(gen, []));
-        }
-      }
+      setSearchHasMore(false);
+      setSearchMetadata(EMPTY_SEARCH_RESULT_METADATA);
+      setPaintMeasurement(null);
+      pendingSemanticRefreshRef.current = null;
+      setSearchResults([]);
+      setSearchError("search");
+      setSearchResultGeneration(gen);
+      setSearchResultSourceKey(createSearchResultSourceKey(gen, []));
+      setSearchTime(Math.round(performance.now() - startTime));
     } finally {
       if (gen === searchGenerationRef.current) {
         setSearchLoading(false);
@@ -3178,8 +3155,17 @@ function HomePage() {
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: image search coordinates preview, source validation, and generation-safe result states
   async function handleImageSearch(imagePath: string) {
+    cancelPendingPhotoSearch();
     const gen = ++searchGenerationRef.current;
-    setSearchExactTotal(null);
+    setSearchMetadata(EMPTY_SEARCH_RESULT_METADATA);
+    pendingSemanticRefreshRef.current = null;
+    setPaintMeasurement(null);
+    setSearchTime(undefined);
+    searchLoadingMoreRef.current = false;
+    searchNextCursorRef.current = null;
+    searchNextOffsetRef.current = 0;
+    setIsFetchingSearchNextPage(false);
+    lastSearchParamsRef.current = null;
     lastImageSearchPathRef.current = imagePath;
     filter.applySearch({
       filters: {},
@@ -3645,8 +3631,19 @@ function HomePage() {
               </>
             }
           />
+          {searchIncomplete && (
+            <SearchCompletionNotice
+              onRetry={
+                searchMode === "image"
+                  ? handleImageSearchRetry
+                  : handleSearchRetry
+              }
+            />
+          )}
           {searchMode === "text" &&
+            !aiStatus?.rebuildRequired &&
             searchSemantic &&
+            searchSemanticRequired &&
             searchSemantic.state !== "ready" && (
               <div className="border-amber-300 border-b bg-amber-50 px-4 py-2 text-amber-900 text-xs dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                 {searchSemantic.state === "error"
@@ -3716,6 +3713,7 @@ function HomePage() {
                   onRestoreSettled={handleRestoreSettled}
                   onRetrySequences={handleSequenceRetry}
                   onReturnLocated={settleReturn}
+                  onScrollRestored={handleModeScrollRestored}
                   onScrollTopChange={handleGalleryScrollTopChange}
                   onSelect={handlePhotoSelect}
                   onSelectSequence={handleSequenceSelect}
@@ -3740,6 +3738,13 @@ function HomePage() {
                     restoreGateReady && !gallerySnapshot.retaining
                   }
                   routeKey={gallerySnapshot.value.routeKey}
+                  scrollRestoreRequest={
+                    modeScrollRestore?.routeKey === routeKey &&
+                    modeScrollRestore.mode === gallerySnapshot.value.mode &&
+                    !gallerySnapshot.retaining
+                      ? modeScrollRestore
+                      : undefined
+                  }
                   searchQuery={searchQuery}
                   selectedIds={selectedIds}
                   semanticTopSimilarity={searchSemantic?.topSimilarity}

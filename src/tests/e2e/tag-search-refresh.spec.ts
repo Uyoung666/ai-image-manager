@@ -316,8 +316,16 @@ test("tag removal refreshes active results and rejects a delayed old response ac
     const details = page.locator('aside[data-surface="inspector"]');
     await page.keyboard.press("Escape");
     await expect(details).toHaveCount(0);
+    // Let the modal's passive focus restoration settle before the next input.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        })
+    );
     const searchInput = page.locator("input.home-search-input");
     await searchInput.fill("5");
+    await searchInput.focus();
     await expect(searchInput).toBeFocused();
     await expect(searchInput).toHaveValue("5");
     await expect(

@@ -66,7 +66,7 @@ beforeEach(() => {
 });
 afterEach(() => sqlite.close());
 
-it("expires cursors created by an in-flight request after a tag deletion", async () => {
+it("discards an in-flight request after a tag deletion without returning a stale cursor", async () => {
   let release!: (value: unknown) => void;
   state.search.mockImplementationOnce(
     () =>
@@ -89,15 +89,13 @@ it("expires cursors created by an in-flight request after a tag deletion", async
     },
   });
   const old = await pending;
-  const cursor = "nextCursor" in old ? old.nextCursor : null;
-  expect(cursor).toBeTruthy();
-  expect(
-    await call(searchCompound, {
-      query: "FSevenMarker",
-      limit: 1,
-      cursor: cursor as string,
-    })
-  ).toMatchObject({ cursorExpired: true, results: [] });
+  expect(old).toMatchObject({
+    results: [],
+    completion: "partial",
+    incompleteReason: "changed",
+    totalExact: false,
+  });
+  expect(old.nextCursor ?? null).toBeNull();
   expect(
     (await call(searchCompound, { query: "FSevenMarker" })).results
   ).toEqual([]);

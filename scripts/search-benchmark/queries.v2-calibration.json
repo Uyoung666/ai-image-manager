@@ -1,0 +1,664 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": "search-quality-2026-10-08-v2-calibration",
+  "sourceManifest": "audit/tag-benchmark-v2/manifest.v2.json",
+  "review": {
+    "method": "Independently reviewed all 320 manifest images in 16 newly generated split-specific contact sheets, verifying each file against source.sha256 and displaying the actual manifest sample ID. Inspected ambiguous originals. Whole-query judgments come from visible image content, not goldTags, source titles, model scores or search results.",
+    "reviewedAt": "2026-10-08",
+    "granularity": "Visible objects, scenes and compound attributes; unresolved fine detail remains unjudged. Transparent images were checked against originals because white contact-sheet backgrounds can hide white lettering.",
+    "splitRule": "Reuse the manifest near-duplicate cluster split: 160 development images and 160 holdout images; judgments never cross splits.",
+    "contactSheets": "reports/search-optimization/calibration-contact-sheets-20261008",
+    "previousContactSheets": "Existing audit/tag-benchmark-v2/contact-sheets/v2-* sheets were rejected for sample-ID mapping because several displayed IDs do not match the current manifest originals.",
+    "independence": "60 new natural-language queries, 30 for calibration and 30 for validation, prepared without viewing their model scores or returned results. Images were already used in earlier work; this is query independence on existing material, not an unseen-image or new-library acceptance set.",
+    "status": "frozen-before-model-evaluation",
+    "labelPolicy": "Do not change queries, positives, hard negatives or unjudged judgments in response to model results; report newly discovered annotation defects separately before any versioned correction."
+  },
+  "metadata": {
+    "formula": "id is source position + 1; camera odd Nikon/even Canon; ISO divisible by 3 = 800 else 100; date = 2025-07-(id % 28 + 1), local noon; named identities are isolated fixture assignments",
+    "purpose": "Independent query calibration and validation for the existing model and aligned image input. The unchanged v1 definition remains the historical regression set."
+  },
+  "queries": [
+    {
+      "id": "calibration-development-01",
+      "split": "development",
+      "query": "扶着拐杖站在石墙边的老人",
+      "relevantSampleIds": ["people-life-04"],
+      "hardNegativeSampleIds": ["people-life-03", "people-life-18"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-02",
+      "split": "development",
+      "query": "黑白照片里倒扣在桌上的椅子",
+      "relevantSampleIds": ["people-life-08"],
+      "hardNegativeSampleIds": ["nature-architecture-15", "people-life-11"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-03",
+      "split": "development",
+      "query": "a wooden sign with large painted English lettering",
+      "relevantSampleIds": ["people-life-06", "people-life-07"],
+      "hardNegativeSampleIds": ["people-life-10", "meme-sticker-05"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-04",
+      "split": "development",
+      "query": "屋顶上种着草坪的现代建筑",
+      "relevantSampleIds": ["people-life-17"],
+      "hardNegativeSampleIds": ["nature-architecture-08", "people-life-12"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-05",
+      "split": "development",
+      "query": "橙色外墙配蓝色门窗的小房子",
+      "relevantSampleIds": ["nature-architecture-16"],
+      "hardNegativeSampleIds": [
+        "nature-architecture-17",
+        "nature-architecture-04"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-06",
+      "split": "development",
+      "query": "乡间道路上装满木柴的货车",
+      "relevantSampleIds": ["nature-architecture-10"],
+      "hardNegativeSampleIds": ["people-life-14", "people-life-02"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-07",
+      "split": "development",
+      "query": "a black and white photograph of an ornate study with a large fireplace",
+      "relevantSampleIds": ["nature-architecture-15"],
+      "hardNegativeSampleIds": ["nature-architecture-18", "people-life-08"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-08",
+      "split": "development",
+      "query": "室内木架上放着老电视，旁边有木十字架",
+      "relevantSampleIds": ["nature-architecture-18"],
+      "hardNegativeSampleIds": [
+        "nature-architecture-19",
+        "nature-architecture-15"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-09",
+      "split": "development",
+      "query": "绿色植物间挂满露珠的蜘蛛网",
+      "relevantSampleIds": ["animal-plant-03", "animal-plant-04"],
+      "hardNegativeSampleIds": ["product-food-15", "nature-architecture-12"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-10",
+      "split": "development",
+      "query": "纸上的绿色细胞连成一排的科学示意图",
+      "relevantSampleIds": ["animal-plant-13"],
+      "hardNegativeSampleIds": ["animal-plant-18", "animal-plant-12"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": ["animal-plant-19"]
+    },
+    {
+      "id": "calibration-development-11",
+      "split": "development",
+      "query": "路边用红色方框支架固定的树",
+      "relevantSampleIds": ["animal-plant-05"],
+      "hardNegativeSampleIds": ["animal-plant-09", "nature-architecture-09"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-12",
+      "split": "development",
+      "query": "白色门旁边的棕色卷毛小狗",
+      "relevantSampleIds": ["animal-plant-10"],
+      "hardNegativeSampleIds": ["animal-plant-06", "animal-plant-07"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-13",
+      "split": "development",
+      "query": "黑色盘子里摆着白色圆球甜点",
+      "relevantSampleIds": ["product-food-02"],
+      "hardNegativeSampleIds": ["product-food-07", "product-food-11"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-14",
+      "split": "development",
+      "query": "脚上穿着黄色和橙色的卡通袜子",
+      "relevantSampleIds": ["product-food-06"],
+      "hardNegativeSampleIds": ["anime-illustration-01", "product-food-09"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-15",
+      "split": "development",
+      "query": "白色背景上平铺的红色文胸",
+      "relevantSampleIds": ["product-food-09"],
+      "hardNegativeSampleIds": ["product-food-06", "anime-illustration-01"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-16",
+      "split": "development",
+      "query": "a glass vacuum tube on a white background",
+      "relevantSampleIds": ["product-food-05"],
+      "hardNegativeSampleIds": ["product-food-17", "product-food-04"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-17",
+      "split": "development",
+      "query": "穿黄色和服玩纸牌的动漫女孩",
+      "relevantSampleIds": ["anime-illustration-05"],
+      "hardNegativeSampleIds": [
+        "anime-illustration-01",
+        "anime-illustration-10"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-18",
+      "split": "development",
+      "query": "多人使用望远镜，里面有坐轮椅的人的插画",
+      "relevantSampleIds": ["anime-illustration-02"],
+      "hardNegativeSampleIds": ["anime-illustration-04", "animal-plant-07"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-19",
+      "split": "development",
+      "query": "黑色圆形图标中有一个白色文字字符",
+      "relevantSampleIds": ["anime-illustration-19"],
+      "hardNegativeSampleIds": ["meme-sticker-14", "meme-sticker-01"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-20",
+      "split": "development",
+      "query": "红色数字100下面带两道横线的表情图",
+      "relevantSampleIds": ["meme-sticker-01"],
+      "hardNegativeSampleIds": ["chart-poster-03", "meme-sticker-08"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-21",
+      "split": "development",
+      "query": "举着红色球的古典人物雕像",
+      "relevantSampleIds": ["meme-sticker-10"],
+      "hardNegativeSampleIds": ["people-life-15", "meme-sticker-04"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-22",
+      "split": "development",
+      "query": "聊天消息截图里有拳头、美国国旗和火焰表情",
+      "relevantSampleIds": ["meme-sticker-06"],
+      "hardNegativeSampleIds": ["meme-sticker-04", "screenshot-document-18"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-23",
+      "split": "development",
+      "query": "旧纸张上画着街道网格的城市地图",
+      "relevantSampleIds": ["screenshot-document-04"],
+      "hardNegativeSampleIds": ["screenshot-document-17", "chart-poster-11"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": ["anime-illustration-07"]
+    },
+    {
+      "id": "calibration-development-24",
+      "split": "development",
+      "query": "深蓝色介绍页面右边放着一张带人像的工作证",
+      "relevantSampleIds": ["screenshot-document-20"],
+      "hardNegativeSampleIds": ["anime-illustration-04", "chart-poster-13"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-25",
+      "split": "development",
+      "query": "打字文件右下角盖着蓝色矩形印章",
+      "relevantSampleIds": ["screenshot-document-15", "screenshot-document-16"],
+      "hardNegativeSampleIds": [
+        "screenshot-document-01",
+        "screenshot-document-02"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-26",
+      "split": "development",
+      "query": "白底海报上有红色月牙标志和大数字96",
+      "relevantSampleIds": ["chart-poster-03"],
+      "hardNegativeSampleIds": ["meme-sticker-01", "chart-poster-05"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-27",
+      "split": "development",
+      "query": "黄色背景的海报里有人骑着黑马",
+      "relevantSampleIds": ["chart-poster-16"],
+      "hardNegativeSampleIds": ["chart-poster-14", "screenshot-document-03"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-28",
+      "split": "development",
+      "query": "four blue parabola plots with red straight line segments on one page",
+      "relevantSampleIds": ["chart-poster-11"],
+      "hardNegativeSampleIds": ["chart-poster-18", "chart-poster-19"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-29",
+      "split": "development",
+      "query": "宇航员在水下拉小提琴，周围有鲨鱼",
+      "relevantSampleIds": [],
+      "hardNegativeSampleIds": [
+        "anime-illustration-02",
+        "nature-architecture-13"
+      ],
+      "filters": {},
+      "expectEmpty": true,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-development-30",
+      "split": "development",
+      "query": "停在海滩上的粉色棉花糖汽车",
+      "relevantSampleIds": [],
+      "hardNegativeSampleIds": ["chart-poster-14", "nature-architecture-13"],
+      "filters": {},
+      "expectEmpty": true,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-01",
+      "split": "holdout",
+      "query": "黑白理发店里镜子前的理发椅",
+      "relevantSampleIds": ["people-life-24"],
+      "hardNegativeSampleIds": ["people-life-23", "people-life-30"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-02",
+      "split": "holdout",
+      "query": "街头菜单黑板旁探出头的狗",
+      "relevantSampleIds": ["people-life-31"],
+      "hardNegativeSampleIds": ["animal-plant-33", "people-life-27"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-03",
+      "split": "holdout",
+      "query": "戴三角海盗帽、穿黑色夹克的女人",
+      "relevantSampleIds": ["people-life-37"],
+      "hardNegativeSampleIds": ["people-life-34", "people-life-21"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-04",
+      "split": "holdout",
+      "query": "黑白街头照片里整面墙都是卡通涂鸦",
+      "relevantSampleIds": ["people-life-39"],
+      "hardNegativeSampleIds": ["people-life-27", "meme-sticker-26"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-05",
+      "split": "holdout",
+      "query": "水边一排白色风力发电机",
+      "relevantSampleIds": ["nature-architecture-28"],
+      "hardNegativeSampleIds": [
+        "nature-architecture-36",
+        "nature-architecture-33"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-06",
+      "split": "holdout",
+      "query": "绿色山坡上的石砌铁路隧道入口",
+      "relevantSampleIds": ["nature-architecture-38"],
+      "hardNegativeSampleIds": ["nature-architecture-27", "people-life-25"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-07",
+      "split": "holdout",
+      "query": "密集排列的高层住宅楼",
+      "relevantSampleIds": ["nature-architecture-40"],
+      "hardNegativeSampleIds": [
+        "nature-architecture-33",
+        "nature-architecture-31"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-08",
+      "split": "holdout",
+      "query": "a group posing in front of a shiny silver dome building",
+      "relevantSampleIds": ["nature-architecture-32"],
+      "hardNegativeSampleIds": ["people-life-34", "nature-architecture-37"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-09",
+      "split": "holdout",
+      "query": "尺子旁边放着一只大型黑色甲虫",
+      "relevantSampleIds": ["animal-plant-22"],
+      "hardNegativeSampleIds": ["animal-plant-23", "animal-plant-38"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-10",
+      "split": "holdout",
+      "query": "正面看着镜头、吐着舌头的棕色狗",
+      "relevantSampleIds": ["animal-plant-27", "animal-plant-30"],
+      "hardNegativeSampleIds": ["animal-plant-23", "animal-plant-33"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-11",
+      "split": "holdout",
+      "query": "蜷在圆形狗窝里的黑白小狗",
+      "relevantSampleIds": ["animal-plant-28"],
+      "hardNegativeSampleIds": ["animal-plant-24", "animal-plant-35"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-12",
+      "split": "holdout",
+      "query": "湖岸芦苇后面的一条独木舟",
+      "relevantSampleIds": ["animal-plant-21"],
+      "hardNegativeSampleIds": [
+        "nature-architecture-36",
+        "nature-architecture-30"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-13",
+      "split": "holdout",
+      "query": "白色背景上的橙色酒瓶产品照片",
+      "relevantSampleIds": ["product-food-38", "product-food-39"],
+      "hardNegativeSampleIds": ["product-food-40", "product-food-37"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-14",
+      "split": "holdout",
+      "query": "a black and white photo of cut coconut pieces and a knife on a plate",
+      "relevantSampleIds": ["product-food-26"],
+      "hardNegativeSampleIds": ["product-food-35", "product-food-21"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-15",
+      "split": "holdout",
+      "query": "碗里的浅色冰淇淋上撒着葡萄干",
+      "relevantSampleIds": ["product-food-30"],
+      "hardNegativeSampleIds": ["product-food-23", "product-food-27"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-16",
+      "split": "holdout",
+      "query": "桌上摆着化妆刷、粉底液瓶和软管化妆品",
+      "relevantSampleIds": ["product-food-37"],
+      "hardNegativeSampleIds": ["product-food-40", "product-food-38"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-17",
+      "split": "holdout",
+      "query": "棕发动漫女孩头上戴着大黄色蝴蝶结",
+      "relevantSampleIds": ["anime-illustration-21"],
+      "hardNegativeSampleIds": [
+        "anime-illustration-22",
+        "anime-illustration-36"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-18",
+      "split": "holdout",
+      "query": "棕色头发、白色围裙的Q版女仆",
+      "relevantSampleIds": ["anime-illustration-36"],
+      "hardNegativeSampleIds": [
+        "anime-illustration-37",
+        "anime-illustration-38"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-19",
+      "split": "holdout",
+      "query": "冒着烟的战舰海战老版画",
+      "relevantSampleIds": ["anime-illustration-31"],
+      "hardNegativeSampleIds": [
+        "anime-illustration-32",
+        "nature-architecture-36"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-20",
+      "split": "holdout",
+      "query": "两杯带泡沫的啤酒碰杯的卡通图标",
+      "relevantSampleIds": ["meme-sticker-27"],
+      "hardNegativeSampleIds": ["chart-poster-28", "product-food-38"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-21",
+      "split": "holdout",
+      "query": "a symmetrical green interlaced knot graphic with black outlines",
+      "relevantSampleIds": ["meme-sticker-25"],
+      "hardNegativeSampleIds": ["meme-sticker-33", "meme-sticker-29"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-22",
+      "split": "holdout",
+      "query": "橙色蜡笔形状的标志图案",
+      "relevantSampleIds": ["meme-sticker-38"],
+      "hardNegativeSampleIds": ["meme-sticker-37", "meme-sticker-27"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-23",
+      "split": "holdout",
+      "query": "黑色边框包围的打字个人档案",
+      "relevantSampleIds": ["screenshot-document-36"],
+      "hardNegativeSampleIds": [
+        "screenshot-document-22",
+        "screenshot-document-25"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-24",
+      "split": "holdout",
+      "query": "软件截图里是深色文件列表，右侧有彩色直方图",
+      "relevantSampleIds": ["screenshot-document-28"],
+      "hardNegativeSampleIds": [
+        "screenshot-document-38",
+        "screenshot-document-29"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-25",
+      "split": "holdout",
+      "query": "英文货币兑换网页上有输入框和汇率折线图",
+      "relevantSampleIds": ["screenshot-document-31"],
+      "hardNegativeSampleIds": ["chart-poster-35", "screenshot-document-35"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-26",
+      "split": "holdout",
+      "query": "彩色方框用箭头连接起来的流程图",
+      "relevantSampleIds": ["chart-poster-33"],
+      "hardNegativeSampleIds": ["chart-poster-32", "chart-poster-35"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": ["screenshot-document-39"]
+    },
+    {
+      "id": "calibration-holdout-27",
+      "split": "holdout",
+      "query": "按年份排列的分组柱状图，每组有几根不同颜色的柱子",
+      "relevantSampleIds": ["chart-poster-32"],
+      "hardNegativeSampleIds": ["chart-poster-21", "chart-poster-35"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-28",
+      "split": "holdout",
+      "query": "白色海报四周画着彩色的儿童头像",
+      "relevantSampleIds": ["chart-poster-39"],
+      "hardNegativeSampleIds": [
+        "anime-illustration-35",
+        "anime-illustration-34"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-29",
+      "split": "holdout",
+      "query": "两只火烈鸟坐在火车里读报纸",
+      "relevantSampleIds": [],
+      "hardNegativeSampleIds": ["nature-architecture-38", "animal-plant-21"],
+      "filters": {},
+      "expectEmpty": true,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "calibration-holdout-30",
+      "split": "holdout",
+      "query": "阳台上的机器人厨师正在做披萨",
+      "relevantSampleIds": [],
+      "hardNegativeSampleIds": ["nature-architecture-32", "product-food-24"],
+      "filters": {},
+      "expectEmpty": true,
+      "unjudgedSampleIds": []
+    }
+  ]
+}

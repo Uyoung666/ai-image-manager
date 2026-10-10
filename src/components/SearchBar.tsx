@@ -18,6 +18,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { AiIndexRebuildNotice } from "@/components/AiIndexRebuildNotice";
 import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
@@ -114,6 +115,7 @@ interface SearchBarProps {
     hasVectors: boolean;
     vectorCount: number;
     indexReady: boolean;
+    rebuildRequired?: boolean;
     indexedPhotos?: number;
     isEmbedding: boolean;
     totalPhotos?: number;
@@ -360,7 +362,8 @@ export const SearchBar = memo(
 
       const examplesDisabled = Boolean(
         aiStatus &&
-          (aiStatus.isEmbedding ||
+          (aiStatus.rebuildRequired ||
+            aiStatus.isEmbedding ||
             aiStatus.model === "loading" ||
             aiStatus.model === "error" ||
             aiStatus.vectorDB !== "ready" ||
@@ -837,6 +840,9 @@ export const SearchBar = memo(
 
       // Determine search placeholder based on AI status
       function getPlaceholder(): string {
+        if (aiStatus?.rebuildRequired) {
+          return t("aiIndexRebuildSearchPlaceholder");
+        }
         if (imageSearchActive) {
           return t("imageSearchMode");
         }
@@ -1192,11 +1198,19 @@ export const SearchBar = memo(
               </div>
             )}
 
-            {aiStatus?.coverageState === "error" && (
-              <div className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
-                {t("semanticSearchUnavailable")}
+            {aiStatus?.rebuildRequired && (
+              <div className="mt-2 min-w-0">
+                <AiIndexRebuildNotice
+                  onOpenSettings={() => navigate({ to: "/settings/ai-index" })}
+                />
               </div>
             )}
+            {!aiStatus?.rebuildRequired &&
+              aiStatus?.coverageState === "error" && (
+                <div className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+                  {t("semanticSearchUnavailable")}
+                </div>
+              )}
 
             {/* Active filter chips and drill-down actions */}
             {(hasActiveFilters ||

@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   stop: vi.fn(),
   send: vi.fn(),
   legacyRoots: [] as Array<{ path: string }>,
+  indexResetting: false,
 }));
 vi.mock("electron", () => ({
   BrowserWindow: {
@@ -40,7 +41,12 @@ vi.mock("@/ipc/photos/handlers/listing", () => ({
 vi.mock("@/ipc/photos/handlers/stats", () => ({
   invalidateIndexStatsCache: vi.fn(),
 }));
-vi.mock("@/services/ai/state", () => ({ getAiControlState: () => "idle" }));
+vi.mock("@/services/ai/state", () => ({
+  getAiControlState: () => "idle",
+  get isAiIndexResetting() {
+    return state.indexResetting;
+  },
+}));
 vi.mock("@/services/ai-embedder", () => ({
   deletePhotoVectors: vi.fn(),
   embedAllPhotos: vi.fn().mockResolvedValue(0),
@@ -97,7 +103,30 @@ describe("durable import recovery", () => {
     vi.clearAllMocks();
     state.settings.clear();
     state.legacyRoots = [];
+    state.indexResetting = false;
     state.scan.mockResolvedValue(result());
+  });
+
+  it("retains imported photos pending for embedding until index reset finishes", async () => {
+    vi.useFakeTimers();
+    try {
+      state.indexResetting = true;
+      state.scan.mockResolvedValue({ ...result(), newPhotoIds: [1, 2] });
+      const { embedAllPhotos } = await import("@/services/ai-embedder");
+      const queue = await import("@/services/import-queue");
+      queue.enqueueImport("photos-during-reset");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queue.getImportQueueStatus().history[0]?.status).toBe("done");
+      expect(embedAllPhotos).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(embedAllPhotos).not.toHaveBeenCalled();
+      state.indexResetting = false;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(embedAllPhotos).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("resumes interrupted and queued roots after restart, but not completed roots", async () => {

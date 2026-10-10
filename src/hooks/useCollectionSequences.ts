@@ -294,17 +294,9 @@ export function useCollectionSequences({
         setRefreshVersion((value) => value + 1);
       }
     };
-    const onFocus = () => {
-      requestRef.current += 1;
-      detailsRequestRef.current += 1;
-      detailCacheRef.current.clear();
-      setRefreshVersion((value) => value + 1);
-    };
-    window.addEventListener("focus", onFocus);
     window.addEventListener("message", onMessage);
     return () => {
       window.removeEventListener("message", onMessage);
-      window.removeEventListener("focus", onFocus);
     };
   }, [updateSequenceOrder]);
 

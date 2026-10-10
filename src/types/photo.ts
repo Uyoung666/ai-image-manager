@@ -54,9 +54,12 @@ export interface PhotoListResponse {
 }
 
 export interface SearchResponse {
+  completion?: import("./search-diagnostics").SearchCompletion;
   cursorExpired?: boolean;
+  diagnostics?: import("./search-diagnostics").SearchDiagnostics;
   fallback?: "filename" | "tags";
   hasMore?: boolean;
+  incompleteReason?: import("./search-diagnostics").SearchIncompleteReason;
   nextCursor?: string | null;
   nextOffset?: number | null;
   query?: string;
@@ -76,6 +79,8 @@ export interface SearchResponse {
     ignoredLowConfidenceTags?: number;
     manualExactAccepted?: number;
     reason?: string;
+    /** Whether this query requires semantic inference (exact/time queries do not). */
+    required?: boolean;
     rejectedWeak?: number;
     sensitivity?: "relaxed" | "standard" | "precise";
     sensitivityMultiplier?: number;
@@ -90,6 +95,7 @@ export interface SearchResponse {
     totalPhotos: number;
     used: boolean;
   };
+  semanticRequired?: boolean;
   snapshotVersion?: string;
   timeFilter?: {
     dateFrom: string;
@@ -109,8 +115,11 @@ export interface AiStatus {
   lastError?: string;
   model: string;
   pendingPhotos: number;
+  rebuildRequired?: boolean;
   totalPhotos: number;
   translationState?: "ready" | "loading" | "degraded" | "error";
+  vectorBuildState?: "building" | "ready";
+  vectorCompatibility?: import("@/services/ai/model-fingerprint").VectorCompatibility;
   vectorCount: number;
   vectorDB: string;
 }

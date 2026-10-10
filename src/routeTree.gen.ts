@@ -28,6 +28,7 @@ import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagn
 import { Route as SettingsCloudSyncRouteImport } from './routes/settings.cloud-sync'
 import { Route as SettingsBehaviorRouteImport } from './routes/settings.behavior'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
+import { Route as SettingsAiIndexRouteImport } from './routes/settings.ai-index'
 import { Route as SettingsAccelerationRouteImport } from './routes/settings.acceleration'
 import { Route as SettingsAboutRouteImport } from './routes/settings.about'
 import { Route as PeopleReviewRouteImport } from './routes/people.review'
@@ -130,6 +131,11 @@ const SettingsAppearanceRoute = SettingsAppearanceRouteImport.update({
   path: '/appearance',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsAiIndexRoute = SettingsAiIndexRouteImport.update({
+  id: '/ai-index',
+  path: '/ai-index',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsAccelerationRoute = SettingsAccelerationRouteImport.update({
   id: '/acceleration',
   path: '/acceleration',
@@ -177,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/people/review': typeof PeopleReviewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/acceleration': typeof SettingsAccelerationRoute
+  '/settings/ai-index': typeof SettingsAiIndexRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/behavior': typeof SettingsBehaviorRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
@@ -204,6 +211,7 @@ export interface FileRoutesByTo {
   '/people/review': typeof PeopleReviewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/acceleration': typeof SettingsAccelerationRoute
+  '/settings/ai-index': typeof SettingsAiIndexRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/behavior': typeof SettingsBehaviorRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
@@ -232,6 +240,7 @@ export interface FileRoutesById {
   '/people/review': typeof PeopleReviewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/acceleration': typeof SettingsAccelerationRoute
+  '/settings/ai-index': typeof SettingsAiIndexRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/behavior': typeof SettingsBehaviorRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
@@ -261,6 +270,7 @@ export interface FileRouteTypes {
     | '/people/review'
     | '/settings/about'
     | '/settings/acceleration'
+    | '/settings/ai-index'
     | '/settings/appearance'
     | '/settings/behavior'
     | '/settings/cloud-sync'
@@ -288,6 +298,7 @@ export interface FileRouteTypes {
     | '/people/review'
     | '/settings/about'
     | '/settings/acceleration'
+    | '/settings/ai-index'
     | '/settings/appearance'
     | '/settings/behavior'
     | '/settings/cloud-sync'
@@ -315,6 +326,7 @@ export interface FileRouteTypes {
     | '/people/review'
     | '/settings/about'
     | '/settings/acceleration'
+    | '/settings/ai-index'
     | '/settings/appearance'
     | '/settings/behavior'
     | '/settings/cloud-sync'
@@ -474,6 +486,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAppearanceRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/ai-index': {
+      id: '/settings/ai-index'
+      path: '/ai-index'
+      fullPath: '/settings/ai-index'
+      preLoaderRoute: typeof SettingsAiIndexRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/acceleration': {
       id: '/settings/acceleration'
       path: '/acceleration'
@@ -556,6 +575,7 @@ const PeopleRouteWithChildren =
 interface SettingsRouteChildren {
   SettingsAboutRoute: typeof SettingsAboutRoute
   SettingsAccelerationRoute: typeof SettingsAccelerationRoute
+  SettingsAiIndexRoute: typeof SettingsAiIndexRoute
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsBehaviorRoute: typeof SettingsBehaviorRoute
   SettingsCloudSyncRoute: typeof SettingsCloudSyncRoute
@@ -571,6 +591,7 @@ interface SettingsRouteChildren {
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAboutRoute: SettingsAboutRoute,
   SettingsAccelerationRoute: SettingsAccelerationRoute,
+  SettingsAiIndexRoute: SettingsAiIndexRoute,
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsBehaviorRoute: SettingsBehaviorRoute,
   SettingsCloudSyncRoute: SettingsCloudSyncRoute,

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -15,6 +16,7 @@ import {
 import { eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { appSettings, photos } from "@/db/schema";
+import { invalidateVectorSearch } from "@/services/search-revision";
 import { getDataPath } from "@/utils/data-path";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
 import { getActiveEmbeddingAdapter } from "./model-adapter";
@@ -27,6 +29,7 @@ import {
   getModelFingerprint,
   inspectStoredVectorFingerprint,
   isVectorCompatibilitySearchable,
+  SIGLIP_LEGACY_FINGERPRINT,
   type VectorCompatibility,
   verifyAdapterArtifacts,
   writeStoredVectorFingerprint,
@@ -41,6 +44,7 @@ import {
   setColorTable,
   setIsVectorDBReady,
   setPhotoTable,
+  setVectorBuildState,
   setVectorCompatibility,
   setVectordb,
   setWasAutoRepaired,
@@ -113,33 +117,35 @@ async function runVectorMaintenance(): Promise<void> {
   }
   maintenanceRunning = true;
   try {
-    // Phase 1: compact files — merges fragmented data shards
-    try {
-      const maintenanceTable = photoTable as MaintenanceTable;
-      if (maintenanceTable.compactFiles) {
-        await maintenanceTable.compactFiles();
-        console.log("[AI] Maintenance: compactFiles OK");
+    await withVectorDbOperation(async () => {
+      // Phase 1: compact files — merges fragmented data shards
+      try {
+        const maintenanceTable = photoTable as MaintenanceTable;
+        if (maintenanceTable.compactFiles) {
+          await maintenanceTable.compactFiles();
+          console.log("[AI] Maintenance: compactFiles OK");
+        }
+      } catch (err: unknown) {
+        console.warn(
+          "[AI] Maintenance: compactFiles skipped:",
+          getErrorMessage(err)
+        );
       }
-    } catch (err: unknown) {
-      console.warn(
-        "[AI] Maintenance: compactFiles skipped:",
-        getErrorMessage(err)
-      );
-    }
 
-    // Phase 2: cleanup old versions — removes stale version history
-    try {
-      const maintenanceTable = photoTable as MaintenanceTable;
-      if (maintenanceTable.cleanupOldVersions) {
-        await maintenanceTable.cleanupOldVersions();
-        console.log("[AI] Maintenance: cleanupOldVersions OK");
+      // Phase 2: cleanup old versions — removes stale version history
+      try {
+        const maintenanceTable = photoTable as MaintenanceTable;
+        if (maintenanceTable.cleanupOldVersions) {
+          await maintenanceTable.cleanupOldVersions();
+          console.log("[AI] Maintenance: cleanupOldVersions OK");
+        }
+      } catch (err: unknown) {
+        console.warn(
+          "[AI] Maintenance: cleanupOldVersions skipped:",
+          getErrorMessage(err)
+        );
       }
-    } catch (err: unknown) {
-      console.warn(
-        "[AI] Maintenance: cleanupOldVersions skipped:",
-        getErrorMessage(err)
-      );
-    }
+    });
   } finally {
     maintenanceRunning = false;
   }
@@ -166,12 +172,26 @@ function clearVectorMaintenance(): void {
 let vectorDbInitPromise: Promise<void> | null = null;
 let vectorDbGeneration = 0;
 let vectorDbOperationTail = Promise.resolve();
+const vectorOperationContext = new AsyncLocalStorage<{ active: boolean }>();
 
-/** Serialize destructive rebuild/close operations with embedding and search IO. */
+/** Serialize initialization, rebuild/close, embedding and search IO. */
 export function withVectorDbOperation<T>(
   operation: () => Promise<T> | T
 ): Promise<T> {
-  const run = vectorDbOperationTail.then(operation, operation);
+  if (vectorOperationContext.getStore()?.active) {
+    return Promise.resolve().then(operation);
+  }
+  const execute = () => {
+    const lease = { active: true };
+    return vectorOperationContext.run(lease, async () => {
+      try {
+        return await operation();
+      } finally {
+        lease.active = false;
+      }
+    });
+  };
+  const run = vectorDbOperationTail.then(execute, execute);
   vectorDbOperationTail = run.then(
     () => undefined,
     () => undefined
@@ -227,9 +247,13 @@ async function inspectVectorCompatibility(
   const adapter = getActiveEmbeddingAdapter();
   const fingerprint = getModelFingerprint(adapter);
   const marker = inspectStoredVectorFingerprint(dataPath);
+  if (marker.state === "valid") {
+    setVectorBuildState(marker.value.buildState ?? "ready");
+  }
   const shouldVerifyLegacyArtifacts =
     marker.state === "missing" &&
     rowCount > 0 &&
+    fingerprint === SIGLIP_LEGACY_FINGERPRINT &&
     adapter.legacyKind === "siglip" &&
     dimensions === adapter.embeddingSpace.dimensions;
 
@@ -262,11 +286,16 @@ function initializeEmbeddingRuntime(): void {
         : "empty",
     thresholdProfileId: profile.profileId,
     calibrationStatus: profile.calibrationStatus,
+    vectorBuildState:
+      current?.fingerprint === info.fingerprint
+        ? current.vectorBuildState
+        : undefined,
   });
 }
 
 export async function persistActiveVectorFingerprint(
-  source: "fresh-build" | "legacy-adoption" = "fresh-build"
+  source: "fresh-build" | "legacy-adoption" = "fresh-build",
+  buildState: "building" | "ready" = "ready"
 ): Promise<void> {
   const adapter = getActiveEmbeddingAdapter();
   await writeStoredVectorFingerprint(getDataPath(), {
@@ -276,13 +305,26 @@ export async function persistActiveVectorFingerprint(
     dimensions: adapter.embeddingSpace.dimensions,
     createdAt: new Date().toISOString(),
     source,
+    buildState,
   });
+  setVectorBuildState(buildState);
   setVectorCompatibility(
     source === "legacy-adoption" ? "legacy-compatible" : "matching"
   );
 }
 
 export function initVectorDB(): Promise<void> {
+  // A ready store needs no IO. Keep text encoding independent of queued vector
+  // reads/writes; callers acquire their own lease before accessing the tables.
+  if (isVectorDBReady && vectordb && photoTable) {
+    return Promise.resolve();
+  }
+  // Readiness polling can arrive while rebuild is deleting the old directory.
+  // Recheck after acquiring the same lease as rebuild/close before doing IO.
+  return withVectorDbOperation(initVectorDBInOperation);
+}
+
+function initVectorDBInOperation(): Promise<void> {
   if (isVectorDBReady && vectordb && photoTable) {
     return Promise.resolve();
   }
@@ -314,7 +356,9 @@ async function initializeVectorDB(): Promise<void> {
 
   let db: LanceConnection;
   try {
-    db = await lancedb.connect(vectorPath);
+    // A rejected fingerprint keeps the connection available for explicit
+    // rebuilding. Readiness polling must not leak a new connection each time.
+    db = vectordb ?? (await lancedb.connect(vectorPath));
   } catch (err: unknown) {
     const message = getErrorMessage(err);
     console.error("[AI] LanceDB connect failed:", message);
@@ -414,9 +458,7 @@ async function initializeVectorDB(): Promise<void> {
           await initColorTable(db);
 
           // 后台回填已有的 dominant_colors 到 LanceDB 颜色表
-          backfillColorVectors().catch((err) =>
-            console.warn("[AI] Color backfill failed:", getErrorMessage(err))
-          );
+          startColorBackfill();
 
           setIsVectorDBReady(true);
           scheduleVectorMaintenance();
@@ -482,6 +524,9 @@ async function initializeVectorDB(): Promise<void> {
   const newTable = await db.createEmptyTable("photo_embeddings", schema);
   setPhotoTable(newTable);
   setVectorCompatibility("empty");
+  // Record the input protocol before the first write so interrupted builds
+  // can resume only with the same image preprocessing and model identity.
+  await persistActiveVectorFingerprint("fresh-build", "building");
   console.log(
     `[AI] Created photo_embeddings table (FixedSizeList<Float32>[${vectorDimensions}], ${model.displayName})`
   );
@@ -491,9 +536,7 @@ async function initializeVectorDB(): Promise<void> {
   await initColorTable(db);
 
   // 后台回填已有的 dominant_colors 到 LanceDB 颜色表（不阻塞启动）
-  backfillColorVectors().catch((err) =>
-    console.warn("[AI] Color backfill failed:", getErrorMessage(err))
-  );
+  startColorBackfill();
 
   setIsVectorDBReady(true);
   scheduleVectorMaintenance();
@@ -505,6 +548,19 @@ export function buildPhotoIdFilter(ids: number[]): string {
   );
   if (validated.length === 0) {
     throw new Error("[AI] buildPhotoIdFilter: no valid IDs");
+  }
+  if (validated.length >= 32) {
+    const uniqueIds = new Set(validated);
+    let minimum = Number.POSITIVE_INFINITY;
+    let maximum = Number.NEGATIVE_INFINITY;
+    for (const id of uniqueIds) {
+      minimum = Math.min(minimum, id);
+      maximum = Math.max(maximum, id);
+    }
+    // On the Int32 photo_id column, a complete integer interval is exactly IN.
+    if (uniqueIds.size >= 32 && uniqueIds.size === maximum - minimum + 1) {
+      return `photo_id BETWEEN ${minimum} AND ${maximum}`;
+    }
   }
   return `photo_id IN (${validated.join(", ")})`;
 }
@@ -544,6 +600,7 @@ export async function cleanupOrphanVectors(
     const CHUNK_SIZE = 500;
 
     for (let index = 0; index < idsToDelete.length; index += CHUNK_SIZE) {
+      invalidateVectorSearch();
       await photoTable.delete(
         buildPhotoIdFilter(idsToDelete.slice(index, index + CHUNK_SIZE))
       );
@@ -590,6 +647,18 @@ export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
   if (photoIds.length === 0) {
     return;
   }
+  if (!(isVectorDBReady && photoTable)) {
+    await initVectorDB();
+  }
+  return withVectorDbOperation(() => deletePhotoVectorsInOperation(photoIds));
+}
+
+async function deletePhotoVectorsInOperation(
+  photoIds: number[]
+): Promise<void> {
+  if (photoIds.length === 0) {
+    return;
+  }
 
   try {
     if (!(isVectorDBReady && photoTable)) {
@@ -602,6 +671,7 @@ export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
     const uniqueIds = [...new Set(photoIds)];
     const CHUNK_SIZE = 500;
     for (let index = 0; index < uniqueIds.length; index += CHUNK_SIZE) {
+      invalidateVectorSearch();
       await photoTable.delete(
         buildPhotoIdFilter(uniqueIds.slice(index, index + CHUNK_SIZE))
       );
@@ -615,7 +685,16 @@ export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
   }
 }
 
-export async function getPhotoVectors(
+export function getPhotoVectors(
+  photoIds: number[],
+  strict = false
+): Promise<Map<number, number[]>> {
+  return withVectorDbOperation(() =>
+    getPhotoVectorsInOperation(photoIds, strict)
+  );
+}
+
+async function getPhotoVectorsInOperation(
   photoIds: number[],
   strict = false
 ): Promise<Map<number, number[]>> {
@@ -663,7 +742,11 @@ export async function getPhotoVectors(
   return map;
 }
 
-export async function ensureVectorIndex(force = false): Promise<boolean> {
+export function ensureVectorIndex(force = false): Promise<boolean> {
+  return withVectorDbOperation(() => ensureVectorIndexInOperation(force));
+}
+
+async function ensureVectorIndexInOperation(force: boolean): Promise<boolean> {
   if (!photoTable) {
     return false;
   }
@@ -806,6 +889,7 @@ export function rebuildVectorDB(): Promise<{
     vectorDbInitPromise = null;
     setIsVectorDBReady(false);
     setPhotoTable(null);
+    setColorTable(null);
     try {
       // 1. 优先通过 LanceDB API 清理（正确处理内部文件锁）
       if (vectordb) {
@@ -843,12 +927,17 @@ export function rebuildVectorDB(): Promise<{
       const vectorPath = path.join(getDataPath(), "vectors");
       if (fs.existsSync(vectorPath)) {
         try {
-          await fs.promises.rm(vectorPath, { recursive: true, force: true });
+          await fs.promises.rm(vectorPath, {
+            recursive: true,
+            force: true,
+            maxRetries: 3,
+            retryDelay: 100,
+          });
           console.log(`[AI] rebuildVectorDB: removed ${vectorPath}`);
         } catch (rmErr: unknown) {
           // Windows mmap 锁：重命名绕过，下次启动时清理
           const code = getErrorCode(rmErr);
-          if (code === "EPERM" || code === "EBUSY") {
+          if (code === "EPERM" || code === "EBUSY" || code === "ENOTEMPTY") {
             const bakPath = path.join(
               getDataPath(),
               `vectors.bak.${Date.now()}`
@@ -858,13 +947,14 @@ export function rebuildVectorDB(): Promise<{
               `[AI] rebuildVectorDB: renamed to ${bakPath} (mmap lock bypass)`
             );
             // 异步清理备份（延迟 10s 等系统释放句柄）
-            setTimeout(() => {
-              try {
-                fs.promises.rm(bakPath, { recursive: true, force: true });
-              } catch {
-                // 残留文件不阻塞，下次 initVectorDB 时会跳过（目录名已不同）
-              }
+            const cleanupTimer = setTimeout(() => {
+              fs.promises
+                .rm(bakPath, { recursive: true, force: true, maxRetries: 3 })
+                .catch(() => {
+                  // Best effort: startup will retry any locked backup.
+                });
             }, 10_000);
+            cleanupTimer.unref();
           } else {
             throw rmErr;
           }
@@ -915,6 +1005,7 @@ export function closeVectorDB(): Promise<void> {
     const currentDb = vectordb;
     setVectordb(null);
     setPhotoTable(null);
+    setColorTable(null);
     setIsVectorDBReady(false);
     if (currentDb) {
       try {
@@ -1011,7 +1102,18 @@ async function initColorTable(db: LanceConnection): Promise<void> {
 }
 
 /** 写入或更新照片的主导颜色向量 */
-export async function upsertColorVector(
+export function upsertColorVector(
+  photoId: number,
+  r: number,
+  g: number,
+  b: number
+): Promise<void> {
+  return withVectorDbOperation(() =>
+    upsertColorVectorInOperation(photoId, r, g, b)
+  );
+}
+
+async function upsertColorVectorInOperation(
   photoId: number,
   r: number,
   g: number,
@@ -1031,11 +1133,19 @@ export async function upsertColorVector(
       getErrorMessage(err)
     );
     throw err;
+  } finally {
+    invalidateVectorSearch();
   }
 }
 
 /** 批量写入颜色向量 */
-export async function upsertColorVectors(
+export function upsertColorVectors(
+  entries: Array<{ photoId: number; r: number; g: number; b: number }>
+): Promise<void> {
+  return withVectorDbOperation(() => upsertColorVectorsInOperation(entries));
+}
+
+async function upsertColorVectorsInOperation(
   entries: Array<{ photoId: number; r: number; g: number; b: number }>
 ): Promise<void> {
   if (!colorTable || entries.length === 0) {
@@ -1061,44 +1171,67 @@ export async function upsertColorVectors(
       getErrorMessage(err)
     );
     throw err;
+  } finally {
+    invalidateVectorSearch();
   }
 }
 
 /** 颜色向量 ANN 搜索。colorTable 不可用时返回 null，调用方降级 SQLite UDF。 */
-export async function searchByColorVector(
+export function searchByColorVector(
   r: number,
   g: number,
   b: number,
-  limit: number
+  limit: number,
+  allowedPhotoIds?: number[],
+  strict = false
 ): Promise<Array<{ photoId: number; distanceSquared: number }> | null> {
-  if (!colorTable) {
-    return null;
-  }
-  try {
-    const targetVector = Array.from(
-      { length: COLOR_VECTOR_DIM },
-      (_, i) => [r, g, b][i]
-    );
-    const rawResults = (await colorTable
-      .vectorSearch(targetVector)
-      .distanceType("l2")
-      .limit(limit)
-      .toArray()) as Record<string, unknown>[];
+  return withVectorDbOperation(async () => {
+    if (!colorTable) {
+      return null;
+    }
+    try {
+      const targetVector = Array.from(
+        { length: COLOR_VECTOR_DIM },
+        (_, i) => [r, g, b][i]
+      );
+      if (allowedPhotoIds?.length === 0) {
+        return [];
+      }
+      let query = colorTable
+        .vectorSearch(targetVector)
+        .distanceType("l2")
+        .limit(limit);
+      if (allowedPhotoIds) {
+        query = query
+          .where(buildPhotoIdFilter(allowedPhotoIds))
+          .bypassVectorIndex();
+      }
+      const rawResults = (await query.toArray()) as Record<string, unknown>[];
 
-    return rawResults.map((row) => ({
-      photoId: row.photo_id as number,
-      // LanceDB L2 exposes squared Euclidean distance, the same unit used by
-      // SQLite closest_color_dist.
-      distanceSquared: row._distance as number,
-    }));
-  } catch (err: unknown) {
-    console.error("[AI] Color vector search failed:", getErrorMessage(err));
-    return null;
-  }
+      return rawResults.map((row) => ({
+        photoId: row.photo_id as number,
+        // LanceDB L2 exposes squared Euclidean distance, the same unit used by
+        // SQLite closest_color_dist.
+        distanceSquared: row._distance as number,
+      }));
+    } catch (err: unknown) {
+      console.error("[AI] Color vector search failed:", getErrorMessage(err));
+      if (strict) {
+        throw err;
+      }
+      return null;
+    }
+  });
 }
 
 /** 删除指定照片的颜色向量 */
-export async function deleteColorVectors(photoIds: number[]): Promise<void> {
+export function deleteColorVectors(photoIds: number[]): Promise<void> {
+  return withVectorDbOperation(() => deleteColorVectorsInOperation(photoIds));
+}
+
+async function deleteColorVectorsInOperation(
+  photoIds: number[]
+): Promise<void> {
   if (!colorTable || photoIds.length === 0) {
     return;
   }
@@ -1106,6 +1239,8 @@ export async function deleteColorVectors(photoIds: number[]): Promise<void> {
     await colorTable.delete(`photo_id IN (${photoIds.join(",")})`);
   } catch (err: unknown) {
     console.error("[AI] Delete color vectors failed:", getErrorMessage(err));
+  } finally {
+    invalidateVectorSearch();
   }
 }
 
@@ -1129,6 +1264,16 @@ function diagLog(msg: string) {
 }
 
 // ── 颜色向量回填 ─────────────────────────────────────────────────────
+function startColorBackfill(): void {
+  // Detached work must acquire its own leases; it must not inherit startup's
+  // reentrant lease and keep writing after startup has released the queue.
+  vectorOperationContext
+    .exit(() => backfillColorVectors())
+    .catch((err) =>
+      console.warn("[AI] Color backfill failed:", getErrorMessage(err))
+    );
+}
+
 // 将已有 dominant_colors 但 LanceDB 中无颜色向量的照片批量回填。
 // 首次启动时自动运行，后续跳过（通过 app_settings 标记）。
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Backfill coordinates marker checks, JSON normalization, batch writes, and yielding without changing startup lifecycle.
@@ -1140,26 +1285,39 @@ export async function backfillColorVectors(): Promise<{
     console.log("[AI] Color backfill skipped: colorTable not initialized");
     return { total: 0, backfilled: 0 };
   }
-
   const db = getDatabase();
-
-  // 检查是否已回填
-  const marker = db
-    .select({ value: appSettings.value })
-    .from(appSettings)
-    .where(eq(appSettings.key, "color_vectors_backfilled"))
-    .get();
-
-  if (marker?.value === "true") {
-    console.log("[AI] Color backfill: already completed (marker set)");
+  const backfillTable = await withVectorDbOperation(async () => {
+    const table = colorTable;
+    if (!table) {
+      console.log("[AI] Color backfill skipped: colorTable not initialized");
+      return null;
+    }
+    const marker = db
+      .select({ value: appSettings.value })
+      .from(appSettings)
+      .where(eq(appSettings.key, "color_vectors_backfilled"))
+      .get();
+    if (marker?.value === "true") {
+      if ((await table.countRows()) > 0) {
+        console.log("[AI] Color backfill: already completed (marker set)");
+        return null;
+      }
+      // Rebuilding vectors removes the color table while SQLite survives.
+      // Clear the stale marker before writing so an interrupted refill retries.
+      db.run(
+        sql`DELETE FROM app_settings WHERE key = 'color_vectors_backfilled'`
+      );
+    }
+    return table;
+  });
+  if (!backfillTable) {
     return { total: 0, backfilled: 0 };
   }
 
   // 只统计需要处理的行，并按批读取，避免一次性把旧数据全部载入内存。
   const needsBackfill = sql`
     ${photos.deletedAt} IS NULL AND
-    ${photos.dominantColors} IS NOT NULL AND
-    ${photos.colorBucket} IS NULL
+    ${photos.dominantColors} IS NOT NULL
   `;
   const totalRow = db
     .select({ count: sql<number>`count(*)` })
@@ -1170,9 +1328,13 @@ export async function backfillColorVectors(): Promise<{
   if (total === 0) {
     console.log("[AI] Color backfill: 0 photos need backfill (all up to date)");
     try {
-      db.run(
-        sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('color_vectors_backfilled', 'true', ${Date.now()})`
-      );
+      await withVectorDbOperation(() => {
+        if (colorTable === backfillTable) {
+          db.run(
+            sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('color_vectors_backfilled', 'true', ${Date.now()})`
+          );
+        }
+      });
     } catch (err: unknown) {
       console.error(
         "[AI] Color backfill completion marker failed:",
@@ -1236,7 +1398,16 @@ export async function backfillColorVectors(): Promise<{
 
     if (entries.length > 0) {
       try {
-        await upsertColorVectors(entries);
+        const written = await withVectorDbOperation(async () => {
+          if (colorTable !== backfillTable) {
+            return false;
+          }
+          await upsertColorVectors(entries);
+          return true;
+        });
+        if (!written) {
+          return { total, backfilled };
+        }
         backfilled += entries.length;
       } catch (err: unknown) {
         failed += entries.length;
@@ -1254,9 +1425,13 @@ export async function backfillColorVectors(): Promise<{
   // 只有每一行都成功写入且完成标记本身写入成功时，才宣布回填完成。
   if (failed === 0 && backfilled === total) {
     try {
-      db.run(
-        sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('color_vectors_backfilled', 'true', ${Date.now()})`
-      );
+      await withVectorDbOperation(() => {
+        if (colorTable === backfillTable) {
+          db.run(
+            sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('color_vectors_backfilled', 'true', ${Date.now()})`
+          );
+        }
+      });
     } catch (err: unknown) {
       console.error(
         "[AI] Color backfill completion marker failed:",

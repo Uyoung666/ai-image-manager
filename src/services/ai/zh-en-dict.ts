@@ -101,6 +101,7 @@ export const ZH_TO_EN_SEARCH: Record<string, DictEntry> = {
   河: { en: "river stream water flowing", category: "scene" },
   河流: { en: "river stream water flowing", category: "scene" },
   小溪: { en: "stream creek water small", category: "scene" },
+  溪流: { en: "stream creek flowing water", category: "scene" },
   瀑布: { en: "waterfall water cascade", category: "scene" },
   水: { en: "water lake river ocean", category: "scene" },
   水面: { en: "water surface reflection", category: "scene" },
@@ -588,9 +589,8 @@ export const ZH_TO_EN_SEARCH: Record<string, DictEntry> = {
   篝火: { en: "bonfire campfire fire flame night", category: "object" },
 };
 
-// Character-level decomposition for unknown compound words.
-// When a multi-character word isn't in the dictionary, we try splitting
-// it into individual characters and translating each one.
+// Fallback vocabulary for independently bounded single-character terms.
+// These meanings must not be guessed inside unknown compound words.
 export const CHAR_DECOMPOSE: Record<
   string,
   { en: string; category: DictCategory }

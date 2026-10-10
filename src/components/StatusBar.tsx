@@ -1,4 +1,9 @@
 import { useTranslation } from "react-i18next";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { AiStatus } from "@/types/photo";
 
 interface StatusBarProps {
@@ -20,6 +25,9 @@ export function StatusBar({
   if (!aiStatus) {
     aiLabel = t("aiNotReady");
     aiColor = "text-foreground-tertiary";
+  } else if (aiStatus.rebuildRequired) {
+    aiLabel = t("aiIndexRebuildRequired");
+    aiColor = "text-warning";
   } else if (aiStatus.lastError) {
     aiLabel =
       aiStatus.lastError.length > 40
@@ -54,7 +62,23 @@ export function StatusBar({
       </div>
       <div className={`flex min-w-0 items-center gap-1.5 ${aiColor}`}>
         <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
-        <span className="truncate">{aiLabel}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* Truncated status text must remain readable with a keyboard. */}
+            <span
+              className="truncate"
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated status must expose its Tooltip to keyboard users
+              tabIndex={0}
+            >
+              {aiLabel}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {aiStatus?.rebuildRequired
+              ? t("aiIndexRebuildSearchPlaceholder")
+              : aiLabel}
+          </TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

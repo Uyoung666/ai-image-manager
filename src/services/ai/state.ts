@@ -1,3 +1,4 @@
+import { invalidateVectorSearch } from "@/services/search-revision";
 // Shared mutable state across AI sub-modules.
 // Centralised here so that split modules can read/write the same singletons.
 
@@ -17,6 +18,7 @@ export interface ActiveEmbeddingRuntime {
   modelId: string;
   revision: string;
   thresholdProfileId: string;
+  vectorBuildState?: "building" | "ready";
   vectorCompatibility: VectorCompatibility;
 }
 
@@ -66,6 +68,8 @@ export let isEmbedding = false;
 export let poolCancelled = false;
 export let isPaused = false;
 export let aiControlState: AiControlState = "idle";
+/** Blocks new indexing and tag tasks while an explicit index reset owns the store. */
+export let isAiIndexResetting = false;
 export let activeEmbeddingRunId = 0;
 let nextEmbeddingRunId = 0;
 /** 本次嵌入会话中已成功写入的 photo_id 集合，用于取消时精确回滚 */
@@ -90,6 +94,9 @@ export function setVectordb(v: LanceConnection | null): void {
   vectordb = v;
 }
 export function setPhotoTable(t: LanceTable | null): void {
+  if (photoTable && photoTable !== t) {
+    invalidateVectorSearch();
+  }
   photoTable = t;
 }
 export function setColorTable(t: LanceTable | null): void {
@@ -121,6 +128,9 @@ export function setAiControlState(v: AiControlState): void {
 }
 export function getAiControlState(): AiControlState {
   return aiControlState;
+}
+export function setIsAiIndexResetting(value: boolean): void {
+  isAiIndexResetting = value;
 }
 export function beginEmbeddingRun(): number {
   const runId = ++nextEmbeddingRunId;
@@ -267,6 +277,18 @@ export function setActiveEmbeddingRuntime(
 
 export function getActiveEmbeddingRuntime(): ActiveEmbeddingRuntime | null {
   return activeEmbeddingRuntime;
+}
+
+export function setVectorBuildState(buildState: "building" | "ready"): void {
+  if (activeEmbeddingRuntime) {
+    if (activeEmbeddingRuntime.vectorBuildState !== buildState) {
+      invalidateVectorSearch();
+    }
+    activeEmbeddingRuntime = {
+      ...activeEmbeddingRuntime,
+      vectorBuildState: buildState,
+    };
+  }
 }
 
 export function setVectorCompatibility(

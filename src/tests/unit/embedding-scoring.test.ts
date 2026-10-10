@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveEmbeddingModel,
   getTextSearchMaxCosineDistance,
@@ -13,6 +13,18 @@ import {
   selectTagScores,
 } from "@/services/ai/scoring";
 import { CANDIDATE_TAGS } from "@/services/ai/tag-suggester";
+
+vi.mock("@/services/ai/threshold-profile", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/services/ai/threshold-profile")>();
+  return {
+    ...actual,
+    getActiveThresholdProfile: () => ({
+      ...actual.getActiveThresholdProfile(),
+      calibrationStatus: "calibrated",
+    }),
+  };
+});
 
 const originalModel = process.env.AI_EMBEDDING_MODEL;
 const originalPolicy = process.env.AI_SEMANTIC_POLICY;
@@ -262,6 +274,25 @@ describe("embedding prompts and ranked fusion", () => {
     expect(selection.supportCutoff).toBeGreaterThan(0.045);
     expect(selection.rejectedWeak).toBe(3);
     expect(selection.hasMoreCandidates).toBe(false);
+  });
+
+  it("keeps support candidates available beyond the display page limit", () => {
+    const rows = [1, 2, 3].map((photoId) => ({
+      photoId,
+      primarySimilarity: 0.05,
+      rankScore: 1 / (60 + photoId),
+      similarity: 0.05,
+      supportingGroups: ["whole-query" as const],
+    }));
+    const selection = selectRelevantSemanticResults(
+      rows,
+      getActiveEmbeddingModel(),
+      1,
+      1,
+      { intent: "object", primaryScores: [0.05, 0.05, 0.05] }
+    );
+    expect(selection.results).toEqual([]);
+    expect(selection.supportCandidates).toEqual(rows);
   });
 
   it("keeps object results nested from relaxed to standard to precise", () => {

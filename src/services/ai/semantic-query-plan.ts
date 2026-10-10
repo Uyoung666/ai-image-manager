@@ -1,4 +1,4 @@
-import { rewriteQuery } from "@/services/query-rewrite";
+import { type RewrittenQuery, rewriteQuery } from "@/services/query-rewrite";
 import {
   getActiveEmbeddingModel,
   getSemanticPolicyVersion,
@@ -8,11 +8,12 @@ import {
   generateSearchPrompts,
   getQueryCoverage,
   parseChineseQuery,
+  translateQueryTerm,
 } from "./query-parser";
 import { getThresholdProfileIdentity } from "./threshold-profile";
 import { translateChineseToEnglish } from "./translation-worker-client";
 
-export const SEMANTIC_QUERY_PLAN_VERSION = 4;
+export const SEMANTIC_QUERY_PLAN_VERSION = 8;
 
 export function getSemanticQueryPlanFingerprint(
   translationModelVersion = "unknown"
@@ -33,15 +34,23 @@ const WHITESPACE_RE = /\s+/g;
 const PHOTO_NOUN_RE = /\b(?:photo|photograph|picture|image)\b/i;
 const SIGLIP_PROMPT_PREFIX_RE = /^this\s+is\b/i;
 const TRAILING_PERIOD_RE = /[.]+$/;
-const SEARCH_COMMAND_RE =
-  /(?:帮我找|找一下|查一下|搜索一下|搜索|看看|找找|帮我|找)/g;
 const PHOTO_SUFFIX_RE = /(?:的)?(?:照片|图片|相片|影像)$/;
-const LEADING_NEGATIVE_AUX_RE = /^(?:有|着|是)/;
 const QUOTE_PUNCTUATION_RE = /[“”"'（）()]/g;
 const PHOTO_PROMPT_RE =
   /^(?:a|an|the|this)\s+(?:photo|photograph|picture|image)\b/i;
 const LATIN_TERM_RE = /[A-Za-z][A-Za-z0-9_.-]*/g;
 const QUOTED_CONTENT_RE = /["“]([^"”]+)["”]/g;
+const QUOTED_SEGMENT_RE = /(["“][^"”]*["”])/g;
+const CHINESE_NEGATIVE_CLAUSE_RE =
+  /(?:不要|不含|排除|没有)\s*([^，。,.；;!?！？\r\n]*?)(?:的(?=[^\s，。,.；;!?！？])|(?=[，。,.；;!?！？]|$))/g;
+const ABSENT_PEOPLE_RE =
+  /(?:没有人物|没有人|无人)(?:的|(?=[\s，。,.；;!?！？]|$))/g;
+const AMBIGUOUS_NEGATIVE_CLAUSE_RE =
+  /(?:但是|不过|然后|同时|而是|却|正在|在|驾驶|需要|想要|不是)/;
+const CHINESE_NEGATIVE_LIST_RE = /(?:和|与|及|或|、)/;
+const ENGLISH_NEGATIVE_LIST_RE = /\s+(?:and|or)\s+/i;
+const EDGE_CLAUSE_PUNCTUATION_RE =
+  /^[\s，。,.；;!?！？]+|[\s，。,.；;!?！？]+$/g;
 
 export type SemanticPromptRole = "primary" | "structured" | "focused";
 export type SemanticEvidenceGroup = "whole-query" | "subject" | "scene";
@@ -65,17 +74,23 @@ export interface SemanticQueryPrompt {
 
 export interface SemanticQueryPlan {
   coverage: number;
+  exactNames?: string[];
   intent: SemanticQueryIntent;
   language: SemanticQueryLanguage;
   negativePrompts: string[];
+  negativeTerms?: string[];
   normalizedQuery: string;
+  originalQuery?: string;
   prompts: SemanticQueryPrompt[];
   rawPromptCount: number;
+  timeFilter?: RewrittenQuery["timeFilter"];
   translationMode: SemanticTranslationMode;
   version: number;
+  visualDescription?: string;
 }
 
 interface QueryPlanOptions {
+  rewritten?: RewrittenQuery;
   translate?: (text: string) => Promise<string>;
 }
 
@@ -123,7 +138,12 @@ export function canonicalizeSemanticPrompt(text: string): string {
 function classifyParsedIntent(
   parsed: ReturnType<typeof parseChineseQuery>
 ): SemanticQueryIntent {
-  const subjectCount = parsed.subject.length;
+  // Fold aliases only when the dictionary declares exactly the same meaning.
+  const subjectCount = new Set(
+    parsed.subject.map((term) =>
+      normalizeWhitespace(translateQueryTerm(term) || term).toLowerCase()
+    )
+  ).size;
   const sceneCount =
     parsed.scene.length +
     parsed.time.length +
@@ -134,7 +154,7 @@ function classifyParsedIntent(
   if (parsed.unknown.length > 0 && subjectCount + modifierCount === 0) {
     return "unknown";
   }
-  if (subjectCount > 0 && modifierCount === 0) {
+  if (subjectCount === 1 && modifierCount === 0) {
     return "object";
   }
   if (subjectCount === 0 && sceneCount > 0 && parsed.activity.length === 0) {
@@ -170,10 +190,7 @@ function detectLanguage(text: string): SemanticQueryLanguage {
 
 function cleanNegativeTerm(text: string): string {
   return normalizeWhitespace(
-    text
-      .replace(PHOTO_SUFFIX_RE, "")
-      .replace(LEADING_NEGATIVE_AUX_RE, "")
-      .replace(QUOTE_PUNCTUATION_RE, "")
+    text.replace(PHOTO_SUFFIX_RE, "").replace(QUOTE_PUNCTUATION_RE, "")
   );
 }
 
@@ -183,7 +200,6 @@ function cleanNegativeTerm(text: string): string {
  * it is expected to understand Chinese negation in the raw query.
  */
 export function extractNegativeClauses(query: string): NegativeExtraction {
-  let positiveText = query;
   const negativeTerms: string[] = [];
 
   const addTerm = (term: string): void => {
@@ -193,30 +209,50 @@ export function extractNegativeClauses(query: string): NegativeExtraction {
     }
   };
 
-  positiveText = positiveText.replace(/没有人|无人/g, () => {
-    addTerm("人物");
-    return " ";
-  });
-
-  positiveText = positiveText.replace(
-    /(?:不要|不含|排除)\s*([^，。,.；;和与]{1,16})/g,
-    (_match, term: string) => {
-      addTerm(term);
-      return " ";
-    }
-  );
-
-  positiveText = positiveText.replace(
-    /没有\s*([^的，。,.；;\s]{1,8})/g,
-    (_match, term: string) => {
-      addTerm(term);
-      return " ";
-    }
-  );
+  // Quoted names are exact-search syntax, never negative visual clauses.
+  const positiveText = query
+    .split(QUOTED_SEGMENT_RE)
+    .map((segment, index) => {
+      if (index % 2 === 1) {
+        return segment;
+      }
+      return segment
+        .replace(ABSENT_PEOPLE_RE, () => {
+          addTerm("人物");
+          return " ";
+        })
+        .replace(CHINESE_NEGATIVE_CLAUSE_RE, (match, clause: string) => {
+          // Do not guess where a verb phrase ends and a positive subject starts.
+          if (AMBIGUOUS_NEGATIVE_CLAUSE_RE.test(clause)) {
+            return match;
+          }
+          const terms = clause.split(CHINESE_NEGATIVE_LIST_RE);
+          if (terms.some((term) => !cleanNegativeTerm(term))) {
+            return match;
+          }
+          for (const term of terms) {
+            addTerm(term);
+          }
+          return " ";
+        })
+        .replace(
+          /\b(?:without|excluding|no)\s+([^,.;]+)$/gi,
+          (_match, clause: string) => {
+            for (const term of clause.split(ENGLISH_NEGATIVE_LIST_RE)) {
+              addTerm(term);
+            }
+            return " ";
+          }
+        );
+    })
+    .join("");
 
   return {
     negativeTerms,
-    positiveText: normalizeWhitespace(positiveText),
+    positiveText: normalizeWhitespace(positiveText).replace(
+      EDGE_CLAUSE_PUNCTUATION_RE,
+      ""
+    ),
   };
 }
 
@@ -301,15 +337,22 @@ function dedupePrompts(prompts: SemanticQueryPrompt[]): SemanticQueryPrompt[] {
 
 function dictionaryPrompts(query: string): {
   coverage: number;
+  hasUnparsedDescription: boolean;
   intent: SemanticQueryIntent;
   prompts: string[];
 } {
   if (!CJK_RE.test(query)) {
-    return { coverage: 1, intent: classifyEnglishIntent(query), prompts: [] };
+    return {
+      coverage: 1,
+      hasUnparsedDescription: false,
+      intent: classifyEnglishIntent(query),
+      prompts: [],
+    };
   }
   const parsed = parseChineseQuery(query);
   return {
     coverage: getQueryCoverage(query, parsed),
+    hasUnparsedDescription: parsed.unknown.length > 0 || LATIN_RE.test(query),
     intent: classifyParsedIntent(parsed),
     prompts: generateSearchPrompts(parsed).filter(isEnglishPrompt),
   };
@@ -321,16 +364,28 @@ export async function prepareSemanticQueryPlan(
 ): Promise<SemanticQueryPlan> {
   const original = normalizeWhitespace(rawQuery);
   const language = detectLanguage(original);
-  const rewritten = rewriteQuery(original);
+  const rewritten = options.rewritten ?? rewriteQuery(original);
   const withoutCommands = normalizeWhitespace(
-    (rewritten.cleanQuery || original).replace(SEARCH_COMMAND_RE, " ")
+    rewritten.timeFilter
+      ? rewritten.cleanQuery
+      : rewritten.cleanQuery || original
   );
   const { negativeTerms, positiveText } =
     extractNegativeClauses(withoutCommands);
   const normalizedQuery = normalizeWhitespace(positiveText);
+  const details = {
+    originalQuery: original,
+    visualDescription: normalizedQuery,
+    timeFilter: rewritten.timeFilter,
+    negativeTerms,
+    exactNames: [...normalizedQuery.matchAll(QUOTED_CONTENT_RE)].map(
+      (match) => match[1]
+    ),
+  };
 
   if (!normalizedQuery) {
     return {
+      ...details,
       coverage: 0,
       intent: "unknown",
       language,
@@ -345,6 +400,7 @@ export async function prepareSemanticQueryPlan(
 
   if (language === "en") {
     return {
+      ...details,
       coverage: 1,
       intent: classifyEnglishIntent(normalizedQuery),
       language,
@@ -415,8 +471,15 @@ export async function prepareSemanticQueryPlan(
   }
 
   return {
+    ...details,
     coverage: dictionary.coverage,
-    intent: dictionary.intent,
+    // A partial dictionary describes only part of the request. Classify the
+    // complete translated primary with the same policy as an English query.
+    // A fully recognized dictionary still supplies precise concept identity.
+    intent:
+      translated && dictionary.hasUnparsedDescription
+        ? classifyEnglishIntent(translated)
+        : dictionary.intent,
     language,
     negativePrompts: translatedNegatives
       .filter(Boolean)
@@ -431,7 +494,8 @@ export async function prepareSemanticQueryPlan(
 }
 
 export function getSemanticQueryPlan(
-  rawQuery: string
+  rawQuery: string,
+  options: QueryPlanOptions = {}
 ): Promise<SemanticQueryPlan> {
   const key = JSON.stringify({
     query: normalizeWhitespace(rawQuery),
@@ -443,7 +507,7 @@ export function getSemanticQueryPlan(
   if (existing) {
     return existing;
   }
-  const task = prepareSemanticQueryPlan(rawQuery).finally(() => {
+  const task = prepareSemanticQueryPlan(rawQuery, options).finally(() => {
     if (pendingQueryPlans.get(key) === task) {
       pendingQueryPlans.delete(key);
     }

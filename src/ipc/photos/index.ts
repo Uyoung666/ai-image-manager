@@ -65,6 +65,7 @@ import {
   toggleFavorite,
 } from "./handlers/mutations";
 import {
+  cancelSearch,
   getImageSearchPreview,
   searchByImage,
   searchByText,
@@ -127,6 +128,7 @@ export const photos = {
   backfillMissingThumbnails,
   batchGenerateTags,
   cancelAiIndexing,
+  cancelSearch,
   cancelAllImports: cancelAllImports_h,
   cancelQueuedImports: cancelQueuedImports_h,
   cleanupOrphanPhotos,

@@ -107,7 +107,7 @@ function buildRun(candidateRun, mode, config) {
 
       return {
         id: query.id,
-        latencyMs: query.latencyMs ?? 0,
+        latencyMs: query.latencyMs ?? null,
         results: candidates.map((candidate) => candidate.contentHash),
       };
     }),
@@ -118,7 +118,8 @@ function compareConfigurations(left, right) {
   return (
     right.report.macro.recallAt50 - left.report.macro.recallAt50 ||
     right.report.macro.ndcgAt50 - left.report.macro.ndcgAt50 ||
-    right.report.macro.precisionAt50 - left.report.macro.precisionAt50 ||
+    right.report.macro.meanReciprocalRank -
+      left.report.macro.meanReciprocalRank ||
     Math.abs(left.config.semanticWeight - DEFAULT_CONFIG.semanticWeight) -
       Math.abs(right.config.semanticWeight - DEFAULT_CONFIG.semanticWeight) ||
     Math.abs(
@@ -146,15 +147,17 @@ export function calibrateHybridSearch(manifest, candidateRun) {
       grid.push({
         config,
         report,
-        meetsPrecision:
-          report.macro.precisionAt20 >= 0.95 &&
-          report.macro.precisionAt50 >= 0.9,
+        meetsQuality:
+          report.macro.recallAt50 >= 0.95 &&
+          report.macro.ndcgAt10 >= 0.9 &&
+          report.macro.meanReciprocalRank >= 0.9 &&
+          report.macro.hardNegativeFalsePositiveRateAt10 === 0,
       });
     }
   }
 
   const eligible = grid
-    .filter((entry) => entry.meetsPrecision)
+    .filter((entry) => entry.meetsQuality)
     .sort(compareConfigurations);
   const fallback = grid.find(
     (entry) =>
@@ -184,9 +187,9 @@ export function calibrateHybridSearch(manifest, candidateRun) {
         selected.report.macro.ndcgAt50 > semanticOnly.macro.ndcgAt50 &&
         selected.report.macro.ndcgAt50 > tagOnly.macro.ndcgAt50,
     },
-    grid: grid.map(({ config, report, meetsPrecision }) => ({
+    grid: grid.map(({ config, report, meetsQuality }) => ({
       config,
-      meetsPrecision,
+      meetsQuality,
       macro: report.macro,
     })),
   };

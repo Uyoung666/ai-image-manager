@@ -249,6 +249,10 @@ async function initializeModel(): Promise<void> {
         : "empty",
     thresholdProfileId: thresholdProfile.profileId,
     calibrationStatus: thresholdProfile.calibrationStatus,
+    vectorBuildState:
+      existingRuntime?.fingerprint === runtimeInfo.fingerprint
+        ? existingRuntime.vectorBuildState
+        : undefined,
   });
   await initTextWorker(localModelPath, model.kind);
 

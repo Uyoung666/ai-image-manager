@@ -1,0 +1,692 @@
+{
+  "schemaVersion": 1,
+  "definitionVersion": "search-quality-2026-10-04-v1",
+  "sourceManifest": "audit/tag-benchmark-v2/manifest.v2.json",
+  "review": {
+    "method": "320-image contact sheets reviewed against whole-query conditions; previous tag annotations are not used as query answers",
+    "reviewedAt": "2026-10-04",
+    "granularity": "whole scene or visible object; unreadable fine detail is unjudged",
+    "splitRule": "reuse existing near-duplicate cluster split"
+  },
+  "metadata": {
+    "formula": "id is source position + 1; camera odd Nikon/even Canon; ISO divisible by 3 = 800 else 100; date = 2025-07-(id % 28 + 1), local noon; named identities are isolated fixture assignments"
+  },
+  "queries": [
+    {
+      "id": "development-01",
+      "split": "development",
+      "query": "手正在切蔬菜",
+      "relevantSampleIds": ["people-life-13"],
+      "hardNegativeSampleIds": ["people-life-07", "product-food-01"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-02",
+      "split": "development",
+      "query": "black and white portrait of a long-haired man",
+      "relevantSampleIds": ["people-life-20"],
+      "hardNegativeSampleIds": ["people-life-19"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-03",
+      "split": "development",
+      "query": "夜晚灯光下的聚会人群",
+      "relevantSampleIds": ["people-life-16"],
+      "hardNegativeSampleIds": ["people-life-03", "people-life-08"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-04",
+      "split": "development",
+      "query": "街道上的红色和黄色舞狮",
+      "relevantSampleIds": ["people-life-15"],
+      "hardNegativeSampleIds": ["people-life-12"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-05",
+      "split": "development",
+      "query": "黑白摄影中的老汽车",
+      "relevantSampleIds": ["people-life-02", "people-life-14"],
+      "hardNegativeSampleIds": ["people-life-05"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-06",
+      "split": "development",
+      "query": "金黄色田野",
+      "relevantSampleIds": ["nature-architecture-07", "nature-architecture-11"],
+      "hardNegativeSampleIds": ["nature-architecture-09"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-07",
+      "split": "development",
+      "query": "waterfall surrounded by green forest",
+      "relevantSampleIds": ["nature-architecture-12"],
+      "hardNegativeSampleIds": ["nature-architecture-09", "animal-plant-02"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-08",
+      "split": "development",
+      "query": "岩石海岸和蓝色大海",
+      "relevantSampleIds": ["nature-architecture-13"],
+      "hardNegativeSampleIds": ["nature-architecture-01"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-09",
+      "split": "development",
+      "query": "夜景中亮灯的木屋",
+      "relevantSampleIds": ["nature-architecture-04"],
+      "hardNegativeSampleIds": ["nature-architecture-16"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-10",
+      "split": "development",
+      "query": "室内有彩色窗户的小教堂",
+      "relevantSampleIds": ["nature-architecture-19"],
+      "hardNegativeSampleIds": [
+        "nature-architecture-15",
+        "nature-architecture-18"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-11",
+      "split": "development",
+      "query": "草地上坐着的黑狗",
+      "relevantSampleIds": ["animal-plant-06"],
+      "hardNegativeSampleIds": ["animal-plant-07"],
+      "filters": {
+        "cameraModel": "Canon",
+        "isoMin": 100,
+        "dateFrom": 1751328000000,
+        "dateTo": 1754006399999
+      },
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-12",
+      "split": "development",
+      "query": "仰拍树枝",
+      "relevantSampleIds": ["animal-plant-08"],
+      "hardNegativeSampleIds": ["animal-plant-02"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-13",
+      "split": "development",
+      "query": "有人牵着狗",
+      "relevantSampleIds": ["animal-plant-07", "animal-plant-11"],
+      "hardNegativeSampleIds": ["animal-plant-06", "animal-plant-10"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-14",
+      "split": "development",
+      "query": "植物细胞或生殖结构的科学插图",
+      "relevantSampleIds": [
+        "animal-plant-12",
+        "animal-plant-13",
+        "animal-plant-14",
+        "animal-plant-15",
+        "animal-plant-16",
+        "animal-plant-17",
+        "animal-plant-18",
+        "animal-plant-19",
+        "animal-plant-20",
+        "anime-illustration-16",
+        "anime-illustration-17"
+      ],
+      "hardNegativeSampleIds": ["animal-plant-03", "animal-plant-04"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-15",
+      "split": "development",
+      "query": "photograph of food on a plate",
+      "relevantSampleIds": [
+        "product-food-01",
+        "product-food-03",
+        "product-food-11",
+        "product-food-19",
+        "product-food-20"
+      ],
+      "hardNegativeSampleIds": ["product-food-07"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-16",
+      "split": "development",
+      "query": "绿色玻璃瓶的特写",
+      "relevantSampleIds": [
+        "product-food-15",
+        "product-food-16",
+        "product-food-17"
+      ],
+      "hardNegativeSampleIds": [
+        "product-food-12",
+        "product-food-13",
+        "product-food-14"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-17",
+      "split": "development",
+      "query": "相机的静物特写，不要人物",
+      "relevantSampleIds": ["product-food-04"],
+      "hardNegativeSampleIds": ["people-life-13"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-18",
+      "split": "development",
+      "query": "金色手表和珠宝",
+      "relevantSampleIds": ["product-food-10"],
+      "hardNegativeSampleIds": ["product-food-05"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-19",
+      "split": "development",
+      "query": "生日蛋糕上插着蜡烛",
+      "relevantSampleIds": ["product-food-07"],
+      "hardNegativeSampleIds": ["product-food-02", "product-food-03"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-20",
+      "split": "development",
+      "query": "拿着相机的红发动漫女仆",
+      "relevantSampleIds": ["anime-illustration-09", "anime-illustration-10"],
+      "hardNegativeSampleIds": [
+        "anime-illustration-01",
+        "anime-illustration-05",
+        "anime-illustration-11"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-21",
+      "split": "development",
+      "query": "戴帽子女孩的铅笔素描",
+      "relevantSampleIds": ["anime-illustration-03"],
+      "hardNegativeSampleIds": ["anime-illustration-01"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-22",
+      "split": "development",
+      "query": "彩色堆叠柱状图",
+      "relevantSampleIds": ["anime-illustration-08"],
+      "hardNegativeSampleIds": ["chart-poster-11", "chart-poster-18"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-23",
+      "split": "development",
+      "query": "戴墨镜的圆形灰色笑脸",
+      "relevantSampleIds": ["meme-sticker-14"],
+      "hardNegativeSampleIds": ["meme-sticker-08", "meme-sticker-04"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-24",
+      "split": "development",
+      "query": "人群里的黄色笑脸气球",
+      "relevantSampleIds": ["meme-sticker-02"],
+      "hardNegativeSampleIds": ["meme-sticker-04", "meme-sticker-08"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-25",
+      "split": "development",
+      "query": "3D modeling software screenshot",
+      "relevantSampleIds": ["screenshot-document-05"],
+      "hardNegativeSampleIds": ["screenshot-document-18"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-26",
+      "split": "development",
+      "query": "手写信件的扫描件",
+      "relevantSampleIds": ["screenshot-document-11"],
+      "hardNegativeSampleIds": [
+        "screenshot-document-01",
+        "screenshot-document-02"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-27",
+      "split": "development",
+      "query": "棋盘格地板",
+      "relevantSampleIds": [],
+      "hardNegativeSampleIds": [
+        "nature-architecture-15",
+        "nature-architecture-19"
+      ],
+      "filters": {},
+      "expectEmpty": true,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-28",
+      "split": "development",
+      "query": "宇航员骑着恐龙滑雪",
+      "relevantSampleIds": [],
+      "hardNegativeSampleIds": ["anime-illustration-02"],
+      "filters": {},
+      "expectEmpty": true,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-29",
+      "split": "development",
+      "query": "拍立得相机",
+      "relevantSampleIds": [],
+      "hardNegativeSampleIds": ["product-food-04"],
+      "filters": {},
+      "expectEmpty": true,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "development-30",
+      "split": "development",
+      "query": "“林先生”",
+      "relevantSampleIds": ["people-life-20"],
+      "hardNegativeSampleIds": ["people-life-19"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-01",
+      "split": "holdout",
+      "query": "black dog portrait close up",
+      "relevantSampleIds": ["animal-plant-23"],
+      "hardNegativeSampleIds": ["animal-plant-24", "animal-plant-30"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-02",
+      "split": "holdout",
+      "query": "沙发上的猫",
+      "relevantSampleIds": ["animal-plant-26", "animal-plant-35"],
+      "hardNegativeSampleIds": ["animal-plant-34"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-03",
+      "split": "holdout",
+      "query": "木地板上的狗，不要人物",
+      "relevantSampleIds": ["animal-plant-24"],
+      "hardNegativeSampleIds": ["animal-plant-40"],
+      "filters": {
+        "cameraModel": "Canon",
+        "dateFrom": 1751328000000,
+        "dateTo": 1754006399999
+      },
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-04",
+      "split": "holdout",
+      "query": "two lions",
+      "relevantSampleIds": ["animal-plant-31"],
+      "hardNegativeSampleIds": ["animal-plant-23"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-05",
+      "split": "holdout",
+      "query": "树枝上的红花",
+      "relevantSampleIds": ["animal-plant-25"],
+      "hardNegativeSampleIds": ["animal-plant-37"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-06",
+      "split": "holdout",
+      "query": "紫色花朵的植物",
+      "relevantSampleIds": ["animal-plant-37"],
+      "hardNegativeSampleIds": ["animal-plant-36"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-07",
+      "split": "holdout",
+      "query": "街道上骑三轮车的人",
+      "relevantSampleIds": ["people-life-28"],
+      "hardNegativeSampleIds": ["people-life-40"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-08",
+      "split": "holdout",
+      "query": "坐在纸箱里的婴儿",
+      "relevantSampleIds": ["people-life-29"],
+      "hardNegativeSampleIds": ["people-life-23"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-09",
+      "split": "holdout",
+      "query": "黑白照片中坐着的老人",
+      "relevantSampleIds": ["people-life-23"],
+      "hardNegativeSampleIds": ["people-life-30"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-10",
+      "split": "holdout",
+      "query": "黑白摄影中餐桌边的聚会",
+      "relevantSampleIds": ["people-life-32"],
+      "hardNegativeSampleIds": ["people-life-24", "people-life-30"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-11",
+      "split": "holdout",
+      "query": "戴黑帽子留胡子的男人",
+      "relevantSampleIds": ["people-life-21"],
+      "hardNegativeSampleIds": ["people-life-37"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-12",
+      "split": "holdout",
+      "query": "sailboats reflected in calm water",
+      "relevantSampleIds": ["nature-architecture-36"],
+      "hardNegativeSampleIds": [
+        "nature-architecture-30",
+        "nature-architecture-37"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-13",
+      "split": "holdout",
+      "query": "雪山和湖泊的风光",
+      "relevantSampleIds": ["nature-architecture-30"],
+      "hardNegativeSampleIds": ["nature-architecture-23", "animal-plant-33"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-14",
+      "split": "holdout",
+      "query": "枯树和蓝天",
+      "relevantSampleIds": ["nature-architecture-29", "animal-plant-29"],
+      "hardNegativeSampleIds": ["animal-plant-32"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-15",
+      "split": "holdout",
+      "query": "黑白摄影中的旧房屋",
+      "relevantSampleIds": ["nature-architecture-25", "nature-architecture-27"],
+      "hardNegativeSampleIds": ["people-life-27"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-16",
+      "split": "holdout",
+      "query": "棕榈树旁边的石头神庙",
+      "relevantSampleIds": ["nature-architecture-39"],
+      "hardNegativeSampleIds": ["nature-architecture-38"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-17",
+      "split": "holdout",
+      "query": "smoke rising from a barbecue grill",
+      "relevantSampleIds": ["product-food-28"],
+      "hardNegativeSampleIds": ["product-food-25"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-18",
+      "split": "holdout",
+      "query": "蓝色香水瓶的特写",
+      "relevantSampleIds": ["product-food-40"],
+      "hardNegativeSampleIds": ["product-food-38", "product-food-39"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-19",
+      "split": "holdout",
+      "query": "钻石戒指的产品特写",
+      "relevantSampleIds": ["product-food-29", "product-food-36"],
+      "hardNegativeSampleIds": ["product-food-37"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-20",
+      "split": "holdout",
+      "query": "切开的黄色柑橘",
+      "relevantSampleIds": ["product-food-35"],
+      "hardNegativeSampleIds": ["product-food-30"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-21",
+      "split": "holdout",
+      "query": "桌上碗装的饭菜",
+      "relevantSampleIds": [
+        "product-food-31",
+        "product-food-32",
+        "product-food-33",
+        "product-food-34"
+      ],
+      "hardNegativeSampleIds": ["product-food-26", "product-food-27"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-22",
+      "split": "holdout",
+      "query": "单个绿色头发的动漫女孩",
+      "relevantSampleIds": [
+        "anime-illustration-23",
+        "anime-illustration-30",
+        "anime-illustration-39"
+      ],
+      "hardNegativeSampleIds": [
+        "anime-illustration-21",
+        "anime-illustration-22",
+        "anime-illustration-40"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-23",
+      "split": "holdout",
+      "query": "单个紫色头发的动漫女孩",
+      "relevantSampleIds": ["anime-illustration-22", "anime-illustration-37"],
+      "hardNegativeSampleIds": [
+        "anime-illustration-21",
+        "anime-illustration-40"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-24",
+      "split": "holdout",
+      "query": "星空下望远镜的插画",
+      "relevantSampleIds": ["anime-illustration-26"],
+      "hardNegativeSampleIds": ["chart-poster-23"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-25",
+      "split": "holdout",
+      "query": "手里平板电脑显示饼图",
+      "relevantSampleIds": ["chart-poster-24"],
+      "hardNegativeSampleIds": ["chart-poster-32", "chart-poster-35"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-26",
+      "split": "holdout",
+      "query": "蓝色和红色曲线的数据图",
+      "relevantSampleIds": ["chart-poster-35"],
+      "hardNegativeSampleIds": ["chart-poster-21", "chart-poster-32"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-27",
+      "split": "holdout",
+      "query": "深色背景的代码编辑器截图",
+      "relevantSampleIds": ["screenshot-document-38"],
+      "hardNegativeSampleIds": [
+        "screenshot-document-28",
+        "screenshot-document-29"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-28",
+      "split": "holdout",
+      "query": "手机计时器的截图",
+      "relevantSampleIds": ["screenshot-document-40"],
+      "hardNegativeSampleIds": [
+        "screenshot-document-24",
+        "screenshot-document-39"
+      ],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-29",
+      "split": "holdout",
+      "query": "企鹅在雪山上滑雪",
+      "relevantSampleIds": [],
+      "hardNegativeSampleIds": [
+        "nature-architecture-23",
+        "nature-architecture-30"
+      ],
+      "filters": {},
+      "expectEmpty": true,
+      "unjudgedSampleIds": []
+    },
+    {
+      "id": "holdout-30",
+      "split": "holdout",
+      "query": "“小美”",
+      "relevantSampleIds": ["people-life-21"],
+      "hardNegativeSampleIds": ["people-life-23"],
+      "filters": {},
+      "expectEmpty": false,
+      "unjudgedSampleIds": []
+    }
+  ]
+}

@@ -8,6 +8,8 @@ import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
 const electronPath = createRequire(import.meta.url)("electron") as string;
 const SEQUENCES = /^Sequences/;
+const PHOTO_MODE = /^(Photos|照片)$/;
+const SEQUENCE_MODE = /^(Sequences|序列)/;
 const GROUP_IDS = [1, 2, 3, 110, 111, 112, 168, 169, 170];
 const SIZES = [
   { width: 720, height: 480 },
@@ -17,6 +19,16 @@ const SIZES = [
 declare global {
   interface Window {
     galleryFrameProbe: { stop: () => number[][] };
+    galleryModeProbe: {
+      photoFrames: number;
+      stop: () => Array<{
+        photos: number;
+        sequences: number;
+        scrollTop: number | null;
+        readyImages: number;
+        hiddenReadyImages: number;
+      }>;
+    };
     gallerySequenceGate: {
       armed: boolean;
       operation: "listSequences" | "listPhotos";
@@ -277,6 +289,136 @@ test.afterAll(async () => {
   await app?.close();
 });
 
+for (const size of SIZES) {
+  test(`${size.width}x${size.height} switches sequence mode without thumbnail flashes or intermediate scroll`, async () => {
+    await app.evaluate(
+      ({ BrowserWindow }, bounds) =>
+        BrowserWindow.getAllWindows()[0].setContentSize(
+          bounds.width,
+          bounds.height
+        ),
+      size
+    );
+    await navigate("/");
+    const photoMode = page.getByRole("button", { name: PHOTO_MODE });
+    await photoMode.click();
+    const scroll = page.locator("[data-masonry-scroll]");
+    await expect(scroll).toBeVisible();
+    await scroll.evaluate((element) => {
+      element.scrollTop = 1200;
+    });
+    await expect
+      .poll(() => scroll.evaluate((element) => element.scrollTop))
+      .toBe(1200);
+    await expect
+      .poll(() =>
+        scroll.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const images = [...element.querySelectorAll("img")].filter(
+            (image) => {
+              const rect = image.getBoundingClientRect();
+              return rect.bottom > bounds.top + 60 && rect.top < bounds.bottom;
+            }
+          );
+          return (
+            images.length > 0 &&
+            images.every(
+              (image) =>
+                image.complete &&
+                image.naturalWidth > 0 &&
+                Number(getComputedStyle(image).opacity) > 0.99
+            )
+          );
+        })
+      )
+      .toBe(true);
+    await page.getByRole("button", { name: SEQUENCE_MODE }).click();
+    await expect(page.locator("[data-sequence-id]")).toHaveCount(3);
+    await expect
+      .poll(() => scroll.evaluate((element) => element.scrollTop))
+      .toBe(0);
+
+    await page.evaluate(() => {
+      const frames: Array<{
+        photos: number;
+        sequences: number;
+        scrollTop: number | null;
+        readyImages: number;
+        hiddenReadyImages: number;
+      }> = [];
+      let frame = 0;
+      const probe = {
+        photoFrames: 0,
+        stop: () => {
+          cancelAnimationFrame(frame);
+          return frames;
+        },
+      };
+      const sample = () => {
+        const grid = document.querySelector<HTMLElement>(
+          "[data-masonry-scroll]"
+        );
+        const bounds = grid?.getBoundingClientRect();
+        const photos = [
+          ...(grid?.querySelectorAll<HTMLElement>(
+            '[data-photo-id][role="option"]:not([data-sequence-id])'
+          ) ?? []),
+        ];
+        const images = photos
+          .flatMap((photo) => [...photo.querySelectorAll("img")])
+          .filter((image) => {
+            const rect = image.getBoundingClientRect();
+            return (
+              bounds &&
+              rect.bottom > bounds.top + 60 &&
+              rect.top < bounds.bottom &&
+              image.complete &&
+              image.naturalWidth > 0
+            );
+          });
+        if (photos.length > 0) {
+          probe.photoFrames++;
+        }
+        frames.push({
+          photos: photos.length,
+          sequences: grid?.querySelectorAll("[data-sequence-id]").length ?? 0,
+          scrollTop: grid?.scrollTop ?? null,
+          readyImages: images.length,
+          hiddenReadyImages: images.filter(
+            (image) => Number(getComputedStyle(image).opacity) < 0.99
+          ).length,
+        });
+        frame = requestAnimationFrame(sample);
+      };
+      window.galleryModeProbe = probe;
+      sample();
+    });
+    await photoMode.click();
+    await expect
+      .poll(() => page.evaluate(() => window.galleryModeProbe.photoFrames))
+      .toBeGreaterThanOrEqual(12);
+    const frames = await page.evaluate(() => window.galleryModeProbe.stop());
+    fs.writeFileSync(
+      test.info().outputPath("sequence-photo-frames.json"),
+      JSON.stringify(frames, null, 2)
+    );
+    const photoFrames = frames.filter((frame) => frame.photos > 0);
+    expect(photoFrames.every((frame) => frame.scrollTop === 1200)).toBe(true);
+    expect(
+      photoFrames.every(
+        (frame) => frame.readyImages > 0 && frame.hiddenReadyImages === 0
+      )
+    ).toBe(true);
+    expect(
+      frames.every((frame) => frame.photos > 0 || frame.sequences > 0)
+    ).toBe(true);
+    await expect(page.locator(".home-gallery-restore-overlay")).toHaveCount(0);
+    await page.screenshot({
+      path: test.info().outputPath("sequence-photo-settled.png"),
+    });
+  });
+}
+
 for (const albumId of [9001, 9002]) {
   test(`album ${albumId} preserves an expanded member favorite after returning from Favorites`, async () => {
     await navigate("/people/9001");
@@ -456,7 +598,7 @@ test("sequence all-select resolves unloaded members and toggles their actual fav
 
 test("rapid mode changes restore photo scroll after the query and layout settle", async () => {
   await navigate("/?reset=true");
-  await page.getByRole("button", { name: "Photos", exact: true }).click();
+  await page.getByRole("button", { name: PHOTO_MODE }).click();
   const scroll = page.locator("[data-masonry-scroll]");
   await expect(scroll).toBeVisible();
   await scroll.evaluate((element) => {
@@ -466,8 +608,8 @@ test("rapid mode changes restore photo scroll after the query and layout settle"
     .poll(() => scroll.evaluate((element) => element.scrollTop))
     .toBe(700);
   for (let cycle = 0; cycle < 3; cycle++) {
-    await page.getByRole("button", { name: SEQUENCES }).click();
-    await page.getByRole("button", { name: "Photos", exact: true }).click();
+    await page.getByRole("button", { name: SEQUENCE_MODE }).click();
+    await page.getByRole("button", { name: PHOTO_MODE }).click();
   }
   await expect(page.locator("[data-sequence-id]")).toHaveCount(0);
   await expect

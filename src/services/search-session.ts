@@ -30,7 +30,8 @@ export function createSearchFingerprint(
       Object.entries(input)
         .filter(
           ([key, value]) =>
-            !["cursor", "limit", "offset"].includes(key) && value !== undefined
+            !["cursor", "limit", "offset", "requestId"].includes(key) &&
+            value !== undefined
         )
         .sort(([left], [right]) => left.localeCompare(right))
     )

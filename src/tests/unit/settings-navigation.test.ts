@@ -21,6 +21,7 @@ const translations: Record<string, string> = {
   settingsGroupHelp: "帮助与支持",
   settingsDiagnostics: "帮助与诊断",
   settingsStorage: "存储",
+  settingsAiIndex: "AI 索引",
 };
 
 const translate = (key: string) => translations[key] || key;
@@ -97,5 +98,23 @@ describe("settings navigation", () => {
 
   it("does not return settings for an empty query", () => {
     expect(filterSettingsNavigationItems("   ", translate)).toEqual([]);
+  });
+
+  it("finds dedicated AI index settings by title and rebuild intent", () => {
+    for (const query of ["AI 索引", "重建", "semantic", "rebuild"]) {
+      expect(filterSettingsNavigationItems(query, translate)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            groupKey: "settingsGroupData",
+            to: "/settings/ai-index",
+          }),
+        ])
+      );
+    }
+    expect(filterSettingsNavigationItems("GPU", translate)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ to: "/settings/ai-index" }),
+      ])
+    );
   });
 });

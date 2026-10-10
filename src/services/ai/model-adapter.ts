@@ -13,12 +13,16 @@ export interface ModelArtifactSpec {
 }
 
 export interface ImageEmbeddingSpec {
+  colorMode: "rgb";
   dimensions: number;
   imageSize: number;
   inputName: string;
   mean: readonly [number, number, number];
   modelRelativePath: string;
   outputName: string;
+  preprocessingVersion: string;
+  resample: "bicubic";
+  rescaleFactor: number;
   resizeFit: "fill" | "contain" | "cover";
   std: readonly [number, number, number];
 }
@@ -140,12 +144,16 @@ export const SIGLIP_V1_ADAPTER: EmbeddingAdapterDescriptor = {
     dimensions: 768,
     normalization: "l2",
     image: {
+      colorMode: "rgb",
       modelRelativePath:
         "Xenova/siglip-base-patch16-224/onnx/vision_model_quantized.onnx",
       inputName: "pixel_values",
       outputName: "pooler_output",
       dimensions: 768,
       imageSize: 224,
+      preprocessingVersion: "siglip-bicubic-rgb-v2",
+      resample: "bicubic",
+      rescaleFactor: 1 / 255,
       resizeFit: "fill",
       mean: [0.5, 0.5, 0.5],
       std: [0.5, 0.5, 0.5],
@@ -167,7 +175,7 @@ export const SIGLIP_V1_ADAPTER: EmbeddingAdapterDescriptor = {
     tagging: true,
     duplicateDetection: true,
   },
-  thresholdProfileId: "siglip-v1-base-patch16-224-default",
+  thresholdProfileId: "siglip-v2-bicubic-pending",
 };
 
 const adapterRegistry = new Map<EmbeddingAdapterId, EmbeddingAdapterDescriptor>(

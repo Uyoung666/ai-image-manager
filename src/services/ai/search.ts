@@ -1,6 +1,7 @@
 import { fork } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { app } from "electron";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import {
@@ -8,6 +9,15 @@ import {
   EmbeddingProviderError,
   resolveEmbeddingExecutionProvider,
 } from "@/services/embed-worker-pool";
+import type { RewrittenQuery } from "@/services/query-rewrite";
+import {
+  checkSearch,
+  measureSearch,
+  recordSearchDuration,
+  type SearchExecution,
+  waitForSearch,
+} from "@/services/search-control";
+import { getVectorSearchRevision } from "@/services/search-revision";
 import { getSetting } from "@/services/settings-manager";
 import { trackChildProcess } from "@/services/tracked-child-processes";
 import { WORKER_TIMEOUT } from "./constants";
@@ -58,7 +68,23 @@ import {
   getTranslationModelVersion,
   warmupTranslationWorker,
 } from "./translation-worker-client";
-import { initVectorDB, withVectorDbOperation } from "./vector-db";
+import {
+  buildPhotoIdFilter,
+  getPhotoVectors,
+  initVectorDB,
+  withVectorDbOperation,
+} from "./vector-db";
+
+export interface SemanticSearchOptions extends SearchExecution {
+  allowedPhotoIds?: number[];
+  candidateDepth?: number;
+  onCandidates?: (result: SemanticTextSearchResult) => void;
+  plan?: SemanticQueryPlan;
+  rewritten?: RewrittenQuery;
+  /** A revision-bound key for the exact allowedPhotoIds scope. */
+  scopeKey?: string;
+  sourceRevision?: string;
+}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -261,7 +287,8 @@ async function fallbackSearch(
   queryVector: number[],
   limit: number,
   maxDistance = 0.75,
-  knownRowCount?: number
+  knownRowCount?: number,
+  options?: SemanticSearchOptions
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   if (!photoTable) {
     return [];
@@ -281,12 +308,15 @@ async function fallbackSearch(
   );
   const PAGE_SIZE = 500;
   const MAX_PAGES = Math.ceil(rowCount / PAGE_SIZE);
-  const MAX_SAFE_PAGES = 100; // 最多 50000 条，防止极端情况
   const allScored: Array<{ photoId: number; distance: number }> = [];
 
-  for (let page = 0; page < Math.min(MAX_PAGES, MAX_SAFE_PAGES); page++) {
-    const rows = await photoTable
-      .query()
+  for (let page = 0; page < MAX_PAGES; page++) {
+    checkSearch(options);
+    let query = photoTable.query();
+    if (options?.allowedPhotoIds) {
+      query = query.where(buildPhotoIdFilter(options.allowedPhotoIds));
+    }
+    const rows = await query
       .limit(PAGE_SIZE)
       .offset(page * PAGE_SIZE)
       .toArray();
@@ -361,7 +391,8 @@ async function searchVector(
   queryVector: number[],
   limit: number,
   maxCosineDistance: number,
-  rowCount: number
+  rowCount: number,
+  options?: SemanticSearchOptions
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   if (!photoTable) {
     return [];
@@ -379,20 +410,43 @@ async function searchVector(
   );
 
   let rawResults: Record<string, unknown>[] = [];
+  let vectorFailed = false;
   const queryLimit = Math.min(Math.max(limit, 1), Math.max(rowCount, 1));
   try {
-    const vq = photoTable
+    checkSearch(options);
+    let vq = photoTable
       .vectorSearch(queryVector)
       .distanceType("cosine")
       .refineFactor(adaptiveRefine)
       .limit(queryLimit);
+    if (options?.allowedPhotoIds) {
+      vq = vq.where(buildPhotoIdFilter(options.allowedPhotoIds));
+    }
+    if (limit >= rowCount && vq.bypassVectorIndex) {
+      vq = vq.bypassVectorIndex();
+    }
+    if (vq.select) {
+      vq = vq.select(["photo_id"]);
+    }
     rawResults = (await vq.toArray()) as Record<string, unknown>[];
+    checkSearch(options);
   } catch (err: unknown) {
+    checkSearch(options);
+    vectorFailed = true;
     console.error("[AI] vectorSearch failed:", getErrorMessage(err));
   }
 
   if (rawResults.length === 0) {
-    return fallbackSearch(queryVector, limit, maxCosineDistance, rowCount);
+    if (options?.allowedPhotoIds && !vectorFailed) {
+      return [];
+    }
+    return fallbackSearch(
+      queryVector,
+      limit,
+      maxCosineDistance,
+      rowCount,
+      options
+    );
   }
 
   const filtered = filterCosineSearchResults(
@@ -421,7 +475,7 @@ interface EmbeddingCacheEntry {
 }
 
 const textEmbeddingCache = new Map<string, EmbeddingCacheEntry>();
-const pendingEmbeddingBatches = new Map<string, Promise<number[][]>>();
+const pendingTextEmbeddings = new Map<string, Promise<number[]>>();
 const EMBEDDING_CACHE_TTL = 10 * 60 * 1000;
 const MAX_EMBEDDING_CACHE = 100;
 let embeddingCacheModel: typeof embeddingModel = null;
@@ -459,6 +513,18 @@ function setCachedEmbedding(text: string, vector: number[]): void {
   textEmbeddingCache.set(key, { timestamp: Date.now(), vector });
 }
 
+function assertCurrentTextModel(
+  instance: typeof embeddingModel,
+  fingerprint: string
+): void {
+  if (
+    embeddingModel !== instance ||
+    getActiveEmbeddingFingerprint() !== fingerprint
+  ) {
+    throw new Error("Stale text embedding result discarded");
+  }
+}
+
 async function embedSearchTexts(
   texts: string[],
   timings: SearchTimings
@@ -466,9 +532,11 @@ async function embedSearchTexts(
   if (!embeddingModel) {
     return [];
   }
+  const modelInstance = embeddingModel;
+  const modelFingerprint = getActiveEmbeddingFingerprint();
   if (embeddingCacheModel !== embeddingModel) {
     textEmbeddingCache.clear();
-    pendingEmbeddingBatches.clear();
+    pendingTextEmbeddings.clear();
     embeddingCacheModel = embeddingModel;
   }
 
@@ -481,48 +549,55 @@ async function embedSearchTexts(
 
   if (missing.length > 0) {
     const startedAt = Date.now();
-    const missingTexts = missing.map(({ text }) => text);
-    const batchKey = JSON.stringify({
-      embeddingFingerprint: getActiveEmbeddingFingerprint(),
-      texts: missingTexts,
-    });
-    let generationTask = pendingEmbeddingBatches.get(batchKey);
-    if (!generationTask) {
-      generationTask = embeddingModel.embedTexts
-        ? embeddingModel.embedTexts(missingTexts)
-        : (async () => {
-            const sequential: number[][] = [];
-            for (const text of missingTexts) {
-              sequential.push(await embeddingModel.embedText(text));
-            }
-            return sequential;
-          })();
-      pendingEmbeddingBatches.set(batchKey, generationTask);
-    }
-    let generated: number[][];
-    try {
-      generated = await generationTask;
-    } finally {
-      if (pendingEmbeddingBatches.get(batchKey) === generationTask) {
-        pendingEmbeddingBatches.delete(batchKey);
-      }
-    }
+    const generated = await Promise.all(
+      missing.map(({ text }) => {
+        const textKey = JSON.stringify({
+          embeddingFingerprint: modelFingerprint,
+          text,
+        });
+        const pending = pendingTextEmbeddings.get(textKey);
+        if (pending) {
+          return pending;
+        }
+        // Quantized text inference can depend on other rows in the batch.
+        // A fixed single-text batch keeps scores independent of cache history.
+        const generationTask = (async () => {
+          const batch = modelInstance.embedTexts
+            ? await modelInstance.embedTexts([text])
+            : [await modelInstance.embedText(text)];
+          assertCurrentTextModel(modelInstance, modelFingerprint);
+          const model = getActiveEmbeddingModel();
+          const vector = batch[0];
+          if (
+            batch.length !== 1 ||
+            !vector ||
+            !isValidEmbeddingVector(vector, model) ||
+            !vector.some((value) => value !== 0)
+          ) {
+            throw new Error(
+              `${model.displayName} 文本向量无效: expected=${model.vectorDimensions} actual=${vector?.length ?? 0}`
+            );
+          }
+          setCachedEmbedding(text, vector);
+          return vector;
+        })();
+        pendingTextEmbeddings.set(textKey, generationTask);
+        // A cancelled subscriber does not cancel this shared encoding task.
+        const cleanup = () => {
+          if (pendingTextEmbeddings.get(textKey) === generationTask) {
+            pendingTextEmbeddings.delete(textKey);
+          }
+        };
+        generationTask.then(cleanup, cleanup);
+        return generationTask;
+      })
+    );
     timings.embedMs += Date.now() - startedAt;
-    if (generated.length !== missing.length) {
-      throw new Error("SigLIP 批量文本向量数量不匹配");
-    }
-
-    const model = getActiveEmbeddingModel();
+    assertCurrentTextModel(modelInstance, modelFingerprint);
     for (let index = 0; index < missing.length; index++) {
       const item = missing[index];
       const vector = generated[index];
-      if (!isValidEmbeddingVector(vector, model)) {
-        throw new Error(
-          `${model.displayName} 文本向量无效: expected=${model.vectorDimensions} actual=${vector.length}`
-        );
-      }
       vectors[item.index] = vector;
-      setCachedEmbedding(item.text, vector);
     }
   }
 
@@ -547,11 +622,14 @@ interface MultiPromptSearchResult {
   topSimilarity: number;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Bounded multi-prompt recall tracks scope, exact candidate scoring and relevance together.
 async function multiPromptSearch(
   plan: SemanticQueryPlan,
   limit: number,
   timings: SearchTimings = { embedMs: 0, vectorMs: 0 },
-  sensitivity: SearchSensitivity = "standard"
+  sensitivity: SearchSensitivity = "standard",
+  options?: SemanticSearchOptions,
+  preparedVectors?: number[][]
 ): Promise<MultiPromptSearchResult> {
   if (!(embeddingModel && photoTable) || plan.prompts.length === 0) {
     return {
@@ -577,10 +655,12 @@ async function multiPromptSearch(
     ...plan.prompts.map((prompt) => prompt.text),
     ...plan.negativePrompts,
   ];
-  const vectors = await embedSearchTexts(allTexts, timings);
+  const vectors =
+    preparedVectors ?? (await embedSearchTexts(allTexts, timings));
   const positiveVectors = vectors.slice(0, plan.prompts.length);
   const negativeVectors = vectors.slice(plan.prompts.length);
-  const rowCount = await photoTable.countRows();
+  const rowCount =
+    options?.allowedPhotoIds?.length ?? (await photoTable.countRows());
   const model = getActiveEmbeddingModel();
   const evidenceGroups = plan.prompts.map((prompt) => prompt.evidenceGroup);
   const promptGroupCount = new Set(evidenceGroups).size;
@@ -599,22 +679,28 @@ async function multiPromptSearch(
           thresholdProfile.semanticSearch.candidateMinimumSimilarity * s
         );
   const candidateMaxDistance = 1 - candidateMinimum;
-  let candidateDepth = Math.min(rowCount, Math.max(200, limit));
+  let candidateDepth = Math.min(
+    rowCount,
+    Math.max(200, options?.candidateDepth ?? 200)
+  );
 
   while (candidateDepth > 0) {
+    checkSearch(options);
     const vectorStartedAt = Date.now();
-    const resultSets = await Promise.all(
-      positiveVectors.map((vector) =>
-        searchVector(vector, candidateDepth, candidateMaxDistance, rowCount)
+    const resultSets = await measureSearch(options, "vectorMs", () =>
+      Promise.all(
+        positiveVectors.map((vector) =>
+          searchVector(
+            vector,
+            candidateDepth,
+            candidateMaxDistance,
+            rowCount,
+            options
+          )
+        )
       )
     );
-    const negativeResultSets = await Promise.all(
-      negativeVectors.map((vector) =>
-        searchVector(vector, candidateDepth, candidateMaxDistance, rowCount)
-      )
-    );
-    timings.vectorMs += Date.now() - vectorStartedAt;
-
+    const fusionStarted = performance.now();
     const fused = fuseRankedSearchEvidence(
       resultSets,
       rowCount,
@@ -622,8 +708,85 @@ async function multiPromptSearch(
       evidenceGroups,
       primaryPromptIndex
     );
+    // Auxiliary ANN recall must be scored against the whole query, and
+    // negatives must cover every positive candidate, not only a negative top-K.
+    const primaryIds = new Set(
+      resultSets[primaryPromptIndex]?.map((row) => row.photoId)
+    );
+    const needsPrimary = fused.filter(
+      (result) => !primaryIds.has(result.photoId)
+    );
+    const scoreIds =
+      negativeVectors.length > 0
+        ? fused.map((result) => result.photoId)
+        : needsPrimary.map((result) => result.photoId);
+    const candidatesById = new Map(
+      fused.map((result) => [result.photoId, result])
+    );
+    const missingScoreIds = new Set<number>();
+    const negativeResultSets: Array<
+      Array<{ photoId: number; similarity: number }>
+    > = negativeVectors.map(() => []);
+    recordSearchDuration(options, "rankingMs", fusionStarted);
+    const cosine = (left: number[], right: number[]): number => {
+      let dot = 0;
+      let a = 0;
+      let b = 0;
+      for (let i = 0; i < left.length; i++) {
+        dot += left[i] * right[i];
+        a += left[i] ** 2;
+        b += right[i] ** 2;
+      }
+      return a > 0 && b > 0 ? dot / Math.sqrt(a * b) : 0;
+    };
+    for (let start = 0; start < scoreIds.length; start += 500) {
+      checkSearch(options);
+      const batchIds = scoreIds.slice(start, start + 500);
+      const batch = await measureSearch(options, "vectorMs", () =>
+        getPhotoVectors(batchIds, true)
+      );
+      const batchScoringStarted = performance.now();
+      for (const id of batchIds) {
+        const vector = batch.get(id);
+        const result = candidatesById.get(id);
+        if (
+          !(
+            result &&
+            vector &&
+            isValidEmbeddingVector(vector, model) &&
+            vector.some((value) => value !== 0)
+          )
+        ) {
+          missingScoreIds.add(id);
+          continue;
+        }
+        if (!primaryIds.has(id)) {
+          result.primarySimilarity =
+            Math.round(
+              cosine(positiveVectors[primaryPromptIndex], vector) * 10_000
+            ) / 10_000;
+        }
+        for (let index = 0; index < negativeVectors.length; index++) {
+          negativeResultSets[index].push({
+            photoId: id,
+            similarity: Math.max(0, cosine(negativeVectors[index], vector)),
+          });
+        }
+      }
+      recordSearchDuration(options, "rankingMs", batchScoringStarted);
+    }
+    const scoringStarted = performance.now();
+    // Similarity exposed to hybrid ranking and the UI describes the whole query.
+    // Auxiliary evidence still contributes its existing reciprocal-rank weight.
+    for (const result of fused) {
+      result.similarity = result.primarySimilarity;
+    }
+    for (const resultSet of negativeResultSets) {
+      resultSet.sort((left, right) => right.similarity - left.similarity);
+    }
+    timings.vectorMs += Date.now() - vectorStartedAt;
     const penalized = applyNegativeSemanticPenalty(
-      fused,
+      fused.filter((result) => !missingScoreIds.has(result.photoId)),
       negativeResultSets,
       rowCount
     );
@@ -631,7 +794,7 @@ async function multiPromptSearch(
       penalized,
       model,
       promptGroupCount,
-      limit,
+      rowCount,
       {
         candidateTails: resultSets.map((results, index) => ({
           evidenceGroup: evidenceGroups[index],
@@ -646,11 +809,30 @@ async function multiPromptSearch(
       }
     );
     const exhausted = candidateDepth >= rowCount;
+    if (missingScoreIds.size > 0) {
+      selection.cutoffReason = "missing-photo-vector";
+    }
+    recordSearchDuration(options, "rankingMs", scoringStarted);
     const enoughForPage = selection.results.length >= limit;
-    const hasMore =
-      selection.acceptedCount > limit || (!exhausted && selection.canContinue);
+    const hasMore = !exhausted;
+    checkSearch(options);
+    options?.onCandidates?.({
+      ...selection,
+      candidateMinimum,
+      candidateDepth,
+      hasMore,
+      plan,
+      promptGroupCount,
+      sensitivity,
+      sensitivityMultiplier: getSensitivityMultiplier(sensitivity),
+    });
 
-    if (enoughForPage || exhausted || !selection.hasMoreCandidates) {
+    if (
+      options?.candidateDepth !== undefined ||
+      missingScoreIds.size > 0 ||
+      enoughForPage ||
+      exhausted
+    ) {
       console.log(
         `[AI] Semantic relevance: policy=${getSemanticPolicyVersion()} model=${model.kind} intent=${plan.intent} primary="${plan.prompts[primaryPromptIndex]?.text ?? ""}" prompts=${plan.rawPromptCount}->${plan.prompts.length} groups=${promptGroupCount} depth=${candidateDepth}/${rowCount} top=${selection.topSimilarity.toFixed(4)} cutoff=${selection.finalCutoff.toFixed(4)} reason=${selection.cutoffReason} strong=${selection.strongAccepted} supported=${selection.supportedAccepted} rejectedWeak=${selection.rejectedWeak} accepted=${selection.results.length} hasMore=${hasMore}`
       );
@@ -775,9 +957,9 @@ export async function searchByText(
   query: string,
   limit = 50
 ): Promise<Array<{ photoId: number; similarity: number }>> {
-  return (await searchByTextWithPlan(query, limit)).results.map(
-    ({ photoId, similarity }) => ({ photoId, similarity })
-  );
+  return (await searchByTextWithPlan(query, limit)).results
+    .slice(0, limit)
+    .map(({ photoId, similarity }) => ({ photoId, similarity }));
 }
 
 export interface SemanticTextSearchResult {
@@ -803,7 +985,8 @@ export interface SemanticTextSearchResult {
 
 export async function searchByTextWithPlan(
   query: string,
-  limit = 50
+  limit = 50,
+  options?: SemanticSearchOptions
 ): Promise<SemanticTextSearchResult> {
   if (!query.trim()) {
     return {
@@ -826,9 +1009,16 @@ export async function searchByTextWithPlan(
   }
 
   const sensitivity = getActiveSearchSensitivity();
+  checkSearch(options);
+  const revision = getVectorSearchRevision();
   const cacheKey = JSON.stringify({
+    revision,
+    sourceRevision: options?.sourceRevision,
+    scope: options?.scopeKey ?? options?.allowedPhotoIds,
+    candidateDepth: options?.candidateDepth,
     embeddingFingerprint: getActiveEmbeddingFingerprint(),
     limit,
+    plan: options?.plan,
     queryPlanFingerprint: getSemanticQueryPlanFingerprint(
       getTranslationModelVersion()
     ),
@@ -840,7 +1030,7 @@ export async function searchByTextWithPlan(
     translation: getTranslationModelVersion(),
     version: SEMANTIC_QUERY_PLAN_VERSION,
   });
-  const pending = pendingTextSearches.get(cacheKey);
+  const pending = options ? undefined : pendingTextSearches.get(cacheKey);
   if (pending) {
     console.log(`[AI] searchByText IN-FLIGHT HIT: limit=${limit}`);
     return pending;
@@ -855,19 +1045,31 @@ export async function searchByTextWithPlan(
   // TTL cache check — avoids redundant SigLIP inference + LanceDB search
   const cached = getCachedSearch(cacheKey);
   if (cached) {
+    if (options?.diagnostics) {
+      options.diagnostics.cacheHit = true;
+    }
     console.log(`[AI] searchByText CACHE HIT: limit=${limit}`);
     return cached;
   }
 
   const searchPromise = (async () => {
-    await initVectorDB();
-    return withVectorDbOperation(() =>
-      performTextSearch(query, limit, cacheKey, sensitivity)
+    await measureSearch(options, "preparationMs", () =>
+      waitForSearch(initVectorDB(), options)
+    );
+    return performTextSearch(
+      query,
+      limit,
+      cacheKey,
+      sensitivity,
+      options,
+      revision
     );
   })();
-  pendingTextSearches.set(cacheKey, searchPromise);
+  if (!options) {
+    pendingTextSearches.set(cacheKey, searchPromise);
+  }
   try {
-    return await searchPromise;
+    return await waitForSearch(searchPromise, options);
   } finally {
     if (pendingTextSearches.get(cacheKey) === searchPromise) {
       pendingTextSearches.delete(cacheKey);
@@ -875,19 +1077,41 @@ export async function searchByTextWithPlan(
   }
 }
 
+function queryEvidenceFailure(plan: SemanticQueryPlan): string | null {
+  if (!plan.prompts.some((prompt) => prompt.role === "primary")) {
+    return "missing-primary-query";
+  }
+  if (
+    plan.negativeTerms &&
+    plan.negativePrompts.length !== plan.negativeTerms.length
+  ) {
+    return "missing-negative-query";
+  }
+  return null;
+}
+
+function semanticScopeCacheKey(options?: SemanticSearchOptions): string {
+  return `${JSON.stringify(options?.scopeKey ?? options?.allowedPhotoIds)}:${options?.candidateDepth ?? "auto"}`;
+}
+
 async function performTextSearch(
   query: string,
   limit: number,
   cacheKey: string,
-  sensitivity: SearchSensitivity
+  sensitivity: SearchSensitivity,
+  options?: SemanticSearchOptions,
+  revision = getVectorSearchRevision()
 ): Promise<SemanticTextSearchResult> {
   const totalStartedAt = Date.now();
   const timings: SearchTimings = { embedMs: 0, vectorMs: 0 };
   const initStartedAt = Date.now();
 
   try {
-    await loadModel();
+    await measureSearch(options, "preparationMs", () =>
+      waitForSearch(loadModel(), options)
+    );
   } catch (err: unknown) {
+    checkSearch(options);
     console.error(
       "[AI] searchByText: model load failed:",
       getErrorMessage(err)
@@ -968,40 +1192,86 @@ async function performTextSearch(
   }
 
   const parseStartedAt = Date.now();
-  const plan = await getSemanticQueryPlan(query);
+  const plan =
+    options?.plan ??
+    (await measureSearch(options, "translationMs", () =>
+      waitForSearch(
+        getSemanticQueryPlan(query, { rewritten: options?.rewritten }),
+        options
+      )
+    ));
   const parseMs = Date.now() - parseStartedAt;
-  const effectiveCacheKey = semanticQueryPlanCacheKey(
-    plan,
-    getActiveEmbeddingFingerprint(),
-    limit,
-    getTranslationModelVersion(),
-    sensitivity
-  );
-  const planCached = getCachedSearch(effectiveCacheKey);
+  const effectiveCacheKey =
+    `${revision}:${options?.sourceRevision ?? ""}:${semanticScopeCacheKey(options)}:` +
+    semanticQueryPlanCacheKey(
+      plan,
+      getActiveEmbeddingFingerprint(),
+      limit,
+      getTranslationModelVersion(),
+      sensitivity
+    );
+  const evidenceFailure = queryEvidenceFailure(plan);
+  const planCached = evidenceFailure
+    ? null
+    : getCachedSearch(effectiveCacheKey);
   if (planCached) {
-    setCachedSearch(cacheKey, planCached);
+    if (options?.diagnostics) {
+      options.diagnostics.cacheHit = true;
+    }
+    if (revision === getVectorSearchRevision()) {
+      setCachedSearch(cacheKey, planCached);
+    }
     return planCached;
   }
-  const semanticSearch =
-    plan.prompts.length > 0
-      ? await multiPromptSearch(plan, limit, timings, sensitivity)
-      : {
-          candidateMinimum: 0,
-          candidateDepth: 0,
-          consensusCutoff: 0,
-          cutoffReason: "no-prompts",
-          finalCutoff: 0,
-          hasMore: false,
-          promptGroupCount: 0,
-          rejectedWeak: 0,
-          results: [],
-          supportCandidates: [],
-          supportCutoff: 0,
-          strongAccepted: 0,
-          strongCutoff: 0,
-          supportedAccepted: 0,
-          topSimilarity: 0,
-        };
+  const texts = [
+    ...plan.prompts.map((prompt) => prompt.text),
+    ...plan.negativePrompts,
+  ];
+  const canScoreQuery = evidenceFailure === null;
+  const textModelInstance = embeddingModel;
+  const textModelFingerprint = getActiveEmbeddingFingerprint();
+  const vectors = canScoreQuery
+    ? await measureSearch(options, "textEncodingMs", () =>
+        waitForSearch(embedSearchTexts(texts, timings), options)
+      )
+    : [];
+  checkSearch(options);
+  const queuedAt = performance.now();
+  const semanticSearch = canScoreQuery
+    ? await withVectorDbOperation(async () => {
+        checkSearch(options);
+        assertCurrentTextModel(textModelInstance, textModelFingerprint);
+        if (options?.diagnostics) {
+          options.diagnostics.timings.queueMs = performance.now() - queuedAt;
+        }
+        const result = await multiPromptSearch(
+          plan,
+          limit,
+          timings,
+          sensitivity,
+          options,
+          vectors
+        );
+        assertCurrentTextModel(textModelInstance, textModelFingerprint);
+        return result;
+      })
+    : {
+        candidateMinimum: 0,
+        candidateDepth: 0,
+        consensusCutoff: 0,
+        cutoffReason: evidenceFailure,
+        finalCutoff: 0,
+        hasMore: false,
+        promptGroupCount: 0,
+        rejectedWeak: 0,
+        results: [],
+        supportCandidates: [],
+        supportCutoff: 0,
+        strongAccepted: 0,
+        strongCutoff: 0,
+        supportedAccepted: 0,
+        topSimilarity: 0,
+      };
   const searchResult = {
     plan,
     ...semanticSearch,
@@ -1009,9 +1279,16 @@ async function performTextSearch(
     sensitivityMultiplier: getSensitivityMultiplier(sensitivity),
   };
 
-  setCachedSearch(cacheKey, searchResult);
-  if (effectiveCacheKey !== cacheKey) {
-    setCachedSearch(effectiveCacheKey, searchResult);
+  checkSearch(options);
+  if (
+    canScoreQuery &&
+    semanticSearch.cutoffReason !== "missing-photo-vector" &&
+    revision === getVectorSearchRevision()
+  ) {
+    setCachedSearch(cacheKey, searchResult);
+    if (effectiveCacheKey !== cacheKey) {
+      setCachedSearch(effectiveCacheKey, searchResult);
+    }
   }
   searchCacheModel = embeddingModel;
   searchCacheTable = photoTable;
@@ -1046,14 +1323,20 @@ export function warmupAiSearch(): Promise<void> {
 
       const timings: SearchTimings = { embedMs: 0, vectorMs: 0 };
       const [vector] = await embedSearchTexts(["a photo"], timings);
-      const rowCount = await photoTable.countRows();
-      if (vector && rowCount > 0) {
-        await photoTable
-          .vectorSearch(vector)
-          .distanceType("cosine")
-          .limit(1)
-          .toArray();
-      }
+      await withVectorDbOperation(async () => {
+        const table = photoTable;
+        if (!table) {
+          return;
+        }
+        const rowCount = await table.countRows();
+        if (vector && rowCount > 0) {
+          await table
+            .vectorSearch(vector)
+            .distanceType("cosine")
+            .limit(1)
+            .toArray();
+        }
+      });
       warmedModel = embeddingModel;
       warmedTable = photoTable;
       if (_localModelPath) {

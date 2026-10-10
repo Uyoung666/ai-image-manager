@@ -6,6 +6,107 @@ import { Welcome } from "@/components/Welcome";
 const AI_INDEX_TEXT = /AI 智能索引/;
 
 describe("gallery empty states", () => {
+  it.each([
+    "text",
+    "image",
+  ] as const)("shows rebuild recovery instead of retrying a blocked %s search", (searchMode) => {
+    const onGoToAiSettings = vi.fn();
+    render(
+      <SearchEmptyState
+        hasActiveFilters={false}
+        hasAiVectors={false}
+        onClearSearch={vi.fn()}
+        onGoToAiSettings={onGoToAiSettings}
+        onRetry={vi.fn()}
+        query="海边"
+        rebuildRequired
+        searchError={searchMode === "image" ? "image" : "search"}
+        searchIncomplete
+        searchMode={searchMode}
+        semanticState="error"
+      />
+    );
+    expect(
+      screen.getByRole("heading", { name: "aiIndexRebuildRequired" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("aiIndexRebuildNoticeDescription")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "retry" })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "aiIndexOpenSettings" })
+    );
+    expect(onGoToAiSettings).toHaveBeenCalledOnce();
+  });
+
+  it("does not offer AI setup for a complete exact search without vectors", () => {
+    render(
+      <SearchEmptyState
+        hasActiveFilters={false}
+        hasAiVectors={false}
+        onClearSearch={vi.fn()}
+        onGoToAiSettings={vi.fn()}
+        query='"missing.jpg"'
+        rebuildRequired
+        searchMode="text"
+        semanticRequired={false}
+        semanticState="unavailable"
+      />
+    );
+    expect(screen.getByText("未找到匹配的照片")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "前往 AI 设置" })).toBeNull();
+  });
+
+  it("explains an empty time range even when the AI index is unavailable", () => {
+    render(
+      <SearchEmptyState
+        hasActiveFilters={false}
+        hasAiVectors={false}
+        onClearSearch={vi.fn()}
+        parsedTimeFilter={{
+          dateFrom: "2025-01-01",
+          dateTo: "2025-12-31",
+          keyword: "去年",
+        }}
+        query="去年"
+        searchMode="text"
+        semanticRequired={false}
+        semanticState="unavailable"
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: "emptyClearTimeFilter" })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "前往 AI 设置" })).toBeNull();
+  });
+
+  it("does not declare no matches or offer looser filters for incomplete search", () => {
+    const onRetry = vi.fn();
+    const onClearFilters = vi.fn();
+    render(
+      <SearchEmptyState
+        hasActiveFilters={true}
+        hasAiVectors={true}
+        onClearFilters={onClearFilters}
+        onClearSearch={vi.fn()}
+        onRetry={onRetry}
+        query="海边"
+        searchIncomplete={true}
+        searchMode="text"
+        semanticState="ready"
+      />
+    );
+    expect(
+      screen.getByRole("heading", { name: "searchIncompleteTitle" })
+    ).toBeInTheDocument();
+    expect(screen.queryByText("未找到匹配的照片")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "仅保留关键字搜索" })
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "retry" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(onClearFilters).not.toHaveBeenCalled();
+  });
   it("keeps the first import state focused on adding a folder", () => {
     const onAddFolder = vi.fn();
     render(<Welcome onAddFolder={onAddFolder} />);

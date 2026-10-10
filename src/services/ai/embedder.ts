@@ -11,6 +11,7 @@ import {
   isEmbeddingProviderError,
   shutdownPool,
 } from "@/services/embed-worker-pool";
+import { invalidateVectorSearch } from "@/services/search-revision";
 import { getSetting } from "@/services/settings-manager";
 import { trackChildProcess } from "@/services/tracked-child-processes";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
@@ -31,6 +32,7 @@ import {
   getAiControlState,
   getWrittenPhotoIds,
   getWrittenPhotoIdsForRun,
+  isAiIndexResetting,
   isCurrentEmbeddingRun,
   isEmbedding,
   isRunWritable,
@@ -361,9 +363,9 @@ export async function embedAllPhotos(
   onProgress?: EmbedProgressCallback
 ): Promise<number> {
   // Atomically guard against concurrent calls
-  if (getAiControlState() !== "idle" || isEmbedding) {
+  if (getAiControlState() !== "idle" || isEmbedding || isAiIndexResetting) {
     console.warn(
-      `[AI] embedAllPhotos skipped because controlState=${getAiControlState()}`
+      `[AI] embedAllPhotos skipped because controlState=${getAiControlState()}, indexResetting=${isAiIndexResetting}`
     );
     return 0;
   }
@@ -487,6 +489,8 @@ export async function embedAllPhotos(
       return 0;
     }
 
+    await persistActiveVectorFingerprint("fresh-build", "building");
+
     // Repair: detect orphaned isAiProcessed flags from previous worker crashes.
     const processedRow = db
       .select({ count: sql<number>`count(*)` })
@@ -598,6 +602,10 @@ export async function embedAllPhotos(
     const successfulIds: number[] = [];
 
     if (total === 0) {
+      const indexReady = await ensureVectorIndex();
+      if (indexReady && isRunWritable(runId) && !shouldStopRun()) {
+        await persistActiveVectorFingerprint("fresh-build");
+      }
       setCurrentProgress({
         processed: totalPhotos > 0 ? processedCount : 0,
         total: totalPhotos > 0 ? processedCount : 0,
@@ -645,6 +653,7 @@ export async function embedAllPhotos(
       const batchIds = successResults.map((r) => r.id);
 
       try {
+        invalidateVectorSearch();
         await photoTable.delete(buildPhotoIdFilter(batchIds));
       } catch {
         /* first write 鈥?table may be empty */
@@ -657,6 +666,7 @@ export async function embedAllPhotos(
       }));
       const writtenIds = new Set<number>();
       try {
+        invalidateVectorSearch();
         await photoTable.add(records);
         for (const id of batchIds) {
           writtenIds.add(id);
@@ -667,6 +677,7 @@ export async function embedAllPhotos(
         );
         for (const record of records) {
           try {
+            invalidateVectorSearch();
             await photoTable.add([record]);
             writtenIds.add(record.photo_id);
           } catch (individualErr: unknown) {
@@ -812,6 +823,7 @@ export async function embedAllPhotos(
 
         // 1. Batch delete old vectors
         try {
+          invalidateVectorSearch();
           await photoTable.delete(buildPhotoIdFilter(batchIds));
         } catch {
           /* first write — table may be empty */
@@ -824,6 +836,7 @@ export async function embedAllPhotos(
           created_at: Date.now(),
         }));
         try {
+          invalidateVectorSearch();
           await photoTable.add(records);
         } catch (lanceErr: unknown) {
           console.warn(
@@ -831,6 +844,7 @@ export async function embedAllPhotos(
           );
           for (const record of records) {
             try {
+              invalidateVectorSearch();
               await photoTable.add([record]);
             } catch {
               /* skip */

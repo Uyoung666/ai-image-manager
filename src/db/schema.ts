@@ -9,6 +9,12 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+/** Transactional revision of fields used by search, including external writes. */
+export const searchDataRevision = sqliteTable("search_data_revision", {
+  id: integer("id").primaryKey(),
+  revision: integer("revision").notNull().default(0),
+});
+
 export const folders = sqliteTable(
   "folders",
   {

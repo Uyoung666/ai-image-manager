@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { AiIndexRebuildNotice } from "@/components/AiIndexRebuildNotice";
 import { filterSettingsNavigationItems } from "@/components/settings/SettingsSidebar";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SmoothCaret } from "@/components/ui/smooth-input";
@@ -369,7 +370,17 @@ export function SpotlightSearch() {
               ESC
             </kbd>
           </div>
-          {query.trim() &&
+          {aiStatus?.rebuildRequired && (
+            <div className="min-w-0 shrink-0 border-border border-b p-3">
+              <AiIndexRebuildNotice
+                onOpenSettings={() =>
+                  handleSelect(() => navigate({ to: "/settings/ai-index" }))
+                }
+              />
+            </div>
+          )}
+          {!aiStatus?.rebuildRequired &&
+            query.trim() &&
             aiStatus?.coverageState &&
             aiStatus.coverageState !== "ready" && (
               <div className="border-border border-b px-4 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">

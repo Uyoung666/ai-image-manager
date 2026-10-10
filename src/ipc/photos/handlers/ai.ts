@@ -1,7 +1,10 @@
 import { os } from "@orpc/server";
 import { eq } from "drizzle-orm";
+import { BrowserWindow } from "electron";
+import { z } from "zod";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
+import { isAiIndexResetting, setIsAiIndexResetting } from "@/services/ai/state";
 import {
   activeEmbeddingRunId,
   aiControlState,
@@ -25,11 +28,10 @@ import {
 } from "@/services/ai-embedder";
 
 export const startAiIndexing = os.handler(() => {
-  if (aiControlState !== "idle") {
+  if (aiControlState !== "idle" || isAiIndexResetting) {
     return { busy: true, started: false, state: aiControlState };
   }
   embedAllPhotos((aiProgress) => {
-    const { BrowserWindow } = require("electron");
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send("ai-progress", aiProgress);
     }
@@ -44,11 +46,17 @@ export const startAiIndexing = os.handler(() => {
 });
 
 export const stopAiIndexing = os.handler(() => {
+  if (isAiIndexResetting) {
+    return { busy: true, stopped: false };
+  }
   stopEmbedding();
   return { stopped: true };
 });
 
 export const cancelAiIndexing = os.handler(async () => {
+  if (isAiIndexResetting) {
+    return { busy: true, cancelled: false };
+  }
   const runId = activeEmbeddingRunId;
   const stateBeforeCancel = aiControlState;
   cancelEmbedding();
@@ -76,17 +84,19 @@ export const cancelAiIndexing = os.handler(async () => {
 });
 
 export const pauseAiIndexing = os.handler(() => {
+  if (isAiIndexResetting) {
+    return { busy: true, paused: false };
+  }
   pauseEmbedding();
   return { paused: true };
 });
 
 export const resumeAiIndexing = os.handler(() => {
-  if (!resumeEmbedding()) {
+  if (isAiIndexResetting || !resumeEmbedding()) {
     return { resumed: false, state: aiControlState };
   }
   // Fire-and-forget: restart embedding
   embedAllPhotos((aiProgress) => {
-    const { BrowserWindow } = require("electron");
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send("ai-progress", aiProgress);
     }
@@ -104,9 +114,9 @@ export const getAiProgress = os.handler(() => {
   return getEmbeddingProgress();
 });
 
-export const getAiStatus = os.handler(() => {
-  return getAiReadiness();
-});
+export const getAiStatus = os
+  .input(z.object({ loadModel: z.boolean().optional() }))
+  .handler(({ input }) => getAiReadiness(input));
 
 export const getAiHealth = os.handler(() => {
   return checkAiHealth();
@@ -118,36 +128,47 @@ export const getAiHealth = os.handler(() => {
  * 调用方应随后调用 startAiIndexing 以自动重新索引。
  */
 export const resetAiIndex = os.handler(async () => {
-  if (aiControlState !== "idle" || isAutoTaggingActive()) {
+  if (
+    aiControlState !== "idle" ||
+    isAutoTaggingActive() ||
+    isAiIndexResetting
+  ) {
     return {
       busy: true,
       success: false,
     };
   }
-  const rebuildResult = await rebuildVectorDB();
-  if (!rebuildResult.success) {
-    return {
-      success: false,
-      error: rebuildResult.error ?? "Failed to rebuild vector database",
-    };
+  // Reserve the store before awaiting cleanup, including against background imports.
+  setIsAiIndexResetting(true);
+  try {
+    const rebuildResult = await rebuildVectorDB();
+    if (!rebuildResult.success) {
+      return {
+        success: false,
+        error: rebuildResult.error ?? "Failed to rebuild vector database",
+      };
+    }
+
+    const resetCount = resetAllAiProcessedFlags();
+    setWasAutoRepaired(true);
+    console.log(
+      `[AI] Index reset: vector DB rebuilt, ${resetCount} isAiProcessedFlags cleared`
+    );
+    return { success: true };
+  } finally {
+    setIsAiIndexResetting(false);
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("ai-status-changed");
+    }
   }
-
-  const resetCount = resetAllAiProcessedFlags();
-  setWasAutoRepaired(true);
-
-  const { BrowserWindow } = require("electron");
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send("ai-status-changed");
-  }
-
-  console.log(
-    `[AI] Index reset: vector DB rebuilt, ${resetCount} isAiProcessedFlags cleared`
-  );
-  return { success: true };
 });
 
 export const batchGenerateTags = os.handler(async () => {
-  if (aiControlState !== "idle" || isAutoTaggingActive()) {
+  if (
+    aiControlState !== "idle" ||
+    isAutoTaggingActive() ||
+    isAiIndexResetting
+  ) {
     return { busy: true, skipped: 0, tagged: 0, total: 0 };
   }
   const db = getDatabase();
@@ -162,7 +183,6 @@ export const batchGenerateTags = os.handler(async () => {
     return { tagged: 0, skipped: 0, total: 0 };
   }
 
-  const { BrowserWindow } = require("electron");
   const broadcastProgress = () => {
     const progress = getEmbeddingProgress();
     for (const win of BrowserWindow.getAllWindows()) {

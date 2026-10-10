@@ -31,6 +31,72 @@ beforeEach(() => {
 });
 
 describe("collection sequence refresh", () => {
+  it("keeps confirmed ownership and detail caches when the window regains focus", async () => {
+    list.mockResolvedValue(sequences);
+    get.mockResolvedValue({ id: 10, members: photos.slice(0, 2) });
+    const { result } = renderHook(() =>
+      useCollectionSequences({ ...options, photos })
+    );
+    await waitFor(() => expect(result.current.sequencesConfirmed).toBe(true));
+    await act(async () => result.current.openDetails(10));
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(result.current.sequences).toEqual(sequences);
+    expect(result.current.sequencesRefreshing).toBe(false);
+    expect(list).toHaveBeenCalledTimes(1);
+    await act(async () => result.current.openPlayback(10));
+    expect(get).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { channel: "sequences-changed", revision: 1 },
+        })
+      );
+    });
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.sequencesRefreshing).toBe(false));
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { channel: "sequences-changed", revision: 1 },
+        })
+      );
+    });
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows an in-flight expansion to complete after switching back to the window", async () => {
+    list.mockResolvedValue(sequences);
+    let release!: (value: { id: number; members: Photo[] }) => void;
+    get.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        })
+    );
+    const { result } = renderHook(() =>
+      useCollectionSequences({ ...options, photos })
+    );
+    await waitFor(() => expect(result.current.sequencesConfirmed).toBe(true));
+    let expanding!: Promise<void>;
+    act(() => {
+      expanding = result.current.toggleExpand(10);
+    });
+    expect(result.current.expandingSequenceId).toBe(10);
+    await act(async () => {
+      window.dispatchEvent(new Event("blur"));
+      window.dispatchEvent(new Event("focus"));
+      release({ id: 10, members: photos.slice(0, 2) });
+      await expanding;
+    });
+    expect(result.current.expandedSequence?.id).toBe(10);
+    expect(result.current.expandingSequenceId).toBeNull();
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves a known favorite flag when the collection omits it after navigation", async () => {
     list.mockResolvedValue(
       sequences.map((sequence) => ({

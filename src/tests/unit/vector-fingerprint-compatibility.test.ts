@@ -14,6 +14,7 @@ import {
   isVectorCompatibilitySearchable,
   readStoredVectorFingerprint,
   resolveRuntimeVectorCompatibility,
+  SIGLIP_LEGACY_FINGERPRINT,
   type StoredVectorFingerprint,
   shouldPublishVectorFingerprint,
   type VectorCompatibilityDecisionInput,
@@ -95,7 +96,7 @@ describe("vector fingerprint compatibility decisions", () => {
       input: { marker: validMarker() },
     },
     {
-      expected: "legacy-compatible",
+      expected: "missing-fingerprint",
       input: {
         legacyArtifactsVerified: true,
         marker: { state: "missing" } as const,
@@ -153,17 +154,63 @@ describe("vector fingerprint compatibility decisions", () => {
     );
   });
 
-  it("adopts a verified legacy store without requesting a rebuild", () => {
+  it("rejects verified but unmarked legacy vectors for bicubic preprocessing", () => {
     const decision = decide({
       legacyArtifactsVerified: true,
       marker: { state: "missing" },
     });
 
     expect(decision).toEqual({
-      status: "legacy-compatible",
-      adoptLegacy: true,
+      status: "missing-fingerprint",
+      adoptLegacy: false,
     });
+    expect(isVectorCompatibilitySearchable(decision.status)).toBe(false);
+  });
+
+  it("preserves adoption only for the exact legacy preprocessing fingerprint", () => {
+    expect(
+      decide({
+        active: { ...activeIdentity(), fingerprint: SIGLIP_LEGACY_FINGERPRINT },
+        legacyArtifactsVerified: true,
+      })
+    ).toEqual({ status: "legacy-compatible", adoptLegacy: true });
+  });
+
+  it("allows a matching interrupted build to resume without reinterpreting old vectors", () => {
+    const decision = decide({
+      marker: validMarker({ buildState: "building" }),
+    });
+    expect(decision).toEqual({ status: "matching", adoptLegacy: false });
     expect(isVectorCompatibilitySearchable(decision.status)).toBe(true);
+  });
+
+  it("does not treat an interrupted build from another fingerprint as resumable", () => {
+    const decision = decide({
+      marker: validMarker({
+        buildState: "building",
+        fingerprint: "b".repeat(64),
+      }),
+    });
+    expect(decision).toEqual({
+      status: "fingerprint-mismatch",
+      adoptLegacy: false,
+    });
+    expect(isVectorCompatibilitySearchable(decision.status)).toBe(false);
+  });
+
+  it("preserves a completed matching build as searchable", () => {
+    const decision = decide({ marker: validMarker({ buildState: "ready" }) });
+    expect(decision.status).toBe("matching");
+    expect(isVectorCompatibilitySearchable(decision.status)).toBe(true);
+  });
+
+  it("preserves the identity of an empty interrupted build", () => {
+    expect(
+      decide({ marker: validMarker({ buildState: "building" }), rowCount: 0 })
+    ).toEqual({
+      status: "matching",
+      adoptLegacy: false,
+    });
   });
 
   it.each([
@@ -245,6 +292,18 @@ describe("stored vector fingerprint marker inspection", () => {
       value: stored,
     });
     expect(readStoredVectorFingerprint(dataPath)).toEqual(stored);
+  });
+
+  it("rejects an invalid build state", () => {
+    const dataPath = createMarkerDirectory();
+    fs.writeFileSync(
+      getVectorFingerprintPath(dataPath),
+      JSON.stringify({ ...storedFingerprint(), buildState: "unknown" }),
+      "utf-8"
+    );
+    expect(inspectStoredVectorFingerprint(dataPath)).toEqual({
+      state: "invalid",
+    });
   });
 });
 

@@ -1394,6 +1394,27 @@ i18n.use(initReactI18next).init({
         aiMirrorSettingsHint: "或在下方「AI 镜像设置」中配置",
         aiRetry: "重试",
         aiStartIndex: "开始 AI 索引",
+        settingsAiIndex: "AI 索引",
+        settingsAiIndexDescription:
+          "查看 AI 索引状态、开始或继续处理图库。旧索引不兼容时，可在这里重建以恢复 AI 搜索。",
+        dashboardManageAiIndex: "AI 索引设置",
+        dashboardManageAiIndexHint: "查看索引状态、继续索引或重建不兼容的索引",
+        aiIndexBuildIncomplete: "AI 索引尚未完成，可继续构建。",
+        aiRebuildIndex: "重建 AI 索引",
+        aiIndexRebuildRequired: "AI 索引需要重建",
+        aiIndexRebuildDescription:
+          "当前版本的图片分析方式与现有 AI 索引不兼容。请点击“重建 AI 索引”，等待重新分析完成，即可恢复语义搜索和以图搜图。原图、手动标签和收藏会保留，无需重新导入照片。",
+        aiIndexRebuildNoticeDescription:
+          "当前版本的图片分析方式与现有 AI 索引不兼容，语义搜索和以图搜图已暂停。请前往“设置 → AI 索引”，点击“重建 AI 索引”，完成后即可恢复。原图、手动标签和收藏会保留。",
+        aiIndexRebuildFallback: "文件名、标签和人名搜索仍可使用。",
+        aiIndexOpenSettings: "前往 AI 索引设置",
+        aiIndexRebuildSearchPlaceholder: "AI 索引需要重建，请前往 AI 索引设置",
+        aiIndexRebuildFailed: "AI 索引重建未能启动。",
+        aiIndexRebuildPreparing:
+          "正在准备索引任务，请稍候。开始后将显示处理进度。",
+        aiIndexRebuildRetryHint:
+          "请点击下方“重建 AI 索引”重试，等待索引完成后即可恢复 AI 搜索。无需重新导入照片。",
+        aiIndexBusy: "AI 任务正在运行，请等待任务结束后重建。",
         aiIndexComplete: "AI 索引完成 ({{processed}}/{{total}})",
         aiIndexNewPhotos: "索引新照片",
         aiLoadingEmbedding: "加载 SigLIP 模型中... {{percent}}%",
@@ -1496,8 +1517,10 @@ i18n.use(initReactI18next).init({
           "AI 索引中... ({{processed}}/{{total}}) — 完成后即可搜索",
         aiModelLoading: "AI 模型加载中...",
         aiModelError: "AI 模型加载失败，搜索不可用",
-        vectorDbNotReady: "向量数据库未就绪...",
+        vectorDbNotReady: "AI 搜索正在准备中...",
         aiNoIndexHint: "尚无 AI 索引，请先导入并索引照片",
+        searchPartialResults: "当前为部分结果，可重试获取完整结果。",
+        searchIncompleteTitle: "搜索尚未完成",
         semanticSearchPartial:
           "AI 已索引 {{indexed}}/{{total}} 张照片，当前结果可能不完整；索引完成后将自动刷新。",
         semanticSearchUnavailable:

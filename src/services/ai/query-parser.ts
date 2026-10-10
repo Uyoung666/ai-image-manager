@@ -40,8 +40,10 @@ const CATEGORY_TO_SLOT: Record<DictCategory, keyof ParsedQuery> = {
   object: "subject",
 };
 
-const CJK_RE = /[一-鿿]/;
+const CJK_FRAGMENT_RE = /[一-鿿]+/g;
 const WHITESPACE_RE = /\s+/g;
+const MATCHED_TERM_BOUNDARY = "\0";
+const MATCHED_COLOR_BOUNDARY = "\u0001";
 
 function getMergedDict() {
   try {
@@ -51,13 +53,29 @@ function getMergedDict() {
   }
 }
 
-function getSortedDictKeys() {
-  return Object.keys(getMergedDict()).sort((a, b) => b.length - a.length);
+function getCharDictionary() {
+  try {
+    return getDictionaryManager().getCharDecompose();
+  } catch {
+    return CHAR_DECOMPOSE;
+  }
+}
+
+function getDisabledEntries(): ReadonlySet<string> {
+  try {
+    return getDictionaryManager().getDisabledEntries();
+  } catch {
+    return new Set();
+  }
 }
 
 export function parseChineseQuery(query: string): ParsedQuery {
   const dict = getMergedDict();
-  const sortedKeys = getSortedDictKeys();
+  const chars = getCharDictionary();
+  const disabled = getDisabledEntries();
+  const sortedKeys = Object.keys(dict)
+    .filter((key) => key.length > 1)
+    .sort((a, b) => b.length - a.length);
 
   const parsed: ParsedQuery = {
     subject: [],
@@ -78,35 +96,99 @@ export function parseChineseQuery(query: string): ParsedQuery {
       const entry = dict[key];
       const slot = CATEGORY_TO_SLOT[entry.category];
       parsed[slot].push(key);
-      remaining = remaining.replaceAll(key, " ");
+      remaining = remaining.replaceAll(
+        key,
+        entry.category === "color"
+          ? MATCHED_COLOR_BOUNDARY
+          : MATCHED_TERM_BOUNDARY
+      );
     }
   }
 
-  // Character-level decomposition for remaining CJK characters
-  const remainingChars = remaining.replace(WHITESPACE_RE, "");
-  if (remainingChars.length > 0) {
-    for (const char of remainingChars) {
-      if (CJK_RE.test(char) && CHAR_DECOMPOSE[char]) {
-        const entry = CHAR_DECOMPOSE[char];
-        const slot = CATEGORY_TO_SLOT[entry.category as DictCategory];
-        parsed[slot].push(char);
-      } else if (CJK_RE.test(char)) {
-        parsed.unknown.push(char);
+  // Unknown compounds are not bags of visual characters. Known word matches
+  // keep a distinct boundary so they cannot turn 老相机 into elderly + camera.
+  for (const match of remaining.matchAll(CJK_FRAGMENT_RE)) {
+    const fragment = match[0];
+    const leftBoundary = remaining[match.index - 1];
+    const rightBoundary = remaining[match.index + fragment.length];
+    const leftKnown = isKnownTermBoundary(leftBoundary);
+    const rightKnown = isKnownTermBoundary(rightBoundary);
+    const terms = [...fragment.matchAll(CJK_CONTENT_TERM_RE)];
+    if (terms.length === 0) {
+      continue;
+    }
+    const characters = terms.map((term) => {
+      const directlyLeft = term.index === 0 && leftKnown;
+      const directlyRight =
+        term.index + term[0].length === fragment.length && rightKnown;
+      return getBoundedCharacters(
+        term[0],
+        dict,
+        chars,
+        disabled,
+        directlyLeft || directlyRight,
+        directlyLeft && leftBoundary === MATCHED_COLOR_BOUNDARY
+      );
+    });
+    // A function word inside an unknown compound is not evidence of a word
+    // boundary (e.g. 也门 or 沙有发). Accept only completely recognized phrases.
+    if (
+      (CJK_GRAMMAR_BOUNDARIES.has(fragment[0]) && !leftKnown) ||
+      (CJK_GRAMMAR_BOUNDARIES.has(fragment.at(-1) ?? "") && !rightKnown) ||
+      CONSECUTIVE_GRAMMAR_BOUNDARY_RE.test(fragment) ||
+      characters.some((words) => words === null)
+    ) {
+      parsed.unknown.push(...fragment);
+      continue;
+    }
+    for (const char of characters.flat()) {
+      if (char) {
+        parsed[CATEGORY_TO_SLOT[chars[char].category]].push(char);
       }
-      // Non-CJK characters (English, numbers) are ignored here
     }
   }
 
   return parsed;
 }
 
-function translateTerm(term: string): string {
+function isKnownTermBoundary(char: string | undefined): boolean {
+  return char === MATCHED_TERM_BOUNDARY || char === MATCHED_COLOR_BOUNDARY;
+}
+
+function getBoundedCharacters(
+  term: string,
+  dict: ReturnType<typeof getMergedDict>,
+  chars: ReturnType<typeof getCharDictionary>,
+  disabled: ReadonlySet<string>,
+  adjacentKnownWord: boolean,
+  followsExplicitColor: boolean
+): string[] | null {
+  if (disabled.has(term)) {
+    return null;
+  }
+  if (term.length === 1 && chars[term]) {
+    // A complete color word supplies an explicit modifier boundary (红色猫).
+    // Bare compounds (红猫/红包) never get decomposed below.
+    const explicitColorNoun =
+      followsExplicitColor &&
+      dict[term] &&
+      ["subject", "object", "scene"].includes(dict[term].category);
+    return !adjacentKnownWord ||
+      explicitColorNoun ||
+      chars[term].category === "color"
+      ? [term]
+      : null;
+  }
+  return null;
+}
+
+export function translateQueryTerm(term: string): string {
   const dict = getMergedDict();
   const dictEntry = dict[term];
   if (dictEntry) {
     return dictEntry.en;
   }
-  const charEntry = CHAR_DECOMPOSE[term];
+  const charEntry = getCharDictionary()[term];
   if (charEntry) {
     return charEntry.en;
   }
@@ -114,7 +196,7 @@ function translateTerm(term: string): string {
 }
 
 function translateSlot(terms: string[]): string {
-  const translated = terms.map(translateTerm).filter(Boolean);
+  const translated = terms.map(translateQueryTerm).filter(Boolean);
   // Deduplicate words across translations
   const seen = new Set<string>();
   const unique: string[] = [];
@@ -219,6 +301,12 @@ const CJK_FUNCTION_WORDS = new Set([
   "那",
   "也",
 ]);
+// Coverage stopwords are not word boundaries: e.g. 也 is part of 也门.
+// Even these grammar characters can belong to a word, so adjacent separators
+// cannot prove independent terms (猫在和田 must not produce a field prompt).
+const CJK_GRAMMAR_BOUNDARIES = new Set(["的", "和", "与", "或", "及", "在"]);
+const CJK_CONTENT_TERM_RE = /[^的和与或及在]+/g;
+const CONSECUTIVE_GRAMMAR_BOUNDARY_RE = /[的和与或及在]{2,}/;
 
 // 计算中文查询中被词典覆盖的字符比例（0.0~1.0）。
 // 覆盖率仅用于诊断与降级说明，不再用于插值调整 SigLIP 阈值。
@@ -233,13 +321,11 @@ export function getQueryCoverage(query: string, parsed: ParsedQuery): number {
     return 1.0; // 只有虚词，视为完全覆盖
   }
 
-  const unknownChars = new Set(parsed.unknown);
-  let uncoveredCount = 0;
-  for (const char of meaningfulChars) {
-    if (unknownChars.has(char)) {
-      uncoveredCount++;
-    }
-  }
+  // Unknown occurrences are already preserved by the parser. A character that
+  // also appears in a known word must not make that known occurrence unknown.
+  const uncoveredCount = parsed.unknown.filter(
+    (char) => !CJK_FUNCTION_WORDS.has(char)
+  ).length;
   return Math.max(0, 1 - uncoveredCount / meaningfulChars.length);
 }
 

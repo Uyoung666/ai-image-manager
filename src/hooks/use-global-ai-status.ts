@@ -516,6 +516,10 @@ function useGlobalAiStatusState(): GlobalAiProgress {
           lastAiPhaseRef.current = (e.data as AiProgressPayload).phase;
           setAi(e.data as AiProgressPayload);
           break;
+        case "ai-status-changed":
+          queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });
+          break;
         case "ai-embedding-done":
           if (lastAiPhaseRef.current === "error") {
             toast.error(t("toastAiIndexFailed"));

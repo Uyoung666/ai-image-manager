@@ -107,3 +107,40 @@ it("invalidates dashboard statistics when AI finishes, even without a dashboard 
     queryKey: ["dashboard", "stats"],
   });
 });
+
+it("refreshes an incompatible index immediately after an explicit rebuild outside the home page", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+  });
+  client.setQueryData(["aiStatus"], { rebuildRequired: true });
+  const fetchStatus = vi.fn().mockResolvedValue({ rebuildRequired: false });
+  mocks.invalidate.mockImplementation((filters) =>
+    client.invalidateQueries(filters)
+  );
+  function IndexState() {
+    const { data } = useQuery({ queryKey: ["aiStatus"], queryFn: fetchStatus });
+    return (
+      <span>{data?.rebuildRequired ? "needs-rebuild" : "compatible"}</span>
+    );
+  }
+  const view = render(
+    <QueryClientProvider client={client}>
+      <GlobalAiStatusProvider>
+        <IndexState />
+      </GlobalAiStatusProvider>
+    </QueryClientProvider>
+  );
+  expect(screen.getByText("needs-rebuild")).toBeInTheDocument();
+  act(() => {
+    window.dispatchEvent(
+      new MessageEvent("message", { data: { channel: "ai-status-changed" } })
+    );
+  });
+  expect(await screen.findByText("compatible")).toBeInTheDocument();
+  expect(fetchStatus).toHaveBeenCalledOnce();
+  expect(mocks.invalidate).toHaveBeenCalledWith({
+    queryKey: ["dashboard", "stats"],
+  });
+  view.unmount();
+  client.clear();
+});

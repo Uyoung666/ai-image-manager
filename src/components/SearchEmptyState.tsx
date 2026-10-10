@@ -29,8 +29,11 @@ interface SearchEmptyStateProps {
   onRetry?: () => void;
   parsedTimeFilter?: ParsedTimeFilter | null;
   query: string;
+  rebuildRequired?: boolean;
   searchError?: "image" | "search" | null;
+  searchIncomplete?: boolean;
   searchMode: SearchMode | null;
+  semanticRequired?: boolean;
   semanticState?: "ready" | "partial" | "unavailable" | "error";
   totalPhotos?: number;
 }
@@ -49,9 +52,37 @@ export function SearchEmptyState({
   indexedPhotos = 0,
   totalPhotos = 0,
   searchError,
+  searchIncomplete = false,
+  semanticRequired = true,
+  rebuildRequired = false,
 }: SearchEmptyStateProps) {
   const { t } = useTranslation();
   const aiState = semanticState ?? (hasAiVectors ? "ready" : "unavailable");
+
+  if (
+    rebuildRequired &&
+    (searchMode === "image" || (searchMode === "text" && semanticRequired))
+  ) {
+    return (
+      <EmptyStateCard
+        actions={[
+          ...(onGoToAiSettings
+            ? [
+                {
+                  label: t("aiIndexOpenSettings"),
+                  onClick: onGoToAiSettings,
+                  primary: true,
+                },
+              ]
+            : []),
+          { label: t("emptyBrowseAll"), onClick: onClearSearch },
+        ]}
+        description={t("aiIndexRebuildNoticeDescription")}
+        icon={<Brain className="h-5 w-5" />}
+        title={t("aiIndexRebuildRequired")}
+      />
+    );
+  }
 
   if (searchError) {
     const isImageSearch = searchError === "image";
@@ -78,7 +109,28 @@ export function SearchEmptyState({
     );
   }
 
-  if (searchMode === "text" && query.trim() && aiState !== "ready") {
+  if (searchIncomplete) {
+    return (
+      <EmptyStateCard
+        actions={[
+          ...(onRetry
+            ? [{ label: t("retry"), onClick: onRetry, primary: true }]
+            : []),
+          { label: t("emptyBrowseAll"), onClick: onClearSearch },
+        ]}
+        description={t("searchPartialResults")}
+        icon={<Search className="h-5 w-5" />}
+        title={t("searchIncompleteTitle")}
+      />
+    );
+  }
+
+  if (
+    searchMode === "text" &&
+    semanticRequired &&
+    query.trim() &&
+    aiState !== "ready"
+  ) {
     const isPartial = aiState === "partial";
     const isError = aiState === "error";
     return (

@@ -99,6 +99,7 @@ const timings = {
   embeddingMs: 0,
   importMs: 0,
 };
+let ownsDataDir = false;
 
 function listImages(): string[] {
   return fs
@@ -108,8 +109,13 @@ function listImages(): string[] {
 }
 
 function cleanupDataDir(): void {
-  if (fs.existsSync(dataDir)) {
-    fs.rmSync(dataDir, { force: true, recursive: true });
+  if (ownsDataDir && fs.existsSync(dataDir)) {
+    fs.rmSync(dataDir, {
+      force: true,
+      recursive: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 }
 
@@ -128,6 +134,7 @@ describe.skipIf(!datasetDir)(
         );
       }
       fs.mkdirSync(dataDir, { recursive: true });
+      ownsDataDir = true;
       initDatabase();
       const { initThumbnailer } = await import("@/services/thumbnailer");
       initThumbnailer();
@@ -136,6 +143,8 @@ describe.skipIf(!datasetDir)(
     afterAll(async () => {
       const { shutdownPool } = await import("@/services/embed-worker-pool");
       shutdownPool();
+      const { closeVectorDB } = await import("@/services/ai/vector-db");
+      await closeVectorDB();
       closeDatabase();
       cleanupDataDir();
     });

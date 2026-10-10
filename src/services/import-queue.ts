@@ -4,7 +4,7 @@ import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { invalidateIndexStatsCache } from "@/ipc/photos/handlers/stats";
-import { getAiControlState } from "@/services/ai/state";
+import { getAiControlState, isAiIndexResetting } from "@/services/ai/state";
 import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import {
@@ -326,7 +326,7 @@ function runPendingAiEmbedding(): void {
 
   // A manual/repair embedding run may already own the worker. Keep this
   // import-triggered request pending and run it after that owner releases it.
-  if (getAiControlState() !== "idle") {
+  if (getAiControlState() !== "idle" || isAiIndexResetting) {
     setTimeout(runPendingAiEmbedding, 1000);
     return;
   }

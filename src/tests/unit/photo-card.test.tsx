@@ -25,6 +25,7 @@ describe("PhotoCard", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("does not render image element without thumbnailPath", () => {
@@ -157,6 +158,154 @@ describe("PhotoCard", () => {
 
     expect(img).toHaveAttribute("data-load-state", "loaded");
     expect(img).toHaveClass("opacity-100");
+    expect(img).toHaveClass("transition-opacity");
+  });
+
+  it("reveals an already cached thumbnail before waiting for another load event", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
+      true
+    );
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      512
+    );
+
+    render(
+      <PhotoCard
+        {...baseProps}
+        thumbnailPath="C:/AppData/thumbnails/abc123.jpg"
+      />
+    );
+
+    const img = screen.getByRole("img", { name: "test-photo.jpg" });
+    expect(img).toHaveAttribute("data-load-state", "loaded");
+    expect(img).toHaveClass("opacity-100");
+    expect(img).toHaveClass("transition-none");
+    expect(img).not.toHaveClass("transition-opacity");
+    fireEvent.load(img);
+    expect(img).toHaveClass("transition-none");
+  });
+
+  it("reveals a cached thumbnail when its virtualized image is mounted again", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
+      true
+    );
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      512
+    );
+    const props = {
+      ...baseProps,
+      thumbnailPath: "C:/AppData/thumbnails/abc123.jpg",
+    };
+    const { rerender } = render(<PhotoCard {...props} renderImage={false} />);
+
+    rerender(<PhotoCard {...props} renderImage />);
+
+    const img = screen.getByRole("img", { name: "test-photo.jpg" });
+    expect(img).toHaveAttribute("data-load-state", "loaded");
+    expect(img).toHaveClass("opacity-100");
+    expect(img).toHaveClass("transition-none");
+  });
+
+  it("waits for a cold thumbnail after its previously loaded image is remounted", () => {
+    const complete = vi
+      .spyOn(HTMLImageElement.prototype, "complete", "get")
+      .mockReturnValue(true);
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      512
+    );
+    const props = {
+      ...baseProps,
+      thumbnailPath: "C:/AppData/thumbnails/abc123.jpg",
+    };
+    const { rerender } = render(<PhotoCard {...props} />);
+    expect(screen.getByRole("img", { name: "test-photo.jpg" })).toHaveClass(
+      "transition-none"
+    );
+
+    complete.mockReturnValue(false);
+    rerender(<PhotoCard {...props} renderImage={false} />);
+    rerender(<PhotoCard {...props} renderImage />);
+
+    const img = screen.getByRole("img", { name: "test-photo.jpg" });
+    expect(img).toHaveAttribute("data-load-state", "loading");
+    expect(img).toHaveClass("opacity-0");
+    fireEvent.load(img);
+    expect(img).toHaveClass("opacity-100");
+    expect(img).toHaveClass("transition-opacity");
+  });
+
+  it("resets the reveal when a responsive thumbnail source changes", () => {
+    const complete = vi
+      .spyOn(HTMLImageElement.prototype, "complete", "get")
+      .mockReturnValue(true);
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      512
+    );
+    const props = {
+      ...baseProps,
+      thumbnailPath: "C:/AppData/thumbnails/abc123.jpg",
+      thumbnailSmallPath: "C:/AppData/thumbnails/small123.webp",
+    };
+    const { rerender } = render(<PhotoCard {...props} />);
+    const img = screen.getByRole("img", { name: "test-photo.jpg" });
+    expect(img).toHaveClass("transition-none");
+
+    complete.mockReturnValue(false);
+    rerender(
+      <PhotoCard
+        {...props}
+        thumbnailSmallPath="C:/AppData/thumbnails/small456.webp"
+      />
+    );
+
+    expect(img).toHaveAttribute("data-load-state", "loading");
+    expect(img).toHaveClass("opacity-0");
+    fireEvent.load(img);
+    expect(img).toHaveClass("opacity-100");
+    expect(img).toHaveClass("transition-opacity");
+  });
+
+  it("waits for the replacement thumbnail when its URL changes", () => {
+    const { rerender } = render(
+      <PhotoCard
+        {...baseProps}
+        thumbnailPath="C:/AppData/thumbnails/abc123.jpg"
+      />
+    );
+    fireEvent.load(screen.getByRole("img", { name: "test-photo.jpg" }));
+
+    rerender(
+      <PhotoCard
+        {...baseProps}
+        thumbnailPath="C:/AppData/thumbnails/abc456.jpg"
+      />
+    );
+
+    const img = screen.getByRole("img", { name: "test-photo.jpg" });
+    expect(img).toHaveAttribute("data-load-state", "loading");
+    expect(img).toHaveClass("opacity-0");
+    fireEvent.load(img);
+    expect(img).toHaveClass("opacity-100");
+  });
+
+  it("does not reveal a completed image whose thumbnail failed to decode", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
+      true
+    );
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      0
+    );
+
+    render(
+      <PhotoCard
+        {...baseProps}
+        thumbnailPath="C:/AppData/thumbnails/abc123.jpg"
+      />
+    );
+
+    const img = screen.getByRole("img", { name: "test-photo.jpg" });
+    expect(img).toHaveAttribute("data-load-state", "loading");
+    expect(img).toHaveClass("opacity-0");
   });
 
   it("does not render image element when renderImage is false", () => {

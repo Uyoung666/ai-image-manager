@@ -2,7 +2,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { type ElectronApplication, expect, type Page } from "@playwright/test";
+import {
+  type CDPSession,
+  type ElectronApplication,
+  expect,
+  type Page,
+} from "@playwright/test";
 import sharp from "sharp";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
@@ -34,6 +39,7 @@ declare global {
 }
 let app: ElectronApplication;
 let page: Page;
+let focusSession: CDPSession;
 let root: string;
 let profile: string;
 let env: Record<string, string>;
@@ -56,6 +62,7 @@ async function launch() {
   });
   await page.reload();
   await page.waitForFunction(() => Boolean(window.__e2eNavigate));
+  focusSession = await page.context().newCDPSession(page);
 }
 
 test.describe.configure({ mode: "serial" });
@@ -124,6 +131,17 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => {
   await app?.close();
+});
+
+test.beforeEach(async () => {
+  // Search and deep-scroll cases must not inherit another case's restoration
+  // anchors or query cache. The isolated fixture database stays unchanged.
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.__e2eNavigate));
 });
 
 async function startProbe(prepareClick = false) {
@@ -367,6 +385,97 @@ async function finishProbe(label: string, overlay: boolean) {
 }
 
 for (const size of sizes) {
+  test(`${size.width}x${size.height} preserves masonry when switching windows and restoring from desktop`, async () => {
+    // Playwright otherwise forces document.hasFocus() to stay true even when
+    // another native window is active, hiding real window-focus regressions.
+    await focusSession.send("Emulation.setFocusEmulationEnabled", {
+      enabled: false,
+    });
+    await app.evaluate(
+      ({ BrowserWindow }, requested) =>
+        BrowserWindow.getAllWindows()[0].setSize(
+          requested.width,
+          requested.height
+        ),
+      size
+    );
+    await page.evaluate(() => window.__e2eNavigate?.("/"));
+    await page.keyboard.press("Escape");
+    const input = page.locator("input.home-search-input");
+    await input.fill("");
+    await input.press("Enter");
+    await page.getByRole("button", { name: "Photos", exact: true }).click();
+    const gallery = page.locator("[data-masonry-scroll]");
+    for (const scope of ["browse", "search"]) {
+      if (scope === "search") {
+        await input.fill("ReflowFixture-*.png");
+        await input.press("Enter");
+      }
+      await expect(gallery).toBeVisible();
+      await expect
+        .poll(() => gallery.locator('[data-photo-id][role="option"]').count())
+        .toBeGreaterThan(5);
+      await gallery.evaluate((element) => {
+        element.scrollTop = 1500;
+      });
+      await page.waitForTimeout(700);
+      await startProbe();
+      const windows = await app.evaluate(async ({ BrowserWindow }) => {
+        const main = BrowserWindow.getAllWindows()[0];
+        const other = new BrowserWindow({
+          parent: main,
+          width: 240,
+          height: 180,
+        });
+        await other.loadURL("about:blank");
+        main.blur();
+        other.focus();
+        return { main: main.id, other: other.id };
+      });
+      try {
+        await expect
+          .poll(() => page.evaluate(() => document.hasFocus()))
+          .toBe(false);
+      } finally {
+        await app.evaluate(({ BrowserWindow }, ids) => {
+          BrowserWindow.fromId(ids.other)?.close();
+          BrowserWindow.fromId(ids.main)?.focus();
+        }, windows);
+      }
+      await expect
+        .poll(() => page.evaluate(() => document.hasFocus()))
+        .toBe(true);
+      await finishProbe(`${scope}-window-focus`, true);
+
+      await startProbe();
+      await app.evaluate(({ BrowserWindow }, id) => {
+        BrowserWindow.fromId(id)?.minimize();
+      }, windows.main);
+      await expect
+        .poll(() =>
+          app.evaluate(
+            ({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.isMinimized(),
+            windows.main
+          )
+        )
+        .toBe(true);
+      await app.evaluate(({ BrowserWindow }, id) => {
+        const main = BrowserWindow.fromId(id);
+        main?.restore();
+        main?.focus();
+      }, windows.main);
+      await expect
+        .poll(() => page.evaluate(() => document.hasFocus()))
+        .toBe(true);
+      await finishProbe(`${scope}-desktop-return`, true);
+    }
+    await input.fill("");
+    await input.press("Enter");
+    await focusSession.send("Emulation.setFocusEmulationEnabled", {
+      enabled: true,
+    });
+  });
+
   test(`${size.width}x${size.height} preserves deep masonry images during detail reflow`, async () => {
     await app.evaluate(
       ({ BrowserWindow }, requested) =>

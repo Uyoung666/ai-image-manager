@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  Brain,
   Cloud,
   Compass,
   HardDrive,
@@ -77,6 +78,13 @@ const NAV_ITEMS: NavItem[] = [
       "\u6570\u636e \u6027\u80fd \u7f13\u5b58 \u7f29\u7565\u56fe \u6e05\u7406 \u5b64\u7acb \u7d22\u5f15 \u65e0\u6548 \u6570\u636e\u5e93 \u6570\u636e\u76ee\u5f55 \u8fc1\u79fb cache thumbnail orphan index database directory clean storage",
     labelKey: "settingsStorage",
     to: "/settings/storage",
+  },
+  {
+    groupKey: "settingsGroupData",
+    icon: Brain,
+    keywords: "AI 索引 语义 搜索 模型 重建 index semantic search model rebuild",
+    labelKey: "settingsAiIndex",
+    to: "/settings/ai-index",
   },
   {
     groupKey: "settingsGroupData",
@@ -182,6 +190,7 @@ export function SettingsSidebar() {
               <Tooltip key={item.to}>
                 <TooltipTrigger asChild>
                   <button
+                    aria-label={label}
                     className={`flex w-full shrink-0 items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 max-[900px]:h-9 max-[900px]:w-9 max-[900px]:justify-center max-[900px]:px-0 ${
                       isActive
                         ? "bg-primary/15 text-primary"

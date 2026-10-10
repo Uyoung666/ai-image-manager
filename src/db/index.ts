@@ -44,6 +44,7 @@ import {
   pluginAssets,
   pluginInstallations,
   pluginPreferences,
+  searchDataRevision,
   tags,
 } from "./schema";
 
@@ -85,6 +86,7 @@ const schema = {
   pluginAssets,
   pluginInstallations,
   pluginPreferences,
+  searchDataRevision,
   tags,
 };
 

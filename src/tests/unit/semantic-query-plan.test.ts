@@ -20,6 +20,103 @@ afterEach(() => {
 });
 
 describe("SemanticQueryPlan", () => {
+  it.each([
+    ["嵌入式灯具", "a ceiling light", "object"],
+    ["雾中的城池", "foggy city", "scene"],
+    ["猫在瓷砖边", "a cat near patterned tiles", "composed"],
+    ["红色镶嵌符号", "a red geometric emblem", "composed"],
+    ["猫与UncataloguedBrand", "a cat near UncataloguedBrand", "composed"],
+  ] as const)("词典未完整解析时按完整主句判断意图：%s", async (query, translated, intent) => {
+    const translate = vi.fn(async () => translated);
+    const chinese = await prepareSemanticQueryPlan(query, { translate });
+    const english = await prepareSemanticQueryPlan(translated);
+    expect(chinese.intent).toBe(intent);
+    expect(chinese.intent).toBe(english.intent);
+    expect(chinese.prompts[0]).toMatchObject({
+      role: "primary",
+      text: english.prompts[0].text,
+    });
+    expect(translate).toHaveBeenCalledWith(query);
+  });
+
+  it("完整翻译失败时不凭未知复合词猜意图", async () => {
+    const plan = await prepareSemanticQueryPlan("嵌入式灯具", {
+      translate: async () => "",
+    });
+    expect(plan.intent).toBe("unknown");
+    expect(plan.translationMode).toBe("dictionary-fallback");
+    expect(plan.prompts).toEqual([]);
+  });
+
+  it.each([
+    "无人机在海边",
+    "无人驾驶汽车在城市",
+    "无人区里的雪山",
+    "没有人驾驶的无人机",
+    "海边，不要在沙滩上玩耍的狗",
+  ])("不截断无法可靠拆分的实体或从句：%s", (query) => {
+    expect(extractNegativeClauses(query)).toEqual({
+      negativeTerms: [],
+      positiveText: query,
+    });
+  });
+
+  it.each([
+    "没有人的海边",
+    "没有人物的海边",
+    "无人的海边",
+  ])("完整提取缺人条件并保留场景：%s", (query) => {
+    expect(extractNegativeClauses(query)).toEqual({
+      negativeTerms: ["人物"],
+      positiveText: "海边",
+    });
+  });
+
+  it.each([
+    "海边，不要狗和猫",
+    "海边，不含狗与猫",
+    "没有狗和猫的海边",
+  ])("将全部并列否定概念交给负向评分：%s", (query) => {
+    expect(extractNegativeClauses(query)).toEqual({
+      negativeTerms: ["狗", "猫"],
+      positiveText: "海边",
+    });
+  });
+
+  it("引号内名称不按否定命令解析", () => {
+    expect(extractNegativeClauses('"无人"在海边，不要狗和猫')).toEqual({
+      negativeTerms: ["狗", "猫"],
+      positiveText: '"无人"在海边',
+    });
+  });
+
+  it("保留被排除对象的完整词，不将有轨电车截成轨电车", () => {
+    expect(extractNegativeClauses("海边，不要有轨电车")).toEqual({
+      negativeTerms: ["有轨电车"],
+      positiveText: "海边",
+    });
+  });
+
+  it("并列否定分别翻译，正向模型输入不包含被排除的对象", async () => {
+    const translations: Record<string, string> = {
+      海边: "beach",
+      狗: "dog",
+      猫: "cat",
+    };
+    const translate = vi.fn(async (text: string) => translations[text]);
+    const plan = await prepareSemanticQueryPlan("海边，不要狗和猫", {
+      translate,
+    });
+    expect(plan.visualDescription).toBe("海边");
+    expect(plan.prompts[0].text).toBe("This is a photo of beach.");
+    expect(plan.negativePrompts).toEqual([
+      "This is a photo of dog.",
+      "This is a photo of cat.",
+    ]);
+    expect(translate).toHaveBeenCalledWith("狗");
+    expect(translate).toHaveBeenCalledWith("猫");
+  });
+
   it("英文查询不经过翻译", async () => {
     const translate = vi.fn();
     const plan = await prepareSemanticQueryPlan("three cats at sunset", {

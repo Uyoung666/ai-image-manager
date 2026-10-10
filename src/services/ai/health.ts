@@ -27,7 +27,7 @@ import {
   getTranslationState,
   type TranslationState,
 } from "./translation-worker-client";
-import { initVectorDB } from "./vector-db";
+import { initVectorDB, withVectorDbOperation } from "./vector-db";
 
 export interface AiHealthStatus {
   embeddingAdapterId?: string;
@@ -61,9 +61,7 @@ function getListSize(type: unknown): number | undefined {
   return undefined;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: health probing keeps database, model, and readiness checks together.
 export async function checkAiHealth(): Promise<AiHealthStatus> {
-  const runtime = getActiveEmbeddingRuntime();
   const status: AiHealthStatus = {
     lancedb: "error",
     lancedbDetail: "",
@@ -74,83 +72,87 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
     translationState: getTranslationState(),
     overall: "unhealthy",
   };
-  if (runtime) {
-    const active = getActiveEmbeddingRuntimeInfo();
-    status.embeddingAdapterId = active.adapterId;
-    status.embeddingFingerprint = active.fingerprint;
-    status.vectorCompatibility = resolveRuntimeVectorCompatibility(
-      active,
-      runtime,
-      runtime.vectorCompatibility
-    );
-    status.thresholdProfileId = runtime.thresholdProfileId;
-    status.thresholdCalibrationStatus = runtime.calibrationStatus;
-  }
-
-  try {
-    if (!vectordb) {
-      const vectorPath = path.join(getDataPath(), "vectors");
-      const lancedb = await import("@lancedb/lancedb");
-      setVectordb(await lancedb.connect(vectorPath));
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Keep the complete vector health snapshot under one lease.
+  await withVectorDbOperation(async () => {
+    const runtime = getActiveEmbeddingRuntime();
+    if (runtime) {
+      const active = getActiveEmbeddingRuntimeInfo();
+      status.embeddingAdapterId = active.adapterId;
+      status.embeddingFingerprint = active.fingerprint;
+      status.vectorCompatibility = resolveRuntimeVectorCompatibility(
+        active,
+        runtime,
+        runtime.vectorCompatibility
+      );
+      status.thresholdProfileId = runtime.thresholdProfileId;
+      status.thresholdCalibrationStatus = runtime.calibrationStatus;
     }
 
-    const connection = vectordb;
-    if (!connection) {
-      throw new Error("Vector database connection is unavailable");
-    }
-    const tableNames = await connection.tableNames();
-    status.lancedb = "ok";
-    status.lancedbDetail = `connected, tables: ${tableNames.join(", ") || "(none)"}`;
-
-    if (tableNames.includes("photo_embeddings")) {
-      if (!photoTable) {
-        setPhotoTable(await connection.openTable("photo_embeddings"));
+    try {
+      if (!vectordb) {
+        const vectorPath = path.join(getDataPath(), "vectors");
+        const lancedb = await import("@lancedb/lancedb");
+        setVectordb(await lancedb.connect(vectorPath));
       }
 
-      const table = photoTable;
-      if (!table) {
-        throw new Error("Photo embedding table is unavailable");
+      const connection = vectordb;
+      if (!connection) {
+        throw new Error("Vector database connection is unavailable");
       }
-      const rowCount = await table.countRows();
-      status.vectorTable = "ok";
-      status.vectorTableRows = rowCount;
+      const tableNames = await connection.tableNames();
+      status.lancedb = "ok";
+      status.lancedbDetail = `connected, tables: ${tableNames.join(", ") || "(none)"}`;
 
-      // Verify schema: vector column must be FixedSizeList
-      try {
-        const schema = await table.schema();
-        const vectorField = schema.fields.find(
-          (field) => field.name === "vector"
-        );
-        const listSize = getListSize(vectorField?.type);
-        if (listSize !== undefined && listSize > 0) {
-          status.lancedbDetail += `, schema: FixedSizeList<${listSize}>`;
-        } else {
-          status.lancedbDetail +=
-            ", schema: WARNING — vector column not FixedSizeList";
+      if (tableNames.includes("photo_embeddings")) {
+        if (!photoTable) {
+          setPhotoTable(await connection.openTable("photo_embeddings"));
         }
-      } catch {
-        status.lancedbDetail += ", schema: could not read";
-      }
 
-      try {
-        const indices = await table.listIndices();
-        const hasIndex = indices.some(
-          (idx) => idx.columns.includes("vector") || idx.name === "vector_idx"
-        );
-        status.vectorIndex = hasIndex ? "ok" : "missing";
-      } catch {
-        status.vectorIndex = "error";
+        const table = photoTable;
+        if (!table) {
+          throw new Error("Photo embedding table is unavailable");
+        }
+        const rowCount = await table.countRows();
+        status.vectorTable = "ok";
+        status.vectorTableRows = rowCount;
+
+        // Verify schema: vector column must be FixedSizeList
+        try {
+          const schema = await table.schema();
+          const vectorField = schema.fields.find(
+            (field) => field.name === "vector"
+          );
+          const listSize = getListSize(vectorField?.type);
+          if (listSize !== undefined && listSize > 0) {
+            status.lancedbDetail += `, schema: FixedSizeList<${listSize}>`;
+          } else {
+            status.lancedbDetail +=
+              ", schema: WARNING — vector column not FixedSizeList";
+          }
+        } catch {
+          status.lancedbDetail += ", schema: could not read";
+        }
+
+        try {
+          const indices = await table.listIndices();
+          const hasIndex = indices.some(
+            (idx) => idx.columns.includes("vector") || idx.name === "vector_idx"
+          );
+          status.vectorIndex = hasIndex ? "ok" : "missing";
+        } catch {
+          status.vectorIndex = "error";
+        }
+      } else {
+        status.vectorTable = "missing";
+        status.vectorIndex = "missing";
       }
-    } else {
-      status.vectorTable = "missing";
-      status.vectorIndex = "missing";
+    } catch (err: unknown) {
+      status.lancedb = "error";
+      status.lancedbDetail = getErrorMessage(err);
+      status.vectorTable = "error";
+      status.vectorIndex = "error";
     }
-  } catch (err: unknown) {
-    status.lancedb = "error";
-    status.lancedbDetail = getErrorMessage(err);
-    status.vectorTable = "error";
-    status.vectorIndex = "error";
-  }
+  });
 
   // 2. Check text model
   if (isModelLoaded && embeddingModel) {
@@ -209,8 +211,11 @@ export interface AiReadiness {
   lastError?: string;
   model: "loading" | "ready" | "error";
   pendingPhotos: number;
+  rebuildRequired: boolean;
   totalPhotos: number;
   translationState: TranslationState;
+  vectorBuildState?: "building" | "ready";
+  vectorCompatibility?: VectorCompatibility;
   vectorCount: number;
   vectorDB: "loading" | "ready" | "error";
 }
@@ -225,6 +230,7 @@ export async function getAiReadiness(options?: {
     coverageState: "unavailable",
     vectorCount: 0,
     indexReady: false,
+    rebuildRequired: false,
     indexedPhotos: 0,
     pendingPhotos: 0,
     totalPhotos: 0,
@@ -251,51 +257,76 @@ export async function getAiReadiness(options?: {
     try {
       await loadModel();
       readiness.model = "ready";
-    } catch {
+    } catch (error) {
       readiness.model = "error";
+      readiness.lastError = getErrorMessage(error);
     }
   }
 
-  try {
-    await initVectorDB();
-    const table = photoTable;
-    if (table) {
-      readiness.vectorDB = "ready";
-      const rowCount = await table.countRows();
-      // Cap at non-deleted photo count to exclude orphan vectors from trashed photos
-      const nonDeletedCount = readiness.totalPhotos;
-      readiness.vectorCount = Math.min(rowCount, nonDeletedCount);
-      readiness.totalPhotos = nonDeletedCount;
-      readiness.indexedPhotos = readiness.vectorCount;
-      readiness.pendingPhotos = Math.max(
-        0,
-        readiness.totalPhotos - readiness.indexedPhotos
-      );
-      readiness.hasVectors = readiness.vectorCount > 0;
-
-      if (rowCount >= MIN_VECTORS_FOR_INDEX) {
-        const indices = await table.listIndices();
-        readiness.indexReady = indices.some(
-          (idx) => idx.columns.includes("vector") || idx.name === "vector_idx"
+  await withVectorDbOperation(async () => {
+    try {
+      await initVectorDB();
+      const table = photoTable;
+      if (table) {
+        readiness.vectorDB = "ready";
+        const rowCount = await table.countRows();
+        // Cap at non-deleted photo count to exclude orphan vectors from trashed photos
+        const nonDeletedCount = readiness.totalPhotos;
+        readiness.vectorCount = Math.min(rowCount, nonDeletedCount);
+        readiness.totalPhotos = nonDeletedCount;
+        readiness.indexedPhotos = readiness.vectorCount;
+        readiness.pendingPhotos = Math.max(
+          0,
+          readiness.totalPhotos - readiness.indexedPhotos
         );
-      } else if (rowCount > 0) {
-        // Below threshold — brute-force search works, mark index as "ready enough"
-        readiness.indexReady = true;
+        readiness.hasVectors = readiness.vectorCount > 0;
+
+        if (rowCount >= MIN_VECTORS_FOR_INDEX) {
+          const indices = await table.listIndices();
+          readiness.indexReady = indices.some(
+            (idx) => idx.columns.includes("vector") || idx.name === "vector_idx"
+          );
+        } else if (rowCount > 0) {
+          // Below threshold — brute-force search works, mark index as "ready enough"
+          readiness.indexReady = true;
+        }
       }
+    } catch (error) {
+      readiness.vectorDB = "error";
+      readiness.lastError = getErrorMessage(error);
     }
-  } catch {
-    readiness.vectorDB = "error";
-  }
+
+    const runtime = getActiveEmbeddingRuntime();
+    if (runtime) {
+      readiness.vectorCompatibility = resolveRuntimeVectorCompatibility(
+        getActiveEmbeddingRuntimeInfo(),
+        runtime,
+        runtime.vectorCompatibility
+      );
+      readiness.vectorBuildState = runtime.vectorBuildState;
+      readiness.rebuildRequired = !isVectorCompatibilitySearchable(
+        readiness.vectorCompatibility
+      );
+    }
+  });
 
   readiness.coverageState = deriveAiCoverageState(
     readiness.totalPhotos,
     readiness.indexedPhotos,
     Boolean(
       readiness.lastError ||
+        readiness.rebuildRequired ||
         readiness.model === "error" ||
         readiness.vectorDB === "error"
     )
   );
+  if (
+    readiness.vectorBuildState === "building" &&
+    readiness.indexedPhotos > 0 &&
+    readiness.coverageState === "ready"
+  ) {
+    readiness.coverageState = "partial";
+  }
   readiness.translationState = getTranslationState();
 
   return readiness;

@@ -1,43 +1,10 @@
 // 查询改写和标准化
 
-// 口语化词组 — 按长度降序，前部放更具体的组合（先匹配更长的模式）
-const COLLOQUIAL_PHRASES = [
-  "帮我找",
-  "找一下",
-  "有没有",
-  "查一下",
-  // 摄影动作+照片组合 — 必须排在 "的照片" 前面，先吃掉 "拍"
-  "拍的照片",
-  "拍的图片",
-  "照的照片",
-  "拍的相片",
-  "照的图片",
-  "拍照",
-  "拍",
-  "照",
-  "的照片",
-  "的图片",
-  "的相片",
-  "搜索",
-  "看看",
-  "帮我",
-  "找找",
-  "找",
-];
-
-// 独立的虚词／停用词：在去除词组后再逐字移除
-const STOP_WORDS = new Set([
-  "的",
-  "了",
-  "着",
-  "过",
-  "吗",
-  "呢",
-  "吧",
-  "啊",
-  "呀",
-  "嘛",
-]);
+const TIME_PHOTO_PREFIX_RE = /^拍的\s*/;
+const QUERY_COMMAND_PREFIX_RE =
+  /^(?:请\s*)?(?:帮我找一下|帮我找|找一下|查一下|搜索一下|搜索|看看|找找|有没有)\s*/;
+const QUERY_PHOTO_SUFFIX_RE = /(?:的)?(?:照片|图片|相片|影像)\s*$/;
+const QUOTED_NAME_RE = /["“][^"”]+["”]/g;
 
 // ── 动态时间表达式正则引擎 ──────────────────────────────────────────
 // 替代纯硬编码字符串匹配，支持灵活的自然语言时间描述
@@ -55,7 +22,7 @@ const RELATIVE_TIME_RE =
 
 // 绝对时间：2024年 / 2024年3月 / 2024年3月15日 / 3月15日 等
 const ABSOLUTE_DATE_RE =
-  /(\d{4})\s*[年/\-.]\s*(\d{1,2})\s*(?:[月/\-.]\s*(\d{1,2})\s*[日号]?)?/;
+  /(\d{4})\s*[年/\-.]\s*(\d{1,2})\s*(?:[月/\-.]\s*(\d{1,2})\s*[日号]?|月)?/;
 
 // 口语化季节+年份组合：去年夏天 / 2024年春天 等
 const YEAR_QUALIFIED_SEASON_RE =
@@ -341,20 +308,16 @@ function removeColloquialisms(query: string): {
   let cleaned = query;
   const removed: string[] = [];
 
-  // 按长度降序逐段移除，每次从原始位置查找
-  for (const phrase of COLLOQUIAL_PHRASES) {
-    let idx = cleaned.indexOf(phrase);
-    while (idx !== -1) {
-      removed.push(phrase);
-      cleaned = `${cleaned.slice(0, idx)} ${cleaned.slice(idx + phrase.length)}`;
-      idx = cleaned.indexOf(phrase);
-    }
+  const prefix = QUERY_COMMAND_PREFIX_RE.exec(cleaned);
+  if (prefix) {
+    removed.push(prefix[0]);
+    cleaned = cleaned.slice(prefix[0].length);
   }
-
-  // 移除独立停用词（每个字符独立判断，避免合并有意义词）
-  const chars = [...cleaned];
-  const filtered = chars.filter((c) => !STOP_WORDS.has(c));
-  cleaned = filtered.join("");
+  const suffix = QUERY_PHOTO_SUFFIX_RE.exec(cleaned);
+  if (suffix) {
+    removed.push(suffix[0]);
+    cleaned = cleaned.slice(0, suffix.index);
+  }
 
   return { cleaned: cleaned.trim(), removed };
 }
@@ -428,19 +391,40 @@ export function rewriteQuery(query: string): RewrittenQuery {
   }
 
   const originalQuery = query.trim();
+  // Explicit names must survive both temporal parsing and wrapper removal.
+  const quotedNames = new Map<string, string>();
+  let quotePlaceholderPrefix = "\uE000";
+  while (originalQuery.includes(quotePlaceholderPrefix)) {
+    quotePlaceholderPrefix += "\uE000";
+  }
+  const protectedQuery = originalQuery.replace(QUOTED_NAME_RE, (name) => {
+    const placeholder = `${quotePlaceholderPrefix}${quotedNames.size}\uE001`;
+    quotedNames.set(placeholder, name);
+    return placeholder;
+  });
 
   // ── 关键顺序：先解析时间，再去除口语/停用词 ────────────────────
   // 停用词集包含 "过" 等字，会破坏 "过去2周"→"去2周" 的时间模式。
   // 必须在停用词移除之前，在原始查询上完成时间表达式匹配。
 
-  // 1. 在原始查询上解析时间表达式（优先动态正则 → 回退静态词典）
-  const { timeFilter, matchedText } = parseTimeExpression(originalQuery);
+  // 1. 在引号名称外解析时间表达式（优先动态正则 → 回退静态词典）
+  const { timeFilter, matchedText } = parseTimeExpression(protectedQuery);
 
-  // 2. 去除口语化表达和停用词
+  // Remove the time clause before trimming wrappers, preserving visual words.
+  const visualQuery = matchedText
+    ? protectedQuery
+        .replace(matchedText, " ")
+        .trim()
+        .replace(TIME_PHOTO_PREFIX_RE, "")
+    : protectedQuery;
+  // 2. 只去除句首指令与句尾照片表达
   const { cleaned: afterColloquial, removed: removedTerms } =
-    removeColloquialisms(originalQuery);
+    removeColloquialisms(visualQuery);
 
   let cleanQuery = afterColloquial.replace(/\s+/g, " ").trim();
+  if (matchedText) {
+    cleanQuery = cleanQuery.replace(TIME_PHOTO_PREFIX_RE, "");
+  }
 
   // 3. 从 cleanQuery 中移除匹配到的时间文本
   if (matchedText && cleanQuery.includes(matchedText)) {
@@ -465,6 +449,10 @@ export function rewriteQuery(query: string): RewrittenQuery {
     if (!testQuery) {
       cleanQuery = "";
     }
+  }
+
+  for (const [placeholder, name] of quotedNames) {
+    cleanQuery = cleanQuery.replaceAll(placeholder, name);
   }
 
   const result: RewrittenQuery = {

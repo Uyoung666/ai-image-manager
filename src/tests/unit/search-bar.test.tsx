@@ -16,6 +16,9 @@ const presetToast = vi.hoisted(() => ({
   error: vi.fn(),
   success: vi.fn(),
 }));
+const navigateMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateMock }));
 
 vi.mock("sonner", () => ({ toast: presetToast }));
 
@@ -103,6 +106,58 @@ describe("SearchBar", () => {
       .mockResolvedValue([
         { color: "#4f46e5", id: 42, name: "自行车" },
       ] as never);
+  });
+
+  it("explains an incompatible index before searching and opens its exact settings page", async () => {
+    const status = {
+      coverageState: "error" as const,
+      model: "loading",
+      vectorDB: "error",
+      hasVectors: false,
+      vectorCount: 0,
+      indexReady: false,
+      isEmbedding: false,
+      rebuildRequired: true,
+      embeddingProgress: { processed: 0, total: 8, phase: "idle" },
+    };
+    const { rerender } = render(<ControlledSearchBar aiStatus={status} />);
+    expect(screen.getByRole("combobox")).toHaveAttribute(
+      "placeholder",
+      "aiIndexRebuildSearchPlaceholder"
+    );
+    expect(
+      screen.getByRole("alert", { name: "aiIndexRebuildRequired" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("aiIndexRebuildNoticeDescription")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "AI 语义搜索暂不可用，当前仅显示文件名、标签和人名匹配。"
+      )
+    ).toBeNull();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "aiIndexOpenSettings" }));
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/settings/ai-index" });
+    rerender(
+      <ControlledSearchBar
+        aiStatus={{
+          ...status,
+          rebuildRequired: false,
+          coverageState: "ready",
+          model: "ready",
+          vectorDB: "ready",
+          hasVectors: true,
+          indexReady: true,
+        }}
+      />
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("combobox")).toHaveAttribute(
+      "placeholder",
+      "试试搜索“去年秋天的红叶”"
+    );
   });
 
   it("refreshes numeric tag suggestions after creation and deletion without remounting", async () => {

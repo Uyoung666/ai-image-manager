@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getActiveEmbeddingAdapter,
   getActiveEmbeddingAdapterInfo,
+  registerEmbeddingAdapter,
   SIGLIP_V1_ADAPTER,
   serializeEmbeddingAdapter,
 } from "@/services/ai/model-adapter";
@@ -16,15 +17,23 @@ import {
   getDuplicateThreshold,
   getTagThresholds,
   getTextSearchThreshold,
+  resolveThresholdProfile,
+  SIGLIP_BICUBIC_FINGERPRINT,
 } from "@/services/ai/threshold-profile";
 
 describe("embedding adapter contracts", () => {
-  it("registers the unchanged SigLIP v1 defaults", () => {
+  it("registers SigLIP with explicit Processor-aligned image preprocessing", () => {
     const adapter = getActiveEmbeddingAdapter();
     expect(adapter.id).toBe("siglip-v1-base-patch16-224");
     expect(adapter.legacyKind).toBe("siglip");
     expect(adapter.embeddingSpace.dimensions).toBe(768);
     expect(adapter.embeddingSpace.image.imageSize).toBe(224);
+    expect(adapter.embeddingSpace.image).toMatchObject({
+      colorMode: "rgb",
+      preprocessingVersion: "siglip-bicubic-rgb-v2",
+      resample: "bicubic",
+      rescaleFactor: 1 / 255,
+    });
     expect(adapter.embeddingSpace.image.outputName).toBe("pooler_output");
     expect(adapter.embeddingSpace.text.outputName).toBe("pooler_output");
     expect(getActiveEmbeddingAdapterInfo()).toMatchObject({
@@ -55,6 +64,11 @@ describe("embedding adapter contracts", () => {
     expect(getModelFingerprint(tokenizerChanged)).not.toBe(
       getModelFingerprint(SIGLIP_V1_ADAPTER)
     );
+    const preprocessingChanged = structuredClone(SIGLIP_V1_ADAPTER);
+    preprocessingChanged.embeddingSpace.image.preprocessingVersion = "next";
+    expect(getModelFingerprint(preprocessingChanged)).not.toBe(
+      getModelFingerprint(SIGLIP_V1_ADAPTER)
+    );
 
     const payload = buildModelFingerprintPayload(SIGLIP_V1_ADAPTER);
     expect(payload).not.toHaveProperty("thresholdProfileId");
@@ -81,9 +95,9 @@ describe("embedding adapter contracts", () => {
     });
   });
 
-  it("keeps the official threshold profile separate from model identity", () => {
+  it("keeps unchanged thresholds pending validation for the new vector space", () => {
     const profile = getActiveThresholdProfile();
-    expect(profile.calibrationStatus).toBe("official");
+    expect(profile.calibrationStatus).toBe("pending-validation");
     expect(profile.modelFingerprint).toBe(
       getModelFingerprint(SIGLIP_V1_ADAPTER)
     );
@@ -91,6 +105,17 @@ describe("embedding adapter contracts", () => {
     expect(getTextSearchThreshold(0, "zh")).toBe(0.98);
     expect(getTextSearchThreshold(1, "en")).toBe(0.98);
     expect(getTagThresholds().topMinimum).toBe(0.035);
+    expect(profile.modelFingerprint).toBe(SIGLIP_BICUBIC_FINGERPRINT);
+  });
+
+  it("does not transfer a calibration identity to altered preprocessing", () => {
+    const changed = structuredClone(SIGLIP_V1_ADAPTER);
+    changed.id = "siglip-future-preprocessing-test";
+    changed.embeddingSpace.image.preprocessingVersion = "next";
+    registerEmbeddingAdapter(changed);
+    expect(
+      resolveThresholdProfile(changed.id, getModelFingerprint(changed))
+    ).toBeNull();
   });
 
   it("uses the same worker identity through the model-config compatibility API", () => {

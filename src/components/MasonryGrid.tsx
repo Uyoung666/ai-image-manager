@@ -105,6 +105,11 @@ export function getMasonryReturnScrollTop(
   return getReturnScrollTop(input);
 }
 
+export interface MasonryScrollRestoreRequest {
+  id: number;
+  scrollTop: number;
+}
+
 interface MasonryGridProps {
   className?: string;
   columnCount: number;
@@ -126,6 +131,7 @@ interface MasonryGridProps {
   onMarqueeSelect?: (ids: Set<number>) => void;
   onRestoreSettled?: (routeKey: string) => void;
   onReturnLocated?: (request: number) => void;
+  onScrollRestored?: (request: number) => void;
   onScrollTopChange?: (scrollTop: number) => void;
   overscan?: number;
   renderItem: (
@@ -139,6 +145,7 @@ interface MasonryGridProps {
   returnToPhotoId?: number | null;
   returnToPhotoRequest?: number;
   routeKey: string;
+  scrollRestoreRequest?: MasonryScrollRestoreRequest;
   scrollToAlignment?: "center" | "start";
   scrollToId?: number | null;
   selectionActive?: boolean;
@@ -162,6 +169,7 @@ export const MasonryGrid = memo(
       onMarqueeSelect,
       onRestoreSettled,
       onReturnLocated,
+      onScrollRestored,
       onScrollTopChange,
       scrollToAlignment = "center",
       scrollToId,
@@ -172,6 +180,7 @@ export const MasonryGrid = memo(
       returnToMemberId = null,
       returnToPhotoRequest = 0,
       routeKey,
+      scrollRestoreRequest,
       restoreGateReady = true,
       isPlaceholderData = false,
       topInset = 0,
@@ -338,7 +347,11 @@ export const MasonryGrid = memo(
         reflowTop !== null &&
         Math.abs((scrollRef.current?.scrollTop ?? 0) - reflowTop) <=
           SCROLL_TOP_EPSILON;
-      reflowScrollTopRef.current = null;
+      // Native scroll notifications can repeat one programmatic offset. Keep
+      // the marker until the position changes so they cannot release the anchor.
+      if (!isReflowScroll) {
+        reflowScrollTopRef.current = null;
+      }
       if (!(returnToPhotoAutoScrollRef.current || isReflowScroll)) {
         reflowAnchorRef.current = null;
       }
@@ -469,6 +482,18 @@ export const MasonryGrid = memo(
     }, [handleScroll]);
 
     useEffect(() => {
+      const startInteraction = () => {
+        // A new gesture (including a detail-panel handle outside the grid)
+        // starts from the current viewport, not the preceding resize's anchor.
+        reflowAnchorRef.current = null;
+        reflowScrollTopRef.current = null;
+      };
+      window.addEventListener("pointerdown", startInteraction, true);
+      return () =>
+        window.removeEventListener("pointerdown", startInteraction, true);
+    }, []);
+
+    useEffect(() => {
       return () => {
         if (rafRef.current) {
           cancelAnimationFrame(rafRef.current);
@@ -506,6 +531,7 @@ export const MasonryGrid = memo(
     const completedReturnRequestRef = useRef(0);
     const pendingReturnToPhotoRequestRef = useRef<number | null>(null);
     const prevRouteKeyRef = useRef(routeKey);
+    const completedScrollRestoreRef = useRef<number | null>(null);
     const prevContainerWidthRef = useRef(containerWidth);
     const pendingReturnFocusIdRef = useRef<number | null>(null);
     const returnToPhotoFrameRef = useRef<number>(0);
@@ -537,6 +563,9 @@ export const MasonryGrid = memo(
         )
       );
     let pendingReflowAnchor: MasonryReflowAnchor | null = null;
+    const scrollRestorePending =
+      scrollRestoreRequest !== undefined &&
+      scrollRestoreRequest.id !== completedScrollRestoreRef.current;
     const plannedScrollTop = (() => {
       if (
         !scrollElement ||
@@ -545,6 +574,9 @@ export const MasonryGrid = memo(
         !hasInitialPositionedRef.current
       ) {
         return null;
+      }
+      if (scrollRestorePending && scrollRestoreRequest) {
+        return clampScrollTop(scrollRestoreRequest.scrollTop);
       }
       const currentScrollTop = scrollElement.scrollTop;
       const geometryChanged =
@@ -756,6 +788,10 @@ export const MasonryGrid = memo(
         syncScrollMetrics(el);
         updateScrollbarThumbPosition(el);
         onScrollTopChange?.(el.scrollTop);
+        if (scrollRestorePending && scrollRestoreRequest) {
+          completedScrollRestoreRef.current = scrollRestoreRequest.id;
+          onScrollRestored?.(scrollRestoreRequest.id);
+        }
       }
 
       if (
@@ -857,11 +893,14 @@ export const MasonryGrid = memo(
       columnCount,
       gap,
       items,
+      onScrollRestored,
       onScrollTopChange,
       paddingTop,
       pendingReflowAnchor,
       plannedScrollTop,
       positions,
+      scrollRestorePending,
+      scrollRestoreRequest,
       scrollToAlignment,
       scrollToId,
       returnToPhotoId,
@@ -1206,6 +1245,8 @@ export const MasonryGrid = memo(
     prevProps.returnToPhotoId === nextProps.returnToPhotoId &&
     prevProps.returnToMemberId === nextProps.returnToMemberId &&
     prevProps.returnToPhotoRequest === nextProps.returnToPhotoRequest &&
+    prevProps.scrollRestoreRequest === nextProps.scrollRestoreRequest &&
+    prevProps.onScrollRestored === nextProps.onScrollRestored &&
     prevProps.onScrollTopChange === nextProps.onScrollTopChange &&
     prevProps.onRestoreSettled === nextProps.onRestoreSettled &&
     prevProps.onReturnLocated === nextProps.onReturnLocated &&

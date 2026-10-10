@@ -5,6 +5,20 @@ describe("AI index control state", () => {
     vi.resetModules();
   });
 
+  it("blocks background embedding while an explicit index reset owns the store", async () => {
+    const state = await import("@/services/ai/state");
+    const { embedAllPhotos } = await import("@/services/ai/embedder");
+    state.setIsAiIndexResetting(true);
+    try {
+      expect(await embedAllPhotos()).toBe(0);
+      expect(state.activeEmbeddingRunId).toBe(0);
+      expect(state.aiControlState).toBe("idle");
+      expect(state.isEmbedding).toBe(false);
+    } finally {
+      state.setIsAiIndexResetting(false);
+    }
+  });
+
   it("exposes paused state through embedding progress", async () => {
     const state = await import("@/services/ai/state");
     const modelLoader = await import("@/services/ai/model-loader");

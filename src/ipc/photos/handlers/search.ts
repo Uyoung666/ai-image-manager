@@ -1,22 +1,11 @@
 import fs from "node:fs";
+import { performance } from "node:perf_hooks";
 import { os } from "@orpc/server";
 import type { SQL } from "drizzle-orm";
-import {
-  and,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNull,
-  like,
-  lte,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm";
+import { z } from "zod";
 import { getDatabase } from "@/db";
 import {
-  advancedExifData,
-  exifData,
   faceIdentities,
   faceIdentityMembers,
   faceVectors,
@@ -24,6 +13,7 @@ import {
   photoTags,
   tags,
 } from "@/db/schema";
+import { ipcContext } from "@/ipc/context";
 import { getAiReadiness } from "@/services/ai/health";
 import {
   extractTemporalContext,
@@ -33,6 +23,8 @@ import {
   getActiveSearchSensitivity,
   getSensitivityMultiplier,
 } from "@/services/ai/search-sensitivity";
+import { extractNegativeClauses } from "@/services/ai/semantic-query-plan";
+import { getTranslationState } from "@/services/ai/translation-worker-client";
 import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
@@ -50,15 +42,32 @@ import {
   type GatedHybridResult,
 } from "@/services/rerank";
 import {
+  beginSearchRequest,
+  cancelSearchRequest,
+  checkSearch,
+  createSearchDiagnostics,
+  measureSearch,
+  type SearchExecution,
+  SearchInterrupted,
+  waitForSearch,
+} from "@/services/search-control";
+import { getSearchDatabaseRevision } from "@/services/search-revision";
+import {
+  buildPhotoSearchScope,
+  getPhotoSearchScope,
+  type PhotoSearchFilters,
+} from "@/services/search-scope";
+import {
   appendToFrozenSearchPool,
   createSearchFingerprint,
   SearchSessionStore,
   takeFrozenSearchPage,
 } from "@/services/search-session";
 import { getTagSearchRevision } from "@/services/tag-search-revision";
+import type { SearchResponse } from "@/types/photo";
 import {
   COLOR_MATCH_MAX_DISTANCE_SQUARED,
-  hydrateColorSearchResults,
+  colorDistanceToMatchScore,
   mergeColorSearchRanks,
 } from "@/utils/color-search";
 import {
@@ -105,8 +114,33 @@ const SEARCH_PHOTO_COLUMNS = {
 const HASH_PREFIX_RE = /^#/;
 const HEX_COLOR_RE = /^([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 const HEX_COLOR_QUERY_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
+const MAX_RGB_DISTANCE_SQUARED = 3 * 255 ** 2;
 const CHINESE_CHAR_RE = /[一-鿿]/;
 const GLOB_WILDCARD_RE = /[*?[]/;
+const EXACT_NAME_RE = /["“][^"”]+["”]/g;
+const QUOTED_NAME_RE = /["“][^"”]+["”]/;
+
+function needsVectorRevision(
+  input: z.output<typeof CompoundSearchSchema>
+): boolean {
+  let text = input.query?.trim() ?? "";
+  if (input.colorHex || HEX_COLOR_QUERY_RE.test(text)) {
+    return true;
+  }
+  if (!QUOTED_NAME_RE.test(text) && GLOB_WILDCARD_RE.test(text)) {
+    return false;
+  }
+  if (CHINESE_CHAR_RE.test(text)) {
+    text = rewriteQuery(text).cleanQuery.trim();
+  }
+  return Boolean(text.replace(EXACT_NAME_RE, "").trim());
+}
+
+function isExactSource(
+  source: string
+): source is "person" | "tag" | "filename" {
+  return ["person", "tag", "filename"].includes(source);
+}
 
 function withoutInternalSearchScores<
   T extends {
@@ -143,7 +177,7 @@ const _SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 bu
 export interface CachedSearchResult {
   hasMore?: boolean;
   nextOffset?: number | null;
-  results: unknown[];
+  results: Array<{ id: number }>;
   total: number;
   totalExact?: boolean;
 }
@@ -157,12 +191,13 @@ const MAX_CACHE_SIZE = 50;
 const FTS5_QUOTE_RE = /["]/;
 const WHITESPACE_RE = /\s+/g;
 const WHITESPACE_SPLIT_RE = /\s+/;
+const NAME_SPLIT_RE = /\s+|[，,。]/;
 
 function getCacheKey(params: Record<string, unknown>): string {
   // Create a deterministic key excluding non-filter params
   const filterParams: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && key !== "query") {
+    if (value !== undefined && key !== "query" && key !== "requestId") {
       filterParams[key] = value;
     }
   }
@@ -206,7 +241,7 @@ export const searchByText = os
     const photoList = db
       .select(SEARCH_PHOTO_COLUMNS)
       .from(photos)
-      .where(inArray(photos.id, photoIds))
+      .where(and(isNull(photos.deletedAt), inArray(photos.id, photoIds)))
       .all();
 
     const photoMap = new Map(photoList.map((p) => [p.id, p]));
@@ -278,7 +313,7 @@ export const searchByImage = os
     const photoList = db
       .select(SEARCH_PHOTO_COLUMNS)
       .from(photos)
-      .where(inArray(photos.id, photoIds))
+      .where(and(isNull(photos.deletedAt), inArray(photos.id, photoIds)))
       .all();
 
     const photoMap = new Map(photoList.map((p) => [p.id, p]));
@@ -359,667 +394,498 @@ function _buildTemporalBoost(
 }
 
 // Compound search: text + EXIF filters
-export const searchCompound = os
-  .input(CompoundSearchSchema)
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Compound search coordinates independent search branches and ranking.
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    const {
-      query,
-      colorHex,
-      dateFrom,
-      dateMonth,
-      dateHour,
-      dateTo,
-      cameraModel,
-      lensModel,
-      creator,
-      advancedField,
-      advancedValue,
-      focalMin,
-      focalMax,
-      apertureMin,
-      apertureMax,
-      isoMin,
-      isoMax,
-      shutterMin,
-      shutterMax,
-      cursor,
-      limit,
-      offset,
-    } = input;
-    const activeSensitivity = getActiveSearchSensitivity();
-    const fingerprint = createSearchFingerprint({
-      ...input,
-      sensitivity: activeSensitivity,
-      tagRevision: query?.trim() ? getTagSearchRevision() : undefined,
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Compound search coordinates independent search branches and ranking.
+async function performCompoundSearch(
+  input: z.output<typeof CompoundSearchSchema>,
+  execution: SearchExecution,
+  sourceRevision: string
+) {
+  const db = getDatabase();
+  const {
+    query,
+    colorHex,
+    dateFrom,
+    dateMonth,
+    dateHour,
+    dateTo,
+    cameraModel,
+    lensModel,
+    creator,
+    advancedField,
+    advancedValue,
+    focalMin,
+    focalMax,
+    apertureMin,
+    apertureMax,
+    isoMin,
+    isoMax,
+    shutterMin,
+    shutterMax,
+    cursor,
+    limit,
+    offset,
+  } = input;
+  checkSearch(execution);
+  const sqliteBranch = <T>(task: () => T) =>
+    deferSearchBranch(() => measureSearch(execution, "sqliteMs", task));
+  const hydratePage = <T extends { id: number }>(page: T[]) => {
+    if (page.length === 0) {
+      return [];
+    }
+    const started = performance.now();
+    const rows = db
+      .select(SEARCH_PHOTO_COLUMNS)
+      .from(photos)
+      .where(
+        and(
+          isNull(photos.deletedAt),
+          inArray(
+            photos.id,
+            page.map((row) => row.id)
+          )
+        )
+      )
+      .all();
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    if (execution.diagnostics) {
+      execution.diagnostics.timings.hydrationMs =
+        (execution.diagnostics.timings.hydrationMs ?? 0) +
+        performance.now() -
+        started;
+    }
+    return page.flatMap((row) => {
+      const photo = byId.get(row.id);
+      return photo ? [{ ...row, ...photo }] : [];
     });
-    const activeSearchSession = cursor ? searchSessions.get(cursor) : null;
+  };
+  const activeSensitivity = getActiveSearchSensitivity();
+  const fingerprint = createSearchFingerprint({
+    ...input,
+    sensitivity: activeSensitivity,
+    tagRevision: query?.trim() ? getTagSearchRevision() : undefined,
+    sourceRevision,
+  });
+  const activeSearchSession = cursor ? searchSessions.get(cursor) : null;
+  if (
+    cursor &&
+    (!activeSearchSession || activeSearchSession.fingerprint !== fingerprint)
+  ) {
+    return {
+      cursorExpired: true,
+      hasMore: false,
+      nextCursor: null,
+      results: [],
+      snapshotVersion: activeSearchSession?.snapshotVersion,
+      total: 0,
+      totalExact: false,
+    };
+  }
+  if (
+    activeSearchSession?.responseBase &&
+    (activeSearchSession.rankedPool.length >= limit ||
+      (activeSearchSession.rankedPool.length > 0 &&
+        !activeSearchSession.upstreamHasMore))
+  ) {
+    const page = takeFrozenSearchPage(activeSearchSession, limit);
+    for (const result of page) {
+      activeSearchSession.emittedIds.add(result.id);
+    }
+    const hasMore =
+      activeSearchSession.upstreamHasMore ||
+      activeSearchSession.rankedPool.length > 0;
+    const cachedSemantic = activeSearchSession.responseBase.semantic;
+    return {
+      ...activeSearchSession.responseBase,
+      hasMore,
+      nextCursor: hasMore ? activeSearchSession.cursor : null,
+      nextOffset: hasMore ? activeSearchSession.emittedIds.size : null,
+      results: hydratePage(page),
+      ...(cachedSemantic &&
+      typeof cachedSemantic === "object" &&
+      !Array.isArray(cachedSemantic)
+        ? {
+            semantic: {
+              ...cachedSemantic,
+              searchSessionHit: true,
+            },
+          }
+        : {}),
+      snapshotVersion: activeSearchSession.snapshotVersion,
+    };
+  }
+  const effectiveOffset = activeSearchSession?.candidateDepth ?? offset;
+  const resultWindowEnd = activeSearchSession
+    ? Math.max(effectiveOffset + limit, effectiveOffset * 2)
+    : offset + limit;
+  const requestedCandidateDepth = activeSearchSession
+    ? Math.max(200, activeSearchSession.candidateDepth * 2)
+    : 200;
+  let searchSessionTagEvidence: unknown;
+  const finalizeSearchPage = <
+    T extends { id: number } & Record<string, unknown>,
+    R extends Record<string, unknown>,
+  >(
+    allResults: T[],
+    base: R,
+    upstreamHasMore: boolean,
+    candidateDepth = resultWindowEnd
+  ) => {
+    const session =
+      activeSearchSession ?? searchSessions.create(fingerprint, candidateDepth);
+    appendToFrozenSearchPool(session, allResults);
+    if (!activeSearchSession && offset > 0) {
+      for (const skipped of takeFrozenSearchPage(session, offset)) {
+        session.emittedIds.add(skipped.id);
+      }
+    }
+    const page = takeFrozenSearchPage<T>(session, limit);
+    for (const result of page) {
+      session.emittedIds.add(result.id);
+    }
+    session.candidateDepth = candidateDepth;
+    session.lastAccess = Date.now();
+    session.responseBase = {
+      ...base,
+      total: session.emittedIds.size + session.rankedPool.length,
+    };
+    session.tagEvidence ??= searchSessionTagEvidence;
+    session.upstreamHasMore = upstreamHasMore;
+    const hasMore = upstreamHasMore || session.rankedPool.length > 0;
+    return {
+      ...session.responseBase,
+      hasMore,
+      nextCursor: hasMore ? session.cursor : null,
+      nextOffset: hasMore ? session.emittedIds.size : null,
+      results: hydratePage(page),
+      snapshotVersion: session.snapshotVersion,
+    };
+  };
+  // Pre-process: extract time filter from natural language
+  let effectiveDateFrom = dateFrom;
+  let effectiveDateTo = dateTo;
+  let rewrittenTimeFilter: RewrittenQuery["timeFilter"] | undefined;
+  let rewrittenQuery: RewrittenQuery | undefined;
+  let searchText = query;
+  if (searchText?.trim()) {
+    const q = searchText.trim();
     if (
-      cursor &&
-      (!activeSearchSession || activeSearchSession.fingerprint !== fingerprint)
+      CHINESE_CHAR_RE.test(q) &&
+      (QUOTED_NAME_RE.test(q) || !GLOB_WILDCARD_RE.test(q))
     ) {
-      return {
-        cursorExpired: true,
-        hasMore: false,
-        nextCursor: null,
-        results: [],
-        snapshotVersion: activeSearchSession?.snapshotVersion,
-        total: 0,
-        totalExact: false,
-      };
+      const rewritten = rewriteQuery(q);
+      rewrittenQuery = rewritten;
+      if (
+        effectiveDateFrom === undefined &&
+        effectiveDateTo === undefined &&
+        rewritten.timeFilter
+      ) {
+        effectiveDateFrom = rewritten.timeFilter.from;
+        effectiveDateTo = rewritten.timeFilter.to;
+      }
+      rewrittenTimeFilter = rewritten.timeFilter;
+      // Pure time query → clear searchText, fall through to EXIF-only path
+      searchText = rewritten.cleanQuery.trim() || undefined;
     }
-    if (
-      activeSearchSession?.responseBase &&
-      (activeSearchSession.rankedPool.length >= limit ||
-        (activeSearchSession.rankedPool.length > 0 &&
-          !activeSearchSession.upstreamHasMore))
-    ) {
-      const page = takeFrozenSearchPage(activeSearchSession, limit);
-      for (const result of page) {
-        activeSearchSession.emittedIds.add(result.id);
-      }
-      const hasMore =
-        activeSearchSession.upstreamHasMore ||
-        activeSearchSession.rankedPool.length > 0;
-      const cachedSemantic = activeSearchSession.responseBase.semantic;
-      return {
-        ...activeSearchSession.responseBase,
-        hasMore,
-        nextCursor: hasMore ? activeSearchSession.cursor : null,
-        nextOffset: hasMore ? activeSearchSession.candidateDepth : null,
-        results: page,
-        ...(cachedSemantic &&
-        typeof cachedSemantic === "object" &&
-        !Array.isArray(cachedSemantic)
-          ? {
-              semantic: {
-                ...cachedSemantic,
-                searchSessionHit: true,
-              },
-            }
-          : {}),
-        snapshotVersion: activeSearchSession.snapshotVersion,
-      };
+  }
+
+  const filters: PhotoSearchFilters = {
+    dateFrom: effectiveDateFrom,
+    dateTo: effectiveDateTo,
+    dateMonth,
+    dateHour,
+    cameraModel,
+    lensModel,
+    creator,
+    advancedField,
+    advancedValue,
+    focalMin,
+    focalMax,
+    apertureMin,
+    apertureMax,
+    isoMin,
+    isoMax,
+    shutterMin,
+    shutterMax,
+  };
+  const scopePredicate = buildPhotoSearchScope(db, filters);
+  const metadataRevision = getSearchDatabaseRevision(db, false);
+
+  // Color search: if colorHex provided, or query is a hex code
+  function parseHexColor(
+    hex: string
+  ): { r: number; g: number; b: number } | null {
+    const cleaned = hex.replace(HASH_PREFIX_RE, "");
+    const match = HEX_COLOR_RE.exec(cleaned);
+    if (!match) {
+      return null;
     }
-    const effectiveOffset = activeSearchSession?.candidateDepth ?? offset;
-    const resultWindowEnd = activeSearchSession
-      ? Math.max(effectiveOffset + limit, effectiveOffset * 2)
-      : offset + limit;
-    let searchSessionTagEvidence: unknown;
-    const finalizeSearchPage = <
-      T extends { id: number } & Record<string, unknown>,
-      R extends Record<string, unknown>,
-    >(
-      allResults: T[],
-      base: R,
-      upstreamHasMore: boolean
-    ) => {
-      const session =
-        activeSearchSession ??
-        searchSessions.create(fingerprint, resultWindowEnd);
-      appendToFrozenSearchPool(session, allResults);
-      const page = takeFrozenSearchPage<T>(session, limit);
-      for (const result of page) {
-        session.emittedIds.add(result.id);
-      }
-      session.candidateDepth = resultWindowEnd;
-      session.lastAccess = Date.now();
-      session.responseBase = base;
-      session.tagEvidence ??= searchSessionTagEvidence;
-      session.upstreamHasMore = upstreamHasMore;
-      const hasMore = upstreamHasMore || session.rankedPool.length > 0;
-      return {
-        ...base,
-        hasMore,
-        nextCursor: hasMore ? session.cursor : null,
-        nextOffset: hasMore ? resultWindowEnd : null,
-        results: page,
-        snapshotVersion: session.snapshotVersion,
-      };
+    let h = match[1];
+    if (h.length === 3) {
+      h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    }
+    return {
+      r: Number.parseInt(h.slice(0, 2), 16),
+      g: Number.parseInt(h.slice(2, 4), 16),
+      b: Number.parseInt(h.slice(4, 6), 16),
     };
-    const periodicDateConditions = (): SQL[] => {
-      const conditions: SQL[] = [];
-      if (dateMonth !== undefined) {
-        conditions.push(
-          sql`CAST(strftime('%m', ${exifData.dateTaken} / 1000, 'unixepoch', 'localtime') AS INTEGER) = ${dateMonth}`
-        );
+  }
+
+  let effectiveColorHex = colorHex;
+  if (!effectiveColorHex && query?.trim()) {
+    const hexMatch = HEX_COLOR_QUERY_RE.exec(query.trim());
+    if (hexMatch) {
+      effectiveColorHex = hexMatch[1];
+    }
+  }
+
+  if (effectiveColorHex) {
+    const rgb = parseHexColor(effectiveColorHex);
+    if (rgb) {
+      // SQLite palette matching is authoritative; vector-only candidates
+      // are supplementary and must obey the same hard-filter scope.
+      const colorScope = getPhotoSearchScope(db, filters, metadataRevision);
+      if (colorScope.rows.length === 0) {
+        return { results: [], total: 0, totalExact: true, hasMore: false };
       }
-      if (dateHour !== undefined) {
-        conditions.push(
-          sql`CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch', 'localtime') AS INTEGER) = ${dateHour}`
-        );
-      }
-      return conditions;
-    };
-    const advancedColumns = {
-      vendor: advancedExifData.vendor,
-      captureMode: advancedExifData.captureMode,
-      exposureProgram: advancedExifData.exposureProgram,
-      meteringMode: advancedExifData.meteringMode,
-      whiteBalance: advancedExifData.whiteBalance,
-      focusMode: advancedExifData.focusMode,
-      subjectTarget: advancedExifData.subjectTarget,
-      driveMode: advancedExifData.driveMode,
-      stabilizationMode: advancedExifData.stabilizationMode,
-      computationalMode: advancedExifData.computationalMode,
-      inCameraLook: advancedExifData.inCameraLook,
-      provenanceStatus: advancedExifData.provenanceStatus,
-    } as const;
-    const getAdvancedIds = (within?: number[]) => {
-      if (!(advancedField && advancedValue)) {
-        return null;
-      }
-      const conditions: SQL[] = [
-        eq(advancedColumns[advancedField], advancedValue),
-      ];
-      if (within) {
-        if (within.length === 0) {
-          return new Set<number>();
-        }
-        conditions.push(inArray(advancedExifData.photoId, within));
-      }
-      return new Set(
-        db
-          .select({ photoId: advancedExifData.photoId })
-          .from(advancedExifData)
-          .where(and(...conditions))
-          .all()
-          .map((row) => row.photoId)
+      const candidates = db
+        .select({
+          id: photos.id,
+          dist: sql<number>`closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, ${photos.dominantColors})`.as(
+            "dist"
+          ),
+        })
+        .from(photos)
+        .where(scopePredicate);
+      const paletteResults = db.all(
+        sql`WITH color_candidates AS MATERIALIZED (${candidates.getSQL()})
+          SELECT id, dist FROM color_candidates
+          WHERE dist < ${COLOR_MATCH_MAX_DISTANCE_SQUARED}
+            OR dist > ${MAX_RGB_DISTANCE_SQUARED}
+          ORDER BY dist ASC, id ASC`
+      ) as Array<{ dist: number; id: number }>;
+      const sqliteResults = paletteResults.filter(
+        (row) => row.dist < COLOR_MATCH_MAX_DISTANCE_SQUARED
       );
-    };
-    const getCreatorIds = (within?: number[]) => {
-      if (!creator) {
-        return null;
-      }
-      if (within?.length === 0) {
-        return new Set<number>();
-      }
-      const pattern = `%${creator}%`;
-      const basicConditions: SQL[] = [like(exifData.artist, pattern)];
-      const advancedConditions: SQL[] = [
-        sql`json_extract(${advancedExifData.normalizedJson}, '$.workflow.artist') LIKE ${pattern}`,
-      ];
-      if (within) {
-        basicConditions.push(inArray(exifData.photoId, within));
-        advancedConditions.push(inArray(advancedExifData.photoId, within));
-      }
-      const ids = new Set(
-        db
-          .select({ photoId: exifData.photoId })
-          .from(exifData)
-          .where(and(...basicConditions))
-          .all()
-          .map((row) => row.photoId)
-          .filter((photoId): photoId is number => photoId !== null)
-      );
-      for (const row of db
-        .select({ photoId: advancedExifData.photoId })
-        .from(advancedExifData)
-        .where(and(...advancedConditions))
-        .all()) {
-        ids.add(row.photoId);
-      }
-      return ids;
-    };
-    const creatorIds = getCreatorIds();
-    if (creatorIds?.size === 0) {
-      return { results: [], total: 0 };
-    }
-
-    // Color search: if colorHex provided, or query is a hex code
-    function parseHexColor(
-      hex: string
-    ): { r: number; g: number; b: number } | null {
-      const cleaned = hex.replace(HASH_PREFIX_RE, "");
-      const match = HEX_COLOR_RE.exec(cleaned);
-      if (!match) {
-        return null;
-      }
-      let h = match[1];
-      if (h.length === 3) {
-        h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-      }
-      return {
-        r: Number.parseInt(h.slice(0, 2), 16),
-        g: Number.parseInt(h.slice(2, 4), 16),
-        b: Number.parseInt(h.slice(4, 6), 16),
-      };
-    }
-
-    let effectiveColorHex = colorHex;
-    if (!effectiveColorHex && query?.trim()) {
-      const hexMatch = HEX_COLOR_QUERY_RE.exec(query.trim());
-      if (hexMatch) {
-        effectiveColorHex = hexMatch[1];
-      }
-    }
-
-    if (effectiveColorHex) {
-      const rgb = parseHexColor(effectiveColorHex);
-      if (rgb) {
-        // ── 颜色搜索双路并行：LanceDB ANN + SQLite UDF ─────────────
-        // LanceDB 颜色表可能稀疏（仅部分照片已索引），不能替代 SQLite。
-        // 双路并行执行，合并结果去重，避免稀疏表导致的"全色块同一结果"。
-
-        const exifActive =
-          dateFrom ||
-          dateTo ||
-          dateMonth !== undefined ||
-          dateHour !== undefined ||
-          cameraModel ||
-          lensModel ||
-          focalMin !== undefined ||
-          focalMax !== undefined ||
-          apertureMin !== undefined ||
-          apertureMax !== undefined ||
-          isoMin !== undefined ||
-          isoMax !== undefined ||
-          shutterMin !== undefined ||
-          shutterMax !== undefined;
-
-        const conditions: SQL[] = [
-          sql`p.deleted_at IS NULL`,
-          sql`p.dominant_colors IS NOT NULL`,
-        ];
-        // color_bucket stores only the first dominant color. Dashboard hue
-        // counts match every stored color, so using color_bucket here would
-        // discard photos whose matching color is secondary in the palette.
-        // Let closest_color_dist perform the authoritative match instead.
-        if (creatorIds) {
-          conditions.push(
-            sql`p.id IN (${sql.join(
-              Array.from(creatorIds).map((id) => sql`${id}`),
-              sql`, `
-            )})`
+      // Invalid/absent palettes return Infinity or MAX_VALUE from the UDF.
+      // Every valid RGB distance is <= 3 * 255^2. A stale primary-color vector
+      // must never override a valid palette that rejects this color.
+      const supplementIds = paletteResults
+        .filter((row) => row.dist > MAX_RGB_DISTANCE_SQUARED)
+        .map((row) => row.id);
+      const supplementSet = new Set(supplementIds);
+      let lanceResults: Array<{ distanceSquared: number; photoId: number }> =
+        [];
+      let colorIncomplete = false;
+      if (supplementIds.length > 0) {
+        try {
+          const { searchByColorVector } = await import(
+            "@/services/ai/vector-db"
           );
-        }
-        if (dateFrom) {
-          conditions.push(sql`e.date_taken >= ${dateFrom}`);
-        }
-        if (dateTo) {
-          conditions.push(sql`e.date_taken <= ${dateTo}`);
-        }
-        if (dateMonth !== undefined) {
-          conditions.push(
-            sql`CAST(strftime('%m', e.date_taken / 1000, 'unixepoch', 'localtime') AS INTEGER) = ${dateMonth}`
-          );
-        }
-        if (dateHour !== undefined) {
-          conditions.push(
-            sql`CAST(strftime('%H', e.date_taken / 1000, 'unixepoch', 'localtime') AS INTEGER) = ${dateHour}`
-          );
-        }
-        if (cameraModel) {
-          conditions.push(sql`e.camera_model LIKE ${`%${cameraModel}%`}`);
-        }
-        if (lensModel) {
-          conditions.push(sql`e.lens_model LIKE ${`%${lensModel}%`}`);
-        }
-        if (focalMin !== undefined) {
-          conditions.push(sql`e.focal_length_num >= ${focalMin}`);
-        }
-        if (focalMax !== undefined) {
-          conditions.push(sql`e.focal_length_num <= ${focalMax}`);
-        }
-        if (apertureMin !== undefined) {
-          conditions.push(sql`e.aperture >= ${apertureMin}`);
-        }
-        if (apertureMax !== undefined) {
-          conditions.push(sql`e.aperture <= ${apertureMax}`);
-        }
-        if (isoMin !== undefined) {
-          conditions.push(sql`e.iso >= ${isoMin}`);
-        }
-        if (isoMax !== undefined) {
-          conditions.push(sql`e.iso <= ${isoMax}`);
-        }
-        if (shutterMin !== undefined) {
-          conditions.push(sql`e.shutter_speed_num >= ${shutterMin}`);
-        }
-        if (shutterMax !== undefined) {
-          conditions.push(sql`e.shutter_speed_num <= ${shutterMax}`);
-        }
-
-        const candidateSql = exifActive
-          ? sql`SELECT p.id, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
-                FROM photos p
-                JOIN exif_data e ON e.photo_id = p.id
-                WHERE ${and(...conditions)}`
-          : sql`SELECT p.id, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
-                FROM photos p
-                WHERE ${and(...conditions)}`;
-        const sqliteResults = db.all(
-          sql`WITH color_candidates AS MATERIALIZED (${candidateSql})
-              SELECT id, dist FROM color_candidates
-              WHERE dist < ${COLOR_MATCH_MAX_DISTANCE_SQUARED}
-              ORDER BY dist ASC
-              LIMIT ${limit}`
-        ) as Array<{ dist: number; id: number }>;
-
-        let lanceResults: Array<{ distanceSquared: number; photoId: number }> =
-          [];
-        if (sqliteResults.length < limit) {
-          try {
-            lanceResults = await withTimeout(
-              (async () => {
-                const { searchByColorVector } = await import(
-                  "@/services/ai/vector-db"
-                );
-                const results = await searchByColorVector(
-                  rgb.r,
-                  rgb.g,
-                  rgb.b,
-                  limit
-                );
-                return (results ?? []).filter(
-                  (result) =>
-                    result.distanceSquared < COLOR_MATCH_MAX_DISTANCE_SQUARED &&
-                    (!creatorIds || creatorIds.has(result.photoId))
-                );
-              })(),
+          lanceResults = (
+            (await withTimeout(
+              searchByColorVector(
+                rgb.r,
+                rgb.g,
+                rgb.b,
+                supplementIds.length,
+                supplementIds,
+                true
+              ),
               COLOR_VECTOR_TIMEOUT_MS,
               "ColorVector"
-            );
-          } catch {
-            // SQLite is authoritative; vector search is only a fast supplement.
-          }
+            )) ?? []
+          ).filter(
+            (result) =>
+              result.distanceSquared < COLOR_MATCH_MAX_DISTANCE_SQUARED &&
+              supplementSet.has(result.photoId)
+          );
+        } catch {
+          colorIncomplete = true;
         }
-
-        const ranks = mergeColorSearchRanks(
-          sqliteResults.map((result) => ({
-            photoId: result.id,
-            distanceSquared: result.dist,
-          })),
-          lanceResults,
-          limit
-        );
-        const rankedIds = ranks.map((rank) => rank.photoId);
-        const typedPhotos =
-          rankedIds.length === 0
-            ? []
-            : db
-                .select(SEARCH_PHOTO_COLUMNS)
-                .from(photos)
-                .where(
-                  and(isNull(photos.deletedAt), inArray(photos.id, rankedIds))
-                )
-                .all();
-        const photoList = hydrateColorSearchResults(ranks, typedPhotos);
-
-        console.log(
-          `[Search] Color #${effectiveColorHex}: SQLite=${sqliteResults.length} LanceDB=${lanceResults.length} merged=${photoList.length}`
-        );
-
-        return {
-          results: photoList,
-          total: photoList.length,
+      }
+      checkSearch(execution);
+      const ranks = mergeColorSearchRanks(
+        sqliteResults.map((result) => ({
+          photoId: result.id,
+          distanceSquared: result.dist,
+        })),
+        lanceResults,
+        colorScope.rows.length
+      );
+      return finalizeSearchPage(
+        ranks.map((rank) => ({
+          id: rank.photoId,
+          match: {
+            kind: "color" as const,
+            score: colorDistanceToMatchScore(rank.distanceSquared),
+          },
+        })),
+        {
+          total: ranks.length,
+          totalExact: !colorIncomplete,
           searchMode: "color" as const,
-        };
-      }
+          ...(colorIncomplete
+            ? {
+                completion: "partial" as const,
+                incompleteReason: "semantic-unavailable" as const,
+              }
+            : {}),
+        },
+        false
+      );
     }
+  }
 
-    // Pre-process: extract time filter from natural language
-    let effectiveDateFrom = dateFrom;
-    let effectiveDateTo = dateTo;
-    let rewrittenTimeFilter: RewrittenQuery["timeFilter"] | undefined;
-    let searchText = query;
-    if (searchText?.trim()) {
-      const q = searchText.trim();
-      if (CHINESE_CHAR_RE.test(q)) {
-        const rewritten = rewriteQuery(q);
-        if (!(effectiveDateFrom || effectiveDateTo) && rewritten.timeFilter) {
-          effectiveDateFrom = rewritten.timeFilter.from;
-          effectiveDateTo = rewritten.timeFilter.to;
-        }
-        rewrittenTimeFilter = rewritten.timeFilter;
-        // Pure time query → clear searchText, fall through to EXIF-only path
-        searchText = rewritten.cleanQuery.trim() || undefined;
-      }
+  // Text query: multi-source retrieval → dedup → rerank
+  if (searchText?.trim()) {
+    const q = searchText.trim();
+    const scopeStarted = performance.now();
+    const quotedNames = [...q.matchAll(/["“]([^"”]+)["”]/g)].map(
+      (match) => match[1]
+    );
+    const isGlob = quotedNames.length === 0 && GLOB_WILDCARD_RE.test(q);
+    const scoped = getPhotoSearchScope(
+      db,
+      { ...filters, filenameGlob: isGlob ? q : undefined },
+      metadataRevision
+    );
+    const scope = [...scoped.rows];
+    const scopeById = scoped.byId;
+    const allowedPhotoIds = scoped.allowedPhotoIds;
+    if (execution.diagnostics) {
+      execution.diagnostics.timings.sqliteMs = performance.now() - scopeStarted;
     }
-
-    // ── Glob wildcard shortcut ─────────────────────────────────────
-    // When the query contains shell-style wildcard characters (*, ?, [abc]),
-    // skip the expensive multi-source retrieval (AI, tags, FTS5, person)
-    // and do a direct GLOB match against the filename column.
-    // SQLite GLOB uses the same wildcard syntax as shell globs — no
-    // translation needed. LOWER() makes the match case-insensitive.
-    if (searchText?.trim() && GLOB_WILDCARD_RE.test(searchText.trim())) {
-      const globPattern = searchText.trim();
-      const baseConds: SQL[] = [
-        isNull(photos.deletedAt),
-        sql`LOWER(${photos.filename}) GLOB LOWER(${globPattern})`,
-      ];
-      if (creatorIds) {
-        baseConds.push(inArray(photos.id, Array.from(creatorIds)));
-      }
-
-      const hasExifFilter =
-        effectiveDateFrom ||
-        effectiveDateTo ||
-        dateMonth !== undefined ||
-        dateHour !== undefined ||
-        cameraModel ||
-        lensModel ||
-        focalMin !== undefined ||
-        focalMax !== undefined ||
-        apertureMin !== undefined ||
-        apertureMax !== undefined ||
-        isoMin !== undefined ||
-        isoMax !== undefined ||
-        shutterMin !== undefined ||
-        shutterMax !== undefined;
-
-      if (hasExifFilter) {
-        const exifConds: SQL[] = [];
-        if (effectiveDateFrom) {
-          exifConds.push(sql`${exifData.dateTaken} >= ${effectiveDateFrom}`);
-        }
-        if (effectiveDateTo) {
-          exifConds.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
-        }
-        exifConds.push(...periodicDateConditions());
-        if (cameraModel) {
-          exifConds.push(like(exifData.cameraModel, `%${cameraModel}%`));
-        }
-        if (lensModel) {
-          exifConds.push(like(exifData.lensModel, `%${lensModel}%`));
-        }
-        if (focalMin !== undefined) {
-          exifConds.push(gte(exifData.focalLengthNum, focalMin));
-        }
-        if (focalMax !== undefined) {
-          exifConds.push(lte(exifData.focalLengthNum, focalMax));
-        }
-        if (apertureMin !== undefined) {
-          exifConds.push(sql`${exifData.aperture} >= ${apertureMin}`);
-        }
-        if (apertureMax !== undefined) {
-          exifConds.push(sql`${exifData.aperture} <= ${apertureMax}`);
-        }
-        if (isoMin !== undefined) {
-          exifConds.push(gte(exifData.iso, isoMin));
-        }
-        if (isoMax !== undefined) {
-          exifConds.push(lte(exifData.iso, isoMax));
-        }
-        if (shutterMin !== undefined) {
-          exifConds.push(gte(exifData.shutterSpeedNum, shutterMin));
-        }
-        if (shutterMax !== undefined) {
-          exifConds.push(lte(exifData.shutterSpeedNum, shutterMax));
-        }
-
-        const exifPhotoIds = db
-          .select({ photoId: exifData.photoId })
-          .from(exifData)
-          .innerJoin(photos, eq(photos.id, exifData.photoId))
-          .where(and(...baseConds, ...exifConds))
-          .limit(limit)
-          .all()
-          .map((r) => r.photoId)
-          .filter(Boolean) as number[];
-
-        if (exifPhotoIds.length === 0) {
-          return { results: [], query: globPattern, total: 0 };
-        }
-
-        const photoList = db
-          .select(SEARCH_PHOTO_COLUMNS)
-          .from(photos)
-          .where(
-            and(isNull(photos.deletedAt), inArray(photos.id, exifPhotoIds))
-          )
-          .orderBy(desc(photos.fileDate))
-          .all();
-
-        return {
-          results: photoList,
-          query: globPattern,
-          total: photoList.length,
-        };
-      }
-
-      // No EXIF filters — simple GLOB query
-      const globResults = db
-        .select(SEARCH_PHOTO_COLUMNS)
-        .from(photos)
-        .where(and(...baseConds))
-        .orderBy(desc(photos.fileDate))
-        .limit(limit)
-        .all();
-
+    checkSearch(execution);
+    if (allowedPhotoIds.length === 0) {
       return {
-        results: globResults,
-        query: globPattern,
-        total: globResults.length,
+        results: [],
+        total: 0,
+        totalExact: true,
+        query: q,
+        semanticRequired: false,
       };
     }
+    if (isGlob) {
+      scope.sort(
+        (left, right) =>
+          (right.fileDate ?? 0) - (left.fileDate ?? 0) || left.id - right.id
+      );
+      return finalizeSearchPage(
+        scope,
+        { query: q, total: scope.length, totalExact: true },
+        false
+      );
+    }
+    const aiReadiness = await waitForSearch(
+      getAiReadiness({ loadModel: false }),
+      execution
+    );
+    let semantic = {
+      candidateMinimum: 0,
+      candidateDepth: 0,
+      consensusCutoff: 0,
+      cutoffReason: "not-run",
+      finalCutoff: 0,
+      hasMore: false,
+      indexedPhotos: aiReadiness.indexedPhotos,
+      intent: "unknown" as "object" | "scene" | "composed" | "unknown",
+      promptGroupCount: 0,
+      reason: aiReadiness.lastError as string | undefined,
+      rejectedWeak: 0,
+      state: aiReadiness.coverageState,
+      strongAccepted: 0,
+      strongCutoff: 0,
+      sensitivity: activeSensitivity,
+      sensitivityMultiplier: getSensitivityMultiplier(activeSensitivity),
+      supportedAccepted: 0,
+      supportCutoff: 0,
+      manualExactAccepted: 0,
+      semanticOnlyAccepted: 0,
+      tagSupportedAccepted: 0,
+      autoTagRescued: 0,
+      ignoredLowConfidenceTags: 0,
+      topSimilarity: 0,
+      totalPhotos: aiReadiness.totalPhotos,
+      required: Boolean(q.replace(EXACT_NAME_RE, "").trim()),
+      used: false,
+    };
 
-    // Text query: multi-source retrieval → dedup → rerank
-    if (searchText?.trim()) {
-      const q = searchText.trim();
-      const aiReadiness = await getAiReadiness({ loadModel: false });
-      let semantic = {
-        candidateMinimum: 0,
-        candidateDepth: 0,
-        consensusCutoff: 0,
-        cutoffReason: "not-run",
-        finalCutoff: 0,
-        hasMore: false,
-        indexedPhotos: aiReadiness.indexedPhotos,
-        intent: "unknown" as "object" | "scene" | "composed" | "unknown",
-        promptGroupCount: 0,
-        reason: aiReadiness.lastError as string | undefined,
-        rejectedWeak: 0,
-        state: aiReadiness.coverageState,
-        strongAccepted: 0,
-        strongCutoff: 0,
-        sensitivity: activeSensitivity,
-        sensitivityMultiplier: getSensitivityMultiplier(activeSensitivity),
-        supportedAccepted: 0,
-        supportCutoff: 0,
-        manualExactAccepted: 0,
-        semanticOnlyAccepted: 0,
-        tagSupportedAccepted: 0,
-        autoTagRescued: 0,
-        ignoredLowConfidenceTags: 0,
-        topSimilarity: 0,
-        totalPhotos: aiReadiness.totalPhotos,
-        used: false,
-      };
-
-      // ── 提取原始查询中的潜在专有名词 token ─────────────────────
-      // 中文姓名/标签通常 2-4 字，从原始 query 中提取 n-gram 子串，
-      // 用于 SQLite LIKE 搜索，避免改写后丢失专有名词信息。
-      function extractNameTokens(raw: string): string[] {
-        // 去除已知停用词、口语词、标点
-        let cleaned = raw;
-        for (const c of [
-          "的",
-          "了",
-          "着",
-          "过",
-          "吗",
-          "呢",
-          "吧",
-          "啊",
-          "在",
-          "是",
-          "有",
-          "和",
-          "与",
-          "或",
-          "及",
-          "等",
-          "这",
-          "那",
-          "也",
-          "拍",
-          "照",
-          "找",
-          "看",
-          "帮",
-        ]) {
-          cleaned = cleaned.replaceAll(c, " ");
+    // ── 提取原始查询中的潜在专有名词 token ─────────────────────
+    // 保留完整正向描述和显式分词，不拆解中文词语内部字符。
+    const positiveNames = extractNegativeClauses(q).positiveText.replace(
+      /[“”"']/g,
+      " "
+    );
+    const nameTokens = [
+      ...new Set([
+        ...quotedNames,
+        ...positiveNames.split(NAME_SPLIT_RE).filter(Boolean),
+      ]),
+    ];
+    const literalQuery = q
+      .replace(/[“”"]/g, " ")
+      .trim()
+      .replace(WHITESPACE_RE, " ");
+    const literalContains = (field: Parameters<typeof like>[0], text: string) =>
+      sql`${field} LIKE ${`%${text.replace(/[\\%_]/g, "\\$&")}%`} ESCAPE ${"\\"}`;
+    // 构建 OR LIKE 条件：column LIKE '%token1%' OR column LIKE '%token2%' ...
+    function buildTokenConditions(
+      tokens: string[],
+      field: Parameters<typeof like>[0],
+      fallbackQ: string
+    ): SQL[] {
+      // 完整描述与独立名称都提供召回证据；是否精确命中由融合阶段判断。
+      const conditions: SQL[] = [literalContains(field, fallbackQ)];
+      for (const token of tokens) {
+        if (token !== fallbackQ) {
+          conditions.push(literalContains(field, token));
         }
-        // 保留 2-4 字的中文连续片段
-        const cjkOnly = cleaned.replace(/[^一-鿿]+/g, " ").trim();
-        const tokens = new Set<string>();
-        if (cjkOnly.length >= 2) {
-          for (let len = 4; len >= 2; len--) {
-            for (let i = 0; i <= cjkOnly.length - len; i++) {
-              tokens.add(cjkOnly.slice(i, i + len));
-            }
-          }
-        }
-        return [...tokens].slice(0, 12); // 上限 12 个 token，避免 SQL 过大
       }
+      return conditions;
+    }
 
-      const nameTokens = extractNameTokens(input.query ?? "");
-      // 构建 OR LIKE 条件：column LIKE '%token1%' OR column LIKE '%token2%' ...
-      function buildTokenConditions(
-        tokens: string[],
-        field: Parameters<typeof like>[0],
-        fallbackQ: string
-      ): SQL[] {
-        // 始终包含完整 q 的 LIKE 条件 + 所有 n-gram token 的 OR 条件
-        // 不做 dedup：n-gram LIKE '%小美%' 与完整 LIKE '%小美床上%' 匹配不同行
-        const conditions: SQL[] = [like(field, `%${fallbackQ}%`)];
-        for (const token of tokens) {
-          if (token !== fallbackQ) {
-            conditions.push(like(field, `%${token}%`));
-          }
-        }
-        return conditions;
-      }
+    // ── 四路并行召回（Promise.allSettled + 硬超时） ─────────────────
+    // 替代脆弱的 Promise.all：单路故障不影响其他路结果。
+    // 已预热的语义搜索限制为 2s；冷启动允许 10s 完成模型和数据库初始化。
 
-      // ── 四路并行召回（Promise.allSettled + 硬超时） ─────────────────
-      // 替代脆弱的 Promise.all：单路故障不影响其他路结果。
-      // 已预热的语义搜索限制为 2s；冷启动允许 10s 完成模型和数据库初始化。
-
-      const aiSearchWasReady = isAiSearchReady();
-      const aiSearchTimeoutMs = aiSearchWasReady
-        ? AI_SEARCH_TIMEOUT_MS
-        : AI_SEARCH_COLD_TIMEOUT_MS;
-      const semanticAvailable =
-        aiReadiness.coverageState === "ready" ||
-        aiReadiness.coverageState === "partial";
+    const semanticAvailable =
+      aiReadiness.coverageState === "ready" ||
+      aiReadiness.coverageState === "partial";
+    // Quoted names are resolved by exact evidence, with no visual description.
+    const semanticRequired = Boolean(q.replace(EXACT_NAME_RE, "").trim());
+    let partialAiSearch:
+      | Awaited<ReturnType<typeof aiSearchByTextWithPlan>>
+      | undefined;
+    let candidateDepth = requestedCandidateDepth;
+    for (;;) {
       const settled = await Promise.allSettled([
         // 路 1：SigLIP 文本推理 + LanceDB 向量召回
-        semanticAvailable
-          ? withTimeout(
-              aiSearchByTextWithPlan(q, resultWindowEnd),
-              aiSearchTimeoutMs,
-              aiSearchWasReady
-                ? "AI semantic search"
-                : "AI semantic search warmup"
+        semanticAvailable && semanticRequired
+          ? aiSearchByTextWithPlan(
+              input.query?.trim() || q,
+              activeSearchSession ? limit : offset + limit,
+              {
+                ...execution,
+                get finished() {
+                  return execution.finished;
+                },
+                allowedPhotoIds,
+                candidateDepth,
+                scopeKey: scoped.key,
+                sourceRevision,
+                rewritten: rewrittenQuery,
+                onCandidates: (partial) => {
+                  partialAiSearch = partial;
+                },
+              }
             )
-          : Promise.resolve([]),
+          : Promise.resolve(null),
         // 路 2：标签库 LIKE 搜索（原始 query token + 改写后 query 双路）
-        activeSearchSession?.tagEvidence
-          ? Promise.resolve(activeSearchSession.tagEvidence)
-          : deferSearchBranch(() =>
+        (activeSearchSession?.tagEvidence ?? searchSessionTagEvidence)
+          ? Promise.resolve(
+              activeSearchSession?.tagEvidence ?? searchSessionTagEvidence
+            )
+          : sqliteBranch(() =>
               db
                 .select({
                   id: photos.id,
@@ -1033,14 +899,20 @@ export const searchCompound = os
                 .innerJoin(tags, eq(tags.id, photoTags.tagId))
                 .where(
                   and(
-                    isNull(photos.deletedAt),
-                    or(...buildTokenConditions(nameTokens, tags.name, q))
+                    scopePredicate,
+                    or(
+                      ...buildTokenConditions(
+                        nameTokens,
+                        tags.name,
+                        literalQuery
+                      )
+                    )
                   )
                 )
                 .all()
             ),
         // 路 3：文件名搜索 — FTS5 MATCH 优先，LIKE 回退
-        (() => {
+        sqliteBranch(() => {
           // FTS5 简单模式下仅 " 为特殊字符；
           // * 和 ? 已由上方的 glob 短路路径处理，不会到达此处。
           const needsFts5Escape = FTS5_QUOTE_RE.test(q);
@@ -1052,8 +924,10 @@ export const searchCompound = os
                 .map((t) => `"${t}"*`)
                 .join(" ");
               const ftsResults = db.all(
-                sql`SELECT rowid AS id FROM photos_fts WHERE photos_fts MATCH ${terms}`
-              ) as Array<{ id: number }>;
+                sql`SELECT photos.id AS id, photos.filename AS filename
+                  FROM photos_fts JOIN photos ON photos.id = photos_fts.rowid
+                  WHERE photos_fts MATCH ${terms} AND (${scopePredicate})`
+              ) as Array<{ id: number; filename: string }>;
               if (ftsResults.length > 0) {
                 return ftsResults;
               }
@@ -1063,15 +937,24 @@ export const searchCompound = os
           }
           // LIKE 回退
           return db
-            .select({ id: photos.id })
+            .select({ id: photos.id, filename: photos.filename })
             .from(photos)
             .where(
-              and(isNull(photos.deletedAt), like(photos.filename, `%${q}%`))
+              and(
+                scopePredicate,
+                or(
+                  ...buildTokenConditions(
+                    quotedNames,
+                    photos.filename,
+                    literalQuery
+                  )
+                )
+              )
             )
             .all();
-        })(),
+        }),
         // 路 4：人脸识别名搜索（token 化匹配中文姓名）
-        deferSearchBranch(() =>
+        sqliteBranch(() =>
           db
             .select({ id: photos.id, name: faceIdentities.name })
             .from(photos)
@@ -1086,8 +969,14 @@ export const searchCompound = os
             )
             .where(
               and(
-                isNull(photos.deletedAt),
-                or(...buildTokenConditions(nameTokens, faceIdentities.name, q))
+                scopePredicate,
+                or(
+                  ...buildTokenConditions(
+                    nameTokens,
+                    faceIdentities.name,
+                    literalQuery
+                  )
+                )
               )
             )
             .all()
@@ -1100,8 +989,10 @@ export const searchCompound = os
           ? (settled[0].value as Awaited<
               ReturnType<typeof aiSearchByTextWithPlan>
             >)
-          : null;
-      const aiResults = aiSearch?.results ?? [];
+          : (partialAiSearch ?? null);
+      const aiResults = (aiSearch?.results ?? []).filter((row) =>
+        scopeById.has(row.photoId)
+      );
       let semanticReason = semantic.reason;
       if (settled[0].status === "rejected") {
         semanticReason =
@@ -1148,10 +1039,13 @@ export const searchCompound = os
               userConfirmed: boolean;
             }>)
           : [];
-      searchSessionTagEvidence = tagPhotoRows;
+      const allowedTagRows = tagPhotoRows.filter((row) =>
+        scopeById.has(row.id)
+      );
+      searchSessionTagEvidence = allowedTagRows;
       const filenamePhotoRows =
         settled[2].status === "fulfilled"
-          ? (settled[2].value as { id: number }[])
+          ? (settled[2].value as { id: number; filename?: string }[])
           : [];
       const personPhotoRows =
         settled[3].status === "fulfilled"
@@ -1182,9 +1076,20 @@ export const searchCompound = os
         );
       }
 
-      const normalizedExactQuery = q.trim().toLocaleLowerCase();
-      const isFullMatch = (value: string): boolean =>
-        value.trim().toLocaleLowerCase() === normalizedExactQuery;
+      const rankingStarted = performance.now();
+      const normalizedExactQuery = q
+        .trim()
+        .replace(/^[“"]|[”"]$/g, "")
+        .toLocaleLowerCase();
+      const isFullMatch = (value: string): boolean => {
+        const normalized = value.trim().toLocaleLowerCase();
+        return (
+          normalized === normalizedExactQuery ||
+          quotedNames.some(
+            (name) => name.trim().toLocaleLowerCase() === normalized
+          )
+        );
+      };
       const semanticPhotoIds = new Set(aiResults.map(({ photoId }) => photoId));
       const semanticCandidates =
         SEARCH_PIPELINE_VERSION === "hybrid-v3"
@@ -1196,30 +1101,34 @@ export const searchCompound = os
             ]
           : aiResults;
       const exactEvidence: ExactSearchEvidence[] = [
-        ...personPhotoRows.map((row) => ({
-          exact: isFullMatch(row.name),
-          photoId: row.id,
-          source: "person" as const,
-        })),
+        ...personPhotoRows
+          .filter((row) => scopeById.has(row.id))
+          .map((row) => ({
+            exact: isFullMatch(row.name),
+            photoId: row.id,
+            source: "person" as const,
+          })),
         ...buildTagSearchEvidence(
-          tagPhotoRows,
+          allowedTagRows,
           SEARCH_PIPELINE_VERSION === "hybrid-v3"
             ? new Set<number>()
             : semanticPhotoIds,
           isFullMatch
         ),
-        ...filenamePhotoRows.map((row) => ({
-          exact: false,
-          photoId: row.id,
-          source: "filename" as const,
-        })),
+        ...filenamePhotoRows
+          .filter((row) => scopeById.has(row.id))
+          .map((row) => ({
+            exact: isFullMatch(row.filename ?? ""),
+            photoId: row.id,
+            source: "filename" as const,
+          })),
       ];
       const gated =
         SEARCH_PIPELINE_VERSION === "hybrid-v3"
           ? fuseGatedHybridSearchEvidence(
               semanticCandidates,
               exactEvidence,
-              tagPhotoRows,
+              allowedTagRows,
               {
                 acceptedSemanticPhotoIds: semanticPhotoIds,
                 intent: aiSearch?.plan.intent ?? "unknown",
@@ -1244,55 +1153,6 @@ export const searchCompound = os
         );
       }
 
-      if (rerankedList.length === 0) {
-        // If time filter was parsed from query, skip AI and do plain date filter
-        if (
-          effectiveDateFrom ||
-          effectiveDateTo ||
-          dateMonth !== undefined ||
-          dateHour !== undefined
-        ) {
-          const dateConditions: SQL[] = [];
-          if (effectiveDateFrom) {
-            dateConditions.push(gte(exifData.dateTaken, effectiveDateFrom));
-          }
-          if (effectiveDateTo) {
-            dateConditions.push(lte(exifData.dateTaken, effectiveDateTo));
-          }
-          dateConditions.push(...periodicDateConditions());
-          const dateFiltered = db
-            .select({ photoId: exifData.photoId })
-            .from(exifData)
-            .where(and(...dateConditions))
-            .limit(limit)
-            .all();
-          const datePhotoIds = dateFiltered
-            .map((e) => e.photoId)
-            .filter(Boolean) as number[];
-          if (datePhotoIds.length > 0) {
-            const datePhotos = db
-              .select(SEARCH_PHOTO_COLUMNS)
-              .from(photos)
-              .where(
-                and(isNull(photos.deletedAt), inArray(photos.id, datePhotoIds))
-              )
-              .orderBy(desc(photos.fileDate))
-              .limit(limit)
-              .all();
-            return {
-              results: datePhotos,
-              query: q,
-              total: datePhotos.length,
-              semantic,
-              ...(rewrittenTimeFilter
-                ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
-                : {}),
-            };
-          }
-        }
-        return { results: [], query: q, total: 0, semantic };
-      }
-
       // hybrid 的 similarity 在 rerank 里取自语义分（含 semantic 证据时），
       // 带上它让前端能把「语义 + 标签」也归一化为匹配百分比。
       const hybridSemanticScore = (
@@ -1303,9 +1163,7 @@ export const searchCompound = os
         if ("hybridEvidence" in result) {
           const hybridResult = result as GatedHybridResult;
           if (hybridResult.hybridEvidence.length === 0) {
-            return hybridResult._source === "person" ||
-              hybridResult._source === "tag" ||
-              hybridResult._source === "filename"
+            return isExactSource(hybridResult._source)
               ? {
                   kind: "exact" as const,
                   source: hybridResult._source,
@@ -1327,177 +1185,20 @@ export const searchCompound = os
           : { kind: "exact" as const, source: result._source };
       };
 
-      const hasExifOrTimeFilter =
-        effectiveDateFrom ||
-        effectiveDateTo ||
-        dateMonth !== undefined ||
-        dateHour !== undefined ||
-        cameraModel ||
-        lensModel ||
-        creator ||
-        focalMin !== undefined ||
-        focalMax !== undefined ||
-        apertureMin !== undefined ||
-        apertureMax !== undefined ||
-        isoMin !== undefined ||
-        isoMax !== undefined ||
-        shutterMin !== undefined ||
-        shutterMax !== undefined ||
-        Boolean(advancedField && advancedValue);
-
-      if (!hasExifOrTimeFilter) {
-        const allIds = rerankedList.map((r) => r.photoId);
-        const photoList = db
-          .select(SEARCH_PHOTO_COLUMNS)
-          .from(photos)
-          .where(inArray(photos.id, allIds))
-          .all();
-        const photoMap = new Map(photoList.map((p) => [p.id, p]));
-        const combined = rerankedList
-          .map((r) => {
-            const photo = photoMap.get(r.photoId);
-            if (!photo) {
-              return null;
-            }
-            return {
-              ...photo,
-              exactMatch: r.exact,
-              match: toSearchMatch(r),
-              rankScore: r.rankScore,
-              similarity: r.similarity,
-              fileDate: photo.fileDate,
-            };
-          })
-          .filter(
-            (p): p is NonNullable<typeof p> => p !== null && p.id != null
-          );
-        combined.sort(
-          (left, right) =>
-            Number(right.exactMatch) - Number(left.exactMatch) ||
-            right.rankScore - left.rankScore ||
-            right.similarity - left.similarity ||
-            (right.fileDate ?? 0) - (left.fileDate ?? 0) ||
-            left.id - right.id
-        );
-
-        return finalizeSearchPage(
-          withoutInternalSearchScores(combined),
-          {
-            query: q,
-            total: combined.length,
-            totalExact:
-              combined.length <= resultWindowEnd && !aiSearch?.hasMore,
-            semantic: {
-              ...semantic,
-              searchSessionHit: Boolean(activeSearchSession),
-            },
-            ...(rewrittenTimeFilter
-              ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
-              : {}),
-          },
-          Boolean(aiSearch?.hasMore)
-        );
-      }
-
-      // 7) Apply EXIF/time filters on merged results
-      const allIds = rerankedList.map((r) => r.photoId);
-      const exifConditions: SQL[] = [];
-
-      if (effectiveDateFrom) {
-        exifConditions.push(sql`${exifData.dateTaken} >= ${effectiveDateFrom}`);
-      }
-      if (effectiveDateTo) {
-        exifConditions.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
-      }
-      exifConditions.push(...periodicDateConditions());
-      if (cameraModel) {
-        exifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));
-      }
-      if (lensModel) {
-        exifConditions.push(like(exifData.lensModel, `%${lensModel}%`));
-      }
-      if (focalMin !== undefined) {
-        exifConditions.push(gte(exifData.focalLengthNum, focalMin));
-      }
-      if (focalMax !== undefined) {
-        exifConditions.push(lte(exifData.focalLengthNum, focalMax));
-      }
-      if (apertureMin !== undefined) {
-        exifConditions.push(sql`${exifData.aperture} >= ${apertureMin}`);
-      }
-      if (apertureMax !== undefined) {
-        exifConditions.push(sql`${exifData.aperture} <= ${apertureMax}`);
-      }
-      if (isoMin !== undefined) {
-        exifConditions.push(gte(exifData.iso, isoMin));
-      }
-      if (isoMax !== undefined) {
-        exifConditions.push(lte(exifData.iso, isoMax));
-      }
-      if (shutterMin !== undefined) {
-        exifConditions.push(gte(exifData.shutterSpeedNum, shutterMin));
-      }
-      if (shutterMax !== undefined) {
-        exifConditions.push(lte(exifData.shutterSpeedNum, shutterMax));
-      }
-
-      const validIds =
-        exifConditions.length > 0
-          ? new Set(
-              db
-                .select({ photoId: exifData.photoId })
-                .from(exifData)
-                .where(
-                  and(inArray(exifData.photoId, allIds), ...exifConditions)
-                )
-                .all()
-                .map((row) => row.photoId)
-                .filter((photoId): photoId is number => photoId !== null)
-            )
-          : new Set(allIds);
-      const advancedIds = getAdvancedIds(allIds);
-
-      const filtered = rerankedList.filter(
-        (r) =>
-          validIds.has(r.photoId) &&
-          (!creatorIds || creatorIds.has(r.photoId)) &&
-          (!advancedIds || advancedIds.has(r.photoId))
-      );
-
-      if (filtered.length === 0) {
-        return {
-          results: [],
-          query: q,
-          total: 0,
-          semantic,
-          ...(rewrittenTimeFilter
-            ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
-            : {}),
-        };
-      }
-      const filteredIds = filtered.map((r) => r.photoId);
-      const photoList = db
-        .select(SEARCH_PHOTO_COLUMNS)
-        .from(photos)
-        .where(inArray(photos.id, filteredIds))
-        .all();
-      const photoMap = new Map(photoList.map((p) => [p.id, p]));
-      const combined = filtered
-        .map((r) => {
-          const photo = photoMap.get(r.photoId);
-          if (!photo) {
-            return null;
-          }
-          return {
-            ...photo,
-            exactMatch: r.exact,
-            match: toSearchMatch(r),
-            rankScore: r.rankScore,
-            similarity: r.similarity,
-            fileDate: photo.fileDate,
-          };
-        })
-        .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
+      const combined = rerankedList.flatMap((result) => {
+        const photo = scopeById.get(result.photoId);
+        return photo
+          ? [
+              {
+                ...photo,
+                exactMatch: result.exact,
+                match: toSearchMatch(result),
+                rankScore: result.rankScore,
+                similarity: result.similarity,
+              },
+            ]
+          : [];
+      });
       combined.sort(
         (left, right) =>
           Number(right.exactMatch) - Number(left.exactMatch) ||
@@ -1506,13 +1207,65 @@ export const searchCompound = os
           (right.fileDate ?? 0) - (left.fileDate ?? 0) ||
           left.id - right.id
       );
-
+      if (execution.diagnostics) {
+        execution.diagnostics.timings.rankingMs =
+          (execution.diagnostics.timings.rankingMs ?? 0) +
+          performance.now() -
+          rankingStarted;
+      }
+      const failed = settled.find((branch) => branch.status === "rejected");
+      let incompleteReason: SearchResponse["incompleteReason"] =
+        failed || (semanticRequired && !semanticAvailable)
+          ? "semantic-unavailable"
+          : undefined;
+      if (
+        failed?.status === "rejected" &&
+        failed.reason instanceof SearchInterrupted
+      ) {
+        incompleteReason = failed.reason.reason;
+      }
+      if (
+        aiSearch &&
+        ([
+          "model-load-failed",
+          "ai-not-initialized",
+          "missing-primary-query",
+          "missing-negative-query",
+          "missing-photo-vector",
+        ].includes(aiSearch.cutoffReason) ||
+          aiSearch.cutoffReason?.startsWith("vector-"))
+      ) {
+        incompleteReason = "semantic-unavailable";
+      }
+      const emitted = activeSearchSession?.emittedIds ?? new Set<number>();
+      const availableIds = new Set([
+        ...(activeSearchSession?.rankedPool.map((row) => row.id) ?? []),
+        ...combined.filter((row) => !emitted.has(row.id)).map((row) => row.id),
+      ]);
+      const actualDepth = aiSearch?.candidateDepth ?? candidateDepth;
+      if (
+        !incompleteReason &&
+        aiSearch?.hasMore &&
+        availableIds.size < (activeSearchSession ? limit : offset + limit) &&
+        actualDepth < allowedPhotoIds.length
+      ) {
+        candidateDepth = Math.min(
+          allowedPhotoIds.length,
+          Math.max(actualDepth + 200, actualDepth * 2)
+        );
+        checkSearch(execution);
+        continue;
+      }
       return finalizeSearchPage(
         withoutInternalSearchScores(combined),
         {
           query: q,
           total: combined.length,
-          totalExact: combined.length <= resultWindowEnd && !aiSearch?.hasMore,
+          totalExact: !(incompleteReason || aiSearch?.hasMore),
+          completion: incompleteReason
+            ? ("partial" as const)
+            : ("complete" as const),
+          ...(incompleteReason ? { incompleteReason } : {}),
           semantic: {
             ...semantic,
             searchSessionHit: Boolean(activeSearchSession),
@@ -1521,136 +1274,161 @@ export const searchCompound = os
             ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
             : {}),
         },
-        Boolean(aiSearch?.hasMore)
+        Boolean(aiSearch?.hasMore),
+        actualDepth
       );
     }
+  }
 
-    // No text query: EXIF-only filter
-    const hasEffectiveFilters =
-      effectiveDateFrom ||
-      effectiveDateTo ||
-      dateMonth !== undefined ||
-      dateHour !== undefined ||
-      cameraModel ||
-      lensModel ||
-      creator ||
-      focalMin !== undefined ||
-      focalMax !== undefined ||
-      apertureMin !== undefined ||
-      apertureMax !== undefined ||
-      isoMin !== undefined ||
-      isoMax !== undefined ||
-      shutterMin !== undefined ||
-      shutterMax !== undefined ||
-      Boolean(advancedField && advancedValue);
-    if (!hasEffectiveFilters) {
-      const items = db
-        .select(SEARCH_PHOTO_COLUMNS)
-        .from(photos)
-        .orderBy(desc(photos.fileDate))
-        .limit(limit)
-        .all();
-      return { results: items, total: items.length };
-    }
+  // No text query: EXIF-only filter
+  // Check EXIF-only filter cache (only for non-AI path)
+  const cacheKey =
+    sourceRevision +
+    ":" +
+    getCacheKey({ ...input, effectiveDateFrom, effectiveDateTo });
+  const cached = getCachedResult(cacheKey);
+  if (cached) {
+    return {
+      ...cached,
+      results: hydratePage(cached.results),
+      ...(rewrittenTimeFilter
+        ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+        : {}),
+    };
+  }
 
-    // Check EXIF-only filter cache (only for non-AI path)
-    const cacheKey = getCacheKey(input);
-    const cached = getCachedResult(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
-    const exifConditions: SQL[] = [];
-
-    if (effectiveDateFrom) {
-      exifConditions.push(sql`${exifData.dateTaken} >= ${effectiveDateFrom}`);
-    }
-    if (effectiveDateTo) {
-      exifConditions.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
-    }
-    exifConditions.push(...periodicDateConditions());
-    if (cameraModel) {
-      exifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));
-    }
-    if (lensModel) {
-      exifConditions.push(like(exifData.lensModel, `%${lensModel}%`));
-    }
-    if (creatorIds) {
-      exifConditions.push(inArray(exifData.photoId, Array.from(creatorIds)));
-    }
-    if (focalMin !== undefined) {
-      exifConditions.push(gte(exifData.focalLengthNum, focalMin));
-    }
-    if (focalMax !== undefined) {
-      exifConditions.push(lte(exifData.focalLengthNum, focalMax));
-    }
-    if (apertureMin !== undefined) {
-      exifConditions.push(sql`${exifData.aperture} >= ${apertureMin}`);
-    }
-    if (apertureMax !== undefined) {
-      exifConditions.push(sql`${exifData.aperture} <= ${apertureMax}`);
-    }
-    if (isoMin !== undefined) {
-      exifConditions.push(gte(exifData.iso, isoMin));
-    }
-    if (isoMax !== undefined) {
-      exifConditions.push(lte(exifData.iso, isoMax));
-    }
-    if (shutterMin !== undefined) {
-      exifConditions.push(gte(exifData.shutterSpeedNum, shutterMin));
-    }
-    if (shutterMax !== undefined) {
-      exifConditions.push(lte(exifData.shutterSpeedNum, shutterMax));
-    }
-    const allAdvancedIds = getAdvancedIds();
-    if (allAdvancedIds) {
-      if (allAdvancedIds.size === 0) {
-        const emptyResult = { results: [], total: 0 };
-        setCachedResult(cacheKey, emptyResult);
-        return emptyResult;
-      }
-      exifConditions.push(
-        inArray(exifData.photoId, Array.from(allAdvancedIds))
-      );
-    }
-
-    const matchingExif = db
-      .select({ photoId: exifData.photoId })
-      .from(exifData)
-      .where(and(...exifConditions));
-    // Keep the complete matching set in SQL. Only hydrate the requested page;
-    // the existing gallery continuation consumes hasMore / nextOffset.
-    const matchingPhotos = and(
-      isNull(photos.deletedAt),
-      inArray(photos.id, matchingExif)
-    );
-    const result = db.transaction(() => {
-      const total =
-        db
-          .select({ count: sql<number>`count(*)` })
-          .from(photos)
-          .where(matchingPhotos)
-          .get()?.count ?? 0;
-      const photoList = db
-        .select(SEARCH_PHOTO_COLUMNS)
+  const matchingPhotos = scopePredicate;
+  const result = db.transaction(() => {
+    const total =
+      db
+        .select({ count: sql<number>`count(*)` })
         .from(photos)
         .where(matchingPhotos)
-        .orderBy(desc(photos.fileDate), desc(photos.id))
-        .limit(limit)
-        .offset(offset)
-        .all();
-      const hasMore = offset + photoList.length < total;
-      return {
-        results: photoList,
-        total,
-        totalExact: true,
-        hasMore,
-        nextOffset: hasMore ? offset + photoList.length : null,
-      };
-    });
-    setCachedResult(cacheKey, result);
-    return result;
+        .get()?.count ?? 0;
+    const photoList = db
+      .select(SEARCH_PHOTO_COLUMNS)
+      .from(photos)
+      .where(matchingPhotos)
+      .orderBy(desc(photos.fileDate), desc(photos.id))
+      .limit(limit)
+      .offset(offset)
+      .all();
+    const hasMore = offset + photoList.length < total;
+    return {
+      results: photoList,
+      total,
+      totalExact: true,
+      hasMore,
+      nextOffset: hasMore ? offset + photoList.length : null,
+    };
   });
+  setCachedResult(cacheKey, {
+    ...result,
+    results: result.results.map(({ id }) => ({ id })),
+  });
+  return {
+    ...result,
+    ...(rewrittenTimeFilter
+      ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+      : {}),
+  };
+}
+
+export const searchCompound = os
+  .input(CompoundSearchSchema)
+  .handler(async ({ input }): Promise<SearchResponse> => {
+    const started = performance.now();
+    const cold =
+      Boolean(input.query?.trim()) &&
+      (!isAiSearchReady() ||
+        (CHINESE_CHAR_RE.test(input.query ?? "") &&
+          getTranslationState() !== "ready"));
+    const diagnostics = createSearchDiagnostics(input.requestId, cold);
+    const request = beginSearchRequest(
+      ipcContext.mainWindow?.webContents.id ?? 0,
+      diagnostics.requestId
+    );
+    const execution: SearchExecution = {
+      signal: request.signal,
+      deadline:
+        started + (cold ? AI_SEARCH_COLD_TIMEOUT_MS : AI_SEARCH_TIMEOUT_MS),
+      diagnostics,
+    };
+    const db = getDatabase();
+    const includeVectors = needsVectorRevision(input);
+    const sourceRevision = getSearchDatabaseRevision(db, includeVectors);
+    diagnostics.timings.preparationMs = performance.now() - started;
+    try {
+      const response = (await performCompoundSearch(
+        input,
+        execution,
+        sourceRevision
+      )) as SearchResponse;
+      if (request.signal.aborted) {
+        return {
+          results: [],
+          total: 0,
+          totalExact: false,
+          completion: "cancelled",
+          incompleteReason: "cancelled",
+          diagnostics,
+        };
+      }
+      if (getSearchDatabaseRevision(db, includeVectors) !== sourceRevision) {
+        return {
+          results: [],
+          total: 0,
+          totalExact: false,
+          cursorExpired: Boolean(input.cursor),
+          completion: "partial",
+          incompleteReason: "changed",
+          diagnostics,
+        };
+      }
+      const deadlineExceeded = performance.now() >= execution.deadline;
+      return {
+        ...response,
+        semanticRequired:
+          response.semanticRequired ??
+          (includeVectors &&
+            !input.colorHex &&
+            !HEX_COLOR_QUERY_RE.test(input.query?.trim() ?? "")),
+        ...(deadlineExceeded
+          ? { incompleteReason: "deadline" as const, totalExact: false }
+          : {}),
+        completion: deadlineExceeded
+          ? "partial"
+          : (response.completion ?? "complete"),
+        diagnostics,
+      };
+    } catch (error) {
+      if (!(error instanceof SearchInterrupted)) {
+        throw error;
+      }
+      return {
+        results: [],
+        total: 0,
+        totalExact: false,
+        completion: error.reason === "cancelled" ? "cancelled" : "partial",
+        incompleteReason: error.reason,
+        diagnostics,
+      };
+    } finally {
+      execution.finished = true;
+      diagnostics.timings.serviceMs = performance.now() - started;
+      request.finish();
+    }
+  });
+
+export const cancelSearch = os
+  .use(ipcContext.mainWindowContext)
+  .input(z.object({ requestId: z.string().uuid() }))
+  .handler(({ input, context }) => ({
+    cancelled: cancelSearchRequest(
+      context.window.webContents.id,
+      input.requestId
+    ),
+  }));
 
 // ── Spotlight 轻量搜索 ───────────────────────────────────────────────
 // 专为 Ctrl+K 全局搜索设计：仅返回 id + filename + thumbnailPath，

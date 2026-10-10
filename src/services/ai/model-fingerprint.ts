@@ -14,10 +14,14 @@ export interface ModelFingerprintPayload {
   dimensions: number;
   embeddingAlgorithmVersion: string;
   image: {
+    colorMode: string;
     inputName: string;
     outputName: string;
     imageSize: number;
     resizeFit: string;
+    preprocessingVersion: string;
+    resample: string;
+    rescaleFactor: number;
     mean: [number, number, number];
     std: [number, number, number];
   };
@@ -38,6 +42,8 @@ export interface ModelFingerprintPayload {
 
 export interface StoredVectorFingerprint {
   adapterId: string;
+  /** Markers predating resumable builds are completed (ready) markers. */
+  buildState?: "building" | "ready";
   createdAt: string;
   dimensions: number;
   fingerprint: string;
@@ -87,7 +93,10 @@ export interface VectorFingerprintPublicationInput {
   total: number;
 }
 
-const EMBEDDING_ALGORITHM_VERSION = "siglip-adapter-v1";
+const EMBEDDING_ALGORITHM_VERSION = "siglip-adapter-v2";
+/** The only image pipeline whose unmarked vectors may be legacy-adopted. */
+export const SIGLIP_LEGACY_FINGERPRINT =
+  "ed62a65ceff237b5aa9f1267ccd058710f76be5781b3c739ccfa15bf764f6297";
 const SHA256_RE = /^[a-f0-9]{64}$/u;
 const PATH_SPLIT_RE = /[\\/]/u;
 
@@ -130,10 +139,14 @@ export function buildModelFingerprintPayload(
       .map(({ relativePath, sha256 }) => ({ relativePath, sha256 })),
     dimensions: adapter.embeddingSpace.dimensions,
     image: {
+      colorMode: image.colorMode,
       inputName: image.inputName,
       outputName: image.outputName,
       imageSize: image.imageSize,
       resizeFit: image.resizeFit,
+      preprocessingVersion: image.preprocessingVersion,
+      resample: image.resample,
+      rescaleFactor: image.rescaleFactor,
       mean: [...image.mean] as [number, number, number],
       std: [...image.std] as [number, number, number],
     },
@@ -187,6 +200,9 @@ export function isValidStoredVectorFingerprint(
     Number.isInteger(dimensions) &&
     dimensions > 0 &&
     typeof stored.createdAt === "string" &&
+    (stored.buildState === undefined ||
+      stored.buildState === "building" ||
+      stored.buildState === "ready") &&
     (stored.source === "fresh-build" || stored.source === "legacy-adoption")
   );
 }
@@ -223,7 +239,11 @@ export function decideVectorCompatibility({
   if (vectorDimensions !== active.dimensions) {
     return { status: "dimension-mismatch", adoptLegacy: false };
   }
-  if (active.legacyKind === "siglip" && legacyArtifactsVerified) {
+  if (
+    active.legacyKind === "siglip" &&
+    active.fingerprint === SIGLIP_LEGACY_FINGERPRINT &&
+    legacyArtifactsVerified
+  ) {
     return { status: "legacy-compatible", adoptLegacy: true };
   }
   return { status: "missing-fingerprint", adoptLegacy: false };

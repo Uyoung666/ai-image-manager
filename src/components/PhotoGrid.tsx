@@ -44,7 +44,11 @@ import {
   type PhotoGroupInputSnapshot,
   snapshotPhotoGroupInputs,
 } from "@/utils/photo-group-headers";
-import type { GroupHeader, MasonryGridHandle } from "./MasonryGrid";
+import type {
+  GroupHeader,
+  MasonryGridHandle,
+  MasonryScrollRestoreRequest,
+} from "./MasonryGrid";
 import { MasonryGrid } from "./MasonryGrid";
 import { type FaceOverlay, PhotoCard } from "./PhotoCard";
 import { RecentlyViewedBadge } from "./RecentlyViewedBadge";
@@ -118,6 +122,7 @@ interface PhotoGridProps {
   onRestoreSettled?: (routeKey: string) => void;
   onRetrySequences?: () => void;
   onReturnLocated?: (request: number) => void;
+  onScrollRestored?: (request: number) => void;
   onScrollTopChange?: (scrollTop: number) => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSelectSequence?: (memberIds: number[], event: React.MouseEvent) => void;
@@ -142,6 +147,7 @@ interface PhotoGridProps {
    * 例如: "home" | "album-123" | "person-456"
    */
   routeKey: string;
+  scrollRestoreRequest?: MasonryScrollRestoreRequest;
   searchQuery?: string;
   selectedIds: Set<number>;
   /** 本次语义搜索最佳匹配的原始余弦相似度，透传给 PhotoCard 归一化角标 */
@@ -909,6 +915,7 @@ export const PhotoGrid = memo(
     deletingIds,
     gridRef,
     routeKey,
+    scrollRestoreRequest,
     searchQuery,
     semanticTopSimilarity,
     sort = "date",
@@ -935,6 +942,7 @@ export const PhotoGrid = memo(
     onMarqueeSelect,
     onRestoreSettled,
     onScrollTopChange,
+    onScrollRestored,
     onBackgroundClick,
     recentlyViewedTarget = null,
     recentlyViewedReturnRequest,
@@ -1831,6 +1839,7 @@ export const PhotoGrid = memo(
             onMarqueeSelect={handleGridMarqueeSelect}
             onRestoreSettled={onRestoreSettled}
             onReturnLocated={handleReturnLocated}
+            onScrollRestored={onScrollRestored}
             onScrollTopChange={handleGridScrollTopChange}
             ref={gridRef}
             renderItem={renderItem}
@@ -1839,6 +1848,7 @@ export const PhotoGrid = memo(
             returnToPhotoId={returnPresentation.itemId}
             returnToPhotoRequest={returnRequest}
             routeKey={routeKey}
+            scrollRestoreRequest={scrollRestoreRequest}
             scrollToAlignment={expandedSequence ? "start" : "center"}
             scrollToId={scrollToId}
             selectionActive={selectedIds.size > 0}
@@ -2013,6 +2023,12 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.onScrollTopChange !== nextProps.onScrollTopChange) {
+      return false;
+    }
+    if (prevProps.onScrollRestored !== nextProps.onScrollRestored) {
+      return false;
+    }
+    if (prevProps.scrollRestoreRequest !== nextProps.scrollRestoreRequest) {
       return false;
     }
     if (prevProps.topInset !== nextProps.topInset) {

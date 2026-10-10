@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, Lightbulb, Sparkles } from "lucide-react";
 import {
+  type ReactNode,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -22,6 +23,7 @@ import {
   YAxis,
 } from "recharts";
 import { advancedExifActions } from "@/actions/advanced-exif";
+import { AiIndexRebuildNotice } from "@/components/AiIndexRebuildNotice";
 import { CalendarHeatmap } from "@/components/dashboard/calendar-heatmap";
 import {
   ChartSection,
@@ -46,6 +48,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
+import { useAiStatus } from "@/hooks/useAiStatus";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import type { AdvancedExifProgress } from "@/types/photo-metadata";
@@ -233,6 +236,7 @@ const axisTick = { fill: "var(--muted-foreground)", fontSize: 11 };
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates five lazy dashboard sections and their shared filters
 function DashboardPage() {
   const { t, i18n } = useTranslation();
+  const { data: aiStatus } = useAiStatus();
   const navigate = useNavigate();
   const { getSession: getBrowseSession } = useBrowseSession();
   const queryClient = useQueryClient();
@@ -738,6 +742,13 @@ function DashboardPage() {
               DASHBOARD_TOOLBAR_CONTENT_GAP,
           }}
         >
+          {aiStatus?.rebuildRequired && (
+            <div className="mb-4 min-w-0">
+              <AiIndexRebuildNotice
+                onOpenSettings={() => navigate({ to: "/settings/ai-index" })}
+              />
+            </div>
+          )}
           {range.from !== undefined && data.scope.excludedUndated > 0 && (
             <div className="mb-4 flex items-start gap-2 rounded-[8px] border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-foreground">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
@@ -818,8 +829,33 @@ function DashboardPage() {
                 </p>
                 <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border sm:grid-cols-3 xl:grid-cols-6">
                   <HealthMetric
+                    action={
+                      <AppTooltip>
+                        <AppTooltipTrigger asChild>
+                          <Button
+                            className="mt-2 h-auto max-w-full whitespace-normal px-1 py-1 text-[10px]"
+                            onClick={() =>
+                              navigate({ to: "/settings/ai-index" })
+                            }
+                            size="sm"
+                            variant="ghost"
+                          >
+                            {t("dashboardManageAiIndex")}
+                          </Button>
+                        </AppTooltipTrigger>
+                        <AppTooltipContent>
+                          {t("dashboardManageAiIndexHint")}
+                        </AppTooltipContent>
+                      </AppTooltip>
+                    }
+                    aiIndexCoverage
                     label={t("dashboardAiCoverage")}
                     percentage={overviewCoverage.ai}
+                    statusLabel={
+                      aiStatus?.rebuildRequired
+                        ? t("aiIndexRebuildRequired")
+                        : undefined
+                    }
                   />
                   <HealthMetric
                     label={t("dashboardExifCoverage")}
@@ -1743,14 +1779,23 @@ function ColorContent({
   );
 }
 function HealthMetric({
+  action,
+  aiIndexCoverage,
   label,
   percentage,
+  statusLabel,
 }: {
+  action?: ReactNode;
+  aiIndexCoverage?: boolean;
   label: string;
   percentage: number;
+  statusLabel?: string;
 }) {
   return (
-    <div className="dashboard-overview-metric min-w-0 border-border/70 border-r border-b bg-background/30 p-4 xl:border-b-0">
+    <div
+      className="dashboard-overview-metric min-w-0 border-border/70 border-r border-b bg-background/30 p-4 xl:border-b-0"
+      data-ai-index-coverage={aiIndexCoverage || undefined}
+    >
       <div className="flex items-center gap-1.5">
         <AppTooltip>
           <AppTooltipTrigger asChild>
@@ -1761,18 +1806,27 @@ function HealthMetric({
           <AppTooltipContent>{label}</AppTooltipContent>
         </AppTooltip>
       </div>
-      <p className="mt-1 font-semibold text-[18px] text-foreground tabular-nums">
-        {percentage}%
+      <p
+        className={
+          statusLabel
+            ? "mt-1 break-words font-medium text-[12px] text-foreground"
+            : "mt-1 font-semibold text-[18px] text-foreground tabular-nums"
+        }
+      >
+        {statusLabel ?? `${percentage}%`}
       </p>
-      <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full"
-          style={{
-            backgroundColor: "var(--primary)",
-            width: `${Math.min(100, percentage)}%`,
-          }}
-        />
-      </div>
+      {!statusLabel && (
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full"
+            style={{
+              backgroundColor: "var(--primary)",
+              width: `${Math.min(100, percentage)}%`,
+            }}
+          />
+        </div>
+      )}
+      {action}
     </div>
   );
 }

@@ -9,6 +9,7 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import sharp from "sharp";
+import { preprocessImage } from "./image-preprocessing.mjs";
 import { extractRawPreview } from "./raw-preview.mjs";
 
 const require = createRequire(import.meta.url);
@@ -62,7 +63,13 @@ function validateAdapter(adapter) {
     image.dimensions <= 0 ||
     !Number.isInteger(image.imageSize) ||
     image.imageSize <= 0 ||
-    !["fill", "contain", "cover"].includes(image.resizeFit) ||
+    image.resizeFit !== "fill" ||
+    image.colorMode !== "rgb" ||
+    typeof image.preprocessingVersion !== "string" ||
+    !image.preprocessingVersion.trim() ||
+    image.resample !== "bicubic" ||
+    !Number.isFinite(image.rescaleFactor) ||
+    image.rescaleFactor <= 0 ||
     !Array.isArray(image.mean) ||
     !Array.isArray(image.std) ||
     image.mean.length !== 3 ||
@@ -105,39 +112,6 @@ function loadOrt() {
     _ort = require(path.join(projectRoot, "node_modules", "onnxruntime-node"));
   }
   return _ort;
-}
-
-async function preprocessImage(filePath) {
-  const image = activeAdapter.image;
-  const { data, info } = await sharp(filePath, { failOn: "none" })
-    .rotate()
-    .resize(image.imageSize, image.imageSize, {
-      fit: image.resizeFit,
-      position: "center",
-    })
-    .removeAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const { width, height, channels } = info;
-  if (width !== image.imageSize || height !== image.imageSize || channels < 3) {
-    throw new Error(`Image resize mismatch: ${width}x${height}x${channels}`);
-  }
-
-  const rgb = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  const pixelsPerChannel = image.imageSize * image.imageSize;
-  const floatData = new Float32Array(3 * pixelsPerChannel);
-  for (let y = 0; y < image.imageSize; y++) {
-    for (let x = 0; x < image.imageSize; x++) {
-      const sourceIndex = (y * image.imageSize + x) * channels;
-      for (let channel = 0; channel < 3; channel++) {
-        const pixel = rgb[sourceIndex + channel] / 255;
-        floatData[channel * pixelsPerChannel + y * image.imageSize + x] =
-          (pixel - image.mean[channel]) / image.std[channel];
-      }
-    }
-  }
-  return floatData;
 }
 
 async function handleInit(message) {
@@ -247,7 +221,7 @@ async function handleEmbed(message) {
       if (isRawFile(photo.path)) {
         imageInput = extractRawPreview(photo.path) || photo.path;
       }
-      const floatData = await preprocessImage(imageInput);
+      const floatData = await preprocessImage(imageInput, activeAdapter.image);
       const image = activeAdapter.image;
       const pixelValues = new ort.Tensor("float32", floatData, [
         1,

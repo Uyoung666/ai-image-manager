@@ -90,6 +90,7 @@ export function applyTimeDecay<
 }
 
 export const CompoundSearchSchema = z.object({
+  requestId: z.string().uuid().optional(),
   query: z.string().optional(),
   colorHex: z.string().optional(),
   dateFrom: z.number().optional(),

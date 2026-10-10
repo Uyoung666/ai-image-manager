@@ -78,10 +78,10 @@ export class DictionaryManager {
       this.mergedCache.set(zh, entry);
     }
 
-    // 2. 应用用户禁用
-    if (this.customDict?.disabled) {
-      for (const zh of this.customDict.disabled) {
-        this.mergedCache.delete(zh);
+    // 2. 添加用户自定义
+    if (this.customDict?.entries) {
+      for (const [zh, entry] of Object.entries(this.customDict.entries)) {
+        this.mergedCache.set(zh, entry);
       }
     }
 
@@ -92,11 +92,9 @@ export class DictionaryManager {
       }
     }
 
-    // 4. 添加用户自定义
-    if (this.customDict?.entries) {
-      for (const [zh, entry] of Object.entries(this.customDict.entries)) {
-        this.mergedCache.set(zh, entry);
-      }
+    // 4. 禁用优先于覆盖和自定义，不能在合并或单字回退时复活。
+    for (const zh of this.customDict?.disabled ?? []) {
+      this.mergedCache.delete(zh);
     }
 
     log.info({ total: this.mergedCache.size }, "Dictionary cache rebuilt");
@@ -109,11 +107,25 @@ export class DictionaryManager {
     return Object.fromEntries(this.mergedCache);
   }
 
+  getDisabledEntries(): ReadonlySet<string> {
+    return new Set(this.customDict?.disabled ?? []);
+  }
+
   /**
    * 获取字符分解词典
    */
   getCharDecompose(): Record<string, { en: string; category: DictCategory }> {
-    return CHAR_DECOMPOSE;
+    const chars: Record<string, DictEntry> = { ...CHAR_DECOMPOSE };
+    for (const [zh, entry] of this.mergedCache) {
+      if (zh.length === 1) {
+        chars[zh] = entry;
+      }
+    }
+    // Disabling an entry must also prevent its single-character fallback.
+    for (const zh of this.customDict?.disabled ?? []) {
+      delete chars[zh];
+    }
+    return chars;
   }
 
   /**

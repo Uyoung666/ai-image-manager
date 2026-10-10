@@ -216,6 +216,103 @@ afterEach(() => {
 });
 
 describe("masonry reflow continuity", () => {
+  it("restores a mode's virtual window before the first paint", () => {
+    const view = render(<MasonryGrid {...props} items={photos.slice(0, 3)} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    const onScrollRestored = vi.fn();
+
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        onScrollRestored={onScrollRestored}
+        scrollRestoreRequest={{ id: 1, scrollTop: 30_000 }}
+      />
+    );
+
+    expect(scroll.scrollTop).toBe(30_000);
+    expect(visibleCards(scroll).length).toBeGreaterThan(0);
+    expect(
+      visibleCards(scroll).every((card) => card.querySelector("img"))
+    ).toBe(true);
+    expect(onScrollRestored).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
+  it("consumes a mode restore once without locking subsequent user scrolling", () => {
+    const onScrollRestored = vi.fn();
+    const request = { id: 1, scrollTop: 10_000 };
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        onScrollRestored={onScrollRestored}
+        scrollRestoreRequest={request}
+      />
+    );
+    scrollTo(scroll, 15_000);
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        onScrollRestored={onScrollRestored}
+        scrollRestoreRequest={{ ...request }}
+      />
+    );
+    expect(scroll.scrollTop).toBe(15_000);
+    expect(onScrollRestored).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        onScrollRestored={onScrollRestored}
+        scrollRestoreRequest={{ ...request, id: 2 }}
+      />
+    );
+    expect(scroll.scrollTop).toBe(10_000);
+    expect(onScrollRestored).toHaveBeenLastCalledWith(2);
+  });
+
+  it("waits for confirmed items before consuming a mode restore", () => {
+    const onScrollRestored = vi.fn();
+    const request = { id: 1, scrollTop: 10_000 };
+    const view = render(
+      <MasonryGrid
+        {...props}
+        isPlaceholderData
+        onScrollRestored={onScrollRestored}
+        scrollRestoreRequest={request}
+      />
+    );
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    expect(scroll.scrollTop).toBe(0);
+    expect(onScrollRestored).not.toHaveBeenCalled();
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        onScrollRestored={onScrollRestored}
+        scrollRestoreRequest={request}
+      />
+    );
+    expect(scroll.scrollTop).toBe(10_000);
+    expect(visibleCards(scroll).length).toBeGreaterThan(0);
+    expect(onScrollRestored).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
+  it("clamps a mode restore against the new layout's height", () => {
+    const view = render(<MasonryGrid {...props} items={photos.slice(0, 3)} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    const onScrollRestored = vi.fn();
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        onScrollRestored={onScrollRestored}
+        scrollRestoreRequest={{ id: 1, scrollTop: Number.MAX_SAFE_INTEGER }}
+      />
+    );
+    expect(scroll.scrollTop).toBe(scroll.scrollHeight - scroll.clientHeight);
+    expect(visibleCards(scroll).length).toBeGreaterThan(0);
+    expect(onScrollRestored).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
   for (const depth of [0, 10_000, 30_000, Number.MAX_SAFE_INTEGER]) {
     it(`retains images while opening and closing the panel at ${depth}px`, () => {
       const view = render(<MasonryGrid {...props} />);
@@ -312,7 +409,13 @@ describe("masonry reflow continuity", () => {
         anchor.offset,
         4
       );
-      act(() => vi.advanceTimersByTime(40));
+      act(() => {
+        // Native scroll notifications can repeat the same programmatic offset
+        // while the detail panel is being resized. They are not user scrolling.
+        fireEvent.scroll(scroll);
+        fireEvent.scroll(scroll);
+        vi.advanceTimersByTime(40);
+      });
     }
     // A real scroll must release the previous resize anchor.
     scrollTo(scroll, 10_000);
@@ -325,6 +428,47 @@ describe("masonry reflow continuity", () => {
       nextAnchor.offset,
       4
     );
+  });
+
+  it("starts a new resize gesture from the current visible anchor", () => {
+    const gestureProps = {
+      ...props,
+      containerWidth: 1196,
+      items: [...photos].reverse(),
+      topInset: 137,
+    };
+    const view = render(<MasonryGrid {...gestureProps} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    scrollTo(scroll, 30_000);
+    view.rerender(
+      <MasonryGrid {...gestureProps} columnCount={4} containerWidth={896} />
+    );
+    act(() => {
+      fireEvent.scroll(scroll);
+      vi.advanceTimersByTime(350);
+    });
+    const anchor = capture(scroll)[0];
+    // The detail-panel handle is outside the grid. Its pointer gesture must
+    // release the anchor retained for the previous panel opening.
+    fireEvent.pointerDown(window);
+    for (const containerWidth of [882, 869, 855, 841, 828, 814]) {
+      view.rerender(
+        <MasonryGrid
+          {...gestureProps}
+          columnCount={containerWidth >= 860 ? 4 : 3}
+          containerWidth={containerWidth}
+        />
+      );
+      const card = requireElement(scroll, `[data-photo-id="${anchor.id}"]`);
+      expect(position(card).top - scroll.scrollTop).toBeCloseTo(
+        anchor.offset,
+        4
+      );
+      act(() => {
+        fireEvent.scroll(scroll);
+        vi.advanceTimersByTime(40);
+      });
+    }
   });
 
   it("keeps grouped layouts and full-width sequence trays continuous", () => {

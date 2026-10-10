@@ -30,8 +30,11 @@ function createVectorTable(results: Record<string, unknown>[] = []) {
   const query = {
     distanceType: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
+    offset: vi.fn().mockReturnThis(),
     refineFactor: vi.fn().mockReturnThis(),
+    select: vi.fn().mockReturnThis(),
     toArray,
+    where: vi.fn().mockReturnThis(),
   };
   return {
     countRows: vi.fn().mockResolvedValue(10),
@@ -98,22 +101,33 @@ describe("AI semantic search warmup", () => {
     expect(table.vectorSearch).toHaveBeenCalledOnce();
   });
 
-  it("中文多 Prompt 使用一次批量推理并复用行数查询", async () => {
-    const table = createVectorTable([{ photo_id: 8, _distance: 0.2 }]);
+  it("中文多 Prompt 固定单文本编码，并复用任务、缓存和行数查询", async () => {
+    const table = createVectorTable([
+      { photo_id: 8, _distance: 0.2, vector: createEmbeddingVector() },
+    ]);
     const embedTexts = vi.fn(async (texts: string[]) =>
       texts.map(() => createEmbeddingVector())
     );
     installReadyAi(table, embedTexts);
 
-    await searchByText("可爱猫咪", 20);
+    const [first, shared] = await Promise.all([
+      searchByText("可爱猫咪", 20),
+      searchByText("可爱猫咪", 20),
+    ]);
 
-    expect(embedTexts).toHaveBeenCalledOnce();
-    expect(embedTexts.mock.calls[0][0]).toHaveLength(2);
-    expect(
-      embedTexts.mock.calls[0][0].every(
-        (prompt: string) => !CJK_RE.test(prompt)
-      )
-    ).toBe(true);
+    expect(first).toEqual(shared);
+    expect(embedTexts).toHaveBeenCalledTimes(2);
+    const prompts = embedTexts.mock.calls.map(([batch]) => {
+      expect(batch).toHaveLength(1);
+      return batch[0];
+    });
+    expect(new Set(prompts).size).toBe(prompts.length);
+    expect(prompts.every((prompt: string) => !CJK_RE.test(prompt))).toBe(true);
+    expect(table.countRows).toHaveBeenCalledOnce();
+    expect(table.vectorSearch).toHaveBeenCalledTimes(2);
+
+    expect(await searchByText("可爱猫咪", 20)).toEqual(first);
+    expect(embedTexts).toHaveBeenCalledTimes(2);
     expect(table.countRows).toHaveBeenCalledOnce();
     expect(table.vectorSearch).toHaveBeenCalledTimes(2);
   });

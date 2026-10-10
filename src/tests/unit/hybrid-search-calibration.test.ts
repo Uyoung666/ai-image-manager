@@ -51,7 +51,8 @@ describe("hybrid search calibration", () => {
       tagWeight: 0.3,
       autoRescueThreshold: 0.75,
     });
-    expect(report.selected.usedFallback).toBe(true);
+    expect(report.selected.usedFallback).toBe(false);
+    expect(report.selected.report.macro.ndcgAt10).toBeGreaterThan(0.9);
     expect(report.ablation.hybrid.recallAt50).toBe(1);
     expect(report.ablation.semanticOnly.recallAt50).toBe(0.5);
     expect(report.ablation.tagOnly.recallAt50).toBe(0.5);

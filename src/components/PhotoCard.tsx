@@ -1,5 +1,13 @@
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Tooltip,
@@ -171,7 +179,23 @@ function PhotoCardImage({
   url,
   width,
 }: PhotoCardImageProps) {
-  const [loaded, setLoaded] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [loadState, setLoadState] = useState<"loading" | "cached" | "loaded">(
+    "loading"
+  );
+  const loaded = loadState !== "loading";
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new source must re-check the image even when the ref stays stable
+  useLayoutEffect(() => {
+    const image = imageRef.current;
+    // Cached thumbnails can already be decoded before their new load event.
+    // Reveal them before paint when switching back to the photo gallery.
+    setLoadState(
+      hasThumbnail && renderImage && image?.complete && image.naturalWidth > 0
+        ? "cached"
+        : "loading"
+    );
+  }, [hasThumbnail, renderImage, srcSet, url]);
 
   if (!(hasThumbnail && renderImage)) {
     return (
@@ -185,9 +209,11 @@ function PhotoCardImage({
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions: image load state controls the thumbnail reveal transition
     <img
       alt={filename}
-      className={`h-full w-full object-cover transition-opacity duration-150 motion-reduce:transition-none ${
-        loaded ? "opacity-100" : "opacity-0"
-      }`}
+      className={`h-full w-full object-cover ${
+        loadState === "cached"
+          ? "transition-none"
+          : "transition-opacity duration-150 motion-reduce:transition-none"
+      } ${loaded ? "opacity-100" : "opacity-0"}`}
       data-load-state={loaded ? "loaded" : "loading"}
       decoding="async"
       draggable={draggable}
@@ -195,7 +221,10 @@ function PhotoCardImage({
       height={height || undefined}
       loading={loading}
       onError={onError}
-      onLoad={() => setLoaded(true)}
+      onLoad={() =>
+        setLoadState((current) => (current === "cached" ? current : "loaded"))
+      }
+      ref={imageRef}
       sizes="(max-width: 900px) 160px, 220px"
       src={url}
       srcSet={srcSet}

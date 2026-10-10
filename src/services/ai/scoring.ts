@@ -231,7 +231,7 @@ export function fuseRankedSearchEvidence(
     .map(([photoId, score]) => {
       const primarySimilarity = Number.isFinite(score.primarySimilarity)
         ? score.primarySimilarity
-        : score.bestSimilarity;
+        : 0;
       return {
         photoId,
         primarySimilarity: Math.round(primarySimilarity * 10_000) / 10_000,
@@ -544,9 +544,9 @@ function selectV2SemanticResults(
     hasMoreCandidates: relevant.length > limit || canContinue,
     rejectedWeak: results.length - relevant.length,
     results: relevant.slice(0, limit),
-    supportCandidates: results
-      .filter((result) => result.primarySimilarity >= supportCutoff)
-      .slice(0, limit),
+    supportCandidates: results.filter(
+      (result) => result.primarySimilarity >= supportCutoff
+    ),
     supportCutoff,
     strongAccepted,
     strongCutoff,

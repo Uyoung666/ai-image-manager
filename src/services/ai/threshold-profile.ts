@@ -1,10 +1,18 @@
 import {
   getActiveEmbeddingAdapter,
   getEmbeddingAdapter,
+  SIGLIP_V1_ADAPTER_ID,
 } from "./model-adapter";
-import { getModelFingerprint } from "./model-fingerprint";
+import {
+  getModelFingerprint,
+  SIGLIP_LEGACY_FINGERPRINT,
+} from "./model-fingerprint";
 
-export type CalibrationStatus = "official" | "user" | "uncalibrated";
+export type CalibrationStatus =
+  | "official"
+  | "user"
+  | "pending-validation"
+  | "uncalibrated";
 
 export interface ThresholdProfile {
   adapterId: string;
@@ -47,12 +55,11 @@ export const SIGLIP_V1_THRESHOLD_PROFILE_ID =
   "siglip-v1-base-patch16-224-default";
 
 function createSiglipV1Profile(): ThresholdProfile {
-  const adapter = getActiveEmbeddingAdapter();
   return {
     schemaVersion: 1,
     profileId: SIGLIP_V1_THRESHOLD_PROFILE_ID,
-    adapterId: adapter.id,
-    modelFingerprint: getModelFingerprint(adapter),
+    adapterId: SIGLIP_V1_ADAPTER_ID,
+    modelFingerprint: SIGLIP_LEGACY_FINGERPRINT,
     calibrationStatus: "official",
     duplicate: {
       confirmationSimilarity: 0.95,
@@ -108,8 +115,24 @@ function createSiglipV1Profile(): ThresholdProfile {
   };
 }
 
+// This identity is deliberately fixed. Changing adapter preprocessing must
+// never silently stamp a new vector space as already calibrated.
+export const SIGLIP_BICUBIC_FINGERPRINT =
+  "3b04c89412f42d456b61e942e020092d13ec518df919254b3ef497deecda91fb";
+export const SIGLIP_BICUBIC_THRESHOLD_PROFILE_ID = "siglip-v2-bicubic-pending";
+
+function createSiglipBicubicCandidateProfile(): ThresholdProfile {
+  return {
+    ...createSiglipV1Profile(),
+    profileId: SIGLIP_BICUBIC_THRESHOLD_PROFILE_ID,
+    modelFingerprint: SIGLIP_BICUBIC_FINGERPRINT,
+    calibrationStatus: "pending-validation",
+  };
+}
+
 const officialProfiles = new Map<string, () => ThresholdProfile>([
   [SIGLIP_V1_THRESHOLD_PROFILE_ID, createSiglipV1Profile],
+  [SIGLIP_BICUBIC_THRESHOLD_PROFILE_ID, createSiglipBicubicCandidateProfile],
 ]);
 
 export function registerThresholdProfile(
