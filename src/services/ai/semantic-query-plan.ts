@@ -1,4 +1,5 @@
 import { type RewrittenQuery, rewriteQuery } from "@/services/query-rewrite";
+import { traceSearchQuality } from "@/services/search-quality-trace";
 import {
   getActiveEmbeddingModel,
   getSemanticPolicyVersion,
@@ -7,13 +8,14 @@ import { sha256Canonical } from "./model-fingerprint";
 import {
   generateSearchPrompts,
   getQueryCoverage,
+  isConcreteObjectQuery,
   parseChineseQuery,
   translateQueryTerm,
 } from "./query-parser";
-import { getThresholdProfileIdentity } from "./threshold-profile";
+import { getSemanticSearchThresholdIdentity } from "./threshold-profile";
 import { translateChineseToEnglish } from "./translation-worker-client";
 
-export const SEMANTIC_QUERY_PLAN_VERSION = 8;
+export const SEMANTIC_QUERY_PLAN_VERSION = 9;
 
 export function getSemanticQueryPlanFingerprint(
   translationModelVersion = "unknown"
@@ -73,6 +75,7 @@ export interface SemanticQueryPrompt {
 }
 
 export interface SemanticQueryPlan {
+  concreteObjectQuery?: boolean;
   coverage: number;
   exactNames?: string[];
   intent: SemanticQueryIntent;
@@ -338,6 +341,7 @@ function dedupePrompts(prompts: SemanticQueryPrompt[]): SemanticQueryPrompt[] {
 function dictionaryPrompts(query: string): {
   coverage: number;
   hasUnparsedDescription: boolean;
+  concreteObjectQuery: boolean;
   intent: SemanticQueryIntent;
   prompts: string[];
 } {
@@ -345,6 +349,7 @@ function dictionaryPrompts(query: string): {
     return {
       coverage: 1,
       hasUnparsedDescription: false,
+      concreteObjectQuery: false,
       intent: classifyEnglishIntent(query),
       prompts: [],
     };
@@ -353,6 +358,7 @@ function dictionaryPrompts(query: string): {
   return {
     coverage: getQueryCoverage(query, parsed),
     hasUnparsedDescription: parsed.unknown.length > 0 || LATIN_RE.test(query),
+    concreteObjectQuery: isConcreteObjectQuery(parsed),
     intent: classifyParsedIntent(parsed),
     prompts: generateSearchPrompts(parsed).filter(isEnglishPrompt),
   };
@@ -437,6 +443,13 @@ export async function prepareSemanticQueryPlan(
   ]);
 
   const promptCandidates: SemanticQueryPrompt[] = [];
+  traceSearchQuality("translation", () => ({
+    normalizedQuery,
+    negativeTerms,
+    translated,
+    translatedNegatives,
+    dictionary,
+  }));
   if (translated) {
     promptCandidates.push({
       canonicalKey: canonicalizeSemanticPrompt(translated),
@@ -473,6 +486,7 @@ export async function prepareSemanticQueryPlan(
   return {
     ...details,
     coverage: dictionary.coverage,
+    concreteObjectQuery: dictionary.concreteObjectQuery,
     // A partial dictionary describes only part of the request. Classify the
     // complete translated primary with the same policy as an English query.
     // A fully recognized dictionary still supplies precise concept identity.
@@ -524,7 +538,9 @@ export function semanticQueryPlanCacheKey(
   sensitivity = "standard"
 ): string {
   return JSON.stringify({
+    concreteObjectQuery: plan.concreteObjectQuery === true,
     embeddingFingerprint: modelKind,
+    intent: plan.intent,
     limit,
     negativePrompts: plan.negativePrompts,
     normalizedQuery: plan.normalizedQuery,
@@ -537,7 +553,7 @@ export function semanticQueryPlanCacheKey(
     strategy: "hybrid-zh-v2",
     translationModelVersion,
     translationMode: plan.translationMode,
-    thresholdProfile: getThresholdProfileIdentity(),
+    thresholdProfile: getSemanticSearchThresholdIdentity(),
     version: plan.version,
   });
 }

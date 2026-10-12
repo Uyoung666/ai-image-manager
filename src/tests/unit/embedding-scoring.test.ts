@@ -295,6 +295,71 @@ describe("embedding prompts and ranked fusion", () => {
     expect(selection.supportCandidates).toEqual(rows);
   });
 
+  it("calibrates only explicit composed objects without replacing primary scores", () => {
+    const rows = [0.0442, 0.039, 0.032].map((primarySimilarity, index) => ({
+      photoId: index + 1,
+      primarySimilarity,
+      rankScore: 0.02,
+      similarity: 0.9,
+      supportingGroups: ["whole-query" as const],
+    }));
+    const select = (concreteObjectQuery: boolean) =>
+      selectRelevantSemanticResults(rows, getActiveEmbeddingModel(), 1, 50, {
+        concreteObjectQuery,
+        intent: "composed",
+      });
+
+    expect(select(false).results).toEqual([]);
+    expect(select(false).strongCutoff).toBe(0.045);
+    expect(select(true).strongCutoff).toBe(0.04);
+    expect(select(true).results.map(({ photoId }) => photoId)).toEqual([1]);
+    expect(select(true).results[0].primarySimilarity).toBe(0.0442);
+  });
+
+  it("retains relative, independent-support and negative guards for calibrated objects", () => {
+    const rows = [0.1, 0.0442].map((primarySimilarity, index) => ({
+      photoId: index + 1,
+      primarySimilarity,
+      rankScore: 0.02,
+      similarity: primarySimilarity,
+      supportingGroups: ["whole-query" as const],
+    }));
+    const options = { concreteObjectQuery: true, intent: "composed" as const };
+    const relative = selectRelevantSemanticResults(
+      rows,
+      getActiveEmbeddingModel(),
+      1,
+      50,
+      options
+    );
+    expect(relative.strongCutoff).toBe(0.05);
+    expect(relative.results.map(({ photoId }) => photoId)).toEqual([1]);
+
+    const negative = applyNegativeSemanticPenalty(
+      [rows[1]],
+      [[{ photoId: 2, similarity: 0.03 }]],
+      50
+    );
+    const rejected = selectRelevantSemanticResults(
+      negative,
+      getActiveEmbeddingModel(),
+      1,
+      50,
+      options
+    );
+    expect(negative[0].primarySimilarity).toBe(0.0367);
+    expect(rejected.results).toEqual([]);
+
+    const ordinaryComposed = selectRelevantSemanticResults(
+      [rows[1]],
+      getActiveEmbeddingModel(),
+      2,
+      50,
+      { intent: "composed" }
+    );
+    expect(ordinaryComposed.results).toEqual([]);
+  });
+
   it("keeps object results nested from relaxed to standard to precise", () => {
     const results = [0.1, 0.08, 0.07, 0.065, 0.06, 0.05, 0.04].map(
       (similarity, index) => ({

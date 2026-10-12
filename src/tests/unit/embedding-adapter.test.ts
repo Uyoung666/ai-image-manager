@@ -15,8 +15,11 @@ import {
 import {
   getActiveThresholdProfile,
   getDuplicateThreshold,
+  getSemanticSearchThresholdIdentity,
   getTagThresholds,
   getTextSearchThreshold,
+  getThresholdProfileIdentity,
+  getUncalibratedThresholdProfile,
   resolveThresholdProfile,
   SIGLIP_BICUBIC_FINGERPRINT,
 } from "@/services/ai/threshold-profile";
@@ -95,7 +98,7 @@ describe("embedding adapter contracts", () => {
     });
   });
 
-  it("keeps unchanged thresholds pending validation for the new vector space", () => {
+  it("binds object calibration to its vector space without changing tag or duplicate thresholds", () => {
     const profile = getActiveThresholdProfile();
     expect(profile.calibrationStatus).toBe("pending-validation");
     expect(profile.modelFingerprint).toBe(
@@ -106,6 +109,21 @@ describe("embedding adapter contracts", () => {
     expect(getTextSearchThreshold(1, "en")).toBe(0.98);
     expect(getTagThresholds().topMinimum).toBe(0.035);
     expect(profile.modelFingerprint).toBe(SIGLIP_BICUBIC_FINGERPRINT);
+    expect(profile.semanticSearch.composedObjectMinimumSimilarity).toBe(0.04);
+    expect(profile.semanticSearch.candidateMinimumSimilarity).toBe(0.02);
+    expect(getThresholdProfileIdentity()).toBe("siglip-v2-bicubic-pending:v1");
+    expect(getSemanticSearchThresholdIdentity()).toBe(
+      "siglip-v2-bicubic-pending:v1:semantic-v2"
+    );
+    expect(
+      resolveThresholdProfile(SIGLIP_V1_ADAPTER.id, "unrecognized-fingerprint")
+    ).toBeNull();
+    expect(
+      getUncalibratedThresholdProfile(
+        SIGLIP_V1_ADAPTER.id,
+        "unrecognized-fingerprint"
+      ).semanticSearch.composedObjectMinimumSimilarity
+    ).toBeUndefined();
   });
 
   it("does not transfer a calibration identity to altered preprocessing", () => {

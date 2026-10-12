@@ -9,18 +9,25 @@ import { performance } from "node:perf_hooks";
 import { call } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { createServer } from "vite";
+import { diagnosticTranslationPlugin } from "./search-benchmark/diagnostic-translation.mjs";
 import {
   evaluateSearchRun,
   measuredDistribution,
 } from "./search-benchmark/evaluate.mjs";
-import { encodeTraceTexts } from "./search-benchmark/quality-trace.mjs";
+import { historicalSearchTracePlugin } from "./search-benchmark/historical-trace.mjs";
+import { createNativeModuleBridge } from "./search-benchmark/native-module-bridge.mjs";
 import {
   fingerprintModelArtifacts,
   hashRuntimeSourceTree,
   linkSharedModelArtifacts,
   runtimeSourceFiles,
 } from "./search-benchmark/source-snapshot.mjs";
+import {
+  switchTimingQueries,
+  warmTimingQuery,
+} from "./search-benchmark/timing-workload.mjs";
 import { validateSearchDefinition } from "./search-benchmark/validate.mjs";
+import { verifyBenchmarkVectors } from "./search-benchmark/vector-integrity.mjs";
 
 const DATA_PATH_RE = /\/utils\/data-path(?:\.ts)?$/;
 const repo = path.resolve(import.meta.dirname, "..");
@@ -37,8 +44,34 @@ if (!fs.existsSync(path.join(runtimeRoot, "scripts/embed-worker.mjs"))) {
 const label = value("--label", "optimized");
 const split = value("--split", "holdout");
 const size = Number(value("--synthetic", "0"));
-const rounds = args.includes("--quality-only") ? 0 : 3;
+const coldOnly = args.includes("--cold-only");
+const performanceOnly = args.includes("--performance-only");
+const rounds =
+  args.includes("--quality-only") || coldOnly
+    ? 0
+    : Number(value("--rounds", "3"));
+const roundOffset = Number(value("--round-offset", "0"));
+if (!([0, 1, 3].includes(rounds) && [0, 1, 2].includes(roundOffset))) {
+  throw new Error("Timing rounds must be 1 or 3, with offset 0..2");
+}
 const traceQuality = args.includes("--trace-quality");
+const diagnosticImageCache = value("--diagnostic-image-cache", null);
+const translationControl = value("--diagnostic-translations", null);
+const verifyVectorCount = Number(value("--verify-vector-count", "0"));
+const probeTextEncoding = args.includes("--probe-text-encoding");
+if (
+  !Number.isInteger(verifyVectorCount) ||
+  verifyVectorCount < 0 ||
+  ((verifyVectorCount || probeTextEncoding) && !args.includes("--quality-only"))
+) {
+  throw new Error("Vector verification and text probes require --quality-only");
+}
+if (translationControl && !args.includes("--quality-only")) {
+  throw new Error("Translation counterfactuals require --quality-only");
+}
+if (diagnosticImageCache && !args.includes("--quality-only")) {
+  throw new Error("Counterfactual image vectors require --quality-only");
+}
 const steadyStateOnly = args.includes("--steady-state-only");
 if (steadyStateOnly && size) {
   throw new Error("Historical steady-state comparisons require real images");
@@ -84,8 +117,13 @@ if (!process.versions.electron) {
 linkSharedModelArtifacts(repo, runtimeRoot);
 process.chdir(runtimeRoot);
 const profile = path.join(output, "profile");
-fs.mkdirSync(profile, { recursive: true });
+fs.mkdirSync(profile, { recursive: false });
 const literal = JSON.stringify(profile);
+const traceModule = fs.existsSync(
+  path.join(source, "services/search-quality-trace.ts")
+)
+  ? path.join(source, "services/search-quality-trace.ts")
+  : path.join(repo, "src/services/search-quality-trace.ts");
 const server = await createServer({
   configFile: false,
   root: repo,
@@ -96,6 +134,17 @@ const server = await createServer({
   server: { middlewareMode: true, watch: null },
   ssr: { noExternal: ["electron"] },
   plugins: [
+    createNativeModuleBridge(),
+    ...(traceQuality ? [historicalSearchTracePlugin(traceModule)] : []),
+    ...(translationControl
+      ? [
+          diagnosticTranslationPlugin(
+            JSON.parse(
+              fs.readFileSync(path.resolve(repo, translationControl), "utf8")
+            )
+          ),
+        ]
+      : []),
     {
       name: "isolated-search-runtime",
       enforce: "pre",
@@ -211,6 +260,24 @@ const run = {
   definitionHash: hash(JSON.stringify(definition)),
   definitionPath,
   benchmarkRunnerHash: hash(fs.readFileSync(import.meta.filename)),
+  benchmarkDriver: {
+    qualityTracing: traceQuality,
+    timingWorkloadHash: hash(
+      fs.readFileSync(
+        path.join(repo, "scripts/search-benchmark/timing-workload.mjs")
+      )
+    ),
+    diagnosticTranslations: translationControl,
+    packageLoading: "native-module-namespace-bridge",
+    bridgeHash: hash(
+      fs.readFileSync(
+        path.join(repo, "scripts/search-benchmark/native-module-bridge.mjs")
+      )
+    ),
+    node: process.versions.node,
+    threads: 4,
+    workers: 1,
+  },
   machine: {
     cpu: os.cpus()[0].model,
     logicalCores: os.cpus().length,
@@ -219,6 +286,9 @@ const run = {
   },
   scope: size ? "synthetic-performance-only" : "production-api-real-images",
   performanceMode: steadyStateOnly ? "steady-state-only" : "all-scenarios",
+  coldOnly,
+  performanceOnly,
+  roundOffset,
   queries: [],
   performance: {},
   limitations: [
@@ -334,15 +404,17 @@ try {
     const adapter = await load("services/ai/model-config.ts");
     const fingerprint = adapter.getActiveEmbeddingRuntimeInfo().fingerprint;
     const modelArtifactHash = hash(JSON.stringify(modelArtifacts));
-    const cache = path.join(
-      reports,
-      `image-vectors.${hash(`${fingerprint}:${modelArtifactHash}`).slice(0, 20)}.json`
-    );
+    const cache = diagnosticImageCache
+      ? path.resolve(repo, diagnosticImageCache)
+      : path.join(
+          reports,
+          `image-vectors.${hash(`${fingerprint}:${modelArtifactHash}`).slice(0, 20)}.json`
+        );
     const existing = fs.existsSync(cache)
       ? JSON.parse(fs.readFileSync(cache, "utf8"))
       : { fingerprint, modelArtifactHash, vectors: [] };
     if (
-      existing.fingerprint !== fingerprint ||
+      (!diagnosticImageCache && existing.fingerprint !== fingerprint) ||
       existing.modelArtifactHash !== modelArtifactHash
     ) {
       throw new Error("Cached vectors have a different model fingerprint");
@@ -354,6 +426,9 @@ try {
             row.id === sample.index + 1 && row.sha256 === sample.source?.sha256
         )
     );
+    if (diagnosticImageCache && missing.length) {
+      throw new Error("Diagnostic cache is incomplete; never overwrite it");
+    }
     if (missing.length) {
       pool = await load("services/embed-worker-pool.ts");
       await pool.initWorkerPool(path.join(runtimeRoot, "models"));
@@ -379,6 +454,75 @@ try {
       pool.shutdownPool();
     }
     imageVectors = existing.vectors.filter((row) => ids.has(row.id));
+    run.vectorCache = {
+      path: cache,
+      sha256: hash(fs.readFileSync(cache)),
+      fingerprint: existing.fingerprint,
+      textFingerprint: fingerprint,
+      modelArtifactHash,
+      diagnosticOnly: Boolean(diagnosticImageCache),
+      integrity: verifyBenchmarkVectors(
+        samples,
+        existing.vectors,
+        adapter.getActiveEmbeddingModel().vectorDimensions
+      ),
+      provenance:
+        "historical cache with declared model fingerprint; content and normalization verified",
+      imageWorkerHash: hash(
+        fs.readFileSync(path.join(runtimeRoot, "scripts/embed-worker.mjs"))
+      ),
+      preprocessingHash: fs.existsSync(
+        path.join(runtimeRoot, "scripts/image-preprocessing.mjs")
+      )
+        ? hash(
+            fs.readFileSync(
+              path.join(runtimeRoot, "scripts/image-preprocessing.mjs")
+            )
+          )
+        : null,
+    };
+    if (verifyVectorCount) {
+      const count = Math.min(verifyVectorCount, samples.length);
+      const selected = Array.from(
+        { length: count },
+        (_, index) => samples[Math.floor((index * samples.length) / count)]
+      );
+      pool = await load("services/embed-worker-pool.ts");
+      await pool.initWorkerPool(path.join(runtimeRoot, "models"));
+      const encoded = await pool.embedWithPool(
+        selected.map((sample) => ({
+          id: sample.index + 1,
+          path: sample.filePath,
+        })),
+        (done, total) => {
+          if (done % 20 === 0 || done === total) {
+            console.log(`Verifying cached vectors ${done}/${total}`);
+          }
+        }
+      );
+      const comparisons = encoded.map((row) => {
+        const cached = imageVectors.find((item) => item.id === row.id);
+        if (row.error || !row.vector || !cached) {
+          throw new Error(`Vector re-encoding failed for ${row.id}`);
+        }
+        const maximumAbsoluteError = Math.max(
+          ...row.vector.map((component, index) =>
+            Math.abs(component - cached.vector[index])
+          )
+        );
+        if (maximumAbsoluteError > 0.000_001) {
+          throw new Error(`Cached vector provenance mismatch for ${row.id}`);
+        }
+        return { photoId: row.id, maximumAbsoluteError };
+      });
+      if (comparisons.length !== count) {
+        throw new Error("Missing re-encoded vectors");
+      }
+      pool.shutdownPool();
+      run.vectorCache.reencodedVerification = comparisons;
+      run.vectorCache.provenance =
+        "verified by isolated production-worker re-encoding";
+    }
   }
   for (let index = 0; index < imageVectors.length; index += 500) {
     await vectors.withVectorDbOperation(() =>
@@ -396,15 +540,53 @@ try {
     await vectors.ensureVectorIndex(true);
   }
   const { searchCompound } = await load("ipc/photos/handlers/search.ts");
+  const traceApi = traceQuality
+    ? await server.ssrLoadModule(traceModule)
+    : null;
+  const actualTextVectors = new Map();
+  if (traceApi && state.embeddingModel) {
+    const model = state.embeddingModel;
+    const original = model.embedTexts?.bind(model);
+    if (original) {
+      model.embedTexts = async (texts) => {
+        const encoded = await original(texts);
+        traceApi.traceSearchQuality("worker-text-batch", () => ({
+          texts,
+          vectors: encoded,
+          batchSize: texts.length,
+        }));
+        return encoded;
+      };
+    }
+  }
   const invoke = async (params) => {
     const started = performance.now();
-    const response = await call(searchCompound, {
-      ...params,
-      requestId: params.requestId ?? randomUUID(),
-      limit: params.limit ?? 100,
-    });
+    const requestId = params.requestId ?? randomUUID();
+    const events = [];
+    const execute = () =>
+      call(searchCompound, {
+        ...params,
+        requestId,
+        limit: params.limit ?? 100,
+      });
+    const response = traceApi
+      ? await traceApi.withSearchQualityTrace(
+          requestId,
+          (event) => {
+            const captured = structuredClone(event);
+            events.push(captured);
+            if (captured.stage === "text-encoding") {
+              captured.data.texts.forEach((text, index) => {
+                actualTextVectors.set(text, captured.data.vectors[index]);
+              });
+            }
+          },
+          execute
+        )
+      : await execute();
     return {
       response,
+      events,
       elapsedMs: performance.now() - started,
       rss: process.memoryUsage().rss,
     };
@@ -417,20 +599,35 @@ try {
   run.performance.cold = {
     elapsedMs: cold.elapsedMs,
     completion: cold.response.completion ?? "legacy",
+    incompleteReason: cold.response.incompleteReason,
     diagnostics: cold.response.diagnostics ?? null,
   };
-  if (!size) {
+  if (!(size || coldOnly)) {
     await translation.warmupTranslationWorker(path.join(runtimeRoot, "models"));
   }
-  await search.warmupAiSearch();
+  if (!coldOnly) {
+    await search.warmupAiSearch();
+  }
+  if (traceApi && state.embeddingModel) {
+    const model = state.embeddingModel;
+    const original = model.embedTexts?.bind(model);
+    if (original) {
+      model.embedTexts = async (texts) => {
+        const encoded = await original(texts);
+        traceApi.traceSearchQuality("worker-text-batch", () => ({
+          texts,
+          vectors: encoded,
+          batchSize: texts.length,
+        }));
+        return encoded;
+      };
+    }
+  }
   const selectedDefinition = {
     ...definition,
     queries: definition.queries.filter((query) => query.split === split),
   };
-  if (!size) {
-    const queryPlan = traceQuality
-      ? await load("services/ai/semantic-query-plan.ts")
-      : null;
+  if (!(size || performanceOnly || coldOnly)) {
     for (const query of selectedDefinition.queries) {
       const actual = await invoke({
         ...query.filters,
@@ -438,19 +635,26 @@ try {
         limit: 50,
       });
       let qualityTrace;
-      if (queryPlan) {
-        const plan = await queryPlan.getSemanticQueryPlan(query.query);
+      const executedPlan =
+        actual.events.findLast((event) => event.stage === "query-plan")?.data
+          .plan ??
+        actual.events.findLast((event) => event.stage === "semantic-cache")
+          ?.data.result.plan;
+      if (traceQuality && executedPlan) {
+        const plan = executedPlan;
         const texts = [
           ...plan.prompts.map((prompt) => prompt.text),
           ...plan.negativePrompts,
         ];
-        const textVectors = texts.length
-          ? await encodeTraceTexts(state.embeddingModel, texts)
-          : [];
+        const textVectors = texts.map((text) => actualTextVectors.get(text));
+        if (textVectors.some((vector) => !vector)) {
+          throw new Error(`Missing actual executed encoding for ${query.id}`);
+        }
         qualityTrace = {
           plan,
+          events: actual.events,
           encoding: {
-            batchSize: 1,
+            source: "actual-execution",
             texts,
             positiveCount: plan.prompts.length,
             negativeCount: plan.negativePrompts.length,
@@ -484,6 +688,15 @@ try {
             query.relevantSampleIds.includes(candidate.sampleId) ||
             query.hardNegativeSampleIds.includes(candidate.sampleId)
         );
+      } else if (traceQuality) {
+        qualityTrace = {
+          plan: null,
+          events: actual.events,
+          encoding: { source: "not-executed", texts: [] },
+          semantic: actual.response.semantic,
+          candidates: [],
+          judgments: [],
+        };
       }
       run.queries.push({
         id: query.id,
@@ -498,11 +711,49 @@ try {
     run.quality = evaluateSearchRun(selectedDefinition, run);
   }
   const observations = [];
+  if (probeTextEncoding) {
+    const target = "This is a photo of a red flower.";
+    const companion = "This is a photo of a dog.";
+    const long =
+      "a detailed photograph of a crowded city street with many buildings, windows, vehicles, people and signs, under a cloudy evening sky, with distant mountains and reflections in water";
+    const batches = [
+      [target],
+      [target, companion],
+      [companion, target],
+      [target, long],
+      [target],
+    ];
+    const actual = [];
+    for (const texts of batches) {
+      actual.push({
+        texts,
+        vectors: await state.embeddingModel.embedTexts(texts),
+      });
+    }
+    const reference = actual[0].vectors[0];
+    run.textEncodingProbe = actual.map(({ texts, vectors }) => {
+      const vector = vectors[texts.indexOf(target)];
+      return {
+        texts,
+        batchSize: texts.length,
+        vector,
+        maximumAbsoluteError: Math.max(
+          ...vector.map((component, index) =>
+            Math.abs(component - reference[index])
+          )
+        ),
+        cosineToSingle: vector.reduce(
+          (sum, component, index) => sum + component * reference[index],
+          0
+        ),
+      };
+    });
+  }
   for (let round = 0; round < rounds; round++) {
     for (let index = 0; index < 30; index++) {
       const query = size
         ? `synthetic landscape ${round}-${index}`
-        : `${["a photograph of", "a detailed image of", "an outdoor photo of"][round]} ${["a dog", "a person", "a tree", "a building", "a meal", "a camera"][index % 6]} ${["near a window", "under sunlight", "at night", "on a street", "on a table"][Math.floor(index / 6)]}`;
+        : warmTimingQuery(round + roundOffset, index);
       const actual = await invoke({ query });
       observations.push({
         scenario: "warm-new-query",
@@ -510,12 +761,15 @@ try {
         index,
         elapsedMs: actual.elapsedMs,
         completion: actual.response.completion ?? "legacy",
+        incompleteReason: actual.response.incompleteReason,
         diagnostics: actual.response.diagnostics ?? null,
       });
     }
   }
   const cacheQuery = { query: size ? "synthetic cache" : "a dog" };
-  await invoke(cacheQuery);
+  if (rounds) {
+    await invoke(cacheQuery);
+  }
   for (let round = 0; round < rounds; round++) {
     for (let index = 0; index < 30; index++) {
       const actual = await invoke(cacheQuery);
@@ -525,6 +779,7 @@ try {
         index,
         elapsedMs: actual.elapsedMs,
         completion: actual.response.completion ?? "legacy",
+        incompleteReason: actual.response.incompleteReason,
         diagnostics: actual.response.diagnostics ?? null,
       });
     }
@@ -572,13 +827,17 @@ try {
   for (let round = 0; round < rounds; round++) {
     for (let index = 0; index < 30; index++) {
       const replacedId = randomUUID();
+      const [firstQuery, secondQuery] = switchTimingQueries(
+        round + roundOffset,
+        index
+      );
       const first = invoke({
         requestId: replacedId,
-        query: `a landscape with buildings ${round}-${index}`,
+        query: firstQuery,
       });
       await new Promise((resolve) => setImmediate(resolve));
       control?.cancelSearchRequest(0, replacedId);
-      const second = invoke({ query: `a street with trees ${round}-${index}` });
+      const second = invoke({ query: secondQuery });
       const completed = await Promise.all([first, second]);
       observations.push({
         scenario: "continuous-switch",
@@ -586,6 +845,8 @@ try {
         index,
         elapsedMs: completed[1].elapsedMs,
         completion: completed[1].response.completion ?? "legacy",
+        incompleteReason: completed[1].response.incompleteReason,
+        replacedCompletion: completed[0].response.completion ?? "legacy",
         diagnostics: completed[1].response.diagnostics ?? null,
       });
     }

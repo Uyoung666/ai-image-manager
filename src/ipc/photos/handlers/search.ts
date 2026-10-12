@@ -52,6 +52,7 @@ import {
   SearchInterrupted,
   waitForSearch,
 } from "@/services/search-control";
+import { traceSearchQuality } from "@/services/search-quality-trace";
 import {
   getSearchDatabaseRevision,
   getVectorSearchRevision,
@@ -656,6 +657,11 @@ async function performCompoundSearch(
     }
   }
 
+  traceSearchQuality("query-rewrite", () => ({
+    query,
+    searchText,
+    rewrittenQuery,
+  }));
   const filters: PhotoSearchFilters = {
     dateFrom: effectiveDateFrom,
     dateTo: effectiveDateTo,
@@ -1297,6 +1303,13 @@ async function performCompoundSearch(
           );
         }
 
+        traceSearchQuality("hybrid-ranking", () => ({
+          semanticCandidates,
+          exactEvidence,
+          tagEvidence: allowedTagRows,
+          results: rerankedList,
+          diagnostics: gated?.diagnostics,
+        }));
         const combined = rerankedList.flatMap((result) => {
           const photo = scopeById.get(result.photoId);
           return photo

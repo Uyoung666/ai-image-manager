@@ -6,10 +6,11 @@ import { fileURLToPath } from "node:url";
 const COMMIT_RE = /^[a-f0-9]{40}$/;
 
 function isVerifiedHead(report) {
+  const snapshot = report.headSnapshot ?? report.sourceSnapshot;
   return (
-    report.headSnapshot?.kind === "git-head" &&
-    COMMIT_RE.test(report.headSnapshot.commit) &&
-    report.headSnapshot.sourceTreeHash === report.sourceTreeHash
+    (snapshot?.kind === "git-head" || snapshot?.kind === "git-revision") &&
+    COMMIT_RE.test(snapshot.commit) &&
+    snapshot.sourceTreeHash === report.sourceTreeHash
   );
 }
 
@@ -129,7 +130,8 @@ export function checkSearchRegressions(
   return {
     passed: regressions.length === 0,
     split: candidate.split,
-    baselineCommit: baseline.headSnapshot?.commit ?? null,
+    baselineCommit:
+      (baseline.headSnapshot ?? baseline.sourceSnapshot)?.commit ?? null,
     baselineSourceHash: baseline.sourceHash,
     candidateSourceHash: candidate.sourceHash,
     definitionHash,

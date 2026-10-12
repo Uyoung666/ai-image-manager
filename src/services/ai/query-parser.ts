@@ -276,6 +276,19 @@ export function generateSearchPrompts(parsed: ParsedQuery): string[] {
   return prompts;
 }
 
+/** Explicit dictionary objects only; people and contextual scenes keep their policy. */
+export function isConcreteObjectQuery(parsed: ParsedQuery): boolean {
+  const dictionary = getMergedDict();
+  return (
+    parsed.subject.length > 0 &&
+    parsed.subject.every((term) => dictionary[term]?.category === "object") &&
+    parsed.activity.length === 0 &&
+    parsed.scene.length === 0 &&
+    parsed.weather.length === 0 &&
+    parsed.time.length === 0
+  );
+}
+
 const CJK_FUNCTION_WORDS = new Set([
   "的",
   "了",

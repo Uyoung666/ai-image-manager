@@ -506,14 +506,20 @@ describe("search correctness", () => {
       },
     }));
     const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const { withSearchQualityTrace } = await import(
+      "@/services/search-quality-trace"
+    );
     const smallIds: number[] = [];
+    const observer = vi.fn();
     let cursor: string | undefined;
     for (let page = 0; page < 3; page++) {
-      const result = await call(searchCompound, {
-        query: "cat",
-        limit: 1,
-        cursor,
-      });
+      const result = await withSearchQualityTrace("tag-fixture", observer, () =>
+        call(searchCompound, {
+          query: "cat",
+          limit: 1,
+          cursor,
+        })
+      );
       expect(result.total).toBe(3);
       expect(result.totalExact).toBe(true);
       expect(result.hasMore).toBe(page < 2);
@@ -523,6 +529,12 @@ describe("search correctness", () => {
     const large = await call(searchCompound, { query: "cat", limit: 10 });
     expect(smallIds).toEqual(large.results.map((row) => row.id));
     expect(new Set(smallIds).size).toBe(3);
+    const hybrid = observer.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.stage === "hybrid-ranking");
+    expect(hybrid.requestId).toBe("tag-fixture");
+    expect(hybrid.data.tagEvidence).toHaveLength(3);
+    expect(hybrid.data.diagnostics.tagSupportedAccepted).toBe(3);
   });
 
   it("expands candidate depth after fusion until a supported page is available", async () => {

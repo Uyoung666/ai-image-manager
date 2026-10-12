@@ -20,6 +20,22 @@ afterEach(() => {
 });
 
 describe("SemanticQueryPlan", () => {
+  it("carries explicit object evidence without changing whole-query translation or prompts", async () => {
+    const translate = vi.fn(async () => "a gold watch and jewelry");
+    const plan = await prepareSemanticQueryPlan("金色手表和珠宝", {
+      translate,
+    });
+    const english = await prepareSemanticQueryPlan("a gold watch and jewelry");
+    expect(plan.concreteObjectQuery).toBe(true);
+    expect(english.concreteObjectQuery).not.toBe(true);
+    expect(plan.prompts[0].text).toBe(english.prompts[0].text);
+    expect(translate).toHaveBeenCalledWith("金色手表和珠宝");
+    const person = await prepareSemanticQueryPlan("扶着拐杖的老人", {
+      translate: async () => "an elderly person with a walking stick",
+    });
+    expect(person.concreteObjectQuery).toBe(false);
+  });
+
   it.each([
     ["嵌入式灯具", "a ceiling light", "object"],
     ["雾中的城池", "foggy city", "scene"],
@@ -269,6 +285,28 @@ describe("SemanticQueryPlan", () => {
       semanticQueryPlanCacheKey(plan, "siglip", 50, "opus-v1", "standard")
     ).not.toBe(
       semanticQueryPlanCacheKey(plan, "siglip", 50, "opus-v1", "relaxed")
+    );
+  });
+
+  it("缓存键区分阈值分类，即使主句和提示词相同", async () => {
+    const plan = await prepareSemanticQueryPlan("snow mountain");
+    const key = semanticQueryPlanCacheKey(plan, "siglip", 50, "opus-v1");
+
+    expect(key).not.toBe(
+      semanticQueryPlanCacheKey(
+        { ...plan, concreteObjectQuery: true },
+        "siglip",
+        50,
+        "opus-v1"
+      )
+    );
+    expect(key).not.toBe(
+      semanticQueryPlanCacheKey(
+        { ...plan, intent: "object" },
+        "siglip",
+        50,
+        "opus-v1"
+      )
     );
   });
 

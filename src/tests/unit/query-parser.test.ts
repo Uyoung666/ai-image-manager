@@ -5,6 +5,7 @@ import { getActiveEmbeddingFingerprint } from "@/services/ai/model-fingerprint";
 import {
   generateSearchPrompts,
   getQueryCoverage,
+  isConcreteObjectQuery,
   parseChineseQuery,
 } from "@/services/ai/query-parser";
 import {
@@ -56,6 +57,26 @@ afterEach(() => {
 });
 
 describe("bounded Chinese dictionary parsing", () => {
+  it("calibrates explicit objects while retaining people, scenes and compound protection", async () => {
+    expect(isConcreteObjectQuery(parseChineseQuery("金色手表和珠宝"))).toBe(
+      true
+    );
+    expect(isConcreteObjectQuery(parseChineseQuery("钻石戒指的产品特写"))).toBe(
+      true
+    );
+    for (const query of [
+      "绿色头发的女孩",
+      "扶着拐杖的老人",
+      "猫在草地",
+      "树枝上的红花",
+      "红包",
+      "手写信件",
+    ]) {
+      expect(isConcreteObjectQuery(parseChineseQuery(query))).toBe(false);
+    }
+    await manager.disableBuiltinEntry("手表");
+    expect(isConcreteObjectQuery(parseChineseQuery("金色手表"))).toBe(false);
+  });
   it.each([
     "老电视",
     "流程图",
@@ -219,7 +240,7 @@ describe("bounded Chinese dictionary parsing", () => {
 
   it("changes query cache identity through plan version without changing the image fingerprint", async () => {
     const before = getActiveEmbeddingFingerprint();
-    expect(SEMANTIC_QUERY_PLAN_VERSION).toBe(8);
+    expect(SEMANTIC_QUERY_PLAN_VERSION).toBe(9);
     const plan = await prepareSemanticQueryPlan("cat");
     expect(
       semanticQueryPlanCacheKey(plan, before, 100, "translation")

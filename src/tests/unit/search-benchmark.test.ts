@@ -13,6 +13,8 @@ import {
   measuredDistribution,
   // @ts-expect-error Evaluation intentionally remains runnable as plain Node ESM.
 } from "../../../scripts/search-benchmark/evaluate.mjs";
+// @ts-expect-error Evaluation intentionally remains runnable as plain Node ESM.
+import { createNativeModuleBridge } from "../../../scripts/search-benchmark/native-module-bridge.mjs";
 import {
   encodeTraceTexts,
   // @ts-expect-error Evaluation intentionally remains runnable as plain Node ESM.
@@ -36,6 +38,8 @@ import {
   linkSharedModelArtifacts,
   // @ts-expect-error Evaluation intentionally remains runnable as plain Node ESM.
 } from "../../../scripts/search-benchmark/source-snapshot.mjs";
+// @ts-expect-error Evaluation intentionally remains runnable as plain Node ESM.
+import { verifyBenchmarkVectors } from "../../../scripts/search-benchmark/vector-integrity.mjs";
 
 const fixtures: string[] = [];
 const fixtureRoot = path.resolve(
@@ -77,6 +81,43 @@ afterEach(async () => {
 });
 
 describe("reproducible search runtime", () => {
+  it("loads native CommonJS packages without treating them as Vite source", async () => {
+    const bridge = createNativeModuleBridge();
+    try {
+      expect(bridge.resolveId("electron")).toBeNull();
+      expect(bridge.resolveId("@/services/ai/search")).toBeNull();
+      expect(bridge.resolveId("node:fs")).toBeNull();
+      const code = await bridge.load(bridge.resolveId("pino"));
+      const namespace = await import(
+        `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
+      );
+      expect(typeof namespace.default).toBe("function");
+      expect(typeof namespace.stdSerializers.err).toBe("function");
+    } finally {
+      bridge.closeBundle();
+    }
+  });
+
+  it("rejects image tampering, duplicate IDs and wrong vector shapes before indexing", () => {
+    const root = fixture();
+    const filePath = path.join(root, "fixture.jpg");
+    fs.writeFileSync(filePath, "image-content");
+    const sha256 = createHash("sha256").update("image-content").digest("hex");
+    const samples = [{ id: "fixture", index: 0, filePath, source: { sha256 } }];
+    const row = { id: 1, sha256, vector: [1, 0] };
+    expect(verifyBenchmarkVectors(samples, [row], 2).verifiedImages).toBe(1);
+    expect(() => verifyBenchmarkVectors(samples, [row, row], 2)).toThrow(
+      "Duplicate"
+    );
+    expect(() => verifyBenchmarkVectors(samples, [row], 3)).toThrow(
+      "dimensions"
+    );
+    expect(() =>
+      verifyBenchmarkVectors(samples, [{ ...row, vector: [0.1, 0] }], 2)
+    ).toThrow("Unnormalized");
+    fs.writeFileSync(filePath, "tampered");
+    expect(() => verifyBenchmarkVectors(samples, [row], 2)).toThrow("mismatch");
+  });
   it("makes shared weights resolvable from the frozen cwd and preserves frozen configs", () => {
     const root = fixture();
     writeFixture(root, "models/model/preprocessor_config.json", "config");

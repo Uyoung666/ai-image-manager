@@ -17,6 +17,7 @@ import {
   type SearchExecution,
   waitForSearch,
 } from "@/services/search-control";
+import { traceSearchQuality } from "@/services/search-quality-trace";
 import { getVectorSearchRevision } from "@/services/search-revision";
 import { getSetting } from "@/services/settings-manager";
 import { trackChildProcess } from "@/services/tracked-child-processes";
@@ -62,7 +63,7 @@ import {
 } from "./state";
 import {
   getActiveThresholdProfile,
-  getThresholdProfileIdentity,
+  getSemanticSearchThresholdIdentity,
 } from "./threshold-profile";
 import {
   getTranslationModelVersion,
@@ -601,6 +602,15 @@ async function embedSearchTexts(
     }
   }
 
+  traceSearchQuality("text-encoding", () => ({
+    texts,
+    vectors,
+    batchSize: 1,
+    cacheHits: texts.map(
+      (_, index) => !missing.some((item) => item.index === index)
+    ),
+    fingerprint: modelFingerprint,
+  }));
   return vectors.filter((vector): vector is number[] => vector !== null);
 }
 
@@ -701,6 +711,13 @@ async function multiPromptSearch(
       )
     );
     const fusionStarted = performance.now();
+    traceSearchQuality("candidate-recall", () => ({
+      plan,
+      resultSets,
+      candidateDepth,
+      candidateMinimum,
+      rowCount,
+    }));
     const fused = fuseRankedSearchEvidence(
       resultSets,
       rowCount,
@@ -785,6 +802,11 @@ async function multiPromptSearch(
       resultSet.sort((left, right) => right.similarity - left.similarity);
     }
     timings.vectorMs += Date.now() - vectorStartedAt;
+    traceSearchQuality("primary-and-negative-scores", () => ({
+      fused,
+      negativeResultSets,
+      missingScoreIds: [...missingScoreIds],
+    }));
     const penalized = applyNegativeSemanticPenalty(
       fused.filter((result) => !missingScoreIds.has(result.photoId)),
       negativeResultSets,
@@ -801,6 +823,7 @@ async function multiPromptSearch(
           similarity: results.at(-1)?.similarity ?? 0,
         })),
         intent: plan.intent,
+        concreteObjectQuery: plan.concreteObjectQuery,
         primaryScores: resultSets[primaryPromptIndex]?.map(
           ({ similarity }) => similarity
         ),
@@ -809,6 +832,24 @@ async function multiPromptSearch(
       }
     );
     const exhausted = candidateDepth >= rowCount;
+    traceSearchQuality("semantic-selection", () => ({
+      penalized,
+      selection,
+      rejected: penalized
+        .filter(
+          (row) =>
+            !selection.results.some(
+              (accepted) => accepted.photoId === row.photoId
+            )
+        )
+        .map((row) => ({
+          photoId: row.photoId,
+          reason:
+            row.primarySimilarity < selection.consensusCutoff
+              ? "below-support-floor"
+              : "no-independent-support",
+        })),
+    }));
     if (missingScoreIds.size > 0) {
       selection.cutoffReason = "missing-photo-vector";
     }
@@ -1023,7 +1064,7 @@ export async function searchByTextWithPlan(
       getTranslationModelVersion()
     ),
     policy: getSemanticPolicyVersion(),
-    thresholdProfile: getThresholdProfileIdentity(),
+    thresholdProfile: getSemanticSearchThresholdIdentity(),
     query: query.trim(),
     sensitivity,
     strategy: "hybrid-zh-v2",
@@ -1045,6 +1086,7 @@ export async function searchByTextWithPlan(
   // TTL cache check — avoids redundant SigLIP inference + LanceDB search
   const cached = getCachedSearch(cacheKey);
   if (cached) {
+    traceSearchQuality("semantic-cache", () => ({ hit: true, result: cached }));
     if (options?.diagnostics) {
       options.diagnostics.cacheHit = true;
     }
@@ -1201,6 +1243,11 @@ async function performTextSearch(
       )
     ));
   const parseMs = Date.now() - parseStartedAt;
+  traceSearchQuality("query-plan", () => ({
+    query,
+    plan,
+    rewritten: options?.rewritten,
+  }));
   const effectiveCacheKey =
     `${revision}:${options?.sourceRevision ?? ""}:${semanticScopeCacheKey(options)}:` +
     semanticQueryPlanCacheKey(
@@ -1215,6 +1262,10 @@ async function performTextSearch(
     ? null
     : getCachedSearch(effectiveCacheKey);
   if (planCached) {
+    traceSearchQuality("semantic-cache", () => ({
+      hit: true,
+      result: planCached,
+    }));
     if (options?.diagnostics) {
       options.diagnostics.cacheHit = true;
     }

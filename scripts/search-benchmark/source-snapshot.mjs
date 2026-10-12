@@ -149,12 +149,17 @@ export function hashSourceTree(source) {
 
 /** Freeze committed sources without touching the user's index or checkout. */
 export function freezeHead(repo, destination) {
+  return freezeRevision(repo, destination, "HEAD");
+}
+
+/** Resolve a commit before archiving; never switch or reset the checkout. */
+export function freezeRevision(repo, destination, ref) {
   const reports = path.resolve(repo, "reports/search-optimization");
   if (!path.resolve(destination).startsWith(reports + path.sep)) {
     throw new Error("HEAD snapshots must stay in isolated reports");
   }
   fs.mkdirSync(destination, { recursive: false });
-  const head = spawnSync("git", ["rev-parse", "HEAD"], {
+  const head = spawnSync("git", ["rev-parse", "--verify", `${ref}^{commit}`], {
     cwd: repo,
     encoding: "utf8",
   });
@@ -202,7 +207,8 @@ export function freezeHead(repo, destination) {
   }
   const metadata = {
     schemaVersion: 2,
-    kind: "git-head",
+    kind: ref === "HEAD" ? "git-head" : "git-revision",
+    requestedRef: ref,
     commit,
     sourceTreeHash: hashRuntimeSourceTree(destination),
     files: runtimeSourceFiles(destination),

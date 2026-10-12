@@ -30,6 +30,8 @@ export interface ThresholdProfile {
   schemaVersion: 1;
   semanticSearch: {
     absoluteMinimumSimilarity: number;
+    composedObjectMinimumSimilarity?: number;
+    policyVersion?: number;
     candidateMinimumSimilarity: number;
     consensusThresholdRatio: number;
     relativeToTopRatio: number;
@@ -126,6 +128,13 @@ function createSiglipBicubicCandidateProfile(): ThresholdProfile {
     ...createSiglipV1Profile(),
     profileId: SIGLIP_BICUBIC_THRESHOLD_PROFILE_ID,
     modelFingerprint: SIGLIP_BICUBIC_FINGERPRINT,
+    // Validated on frozen v1/v2 and one-shot v3 queries. Tags and duplicate
+    // detection are still pending validation in this image vector space.
+    semanticSearch: {
+      ...createSiglipV1Profile().semanticSearch,
+      composedObjectMinimumSimilarity: 0.04,
+      policyVersion: 2,
+    },
     calibrationStatus: "pending-validation",
   };
 }
@@ -230,4 +239,11 @@ export function getTagThresholds(): ThresholdProfile["tag"] {
 export function getThresholdProfileIdentity(): string {
   const profile = getActiveThresholdProfile();
   return `${profile.profileId}:v${profile.schemaVersion}`;
+}
+
+/** Semantic calibration must not invalidate unchanged duplicate policies. */
+export function getSemanticSearchThresholdIdentity(): string {
+  const profile = getActiveThresholdProfile();
+  const version = profile.semanticSearch.policyVersion;
+  return `${getThresholdProfileIdentity()}${version ? `:semantic-v${version}` : ""}`;
 }

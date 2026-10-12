@@ -341,6 +341,7 @@ export interface SemanticRelevanceOptions {
     evidenceGroup: SemanticEvidenceGroup;
     similarity: number;
   }>;
+  concreteObjectQuery?: boolean;
   intent?: SemanticQueryIntent;
   primaryScores?: number[];
   promptGroupCount?: number;
@@ -476,7 +477,13 @@ function selectV2SemanticResults(
   options: SemanticRelevanceOptions
 ): SemanticRelevanceSelection {
   const intent = options.intent ?? "unknown";
-  const cutoffPolicy = INTENT_CUTOFF_POLICIES[intent];
+  const defaultCutoffPolicy = INTENT_CUTOFF_POLICIES[intent];
+  const cutoffPolicy =
+    intent === "composed" &&
+    options.concreteObjectQuery &&
+    policy.composedObjectMinimumSimilarity !== undefined
+      ? { ...defaultCutoffPolicy, base: policy.composedObjectMinimumSimilarity }
+      : defaultCutoffPolicy;
   const s = options.sensitivity ?? 1;
   const primaryScores = options.primaryScores?.length
     ? options.primaryScores
