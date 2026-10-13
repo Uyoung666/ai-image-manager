@@ -292,6 +292,45 @@ async function expectHomeToolbarToShrinkSearchBeforeWrapping(): Promise<void> {
   expect(measurement.rowHeight).toBeLessThanOrEqual(48);
 }
 
+async function expectSearchPanelsInsideViewport(): Promise<void> {
+  const currentPage = requirePage();
+  await navigateTo("/");
+  const input = currentPage.locator(".home-search-input");
+  await input.fill("");
+  await input.focus();
+
+  for (const kind of ["search-suggestions", "search-filter"]) {
+    if (kind === "search-filter") {
+      await currentPage.getByRole("button", { name: "EXIF Filters" }).click();
+    }
+    const panel = currentPage.locator(`[data-overlay-kind="${kind}"]`);
+    await expect(panel).toBeVisible();
+    const bounds = await panel.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        viewportHeight: window.innerHeight,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(bounds.left).toBeGreaterThanOrEqual(-OVERFLOW_TOLERANCE_PX);
+    expect(bounds.top).toBeGreaterThanOrEqual(-OVERFLOW_TOLERANCE_PX);
+    expect(bounds.right).toBeLessThanOrEqual(
+      bounds.viewportWidth + OVERFLOW_TOLERANCE_PX
+    );
+    expect(bounds.bottom).toBeLessThanOrEqual(
+      bounds.viewportHeight + OVERFLOW_TOLERANCE_PX
+    );
+  }
+  await currentPage.keyboard.press("Escape");
+  await expect(
+    currentPage.locator('[data-overlay-kind="search-filter"]')
+  ).not.toBeVisible();
+}
+
 async function expectImageSearchReferenceInsideToolbar(
   width: number
 ): Promise<void> {
@@ -534,6 +573,10 @@ for (const { width, height } of WINDOW_SIZES) {
 
     await test.step("image-search reference stays responsive", async () => {
       await expectImageSearchReferenceInsideToolbar(width);
+    });
+
+    await test.step("search panels stay inside the viewport", async () => {
+      await expectSearchPanelsInsideViewport();
     });
 
     await test.step("language dropdown stays inside the viewport", async () => {
