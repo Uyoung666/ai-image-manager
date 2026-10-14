@@ -1163,6 +1163,9 @@ function PersonDetailPage() {
             expandingSequenceId={sequenceView.expandingSequenceId}
             faceOverlayByPhotoId={faceOverlayByPhotoId}
             faceOverlaysVisible={showFaceBoxes}
+            inlineDetailPhotoId={
+              compactDetailOverlay ? undefined : (detailPhoto?.id ?? null)
+            }
             isPlaceholderData={pageLoading}
             loading={
               pageLoading ||

@@ -1400,8 +1400,10 @@ function HomePage() {
     setSequenceDetailsLoading,
     setSequenceReturnTarget,
   ]);
+  const backToTopDetailIdRef = useRef<number | null>(null);
   const handleKeyboardPhotoSelect = useCallback(
     (id: number) => {
+      backToTopDetailIdRef.current = null;
       clearRecentlyViewed(id);
       handleKeyboardSelect(id);
     },
@@ -1486,10 +1488,16 @@ function HomePage() {
   );
   const dismissPhotoDetail = useCallback(() => {
     if (detailPhoto) {
-      markRecentlyViewed(detailPhoto.id);
+      markRecentlyViewed(detailPhoto.id, undefined, {
+        restorePosition: backToTopDetailIdRef.current !== detailPhoto.id,
+      });
     }
+    backToTopDetailIdRef.current = null;
     dismissDetail();
   }, [detailPhoto, dismissDetail, markRecentlyViewed]);
+  const handleGalleryBackToTop = useCallback(() => {
+    backToTopDetailIdRef.current = detailPhoto?.id ?? null;
+  }, [detailPhoto]);
   // 底部操作胶囊清空选择时，详情面板也会随选中状态关闭，先记录最后查看的照片。
   const handleClearSelection = useCallback(() => {
     if (selectedSequence) {
@@ -1544,6 +1552,7 @@ function HomePage() {
   ]);
   const handlePhotoSelect = useCallback(
     (id: number, event: React.MouseEvent) => {
+      backToTopDetailIdRef.current = null;
       clearRecentlyViewed(id);
       setSelectedSequence(null);
       setSequenceDetailsLoading(false);
@@ -2362,6 +2371,9 @@ function HomePage() {
                   hasMore={
                     isPhotoPaginationActive && !gallerySnapshot.retaining
                   }
+                  inlineDetailPhotoId={
+                    compactDetailOverlay ? undefined : (detailPhoto?.id ?? null)
+                  }
                   isLoadingMore={
                     isPhotoPaginationActive &&
                     (isSearching
@@ -2380,6 +2392,7 @@ function HomePage() {
                     }
                     handleClearSelection();
                   }}
+                  onBackToTop={handleGalleryBackToTop}
                   onContextMenu={handleContextMenu}
                   onDoubleClick={handleDoubleClick}
                   onEndReached={handleEndReached}

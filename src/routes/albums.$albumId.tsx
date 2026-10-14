@@ -284,8 +284,10 @@ function AlbumDetailPage() {
     sequenceView.setSelectedSequence,
     markSequence,
   ]);
+  const backToTopDetailIdRef = useRef<number | null>(null);
   const handleKeyboardPhotoSelect = useCallback(
     (id: number) => {
+      backToTopDetailIdRef.current = null;
       clearRecentlyViewed(id);
       handleKeyboardSelect(id);
     },
@@ -305,10 +307,16 @@ function AlbumDetailPage() {
   );
   const dismissPhotoDetail = useCallback(() => {
     if (detailPhoto) {
-      markRecentlyViewed(detailPhoto.id);
+      markRecentlyViewed(detailPhoto.id, undefined, {
+        restorePosition: backToTopDetailIdRef.current !== detailPhoto.id,
+      });
     }
+    backToTopDetailIdRef.current = null;
     dismissDetail();
   }, [detailPhoto, dismissDetail, markRecentlyViewed]);
+  const handleGalleryBackToTop = useCallback(() => {
+    backToTopDetailIdRef.current = detailPhoto?.id ?? null;
+  }, [detailPhoto]);
   const handleClearSelection = useCallback(() => {
     if (sequenceView.selectedSequence) {
       dismissSequenceDetail();
@@ -359,6 +367,7 @@ function AlbumDetailPage() {
   ]);
   const handlePhotoSelect = useCallback(
     (id: number, event: React.MouseEvent) => {
+      backToTopDetailIdRef.current = null;
       clearRecentlyViewed(id);
       handleSelect(id, event);
     },
@@ -1068,6 +1077,9 @@ function AlbumDetailPage() {
             expandedSequence={sequenceView.expandedSequence}
             expandedSequenceComplete={sequenceView.expandedSequenceComplete}
             expandingSequenceId={sequenceView.expandingSequenceId}
+            inlineDetailPhotoId={
+              compactDetailOverlay ? undefined : (detailPhoto?.id ?? null)
+            }
             isPlaceholderData={pageLoading}
             loading={
               pageLoading ||
@@ -1081,6 +1093,7 @@ function AlbumDetailPage() {
               }
               handleClearSelection();
             }}
+            onBackToTop={handleGalleryBackToTop}
             onContextMenu={handleContextMenu}
             onDoubleClick={handleDoubleClick}
             onKeyboardSelect={handleKeyboardPhotoSelect}

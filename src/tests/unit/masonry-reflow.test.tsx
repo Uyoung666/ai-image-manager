@@ -107,6 +107,33 @@ function requireElement(root: ParentNode, selector: string): HTMLElement {
   return element;
 }
 
+function expectPhotoCentered(
+  scroll: HTMLElement,
+  photoId: number,
+  topInset = 0
+) {
+  const card = requireElement(scroll, `[data-photo-id="${photoId}"]`);
+  const bounds = position(card);
+  const style = getComputedStyle(scroll);
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+  const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+  const viewportCenter =
+    topInset + (scroll.clientHeight - topInset - paddingBottom) / 2;
+  expect(
+    Math.abs(
+      bounds.top +
+        paddingTop +
+        bounds.height / 2 -
+        scroll.scrollTop -
+        viewportCenter
+    )
+  ).toBeLessThanOrEqual(2);
+}
+
+function settleFocus() {
+  act(() => vi.advanceTimersByTime(64));
+}
+
 function visibleCards(scroll: HTMLElement) {
   return Array.from(
     scroll.querySelectorAll<HTMLElement>("[data-photo-id]")
@@ -186,7 +213,8 @@ beforeEach(() => {
       return Math.max(
         700,
         Number.parseFloat(content?.style.height ?? "0") +
-          (Number.parseFloat(this.style.paddingTop) || 0)
+          (Number.parseFloat(this.style.paddingTop) || 0) +
+          (Number.parseFloat(this.style.paddingBottom) || 0)
       );
     }
   );
@@ -216,6 +244,284 @@ afterEach(() => {
 });
 
 describe("masonry reflow continuity", () => {
+  for (const visibility of [
+    "fully visible",
+    "clipped above",
+    "clipped below",
+  ]) {
+    it(`centers a clicked photo that is ${visibility} below the toolbar`, () => {
+      const view = render(<MasonryGrid {...props} topInset={80} />);
+      const scroll = requireElement(view.container, "[data-masonry-scroll]");
+      scroll.style.paddingBottom = "24px";
+      scrollTo(scroll, 10_000);
+      const card = visibleCards(scroll)[3];
+      const photoId = Number(card.dataset.photoId);
+      const bounds = position(card);
+      const contentTop = bounds.top + 88;
+      let initialScrollTop = contentTop - 96;
+      if (visibility === "clipped above") {
+        initialScrollTop = contentTop + bounds.height / 2 - 80;
+      } else if (visibility === "clipped below") {
+        initialScrollTop = contentTop + bounds.height / 2 - 700;
+      }
+      scrollTo(scroll, initialScrollTop);
+      loadImages(scroll);
+      const image = card.querySelector("img");
+      const mountCount = mounts.get(photoId);
+      const imageMountCount = imageMounts.get(photoId);
+
+      view.rerender(
+        <MasonryGrid
+          {...props}
+          photoFocusRequest={{ id: 1, photoId }}
+          topInset={80}
+        />
+      );
+      settleFocus();
+
+      expectPhotoCentered(scroll, photoId, 80);
+      expect(scroll.scrollTop).not.toBeCloseTo(initialScrollTop, 1);
+      const focusedCard = requireElement(
+        scroll,
+        `[data-photo-id="${photoId}"]`
+      );
+      expect(focusedCard).toBe(card);
+      expect(focusedCard.querySelector("img")).toBe(image);
+      expect(image).toHaveAttribute("data-load-state", "loaded");
+      expect(mounts.get(photoId)).toBe(mountCount);
+      expect(imageMounts.get(photoId)).toBe(imageMountCount);
+    });
+  }
+
+  it("keeps the clicked photo centered when the panel narrows in the next frame", () => {
+    const view = render(<MasonryGrid {...props} topInset={80} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    scrollTo(scroll, 10_000);
+    const photoId = Number(visibleCards(scroll).at(-1)?.dataset.photoId);
+    const request = { id: 1, photoId };
+    view.rerender(
+      <MasonryGrid {...props} photoFocusRequest={request} topInset={80} />
+    );
+    act(() => vi.advanceTimersByTime(16));
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        columnCount={3}
+        containerWidth={664}
+        photoFocusRequest={request}
+        topInset={80}
+      />
+    );
+    settleFocus();
+    expectPhotoCentered(scroll, photoId, 80);
+  });
+
+  it("waits for the layout width when DOM shrinks before its measurement arrives", () => {
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    scrollTo(scroll, 10_000);
+    Object.defineProperty(scroll, "clientWidth", {
+      configurable: true,
+      value: 664,
+    });
+    const request = { id: 1, photoId: 1000 };
+    view.rerender(<MasonryGrid {...props} photoFocusRequest={request} />);
+    settleFocus();
+    expect(scroll.scrollTop).toBe(10_000);
+
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        columnCount={3}
+        containerWidth={664}
+        photoFocusRequest={request}
+      />
+    );
+    settleFocus();
+    expectPhotoCentered(scroll, 1000);
+  });
+
+  it("recenters the same photo only when its click request changes", () => {
+    const request = { id: 1, photoId: 1000 };
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    view.rerender(<MasonryGrid {...props} photoFocusRequest={request} />);
+    settleFocus();
+    expectPhotoCentered(scroll, 1000);
+
+    scrollTo(scroll, scroll.scrollTop + 200);
+    const userScrollTop = scroll.scrollTop;
+    view.rerender(
+      <MasonryGrid {...props} photoFocusRequest={{ ...request }} />
+    );
+    settleFocus();
+    expect(scroll.scrollTop).toBe(userScrollTop);
+
+    view.rerender(
+      <MasonryGrid {...props} photoFocusRequest={{ ...request, id: 2 }} />
+    );
+    settleFocus();
+    expectPhotoCentered(scroll, 1000);
+  });
+
+  it("only completes the latest photo click during rapid selection", () => {
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    view.rerender(
+      <MasonryGrid {...props} photoFocusRequest={{ id: 1, photoId: 1000 }} />
+    );
+    act(() => vi.advanceTimersByTime(16));
+    view.rerender(
+      <MasonryGrid {...props} photoFocusRequest={{ id: 2, photoId: 1500 }} />
+    );
+    settleFocus();
+    expectPhotoCentered(scroll, 1500);
+    const finalScrollTop = scroll.scrollTop;
+    settleFocus();
+    expect(scroll.scrollTop).toBe(finalScrollTop);
+  });
+
+  it("cancels pending click positioning when the user scrolls the wheel", () => {
+    const request = { id: 1, photoId: 1000 };
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    Object.defineProperty(scroll, "clientWidth", {
+      configurable: true,
+      value: 664,
+    });
+    view.rerender(<MasonryGrid {...props} photoFocusRequest={request} />);
+    fireEvent.wheel(scroll, { deltaY: 200 });
+    scrollTo(scroll, 15_000);
+    const anchor = capture(scroll)[0];
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        columnCount={3}
+        containerWidth={664}
+        photoFocusRequest={request}
+      />
+    );
+    settleFocus();
+    const card = requireElement(scroll, `[data-photo-id="${anchor.id}"]`);
+    expect(position(card).top - scroll.scrollTop).toBeCloseTo(anchor.offset, 4);
+  });
+
+  it("restores ordinary resize anchoring after click positioning completes", () => {
+    const request = { id: 1, photoId: 1000 };
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    view.rerender(<MasonryGrid {...props} photoFocusRequest={request} />);
+    settleFocus();
+    expectPhotoCentered(scroll, 1000);
+    const anchor = capture(scroll)[0];
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        columnCount={3}
+        containerWidth={664}
+        photoFocusRequest={request}
+      />
+    );
+    settleFocus();
+    const card = requireElement(scroll, `[data-photo-id="${anchor.id}"]`);
+    expect(position(card).top - scroll.scrollTop).toBeCloseTo(anchor.offset, 4);
+  });
+
+  it("releases an enforced restored anchor before centering a clicked photo", () => {
+    const ref = createRef<MasonryGridHandle>();
+    const view = render(<MasonryGrid {...props} ref={ref} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    act(() => ref.current?.scrollToItem(1000, 0.5));
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        photoFocusRequest={{ id: 1, photoId: 1500 }}
+        ref={ref}
+      />
+    );
+    settleFocus();
+    expectPhotoCentered(scroll, 1500);
+    act(() => vi.advanceTimersByTime(800));
+    expectPhotoCentered(scroll, 1500);
+  });
+
+  it("does not revive a withdrawn pending click request when its photo reappears", () => {
+    const request = { id: 1, photoId: 1000 };
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    scrollTo(scroll, 10_000);
+    Object.defineProperty(scroll, "clientWidth", {
+      configurable: true,
+      value: 664,
+    });
+    view.rerender(<MasonryGrid {...props} photoFocusRequest={request} />);
+    view.rerender(<MasonryGrid {...props} photoFocusRequest={null} />);
+    Object.defineProperty(scroll, "clientWidth", {
+      configurable: true,
+      value: 1024,
+    });
+    view.rerender(<MasonryGrid {...props} photoFocusRequest={request} />);
+    settleFocus();
+    expect(scroll.scrollTop).toBe(10_000);
+    view.rerender(
+      <MasonryGrid {...props} photoFocusRequest={{ ...request, id: 2 }} />
+    );
+    settleFocus();
+    expectPhotoCentered(scroll, 1000);
+  });
+
+  for (const photoId of [1, 30]) {
+    it(`clamps click positioning for boundary photo ${photoId}`, () => {
+      const boundaryProps = {
+        ...props,
+        columnCount: 1,
+        containerWidth: 400,
+        items: photos.slice(0, 30).map((photo) => ({ ...photo, height: 1000 })),
+      };
+      const view = render(<MasonryGrid {...boundaryProps} />);
+      const scroll = requireElement(view.container, "[data-masonry-scroll]");
+      view.rerender(
+        <MasonryGrid
+          {...boundaryProps}
+          photoFocusRequest={{ id: 1, photoId }}
+        />
+      );
+      settleFocus();
+      expect(scroll.scrollTop).toBe(
+        photoId === 1 ? 0 : scroll.scrollHeight - scroll.clientHeight
+      );
+      expect(
+        visibleCards(scroll).some(
+          (card) => Number(card.dataset.photoId) === photoId
+        )
+      ).toBe(true);
+    });
+  }
+
+  it("centers the middle of a card taller than the usable viewport", () => {
+    const tallProps = {
+      ...props,
+      columnCount: 1,
+      containerWidth: 400,
+      items: photos.slice(0, 30).map((photo) => ({
+        ...photo,
+        height: photo.id === 15 ? 5000 : 1000,
+      })),
+      topInset: 80,
+    };
+    const view = render(<MasonryGrid {...tallProps} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    view.rerender(
+      <MasonryGrid {...tallProps} photoFocusRequest={{ id: 1, photoId: 15 }} />
+    );
+    settleFocus();
+    const card = requireElement(scroll, '[data-photo-id="15"]');
+    expect(position(card).height).toBeGreaterThan(
+      scroll.clientHeight - tallProps.topInset
+    );
+    expectPhotoCentered(scroll, 15, 80);
+  });
+
   it("restores a mode's virtual window before the first paint", () => {
     const view = render(<MasonryGrid {...props} items={photos.slice(0, 3)} />);
     const scroll = requireElement(view.container, "[data-masonry-scroll]");

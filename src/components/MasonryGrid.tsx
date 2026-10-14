@@ -110,6 +110,11 @@ export interface MasonryScrollRestoreRequest {
   scrollTop: number;
 }
 
+export interface MasonryPhotoFocusRequest {
+  id: number;
+  photoId: number;
+}
+
 interface MasonryGridProps {
   className?: string;
   columnCount: number;
@@ -127,6 +132,7 @@ interface MasonryGridProps {
     height: number;
     [key: string]: any;
   }>;
+  onBackToTop?: () => void;
   onEndReached?: () => void;
   onMarqueeSelect?: (ids: Set<number>) => void;
   onRestoreSettled?: (routeKey: string) => void;
@@ -134,6 +140,7 @@ interface MasonryGridProps {
   onScrollRestored?: (request: number) => void;
   onScrollTopChange?: (scrollTop: number) => void;
   overscan?: number;
+  photoFocusRequest?: MasonryPhotoFocusRequest | null;
   renderItem: (
     item: any,
     index: number,
@@ -163,6 +170,7 @@ export const MasonryGrid = memo(
       groupHeaders,
       overscan = 5,
       renderItem,
+      onBackToTop,
       onEndReached,
       hasMore = false,
       isLoadingMore = false,
@@ -173,6 +181,7 @@ export const MasonryGrid = memo(
       onScrollTopChange,
       scrollToAlignment = "center",
       scrollToId,
+      photoFocusRequest,
       className,
       selectionActive = false,
       showGroupHeaders = true,
@@ -214,6 +223,19 @@ export const MasonryGrid = memo(
     >(null);
     const returnToPhotoAutoScrollRef = useRef(false);
     const returnToPhotoFocusFrameRef = useRef<number>(0);
+    const completedPhotoFocusRef = useRef<number | null>(null);
+    const photoFocusFrameRef = useRef(0);
+    const latestPhotoFocusRef = useRef(photoFocusRequest);
+    latestPhotoFocusRef.current = photoFocusRequest;
+    const cancelPhotoFocus = useCallback(() => {
+      if (latestPhotoFocusRef.current) {
+        completedPhotoFocusRef.current = latestPhotoFocusRef.current.id;
+      }
+      if (photoFocusFrameRef.current) {
+        cancelAnimationFrame(photoFocusFrameRef.current);
+        photoFocusFrameRef.current = 0;
+      }
+    }, []);
     const routeForceUnlockRef = useRef<(() => void) | null>(null);
     const scrollbarThumbRef = useRef<HTMLDivElement>(null);
     const scrollbarDragRef = useRef<{
@@ -354,6 +376,7 @@ export const MasonryGrid = memo(
       }
       if (!(returnToPhotoAutoScrollRef.current || isReflowScroll)) {
         reflowAnchorRef.current = null;
+        cancelPhotoFocus();
       }
       if (returnToPhotoAutoScrollRef.current || isReflowScroll) {
         returnToPhotoAutoScrollRef.current = false;
@@ -459,6 +482,7 @@ export const MasonryGrid = memo(
         );
       });
     }, [
+      cancelPhotoFocus,
       checkNearBottom,
       onScrollTopChange,
       syncScrollMetrics,
@@ -487,11 +511,35 @@ export const MasonryGrid = memo(
         // starts from the current viewport, not the preceding resize's anchor.
         reflowAnchorRef.current = null;
         reflowScrollTopRef.current = null;
+        cancelPhotoFocus();
+      };
+      const el = scrollRef.current;
+      const handleScrollKey = (event: KeyboardEvent) => {
+        if (
+          [
+            "ArrowUp",
+            "ArrowDown",
+            "PageUp",
+            "PageDown",
+            "Home",
+            "End",
+            " ",
+          ].includes(event.key)
+        ) {
+          cancelPhotoFocus();
+        }
       };
       window.addEventListener("pointerdown", startInteraction, true);
-      return () =>
+      el?.addEventListener("wheel", cancelPhotoFocus, { passive: true });
+      el?.addEventListener("touchstart", cancelPhotoFocus, { passive: true });
+      el?.addEventListener("keydown", handleScrollKey);
+      return () => {
         window.removeEventListener("pointerdown", startInteraction, true);
-    }, []);
+        el?.removeEventListener("wheel", cancelPhotoFocus);
+        el?.removeEventListener("touchstart", cancelPhotoFocus);
+        el?.removeEventListener("keydown", handleScrollKey);
+      };
+    }, [cancelPhotoFocus]);
 
     useEffect(() => {
       return () => {
@@ -526,6 +574,7 @@ export const MasonryGrid = memo(
     const prevPaddingTopRef = useRef(0);
     const prevScrollToAlignmentRef = useRef(scrollToAlignment);
     const prevScrollToIdRef = useRef(scrollToId);
+    const prevPhotoFocusRequestRef = useRef(photoFocusRequest);
     const prevReturnToPhotoRequestRef = useRef(0);
     const prevReturnToPhotoIdRef = useRef(returnToPhotoId);
     const completedReturnRequestRef = useRef(0);
@@ -554,6 +603,9 @@ export const MasonryGrid = memo(
         : Number.parseFloat(scrollStyle?.paddingTop ?? "0") || 0;
     const paddingBottom =
       Number.parseFloat(scrollStyle?.paddingBottom ?? "0") || 0;
+    const photoFocusPending =
+      photoFocusRequest != null &&
+      photoFocusRequest.id !== completedPhotoFocusRef.current;
     const clampScrollTop = (value: number) =>
       Math.max(
         0,
@@ -662,6 +714,23 @@ export const MasonryGrid = memo(
             });
         return target === null ? reflowScrollTop : clampScrollTop(target);
       }
+      if (photoFocusPending && photoFocusRequest) {
+        const index = idToIndexMap.get(photoFocusRequest.photoId);
+        const position = index === undefined ? undefined : positions[index];
+        if (position) {
+          pendingReflowAnchor = null;
+          const availableHeight = Math.max(
+            0,
+            effectiveViewportHeight - topInset - paddingBottom
+          );
+          return clampScrollTop(
+            position.top +
+              paddingTop +
+              position.height / 2 -
+              (topInset + availableHeight / 2)
+          );
+        }
+      }
       if (
         scrollToId != null &&
         (scrollToId !== prevScrollToIdRef.current ||
@@ -699,6 +768,10 @@ export const MasonryGrid = memo(
       const prevReturnToPhotoId = prevReturnToPhotoIdRef.current;
       const prevRouteKey = prevRouteKeyRef.current;
       const scrollTargetChanged = scrollToId !== prevScrollToIdRef.current;
+      if (!photoFocusRequest && prevPhotoFocusRequestRef.current) {
+        completedPhotoFocusRef.current = prevPhotoFocusRequestRef.current.id;
+      }
+      prevPhotoFocusRequestRef.current = photoFocusRequest;
       prevPositionsRef.current = positions;
       prevItemsRef.current = items;
       prevColumnCountRef.current = columnCount;
@@ -714,6 +787,21 @@ export const MasonryGrid = memo(
 
       const returnRequestChanged =
         returnToPhotoRequest !== prevReturnToPhotoRequest;
+      if (
+        prevRouteKey !== routeKey ||
+        returnRequestChanged ||
+        scrollRestorePending
+      ) {
+        cancelPhotoFocus();
+      }
+      if (
+        photoFocusPending &&
+        photoFocusRequest &&
+        completedPhotoFocusRef.current !== photoFocusRequest.id &&
+        plannedScrollTop !== null
+      ) {
+        gridRef.current?.cancelEnforceLock();
+      }
       if (scrollTargetChanged || returnRequestChanged) {
         reflowAnchorRef.current = null;
       }
@@ -890,13 +978,17 @@ export const MasonryGrid = memo(
         return;
       }
     }, [
+      cancelPhotoFocus,
       columnCount,
       gap,
+      gridRef,
       items,
       onScrollRestored,
       onScrollTopChange,
       paddingTop,
       pendingReflowAnchor,
+      photoFocusRequest,
+      photoFocusPending,
       plannedScrollTop,
       positions,
       scrollRestorePending,
@@ -911,6 +1003,59 @@ export const MasonryGrid = memo(
       topInset,
       syncScrollMetrics,
       updateScrollbarThumbPosition,
+    ]);
+
+    useLayoutEffect(() => {
+      if (
+        !(
+          photoFocusPending &&
+          photoFocusRequest &&
+          restoreReady &&
+          hasInitialPositionedRef.current
+        ) ||
+        plannedScrollTop === null ||
+        completedPhotoFocusRef.current === photoFocusRequest.id
+      ) {
+        return;
+      }
+      // Keep the click alive until ResizeObserver and the DOM describe the
+      // same surface. A subsequent layout restarts these two stable frames.
+      let stableFrames = 0;
+      const settle = () => {
+        const el = scrollRef.current;
+        if (
+          !el ||
+          latestPhotoFocusRef.current?.id !== photoFocusRequest.id ||
+          completedPhotoFocusRef.current === photoFocusRequest.id
+        ) {
+          photoFocusFrameRef.current = 0;
+          return;
+        }
+        const stable =
+          hasMatchingLayoutWidth(el, containerWidth) &&
+          el.clientHeight === effectiveViewportHeight &&
+          Math.abs(el.scrollTop - plannedScrollTop) <= 1;
+        stableFrames = stable ? stableFrames + 1 : 0;
+        if (stableFrames >= 2) {
+          completedPhotoFocusRef.current = photoFocusRequest.id;
+          photoFocusFrameRef.current = 0;
+          return;
+        }
+        photoFocusFrameRef.current = requestAnimationFrame(settle);
+      };
+      photoFocusFrameRef.current = requestAnimationFrame(settle);
+      return () => {
+        cancelAnimationFrame(photoFocusFrameRef.current);
+        photoFocusFrameRef.current = 0;
+      };
+    }, [
+      containerWidth,
+      effectiveViewportHeight,
+      hasInitialPositionedRef,
+      photoFocusPending,
+      photoFocusRequest,
+      plannedScrollTop,
+      restoreReady,
     ]);
 
     useEffect(() => {
@@ -953,21 +1098,26 @@ export const MasonryGrid = memo(
       recordGalleryPerf("masonryImageItems", renderImageCount);
     }, [visibleItems, effectiveScrollTop, effectiveViewportHeight]);
 
-    const scrollToTop = useCallback((e: React.MouseEvent) => {
-      e.stopPropagation();
-      const el = scrollRef.current;
-      if (!el) {
-        return;
-      }
-      const distance = el.scrollTop;
-      el.scrollTo({
-        top: 0,
-        behavior:
-          isReducedMotionEnabled() || distance > el.clientHeight * 4
-            ? "auto"
-            : "smooth",
-      });
-    }, []);
+    const scrollToTop = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const el = scrollRef.current;
+        if (!el) {
+          return;
+        }
+        const distance = el.scrollTop;
+        onBackToTop?.();
+        cancelPhotoFocus();
+        el.scrollTo({
+          top: 0,
+          behavior:
+            isReducedMotionEnabled() || distance > el.clientHeight * 4
+              ? "auto"
+              : "smooth",
+        });
+      },
+      [cancelPhotoFocus, onBackToTop]
+    );
 
     const layoutReady = containerWidth > 0 && columnCount > 0;
     useLayoutEffect(() => {
@@ -1241,6 +1391,8 @@ export const MasonryGrid = memo(
     prevProps.isPlaceholderData === nextProps.isPlaceholderData &&
     prevProps.itemStateVersion === nextProps.itemStateVersion &&
     prevProps.selectionActive === nextProps.selectionActive &&
+    prevProps.onBackToTop === nextProps.onBackToTop &&
+    prevProps.photoFocusRequest === nextProps.photoFocusRequest &&
     prevProps.scrollToId === nextProps.scrollToId &&
     prevProps.returnToPhotoId === nextProps.returnToPhotoId &&
     prevProps.returnToMemberId === nextProps.returnToMemberId &&

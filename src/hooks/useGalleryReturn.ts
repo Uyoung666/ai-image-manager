@@ -80,19 +80,23 @@ export function useGalleryReturn({
     [clearRecentlyViewed]
   );
   const markTarget = useCallback(
-    (next: GalleryReturnTarget) => {
+    (next: GalleryReturnTarget, restorePosition = true) => {
       stopPulse();
       setTarget(next);
       requestRef.current += 1;
       setRequest(requestRef.current);
-      pendingRef.current = true;
-      setPending(true);
+      pendingRef.current = restorePosition;
+      setPending(restorePosition);
     },
     [stopPulse]
   );
   const markRecentlyViewed = useCallback(
-    (photoId: number, sequenceId?: number) => {
-      markTarget(rememberPhoto(photoId, sequenceId));
+    (
+      photoId: number,
+      sequenceId?: number,
+      { restorePosition = true }: { restorePosition?: boolean } = {}
+    ) => {
+      markTarget(rememberPhoto(photoId, sequenceId), restorePosition);
     },
     [markTarget, rememberPhoto]
   );

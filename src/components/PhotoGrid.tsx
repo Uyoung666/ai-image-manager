@@ -47,6 +47,7 @@ import {
 import type {
   GroupHeader,
   MasonryGridHandle,
+  MasonryPhotoFocusRequest,
   MasonryScrollRestoreRequest,
 } from "./MasonryGrid";
 import { MasonryGrid } from "./MasonryGrid";
@@ -99,6 +100,8 @@ interface PhotoGridProps {
   gridRef?: React.RefObject<MasonryGridHandle | null>;
   /** 是否还有更多数据可加载（对应 infinite scroll 的 hasNextPage） */
   hasMore?: boolean;
+  /** Only a visible inline inspector enables mouse-click centering. */
+  inlineDetailPhotoId?: number | null;
   /** 正在加载更多数据（useInfiniteQuery 的 isFetchingNextPage） */
   isLoadingMore?: boolean;
   /**
@@ -111,6 +114,7 @@ interface PhotoGridProps {
   isStale?: boolean;
   loading: boolean;
   onBackgroundClick?: () => void;
+  onBackToTop?: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
   onEndReached?: () => void;
@@ -911,6 +915,7 @@ export const PhotoGrid = memo(
     disablePhotoDrag = false,
     loading,
     isLoadingMore = false,
+    inlineDetailPhotoId,
     selectedIds,
     deletingIds,
     gridRef,
@@ -943,6 +948,7 @@ export const PhotoGrid = memo(
     onRestoreSettled,
     onScrollTopChange,
     onScrollRestored,
+    onBackToTop,
     onBackgroundClick,
     recentlyViewedTarget = null,
     recentlyViewedReturnRequest,
@@ -983,6 +989,34 @@ export const PhotoGrid = memo(
     const toolbarRef = useRef<HTMLDivElement>(null);
     const [toolbarHeight, setToolbarHeight] = useState(0);
     const observerRef = useRef<ResizeObserver | null>(null);
+    const photoFocusIdRef = useRef(0);
+    const [photoFocusRequest, setPhotoFocusRequest] = useState<
+      (MasonryPhotoFocusRequest & { routeKey: string }) | null
+    >(null);
+    const clickFocusEnabled = inlineDetailPhotoId !== undefined;
+    const handlePhotoClick = useCallback(
+      (id: number, event: React.MouseEvent) => {
+        if (
+          clickFocusEnabled &&
+          event.type === "click" &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.shiftKey &&
+          !event.altKey
+        ) {
+          photoFocusIdRef.current += 1;
+          setPhotoFocusRequest({
+            id: photoFocusIdRef.current,
+            photoId: id,
+            routeKey,
+          });
+        } else {
+          setPhotoFocusRequest(null);
+        }
+        onSelect(id, event);
+      },
+      [clickFocusEnabled, onSelect, routeKey]
+    );
     const handleGridScrollTopChange = useCallback(
       (scrollTop: number) => {
         setIsToolbarScrolled((previous) => {
@@ -1462,7 +1496,7 @@ export const PhotoGrid = memo(
               index < columnCount * INITIAL_EAGER_ROWS ? "eager" : "lazy"
             }
             match={photo.match}
-            onClick={onSelect}
+            onClick={handlePhotoClick}
             onDoubleClick={onDoubleClick}
             onNameFace={onNameFace}
             onToggleFavorite={onToggleFavorite}
@@ -1513,6 +1547,7 @@ export const PhotoGrid = memo(
         return photoCard;
       },
       [
+        handlePhotoClick,
         onSelect,
         onSelectSequence,
         onSelectSequenceMembers,
@@ -1835,12 +1870,22 @@ export const PhotoGrid = memo(
             isPlaceholderData={isPlaceholderData}
             itemStateVersion={itemStateVersion}
             items={displayPhotos}
+            onBackToTop={onBackToTop}
             onEndReached={onEndReached}
             onMarqueeSelect={handleGridMarqueeSelect}
             onRestoreSettled={onRestoreSettled}
             onReturnLocated={handleReturnLocated}
             onScrollRestored={onScrollRestored}
             onScrollTopChange={handleGridScrollTopChange}
+            photoFocusRequest={
+              !expandedSequence &&
+              selectedIds.size === 1 &&
+              photoFocusRequest?.routeKey === routeKey &&
+              photoFocusRequest.photoId === scrollToId &&
+              inlineDetailPhotoId === scrollToId
+                ? photoFocusRequest
+                : null
+            }
             ref={gridRef}
             renderItem={renderItem}
             restoreGateReady={restoreGateReady}
@@ -1958,6 +2003,12 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.isLoadingMore !== nextProps.isLoadingMore) {
+      return false;
+    }
+    if (prevProps.inlineDetailPhotoId !== nextProps.inlineDetailPhotoId) {
+      return false;
+    }
+    if (prevProps.onBackToTop !== nextProps.onBackToTop) {
       return false;
     }
     if (prevProps.selectedIds !== nextProps.selectedIds) {

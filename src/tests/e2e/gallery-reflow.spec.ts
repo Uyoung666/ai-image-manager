@@ -31,6 +31,7 @@ declare global {
         retained: number;
         replaced: number;
         removed: number;
+        targetRetained: boolean;
         initialOffset: number;
         initialScrollTop: number;
       };
@@ -144,7 +145,7 @@ test.beforeEach(async () => {
   await page.waitForFunction(() => Boolean(window.__e2eNavigate));
 });
 
-async function startProbe(prepareClick = false) {
+async function startProbe(prepareClick = false, preferredTargetId?: string) {
   if (prepareClick) {
     const targetId = await page.evaluate(() => {
       const scroll = document.querySelector<HTMLElement>(
@@ -179,8 +180,8 @@ async function startProbe(prepareClick = false) {
       }
       return target.dataset.photoId;
     });
-    // Selected-photo scrolling is intentional. Prepare a fully visible target
-    // before measuring only the detail panel's layout transition.
+    // Keep the general reflow fixture target fully visible before the click.
+    // Dedicated focus cases below also exercise partially visible cards.
     await expect
       .poll(async () =>
         page
@@ -203,7 +204,41 @@ async function startProbe(prepareClick = false) {
       )
       .toBe(true);
   }
-  return await page.evaluate(() => {
+  // Start measuring reflow after the cold-cache click target has decoded.
+  await expect
+    .poll(() =>
+      page.evaluate((requestedId) => {
+        const scroll = document.querySelector<HTMLElement>(
+          "[data-masonry-scroll]"
+        );
+        if (!scroll) {
+          throw new Error("Missing masonry scroll surface");
+        }
+        const bounds = scroll.getBoundingClientRect();
+        const inset =
+          document
+            .querySelector(".home-gallery-toolbar-layer")
+            ?.getBoundingClientRect().height ?? 0;
+        const visible = Array.from(
+          scroll.querySelectorAll<HTMLElement>('[data-photo-id][role="option"]')
+        ).filter((card) => {
+          const rect = card.getBoundingClientRect();
+          return rect.bottom > bounds.top + inset && rect.top < bounds.bottom;
+        });
+        const clickTarget = requestedId
+          ? visible.find((card) => card.dataset.photoId === requestedId)
+          : (visible.find((card) => {
+              const rect = card.getBoundingClientRect();
+              return (
+                rect.top >= bounds.top + inset && rect.bottom <= bounds.bottom
+              );
+            }) ?? visible[0]);
+        const image = clickTarget?.querySelector<HTMLImageElement>("img");
+        return image?.dataset.loadState === "loaded" && image.naturalWidth > 0;
+      }, preferredTargetId)
+    )
+    .toBe(true);
+  return await page.evaluate((requestedId) => {
     const scroll = document.querySelector<HTMLElement>("[data-masonry-scroll]");
     if (!scroll) {
       throw new Error("Missing masonry scroll surface");
@@ -222,11 +257,12 @@ async function startProbe(prepareClick = false) {
     });
     const anchor = visible[0];
     // A portrait card can be taller than the available narrow-window viewport.
-    const clickTarget =
-      visible.find((card) => {
-        const rect = card.getBoundingClientRect();
-        return rect.top >= bounds.top + inset && rect.bottom <= bounds.bottom;
-      }) ?? anchor;
+    const clickTarget = requestedId
+      ? visible.find((card) => card.dataset.photoId === requestedId)
+      : (visible.find((card) => {
+          const rect = card.getBoundingClientRect();
+          return rect.top >= bounds.top + inset && rect.bottom <= bounds.bottom;
+        }) ?? anchor);
     if (!(anchor && clickTarget)) {
       throw new Error("No visible fixture cards");
     }
@@ -243,6 +279,7 @@ async function startProbe(prepareClick = false) {
     const images = new Map(
       visible.map((card) => [card.dataset.photoId, card.querySelector("img")])
     );
+    const targetImage = clickTarget.querySelector("img");
     const removed = new Set<Element>();
     const observer = new MutationObserver((records) => {
       for (const record of records) {
@@ -307,48 +344,260 @@ async function startProbe(prepareClick = false) {
           retained,
           replaced,
           removed: removedCount,
+          targetRetained:
+            targetImage !== null &&
+            clickTarget.querySelector("img") === targetImage &&
+            clickTarget.isConnected &&
+            !removed.has(targetImage),
           initialOffset,
           initialScrollTop,
         };
       },
     };
     return clickTarget.dataset.photoId;
-  });
+  }, preferredTargetId);
 }
 
 async function openProbeTarget(id: string | undefined) {
-  const point = await page
-    .locator(`[data-photo-id="${id}"][role="option"]`)
-    .evaluate((card) => {
-      const scroll = card.closest("[data-masonry-scroll]");
-      if (!scroll) {
-        throw new Error("Missing masonry scroll surface");
-      }
-      const bounds = scroll.getBoundingClientRect();
-      const rect = card.getBoundingClientRect();
-      const inset =
-        document
-          .querySelector(".home-gallery-toolbar-layer")
-          ?.getBoundingClientRect().height ?? 0;
-      const top = Math.max(rect.top, bounds.top + inset);
-      const bottom = Math.min(rect.bottom, bounds.bottom);
-      if (bottom <= top) {
-        throw new Error("Fixture card has no clickable visible area");
-      }
-      return {
-        x:
-          (Math.max(rect.left, bounds.left) +
-            Math.min(rect.right, bounds.right)) /
-          2,
-        y: (top + bottom) / 2,
-      };
-    });
+  const point = { x: 0, y: 0 };
+  await expect
+    .poll(
+      async () => {
+        const result = await page
+          .locator(`[data-photo-id="${id}"][role="option"]`)
+          .evaluate((card) => {
+            const scroll = card.closest<HTMLElement>("[data-masonry-scroll]");
+            if (!scroll) {
+              throw new Error("Missing masonry scroll surface");
+            }
+            const bounds = scroll.getBoundingClientRect();
+            const rect = card.getBoundingClientRect();
+            const inset =
+              document
+                .querySelector(".home-gallery-toolbar-layer")
+                ?.getBoundingClientRect().height ?? 0;
+            const paddingBottom =
+              Number.parseFloat(getComputedStyle(scroll).paddingBottom) || 0;
+            const statusBounds = document
+              .querySelector(".home-gallery-status-bar")
+              ?.getBoundingClientRect();
+            const viewportBottom = Math.min(
+              bounds.top + scroll.clientHeight - paddingBottom,
+              statusBounds && statusBounds.height > 0
+                ? statusBounds.top
+                : bounds.bottom
+            );
+            const top = Math.max(rect.top, bounds.top + inset);
+            const bottom = Math.min(rect.bottom, viewportBottom);
+            const left = Math.max(rect.left, bounds.left);
+            const right = Math.min(rect.right, bounds.right);
+            if (bottom <= top || right <= left) {
+              return {
+                point: null,
+                blockedBy: "Fixture card has no clickable visible area",
+              };
+            }
+            const blockers = new Set<string>();
+            for (const yRatio of [0.5, 0.25, 0.75]) {
+              for (const xRatio of [0.5, 0.25, 0.75]) {
+                const candidate = {
+                  x: left + (right - left) * xRatio,
+                  y: top + (bottom - top) * yRatio,
+                };
+                const hit = document.elementFromPoint(candidate.x, candidate.y);
+                if (
+                  card.contains(hit) &&
+                  !hit?.closest('button, [role="button"], input, a')
+                ) {
+                  return { point: candidate, blockedBy: null };
+                }
+                blockers.add(
+                  hit
+                    ? `${hit.tagName}.${hit.getAttribute("class") ?? ""}`
+                    : "null"
+                );
+              }
+            }
+            return {
+              point: null,
+              blockedBy: `Fixture card is covered by ${[...blockers].join("; ")}`,
+            };
+          });
+        if (result.point) {
+          Object.assign(point, result.point);
+        }
+        return result.blockedBy;
+      },
+      { timeout: 10_000, message: `Wait for unobscured fixture card ${id}` }
+    )
+    .toBeNull();
   // Click the visible area without Playwright scrolling a tall card into view.
   await page.mouse.click(point.x, point.y);
 }
 
-async function finishProbe(label: string, overlay: boolean) {
+type ClickVisibility = "above" | "below" | "inside";
+
+async function positionFocusTarget(
+  visibility: ClickVisibility,
+  requestedId?: string
+) {
+  const id = await page.evaluate(
+    ({ placement, targetId }) => {
+      const scroll = document.querySelector<HTMLElement>(
+        "[data-masonry-scroll]"
+      );
+      if (!scroll) {
+        throw new Error("Missing masonry scroll surface");
+      }
+      const bounds = scroll.getBoundingClientRect();
+      const inset =
+        document
+          .querySelector(".home-gallery-toolbar-layer")
+          ?.getBoundingClientRect().height ?? 0;
+      const paddingBottom =
+        Number.parseFloat(getComputedStyle(scroll).paddingBottom) || 0;
+      const statusBounds = document
+        .querySelector(".home-gallery-status-bar")
+        ?.getBoundingClientRect();
+      const top = bounds.top + inset;
+      const bottom = Math.min(
+        bounds.top + scroll.clientHeight - paddingBottom,
+        statusBounds && statusBounds.height > 0
+          ? statusBounds.top
+          : bounds.bottom
+      );
+      const cards = Array.from(
+        scroll.querySelectorAll<HTMLElement>('[data-photo-id][role="option"]')
+      );
+      const target = targetId
+        ? cards.find((card) => card.dataset.photoId === targetId)
+        : cards.find((card) => {
+            const rect = card.getBoundingClientRect();
+            return (
+              rect.top >= top &&
+              rect.bottom <= bottom &&
+              rect.height < bottom - top - 48
+            );
+          });
+      if (!target?.dataset.photoId) {
+        throw new Error("No visible fixture card fits the focus test");
+      }
+      const rect = target.getBoundingClientRect();
+      const translateY =
+        Number.parseFloat(
+          getComputedStyle(target).translate.split(" ")[1] ?? "0"
+        ) || 0;
+      let desiredTop = top + 24;
+      if (placement === "above") {
+        desiredTop = top - rect.height / 2;
+      } else if (placement === "below") {
+        desiredTop = bottom - rect.height / 2;
+      }
+      scroll.scrollTop += rect.top - translateY - desiredTop;
+      return target.dataset.photoId;
+    },
+    { placement: visibility, targetId: requestedId }
+  );
+  await expect
+    .poll(() =>
+      page
+        .locator(`[data-photo-id="${id}"][role="option"]`)
+        .evaluate((card, placement) => {
+          const scroll = card.closest<HTMLElement>("[data-masonry-scroll]");
+          if (!scroll) {
+            throw new Error("Missing masonry scroll surface");
+          }
+          const bounds = scroll.getBoundingClientRect();
+          const rect = card.getBoundingClientRect();
+          const inset =
+            document
+              .querySelector(".home-gallery-toolbar-layer")
+              ?.getBoundingClientRect().height ?? 0;
+          const paddingBottom =
+            Number.parseFloat(getComputedStyle(scroll).paddingBottom) || 0;
+          const statusBounds = document
+            .querySelector(".home-gallery-status-bar")
+            ?.getBoundingClientRect();
+          const translateY =
+            Number.parseFloat(
+              getComputedStyle(card).translate.split(" ")[1] ?? "0"
+            ) || 0;
+          const top = rect.top - translateY;
+          const bottom = rect.bottom - translateY;
+          const viewportTop = bounds.top + inset;
+          const viewportBottom = Math.min(
+            bounds.top + scroll.clientHeight - paddingBottom,
+            statusBounds && statusBounds.height > 0
+              ? statusBounds.top
+              : bounds.bottom
+          );
+          if (placement === "above") {
+            return top < viewportTop - 2 && bottom > viewportTop + 2;
+          }
+          if (placement === "below") {
+            return top < viewportBottom - 2 && bottom > viewportBottom + 2;
+          }
+          return top > viewportTop + 2 && bottom < viewportBottom - 2;
+        }, visibility)
+    )
+    .toBe(true);
+  return id;
+}
+
+async function expectCenteredTarget(id: string) {
+  const card = page.locator(`[data-photo-id="${id}"][role="option"]`);
+  await expect(card).toHaveAttribute("aria-selected", "true");
+  await expect
+    .poll(() =>
+      card.evaluate((element) => {
+        const scroll = element.closest<HTMLElement>("[data-masonry-scroll]");
+        if (!scroll) {
+          throw new Error("Missing masonry scroll surface");
+        }
+        const bounds = scroll.getBoundingClientRect();
+        const rect = element.getBoundingClientRect();
+        const inset =
+          document
+            .querySelector(".home-gallery-toolbar-layer")
+            ?.getBoundingClientRect().height ?? 0;
+        const paddingBottom =
+          Number.parseFloat(getComputedStyle(scroll).paddingBottom) || 0;
+        const translateY =
+          Number.parseFloat(
+            getComputedStyle(element).translate.split(" ")[1] ?? "0"
+          ) || 0;
+        const top = rect.top - translateY;
+        const bottom = rect.bottom - translateY;
+        const viewportTop = bounds.top + inset;
+        const viewportBottom = bounds.top + scroll.clientHeight - paddingBottom;
+        const centerError =
+          (top + bottom) / 2 - (viewportTop + viewportBottom) / 2;
+        const expectedScrollTop = Math.max(
+          0,
+          Math.min(
+            scroll.scrollTop + centerError,
+            scroll.scrollHeight - scroll.clientHeight
+          )
+        );
+        const fits = rect.height <= viewportBottom - viewportTop;
+        return (
+          Math.abs(scroll.scrollTop - expectedScrollTop) <= 2 &&
+          (!fits || (top >= viewportTop - 2 && bottom <= viewportBottom + 2))
+        );
+      })
+    )
+    .toBe(true);
+}
+
+async function finishProbe(
+  label: string,
+  overlay: boolean,
+  centeredTargetId?: string
+) {
   await page.waitForTimeout(350);
+  if (centeredTargetId) {
+    await expectCenteredTarget(centeredTargetId);
+  }
   const result = await page.evaluate(() => window.masonryReflowProbe.stop());
   const framePath = test.info().outputPath(`${label}.json`);
   fs.writeFileSync(framePath, JSON.stringify(result, null, 2));
@@ -359,15 +608,20 @@ async function finishProbe(label: string, overlay: boolean) {
   expect(result.retained).toBeGreaterThan(0);
   expect(result.replaced).toBe(0);
   expect(result.removed).toBe(0);
+  if (centeredTargetId) {
+    expect(result.targetRetained).toBe(true);
+  }
   expect(result.frames.length).toBeGreaterThan(2);
   for (const frame of result.frames) {
     expect(frame.loaded).toBeGreaterThan(0);
-    expect(frame.anchorOffset).not.toBeNull();
-    // At the top boundary, a wrapping toolbar can legitimately change padding.
-    if (result.initialScrollTop > 0 || frame.scrollTop > 0) {
-      expect(
-        Math.abs((frame.anchorOffset ?? 0) - result.initialOffset)
-      ).toBeLessThanOrEqual(2);
+    if (!centeredTargetId) {
+      expect(frame.anchorOffset).not.toBeNull();
+      // At the top boundary, a wrapping toolbar can legitimately change padding.
+      if (result.initialScrollTop > 0 || frame.scrollTop > 0) {
+        expect(
+          Math.abs((frame.anchorOffset ?? 0) - result.initialOffset)
+        ).toBeLessThanOrEqual(2);
+      }
     }
     if (overlay) {
       expect(frame.scrollTop).toBe(result.initialScrollTop);
@@ -382,6 +636,186 @@ async function finishProbe(label: string, overlay: boolean) {
   );
   expect(overflow).toBe(false);
   await page.screenshot({ path: test.info().outputPath(`${label}.png`) });
+}
+
+for (const visibility of ["above", "below", "inside"] as const) {
+  test(`1280x800 centers the clicked ${visibility} card after opening details`, async () => {
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].setSize(1280, 800)
+    );
+    await page.evaluate(() => window.__e2eNavigate?.("/"));
+    const gallery = page.locator("[data-masonry-scroll]");
+    await expect(gallery).toBeVisible();
+    await page.getByRole("button", { name: "Photos", exact: true }).click();
+    await expect
+      .poll(() => gallery.locator('[data-photo-id][role="option"]').count())
+      .toBeGreaterThan(5);
+    await gallery.evaluate((element) => {
+      element.scrollTop = 1500;
+    });
+    await page.waitForTimeout(700);
+    const id = await positionFocusTarget(visibility);
+    await startProbe(false, id);
+    await openProbeTarget(id);
+    await expect(page.locator(".home-detail-panel-container")).toBeVisible();
+    await finishProbe(`${visibility}-click-open`, false, id);
+
+    if (visibility === "inside") {
+      // The selected ID stays the same: a new click must still recenter it.
+      await positionFocusTarget("above", id);
+      await startProbe(false, id);
+      await openProbeTarget(id);
+      await finishProbe("same-card-click", false, id);
+    }
+  });
+}
+
+for (const closeMethod of ["button", "Escape"] as const) {
+  test(`1280x800 stays at back to top when closing details with ${closeMethod}`, async () => {
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0].setSize(1280, 800)
+    );
+    await page.evaluate(() => window.__e2eNavigate?.("/"));
+    const gallery = page.locator("[data-masonry-scroll]");
+    const details = page.locator(".home-detail-panel-container");
+    await expect(gallery).toBeVisible();
+    await page.getByRole("button", { name: "Photos", exact: true }).click();
+    await expect
+      .poll(
+        () =>
+          gallery.evaluate((element) => {
+            if (element.scrollHeight < 13_000) {
+              element.scrollTop = element.scrollHeight;
+              element.dispatchEvent(new Event("scroll"));
+            }
+            return element.scrollHeight;
+          }),
+        { timeout: 60_000 }
+      )
+      .toBeGreaterThan(13_000);
+
+    const waitForLoadedViewport = async (targetId?: string) => {
+      await expect
+        .poll(() =>
+          gallery.evaluate((element, requestedId) => {
+            const bounds = element.getBoundingClientRect();
+            const inset =
+              document
+                .querySelector(".home-gallery-toolbar-layer")
+                ?.getBoundingClientRect().height ?? 0;
+            return Array.from(
+              element.querySelectorAll<HTMLImageElement>(
+                requestedId ? `[data-photo-id="${requestedId}"] img` : "img"
+              )
+            ).some((image) => {
+              const rect = image.getBoundingClientRect();
+              return (
+                rect.bottom > bounds.top + inset &&
+                rect.top < bounds.bottom &&
+                image.dataset.loadState === "loaded" &&
+                image.naturalWidth > 0
+              );
+            });
+          }, targetId)
+        )
+        .toBe(true);
+    };
+    const prepareProbeTarget = async () => {
+      const id = await positionFocusTarget("inside");
+      await waitForLoadedViewport(id);
+      await startProbe(false, id);
+      return id;
+    };
+    const openMiddleDetail = async (label: string) => {
+      await gallery.evaluate((element) => {
+        element.scrollTop = 10_000;
+      });
+      await page.waitForTimeout(700);
+      const id = await prepareProbeTarget();
+      await openProbeTarget(id);
+      await expect(details).toBeVisible();
+      await finishProbe(label, false, id);
+      return id;
+    };
+    const returnToTop = async () => {
+      await page
+        .getByRole("button", { name: "Back to top", exact: true })
+        .click();
+      await expect
+        .poll(() => gallery.evaluate((element) => element.scrollTop))
+        .toBe(0);
+      await expect(details).toBeVisible();
+      await waitForLoadedViewport();
+    };
+
+    await openMiddleDetail(`${closeMethod}-back-top-open`);
+    await returnToTop();
+    await startProbe();
+    if (closeMethod === "button") {
+      await details.locator("button:has(svg.lucide-x)").click();
+    } else {
+      await page.keyboard.press("Escape");
+    }
+    await expect(details).toHaveCount(0);
+    // Record well beyond the close reflow so a delayed return cannot pass.
+    await page.waitForTimeout(600);
+    await finishProbe(`${closeMethod}-back-top-close`, true);
+    await expect
+      .poll(() => gallery.evaluate((element) => element.scrollTop))
+      .toBe(0);
+
+    if (closeMethod === "button") {
+      const previousId = await openMiddleDetail("new-click-back-top-open");
+      await returnToTop();
+      const nextId = await prepareProbeTarget();
+      expect(nextId).not.toBe(previousId);
+      await openProbeTarget(nextId);
+      await finishProbe("new-click-after-back-top", false, nextId);
+      // A new ordinary click restores the usual return behavior. Move away
+      // without closing details, then close and expect that new photo again.
+      await gallery.evaluate((element) => {
+        element.scrollTop = 10_000;
+      });
+      await expect
+        .poll(() => gallery.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(9000);
+      await details.locator("button:has(svg.lucide-x)").click();
+      await expect(details).toHaveCount(0);
+      const returnedCard = gallery.locator(
+        `[data-photo-id="${nextId}"][role="option"]`
+      );
+      await expect(returnedCard).toHaveAttribute(
+        "data-recently-viewed",
+        "true"
+      );
+      await expect
+        .poll(() =>
+          returnedCard.evaluate((card) => {
+            const scroll = card.closest<HTMLElement>("[data-masonry-scroll]");
+            if (!scroll) {
+              throw new Error("Missing masonry scroll surface");
+            }
+            const bounds = scroll.getBoundingClientRect();
+            const rect = card.getBoundingClientRect();
+            const inset =
+              document
+                .querySelector(".home-gallery-toolbar-layer")
+                ?.getBoundingClientRect().height ?? 0;
+            return rect.bottom > bounds.top + inset && rect.top < bounds.bottom;
+          })
+        )
+        .toBe(true);
+      expect(
+        await page.evaluate(() =>
+          [
+            document.documentElement,
+            document.body,
+            ...document.querySelectorAll("main"),
+          ].some((element) => element.scrollWidth > element.clientWidth + 2)
+        )
+      ).toBe(false);
+    }
+  });
 }
 
 for (const size of sizes) {
@@ -514,7 +948,11 @@ for (const size of sizes) {
         await expect(
           page.locator(".home-detail-panel-container")
         ).toBeVisible();
-        await finishProbe(`depth-${depth}-open-${repeat}`, overlay);
+        await finishProbe(
+          `depth-${depth}-open-${repeat}`,
+          overlay,
+          overlay ? undefined : id
+        );
         await startProbe();
         await page.keyboard.press("Escape");
         await expect(page.locator(".home-detail-panel-container")).toHaveCount(
@@ -527,7 +965,7 @@ for (const size of sizes) {
       const id = await startProbe(true);
       await openProbeTarget(id);
       await expect(page.locator(".home-detail-panel-container")).toBeVisible();
-      await finishProbe("drag-open", false);
+      await finishProbe("drag-open", false, id);
       await startProbe();
       const handle = await page
         .locator(".photo-detail-panel-resize-handle")

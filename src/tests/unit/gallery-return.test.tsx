@@ -133,6 +133,67 @@ describe("gallery return state", () => {
     expect(result.current.recentlyViewedTarget).toEqual(memberTarget);
     expect(result.current.recentlyViewedReturnRequest).toBe(1);
   });
+  it("records a viewed photo without returning or pulsing after returning to the top", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useGalleryReturn(options));
+    act(() =>
+      result.current.markRecentlyViewed(99, undefined, {
+        restorePosition: false,
+      })
+    );
+    expect(result.current.recentlyViewedTarget).toEqual({
+      kind: "photo",
+      photoId: 99,
+    });
+    expect(result.current.recentlyViewedReturnRequest).toBe(0);
+    expect(result.current.recentlyViewedPulseActive).toBe(false);
+    act(() => result.current.settleReturn(1));
+    act(() => vi.advanceTimersByTime(3000));
+    expect(result.current.recentlyViewedPulseActive).toBe(false);
+    expect(result.current.recentlyViewedPhotoId).toBe(99);
+  });
+  it("cancels a pending return while allowing a later default photo return", () => {
+    const { result } = renderHook(() => useGalleryReturn(options));
+    act(() => result.current.markRecentlyViewed(99));
+    expect(result.current.recentlyViewedReturnRequest).toBe(1);
+    act(() =>
+      result.current.markRecentlyViewed(99, undefined, {
+        restorePosition: false,
+      })
+    );
+    act(() => {
+      result.current.settleReturn(1);
+      result.current.settleReturn(2);
+    });
+    expect(result.current.recentlyViewedReturnRequest).toBe(0);
+    expect(result.current.recentlyViewedPulseActive).toBe(false);
+    act(() => result.current.markRecentlyViewed(99));
+    expect(result.current.recentlyViewedReturnRequest).toBe(3);
+    act(() => result.current.settleReturn(2));
+    expect(result.current.recentlyViewedReturnRequest).toBe(3);
+    expect(result.current.recentlyViewedPulseActive).toBe(false);
+    act(() => result.current.settleReturn(3));
+    expect(result.current.recentlyViewedReturnRequest).toBe(0);
+    expect(result.current.recentlyViewedPulseActive).toBe(true);
+  });
+  it("stops an existing pulse without disabling later default sequence returns", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useGalleryReturn(options));
+    act(() => result.current.markRecentlyViewed(30, 7));
+    act(() => result.current.settleReturn(1));
+    expect(result.current.recentlyViewedPulseActive).toBe(true);
+    act(() =>
+      result.current.markRecentlyViewed(30, 7, { restorePosition: false })
+    );
+    expect(result.current.recentlyViewedTarget).toEqual(memberTarget);
+    expect(result.current.recentlyViewedReturnRequest).toBe(0);
+    expect(result.current.recentlyViewedPulseActive).toBe(false);
+    act(() => result.current.markSequence(7));
+    expect(result.current.recentlyViewedTarget).toEqual(memberTarget);
+    expect(result.current.recentlyViewedReturnRequest).toBe(3);
+    act(() => result.current.settleReturn(3));
+    expect(result.current.recentlyViewedPulseActive).toBe(true);
+  });
   it("allows repeated returns and ignores stale or duplicate completion callbacks", () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useGalleryReturn(options));
