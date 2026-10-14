@@ -1089,6 +1089,7 @@
   "albumRenameFailed": "Failed to rename album",
   "duplicateDeleteFailed": "Failed to delete duplicate photo",
   "imageLoadFailed": "Failed to load image",
+  "imageOriginalLoadFailed": "Could not load the original. Showing the preview.",
   "emptySearchTitle": "No matching photos",
   "emptySearchDescription": "Try another keyword, or narrow the range with EXIF filters",
   "emptySearchDescWithFilters": "No results for current filters. Try clearing EXIF filters or changing keywords.",

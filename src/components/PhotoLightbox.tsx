@@ -55,6 +55,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useLightboxImage } from "@/hooks/use-lightbox-image";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import { preloadImage, toLocalMediaUrl } from "@/utils/local-media-url";
@@ -137,7 +138,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const reduceMotion = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const imageRef = useRef<HTMLImageElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wheelFrameRef = useRef<number | null>(null);
   const wheelStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,9 +161,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
   const [canvasSize, setCanvasSize] = useState({ height: 0, width: 0 });
-  const [loaded, setLoaded] = useState(false);
-  const [imageError, setImageError] = useState(false);
   const [sourceKey, setSourceKey] = useState(0);
+  const [previewRetry, setPreviewRetry] = useState(0);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [infoVisible, setInfoVisible] = useState(false);
   const [thumbnailsVisible, setThumbnailsVisible] = useState(false);
@@ -171,8 +170,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const [moreOpen, setMoreOpen] = useState(false);
   const moreAnchorRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [slideshowMode, setSlideshowMode] = useState(false);
-  const [playing, setPlaying] = useState(false);
+  const [slideshowMode, setSlideshowMode] = useState(autoPlay);
+  const [playing, setPlaying] = useState(autoPlay);
   const [delay, setDelay] = useState<number>(sequencePlayback ? 167 : 5000);
   const playbackDelays = sequencePlayback ? [500, 167, 83] : SLIDESHOW_DELAYS;
   const [progress, setProgress] = useState(0);
@@ -194,15 +193,46 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const previewUrl = photo?.thumbnailPath
     ? toLocalMediaUrl(photo.thumbnailPath)
     : null;
+  const original = useLightboxImage({
+    enabled: open && !(previewPlayback && previewUrl),
+    photoId: photo?.id,
+    retry: sourceKey,
+    src: photo ? toLocalMediaUrl(photo.path) : null,
+  });
+  const showPreview =
+    sequencePlayback && Boolean(previewUrl) && !original.loaded;
+  const preview = useLightboxImage({
+    enabled: open && showPreview,
+    photoId: photo?.id,
+    retry: previewRetry,
+    src: previewUrl,
+  });
+  const imageError =
+    (original.error && !preview.loaded) || (previewPlayback && preview.error);
+  const needsLoading =
+    open &&
+    Boolean(photo) &&
+    !(original.loaded || preview.loaded || imageError);
+  const activeImageRequest =
+    previewPlayback && previewUrl ? preview.request : original.request;
+  const [spinnerRequest, setSpinnerRequest] = useState<
+    typeof activeImageRequest | null
+  >(null);
   currentPhotoIdRef.current = photo?.id ?? null;
   const favorite = photo
     ? (favoriteOverrides[photo.id] ?? Boolean(photo.isFavorite))
     : false;
 
   useEffect(() => {
-    setLoaded(false);
-    setImageError(false);
-  }, []);
+    if (!needsLoading) {
+      return;
+    }
+    const timeout = window.setTimeout(
+      () => setSpinnerRequest(activeImageRequest),
+      200
+    );
+    return () => window.clearTimeout(timeout);
+  }, [activeImageRequest, needsLoading]);
 
   useEffect(() => {
     if (!(open && photo)) {
@@ -250,8 +280,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         return next;
       });
       resetView();
-      setLoaded(false);
-      setImageError(false);
       setMoreOpen(false);
       if (manual) {
         setPlaying(false);
@@ -316,12 +344,20 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   );
 
   const showActualPixels = useCallback(() => {
-    const image = imageRef.current;
+    setPlaying(false);
+    const image = original.loaded
+      ? original.ref.current
+      : (preview.ref.current ?? original.ref.current);
     if (!image?.clientWidth) {
       return;
     }
-    updateZoom(clamp(image.naturalWidth / image.clientWidth, 1, MAX_ZOOM));
-  }, [updateZoom]);
+    const width = original.loaded
+      ? image.naturalWidth || photo?.width
+      : photo?.width;
+    if (width) {
+      updateZoom(clamp(width / image.clientWidth, 1, MAX_ZOOM));
+    }
+  }, [original.loaded, original.ref, photo?.width, preview.ref, updateZoom]);
 
   const toggleInfo = useCallback(() => {
     const nextVisible = !infoVisible;
@@ -434,8 +470,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     }
     setPhotoIndex(initialIndex);
     resetView();
-    setLoaded(false);
-    setImageError(false);
     setControlsVisible(true);
     const initialPanelMode = getInitialPanelMode({
       autoPlay,
@@ -744,6 +778,54 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     return null;
   }
 
+  const imageStyle = {
+    gridArea: "1 / 1",
+    maxHeight:
+      isQuarterTurn && canvasSize.width
+        ? `${Math.max(1, canvasSize.width - 128)}px`
+        : undefined,
+    maxWidth:
+      isQuarterTurn && canvasSize.height
+        ? `${Math.max(1, canvasSize.height - 112)}px`
+        : undefined,
+    transform: `translate3d(${translate.x}px, ${translate.y}px, 0) scale(${zoom}) rotate(${rotation}deg)`,
+    backfaceVisibility: "hidden" as const,
+    transition:
+      reduceMotion || dragRef.current || wheelActive
+        ? "none"
+        : "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
+    willChange: "transform",
+  };
+  const frames = [
+    ...(showPreview && previewUrl
+      ? [
+          {
+            kind: "preview",
+            src: previewUrl,
+            state: preview,
+            retry: previewRetry,
+          },
+        ]
+      : []),
+    ...(original.request.enabled && original.request.src
+      ? [
+          {
+            kind: "original",
+            src: original.request.src,
+            state: original,
+            retry: sourceKey,
+          },
+        ]
+      : []),
+  ];
+  const retryImage = () => {
+    if (preview.error) {
+      setPreviewRetry((value) => value + 1);
+    }
+    setSourceKey((value) => value + 1);
+  };
+  const originalFailedWithPreview = original.error && preview.loaded;
+
   return createPortal(
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the modal dialog surface owns global reveal and image context-menu interactions.
     <div
@@ -784,18 +866,48 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             >
               {safeIndex + 1} / {photos.length}
             </span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  className="truncate font-medium text-[13px] text-white/85"
-                  // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated filename must expose its Tooltip to keyboard users
-                  tabIndex={0}
+            <div className="flex min-w-0 flex-col">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className="truncate font-medium text-[13px] text-white/85"
+                    // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated filename must expose its Tooltip to keyboard users
+                    tabIndex={0}
+                  >
+                    {photo.filename}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{photo.filename}</TooltipContent>
+              </Tooltip>
+              {originalFailedWithPreview && (
+                <div
+                  className="flex min-w-0 items-center gap-2 text-[11px] text-white/75"
+                  role="status"
                 >
-                  {photo.filename}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{photo.filename}</TooltipContent>
-            </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="min-w-0 truncate"
+                        // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated failure detail must expose its Tooltip to keyboard users
+                        tabIndex={0}
+                      >
+                        {t("imageOriginalLoadFailed")}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {t("imageOriginalLoadFailed")}
+                    </TooltipContent>
+                  </Tooltip>
+                  <button
+                    className="shrink-0 rounded px-1.5 py-0.5 text-white/85 hover:bg-white/10"
+                    onClick={retryImage}
+                    type="button"
+                  >
+                    {t("retry")}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {onToggleFavorite && (
@@ -925,12 +1037,33 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         </header>
 
         <div
-          className="absolute inset-x-0 top-0 flex items-center justify-center overflow-hidden px-10 pt-14 pb-16 transition-[bottom] duration-200 motion-reduce:transition-none sm:px-16"
+          className="absolute inset-x-0 top-0 grid grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center overflow-hidden px-10 pt-14 pb-16 transition-[bottom] duration-200 motion-reduce:transition-none sm:px-16"
+          onLostPointerCapture={() => {
+            dragRef.current = null;
+          }}
+          onPointerCancel={() => {
+            dragRef.current = null;
+          }}
+          onPointerMove={(event) => {
+            const drag = dragRef.current;
+            if (!drag || drag.pointerId !== event.pointerId) {
+              return;
+            }
+            setTranslate({
+              x: drag.translateX + event.clientX - drag.startX,
+              y: drag.translateY + event.clientY - drag.startY,
+            });
+          }}
+          onPointerUp={(event) => {
+            if (dragRef.current?.pointerId === event.pointerId) {
+              dragRef.current = null;
+            }
+          }}
           ref={canvasRef}
           style={{ bottom: thumbnailsVisible ? 96 : 0 }}
         >
-          {imageError ? (
-            <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+          {imageError && (
+            <div className="flex max-w-full flex-col items-center gap-3 text-center [grid-area:1/1]">
               <ImageIcon className="h-10 w-10 text-white/25" />
               <p className="text-[13px] text-white/65">
                 {t("imageLoadFailed")}
@@ -948,11 +1081,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <div className="flex flex-wrap justify-center gap-2">
                 <button
                   className="lightbox-secondary-button"
-                  onClick={() => {
-                    setImageError(false);
-                    setLoaded(false);
-                    setSourceKey((value) => value + 1);
-                  }}
+                  onClick={retryImage}
                   type="button"
                 >
                   {t("retry")}
@@ -971,32 +1100,28 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 </button>
               </div>
             </div>
-          ) : // biome-ignore lint/style/noNestedTernary: the mutually exclusive error, playback, and original-image surfaces keep only one frame mounted.
-          previewPlayback && previewUrl ? (
-            // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the playback image retains error handling for unavailable thumbnails.
+          )}
+          {frames.map((frame) => (
             <img
               alt={photo.filename}
-              className="max-h-full max-w-full select-none object-contain"
-              data-lightbox-image
-              data-lightbox-playback-frame
-              draggable={false}
+              aria-hidden={
+                imageError ||
+                (frame.kind === "original" && showPreview) ||
+                undefined
+              }
+              className={`max-h-full max-w-full select-none object-contain ${imageError || frame.state.error || (frame.kind === "original" && !original.loaded) ? "pointer-events-none opacity-0" : "opacity-100"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
+              data-lightbox-image={
+                frame.kind === "preview" || !showPreview ? true : undefined
+              }
+              data-lightbox-original-frame={
+                frame.kind === "original" ? true : undefined
+              }
+              data-lightbox-playback-frame={
+                frame.kind === "preview" ? true : undefined
+              }
+              draggable={!previewPlayback && zoom <= 1}
               height={photo.height || undefined}
-              onError={() => {
-                setImageError(true);
-                setLoaded(false);
-              }}
-              src={previewUrl}
-              width={photo.width || undefined}
-            />
-          ) : (
-            // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the reviewed image is directly pannable, zoomable, draggable, and context-menu enabled.
-            <img
-              alt={photo.filename}
-              className={`max-h-full max-w-full select-none object-contain transition-opacity duration-150 motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
-              data-lightbox-image
-              draggable={zoom <= 1}
-              height={photo.height || undefined}
-              key={`${photo.id}-${sourceKey}`}
+              key={`${frame.kind}-${photo.id}-${frame.src}-${frame.retry}`}
               onDoubleClick={() => {
                 if (zoom > 1.05) {
                   updateZoom(1);
@@ -1011,16 +1136,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 }
                 window.electronAPI?.startDrag?.(photo.path);
               }}
-              onError={() => {
-                setImageError(true);
-                setLoaded(false);
-              }}
-              onLoad={() => setLoaded(true)}
               onPointerDown={(event) => {
                 if (zoom <= 1) {
                   return;
                 }
-                event.currentTarget.setPointerCapture(event.pointerId);
+                canvasRef.current?.setPointerCapture(event.pointerId);
                 dragRef.current = {
                   pointerId: event.pointerId,
                   startX: event.clientX,
@@ -1029,45 +1149,14 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                   translateY: translate.y,
                 };
               }}
-              onPointerMove={(event) => {
-                const drag = dragRef.current;
-                if (!drag || drag.pointerId !== event.pointerId) {
-                  return;
-                }
-                setTranslate({
-                  x: drag.translateX + event.clientX - drag.startX,
-                  y: drag.translateY + event.clientY - drag.startY,
-                });
-              }}
-              onPointerUp={(event) => {
-                if (dragRef.current?.pointerId === event.pointerId) {
-                  dragRef.current = null;
-                }
-              }}
               onWheel={handleWheelZoom}
-              ref={imageRef}
-              src={toLocalMediaUrl(photo.path)}
-              style={{
-                maxHeight:
-                  isQuarterTurn && canvasSize.width
-                    ? `${Math.max(1, canvasSize.width - 128)}px`
-                    : undefined,
-                maxWidth:
-                  isQuarterTurn && canvasSize.height
-                    ? `${Math.max(1, canvasSize.height - 112)}px`
-                    : undefined,
-                transform: `translate3d(${translate.x}px, ${translate.y}px, 0) scale(${zoom}) rotate(${rotation}deg)`,
-                backfaceVisibility: "hidden",
-                transition:
-                  reduceMotion || dragRef.current || wheelActive
-                    ? "none"
-                    : "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
-                willChange: "transform",
-              }}
+              ref={frame.state.ref}
+              src={frame.src}
+              style={imageStyle}
               width={photo.width || undefined}
             />
-          )}
-          {!((previewPlayback && previewUrl) || loaded || imageError) && (
+          ))}
+          {needsLoading && spinnerRequest === activeImageRequest && (
             <div className="absolute inset-0 flex items-center justify-center">
               <LoadingSpinner
                 aria-label={t("loading")}
@@ -1253,8 +1342,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                   onClick={() => {
                     setPhotoIndex(index);
                     resetView();
-                    setLoaded(false);
-                    setImageError(false);
                     setPlaying(false);
                   }}
                   ref={(node) => {

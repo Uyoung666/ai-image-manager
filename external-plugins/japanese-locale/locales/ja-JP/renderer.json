@@ -1071,6 +1071,7 @@
   "albumRenameFailed": "アルバムの名前変更に失敗しました",
   "duplicateDeleteFailed": "重複写真の削除に失敗しました",
   "imageLoadFailed": "画像の読み込みに失敗しました",
+  "imageOriginalLoadFailed": "元の画像を読み込めませんでした。プレビューを表示しています。",
   "emptySearchTitle": "一致する写真はありません",
   "emptySearchDescription": "別のキーワードを試すか、EXIF フィルターで範囲を絞り込んでください",
   "emptySearchDescWithFilters": "現在のフィルターでは結果がありません。EXIF フィルターを解除するか、キーワードを変更してください。",

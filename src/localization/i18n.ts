@@ -1252,6 +1252,7 @@ i18n.use(initReactI18next).init({
         albumRenameFailed: "重命名相册失败",
         duplicateDeleteFailed: "删除重复照片失败",
         imageLoadFailed: "图片加载失败",
+        imageOriginalLoadFailed: "原图加载失败，当前显示预览图",
 
         // Empty states
         emptySearchTitle: "未找到匹配的照片",
