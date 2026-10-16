@@ -41,6 +41,7 @@ import {
 } from "@/hooks/useCollectionSequences";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
+import { useSequenceClickFocusRequest } from "@/hooks/useSequenceClickFocusRequest";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
@@ -156,6 +157,8 @@ function PersonSequenceEmptyState({
 function PersonDetailPage() {
   const { t } = useTranslation();
   const compactDetailOverlay = useMediaQuery("(max-width: 1023px)");
+  const { sequenceFocusRequest, requestSequenceFocus, clearSequenceFocus } =
+    useSequenceClickFocusRequest();
   const detailOverlayRef = useRef<HTMLDivElement>(null);
   const { identityId } = Route.useParams() as { identityId: string };
   const navigate = useNavigate();
@@ -1030,6 +1033,7 @@ function PersonDetailPage() {
     active: compactDetailOverlay && detailOverlayOpen,
     containerRef: detailOverlayRef,
     onEscape: () => {
+      clearSequenceFocus();
       sequenceView.setSelectedSequence(null);
       dismissDetail();
       clearSelection();
@@ -1166,6 +1170,11 @@ function PersonDetailPage() {
             inlineDetailPhotoId={
               compactDetailOverlay ? undefined : (detailPhoto?.id ?? null)
             }
+            inlineDetailSequenceId={
+              compactDetailOverlay
+                ? undefined
+                : (sequenceView.selectedSequence?.id ?? null)
+            }
             isPlaceholderData={pageLoading}
             loading={
               pageLoading ||
@@ -1181,21 +1190,44 @@ function PersonDetailPage() {
             }}
             onContextMenu={handleContextMenu}
             onDoubleClick={handleDoubleClick}
-            onKeyboardSelect={handleKeyboardSelect}
+            onKeyboardSelect={(id) => {
+              clearSequenceFocus();
+              handleKeyboardSelect(id);
+            }}
             onMarqueeSelect={wrappedMarqueeSelect}
             onNameFace={handleNameFace}
-            onOpenSequence={sequenceView.openPlayback}
-            onOpenSequenceDetails={sequenceView.openDetails}
+            onOpenSequence={(id) => {
+              clearSequenceFocus();
+              sequenceView.openPlayback(id);
+            }}
+            onOpenSequenceDetails={(id, event) => {
+              if (compactDetailOverlay) {
+                clearSequenceFocus();
+              } else {
+                requestSequenceFocus(id, null, event);
+              }
+              sequenceView.openDetails(id);
+            }}
             onRetrySequences={sequenceView.refreshSequences}
-            onSelect={handleSelect}
+            onSelect={(id, event) => {
+              clearSequenceFocus();
+              handleSelect(id, event);
+            }}
             onSelectSequence={handleSequenceSelect}
             onSelectSequenceMembers={handleSelectSequenceMembers}
-            onSequenceModeChange={sequenceView.setMode}
+            onSequenceFocusHandled={clearSequenceFocus}
+            onSequenceModeChange={(mode) => {
+              clearSequenceFocus();
+              sequenceView.setMode(mode);
+            }}
             onSequenceMutationComplete={sequenceView.refreshSequences}
             onSequenceOrderChange={sequenceView.updateSequenceOrder}
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
-            onToggleSequenceExpand={sequenceView.toggleExpand}
+            onToggleSequenceExpand={(id) => {
+              clearSequenceFocus();
+              sequenceView.toggleExpand(id);
+            }}
             photos={photos}
             preserveOnSequenceError={sequenceView.sequencesConfirmed}
             routeKey={routeKey}
@@ -1204,6 +1236,7 @@ function PersonDetailPage() {
             sequenceError={
               sequenceView.sequencesError ? t("loadFailedRetry") : null
             }
+            sequenceFocusRequest={sequenceFocusRequest}
             sequenceLoading={sequenceView.sequencesLoading}
             sequenceMode={sequenceView.mode}
             sequences={sequenceView.sequences}
@@ -1294,6 +1327,7 @@ function PersonDetailPage() {
             aria-label={t("close")}
             className="absolute inset-0 z-30 border-0 bg-black/20 lg:hidden"
             onClick={() => {
+              clearSequenceFocus();
               sequenceView.setSelectedSequence(null);
               dismissDetail();
               clearSelection();
@@ -1308,8 +1342,11 @@ function PersonDetailPage() {
         >
           {sequenceView.selectedSequence ? (
             <SequenceDetailPanel
-              onClose={() => sequenceView.setSelectedSequence(null)}
-              onOpenPhoto={(photoId) => {
+              onClose={() => {
+                clearSequenceFocus();
+                sequenceView.setSelectedSequence(null);
+              }}
+              onOpenPhoto={(photoId, event) => {
                 const sequence = sequenceView.selectedSequence;
                 const member = sequence?.members.find((m) => m.id === photoId);
                 setReturnSequence(sequence ?? null);
@@ -1317,6 +1354,9 @@ function PersonDetailPage() {
                 handleKeyboardSelect(photoId);
                 if (member) {
                   showPhoto(member);
+                }
+                if (sequence && !compactDetailOverlay) {
+                  requestSequenceFocus(sequence.id, photoId, event);
                 }
               }}
               onPlay={() => {
@@ -1350,6 +1390,7 @@ function PersonDetailPage() {
           ) : (
             <PhotoDetailPanel
               onClose={() => {
+                clearSequenceFocus();
                 setReturnSequence(null);
                 dismissDetail();
                 clearSelection();

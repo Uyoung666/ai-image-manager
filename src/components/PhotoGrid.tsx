@@ -3,7 +3,7 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/noNoninteractiveElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/suspicious/noArrayIndexKey: scoped component lint cleanup preserves existing UI behavior
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
   ArrowRight,
@@ -27,6 +27,8 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { photoSequenceActions } from "@/actions/photo-sequences";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useSequenceClickFocus } from "@/hooks/useSequenceClickFocus";
+import type { SequenceClickFocusRequest } from "@/hooks/useSequenceClickFocusRequest";
 import { useSequenceReturnFocus } from "@/hooks/useSequenceReturnFocus";
 import type { SearchMatch } from "@/types/photo";
 import type {
@@ -82,6 +84,13 @@ interface SequenceTrayPhoto extends Photo {
 }
 
 type DisplayPhoto = Photo | SequenceTrayPhoto;
+interface GalleryPhotoFocusRequest extends MasonryPhotoFocusRequest {
+  keyboard?: boolean;
+  memberId?: number | null;
+  routeKey: string;
+  sequenceId?: number;
+  sourceId?: number;
+}
 export type SortField = "date" | "name" | "size";
 export type SortOrder = "asc" | "desc";
 
@@ -102,6 +111,7 @@ interface PhotoGridProps {
   hasMore?: boolean;
   /** Only a visible inline inspector enables mouse-click centering. */
   inlineDetailPhotoId?: number | null;
+  inlineDetailSequenceId?: number | null;
   /** 正在加载更多数据（useInfiniteQuery 的 isFetchingNextPage） */
   isLoadingMore?: boolean;
   /**
@@ -122,7 +132,10 @@ interface PhotoGridProps {
   onMarqueeSelect?: (ids: Set<number>) => void;
   onNameFace?: (id: number) => void;
   onOpenSequence?: (sequenceId: number) => void;
-  onOpenSequenceDetails?: (sequenceId: number) => void;
+  onOpenSequenceDetails?: (
+    sequenceId: number,
+    event?: React.MouseEvent
+  ) => void;
   onRestoreSettled?: (routeKey: string) => void;
   onRetrySequences?: () => void;
   onReturnLocated?: (request: number) => void;
@@ -131,6 +144,7 @@ interface PhotoGridProps {
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSelectSequence?: (memberIds: number[], event: React.MouseEvent) => void;
   onSelectSequenceMembers?: (memberIds: number[], selectAll: boolean) => void;
+  onSequenceFocusHandled?: () => void;
   onSequenceModeChange?: (mode: "photos" | "sequences") => void;
   onSequenceMutationComplete?: () => void;
   onSequenceOrderChange?: (change: SequenceOrderChange) => void;
@@ -160,6 +174,7 @@ interface PhotoGridProps {
   sequenceCount?: number;
   /** 序列归属查询失败时阻止展示未确认的混合内容。 */
   sequenceError?: string | null;
+  sequenceFocusRequest?: SequenceClickFocusRequest | null;
   /** 序列归属尚未解析完成时，禁止短暂展示混合内容。 */
   sequenceLoading?: boolean;
   sequenceMode?: "photos" | "sequences";
@@ -305,6 +320,7 @@ export function loadGridColumnWidth(): number {
 }
 
 export interface SequenceFocusTrayProps {
+  clickFocusRequest?: GalleryPhotoFocusRequest | null;
   columns: number;
   completeMembers?: readonly Photo[];
   containerWidth: number;
@@ -312,6 +328,15 @@ export interface SequenceFocusTrayProps {
   faceOverlayByPhotoId?: ReadonlyMap<number, FaceOverlay[]>;
   faceOverlaysVisible?: boolean;
   getDragIds: (id: number) => number[];
+  onClickFocusGeometry?: (geometry: {
+    request: number;
+    offsetTop: number;
+    height: number;
+    layoutWidth: number;
+    innerScrollTop: number;
+    outerScrollTop?: number;
+  }) => void;
+  onClickFocusSettled?: (request: number) => void;
   onDoubleClick: (id: number) => void;
   onNameFace?: (id: number) => void;
   onReturnLocated?: (request: number) => void;
@@ -321,6 +346,7 @@ export interface SequenceFocusTrayProps {
   onSequenceOrderChange?: (change: SequenceOrderChange) => void;
   onToggleFavorite?: (id: number) => void;
   onToggleSequenceExpand?: (sequenceId: number) => void;
+  outerFocusSettled?: number;
   recentlyViewedMemberId?: number | null;
   recentlyViewedPulseActive?: boolean;
   recentlyViewedPulseKey?: number;
@@ -334,6 +360,10 @@ export interface SequenceFocusTrayProps {
 }
 
 export function SequenceFocusTray({
+  clickFocusRequest,
+  outerFocusSettled = 0,
+  onClickFocusGeometry,
+  onClickFocusSettled,
   containerWidth,
   columns,
   completeMembers,
@@ -426,17 +456,87 @@ export function SequenceFocusTray({
     containerWidth,
     columns
   );
+  const rowSizes = useMemo(
+    () =>
+      Array.from({ length: rowCount }, (_, rowIndex) =>
+        getSequenceRowHeight(displayMembers, containerWidth, columns, rowIndex)
+      ),
+    [rowCount, displayMembers, containerWidth, columns]
+  );
+  const measuredRowSizesRef = useRef<readonly number[] | null>(null);
+  const focusRow =
+    clickFocusRequest?.memberId == null
+      ? -1
+      : Math.floor(
+          displayMembers.findIndex(
+            (member) => member.id === clickFocusRequest.memberId
+          ) / columns
+        );
+  const rowOffsets = useMemo(() => {
+    let top = 0;
+    return rowSizes.map((height) => {
+      const offset = top;
+      top += height;
+      return offset;
+    });
+  }, [rowSizes]);
+  const focusWindowRows = useMemo(() => {
+    if (focusRow < 0) {
+      return [];
+    }
+    const viewportHeight = Math.min(gridHeight, SEQUENCE_TRAY_MAX_HEIGHT);
+    const plannedTop =
+      clickFocusRequest?.targetRect?.innerScrollTop ??
+      Math.max(0, (rowOffsets[focusRow] ?? 0) - viewportHeight / 2);
+    const rows = rowOffsets.flatMap((top, index) =>
+      top + rowSizes[index] >= plannedTop && top <= plannedTop + viewportHeight
+        ? [index]
+        : []
+    );
+    const first = Math.max(0, (rows[0] ?? focusRow) - 2);
+    const last = Math.min(rowCount - 1, (rows.at(-1) ?? focusRow) + 2);
+    return [
+      ...new Set([
+        focusRow,
+        ...Array.from(
+          { length: last - first + 1 },
+          (_, index) => first + index
+        ),
+      ]),
+    ];
+  }, [
+    focusRow,
+    clickFocusRequest?.targetRect?.innerScrollTop,
+    rowOffsets,
+    rowSizes,
+    gridHeight,
+    rowCount,
+  ]);
   const virtualizer = useVirtualizer({
     count: rowCount,
-    estimateSize: (rowIndex) =>
-      getSequenceRowHeight(displayMembers, containerWidth, columns, rowIndex),
+    estimateSize: (rowIndex) => rowSizes[rowIndex] ?? 1,
     getScrollElement: () => scrollRef.current,
     initialRect: {
       height: Math.min(gridHeight, SEQUENCE_TRAY_MAX_HEIGHT),
       width: containerWidth,
     },
     overscan: 2,
+    rangeExtractor: useCallback(
+      (range: Parameters<typeof defaultRangeExtractor>[0]) =>
+        [
+          ...new Set([...defaultRangeExtractor(range), ...focusWindowRows]),
+        ].sort((a, b) => a - b),
+      [focusWindowRows]
+    ),
   });
+  // estimateSize is cached even when a resize keeps the number of rows unchanged.
+  useLayoutEffect(() => {
+    if (measuredRowSizesRef.current === rowSizes) {
+      return;
+    }
+    measuredRowSizesRef.current = rowSizes;
+    virtualizer.measure();
+  }, [virtualizer, rowSizes]);
   const returnMemberIds = useMemo(
     () => displayMembers.map((member) => member.id),
     [displayMembers]
@@ -456,6 +556,19 @@ export function SequenceFocusTray({
     scrollToRow: scrollToReturnRow,
     onLocated: onReturnLocated,
     topInset,
+  });
+  useSequenceClickFocus({
+    scrollRef,
+    memberId: clickFocusRequest?.memberId ?? null,
+    memberIds: returnMemberIds,
+    columns,
+    request: clickFocusRequest?.id ?? 0,
+    containerWidth: Math.max(0, containerWidth - 16),
+    topInset,
+    onGeometry: onClickFocusGeometry,
+    onSettled: onClickFocusSettled,
+    outerSettled: outerFocusSettled,
+    alignment: "nearest",
   });
   const selectedMemberCount = displayMembers.filter((member) =>
     selectedIds.has(member.id)
@@ -818,7 +931,7 @@ export function SequenceFocusTray({
         <div
           className="relative w-full"
           data-sequence-virtual-grid=""
-          style={{ height: virtualizer.getTotalSize() }}
+          style={{ height: gridHeight }}
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const startIndex = virtualRow.index * columns;
@@ -833,9 +946,9 @@ export function SequenceFocusTray({
                 key={virtualRow.key}
                 style={{
                   gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                  minHeight: virtualRow.size,
+                  minHeight: rowSizes[virtualRow.index],
                   paddingBottom: SEQUENCE_TRAY_GAP,
-                  transform: `translateY(${virtualRow.start}px)`,
+                  transform: `translateY(${rowOffsets[virtualRow.index]}px)`,
                 }}
               >
                 {rowMembers.map((member, columnIndex) => {
@@ -916,6 +1029,9 @@ export const PhotoGrid = memo(
     loading,
     isLoadingMore = false,
     inlineDetailPhotoId,
+    inlineDetailSequenceId,
+    sequenceFocusRequest,
+    onSequenceFocusHandled,
     selectedIds,
     deletingIds,
     gridRef,
@@ -990,9 +1106,103 @@ export const PhotoGrid = memo(
     const [toolbarHeight, setToolbarHeight] = useState(0);
     const observerRef = useRef<ResizeObserver | null>(null);
     const photoFocusIdRef = useRef(0);
-    const [photoFocusRequest, setPhotoFocusRequest] = useState<
-      (MasonryPhotoFocusRequest & { routeKey: string }) | null
-    >(null);
+    const [photoFocusRequest, setPhotoFocusRequest] =
+      useState<GalleryPhotoFocusRequest | null>(null);
+    const [outerFocusSettled, setOuterFocusSettled] = useState(0);
+    const latestFocusRequestRef = useRef(photoFocusRequest);
+    latestFocusRequestRef.current = photoFocusRequest;
+    const externalFocusIdRef = useRef(0);
+    const activeFocusIdRef = useRef(0);
+    const consumePhotoFocus = useCallback(
+      (id: number) => {
+        const current = latestFocusRequestRef.current;
+        if (current?.id !== id) {
+          return;
+        }
+        latestFocusRequestRef.current = null;
+        setPhotoFocusRequest(null);
+        setOuterFocusSettled(0);
+        if (current.sourceId !== undefined) {
+          onSequenceFocusHandled?.();
+        }
+      },
+      [onSequenceFocusHandled]
+    );
+    const handleFocusGeometry = useCallback(
+      (geometry: {
+        request: number;
+        offsetTop: number;
+        height: number;
+        layoutWidth: number;
+        innerScrollTop: number;
+        outerScrollTop?: number;
+      }) => {
+        if (latestFocusRequestRef.current?.id !== geometry.request) {
+          return;
+        }
+        setOuterFocusSettled(0);
+        setPhotoFocusRequest((current) =>
+          current?.id === geometry.request
+            ? {
+                ...current,
+                targetRect: {
+                  top: geometry.offsetTop,
+                  height: geometry.height,
+                  layoutWidth: geometry.layoutWidth,
+                  innerScrollTop: geometry.innerScrollTop,
+                  ...(geometry.outerScrollTop === undefined
+                    ? {}
+                    : { outerScrollTop: geometry.outerScrollTop }),
+                },
+              }
+            : current
+        );
+      },
+      []
+    );
+    const finishPhotoFocus = useCallback(
+      (id: number) => {
+        const current = latestFocusRequestRef.current;
+        if (current?.id !== id) {
+          return;
+        }
+        if (current.keyboard) {
+          const targetId = current.memberId ?? current.photoId;
+          containerRef.current
+            ?.querySelector<HTMLElement>(
+              `[data-photo-id="${targetId}"][role="option"], [data-photo-id="${targetId}"][role="button"]`
+            )
+            ?.focus({ preventScroll: true });
+        }
+        consumePhotoFocus(id);
+      },
+      [consumePhotoFocus]
+    );
+    const handleOuterFocusSettled = useCallback(
+      (id: number) => {
+        const current = latestFocusRequestRef.current;
+        if (current?.id !== id) {
+          return;
+        }
+        if (
+          current.photoId < 0 &&
+          current.memberId != null &&
+          current.targetRect !== undefined
+        ) {
+          setOuterFocusSettled(id);
+        } else {
+          finishPhotoFocus(id);
+        }
+      },
+      [finishPhotoFocus]
+    );
+    const handleGridBackToTop = useCallback(() => {
+      const current = latestFocusRequestRef.current;
+      if (current) {
+        consumePhotoFocus(current.id);
+      }
+      onBackToTop?.();
+    }, [consumePhotoFocus, onBackToTop]);
     const clickFocusEnabled = inlineDetailPhotoId !== undefined;
     const handlePhotoClick = useCallback(
       (id: number, event: React.MouseEvent) => {
@@ -1007,15 +1217,23 @@ export const PhotoGrid = memo(
           photoFocusIdRef.current += 1;
           setPhotoFocusRequest({
             id: photoFocusIdRef.current,
-            photoId: id,
+            photoId: expandedSequence ? -expandedSequence.id : id,
             routeKey,
+            ...(expandedSequence
+              ? {
+                  sequenceId: expandedSequence.id,
+                  memberId: id,
+                  targetRect: null,
+                }
+              : {}),
           });
+          setOuterFocusSettled(0);
         } else {
           setPhotoFocusRequest(null);
         }
         onSelect(id, event);
       },
-      [clickFocusEnabled, onSelect, routeKey]
+      [clickFocusEnabled, onSelect, routeKey, expandedSequence]
     );
     const handleGridScrollTopChange = useCallback(
       (scrollTop: number) => {
@@ -1091,6 +1309,91 @@ export const PhotoGrid = memo(
         ),
       [orderedSequences]
     );
+    useLayoutEffect(() => {
+      if (
+        !sequenceFocusRequest ||
+        sequenceFocusRequest.id === externalFocusIdRef.current
+      ) {
+        return;
+      }
+      const sequence = orderedSequences.find(
+        (item) => item.id === sequenceFocusRequest.sequenceId
+      );
+      if (!(sequence && clickFocusEnabled)) {
+        return;
+      }
+      externalFocusIdRef.current = sequenceFocusRequest.id;
+      photoFocusIdRef.current += 1;
+      const memberId = sequenceFocusRequest.memberId;
+      const isExpanded = expandedSequence?.id === sequence.id;
+      const isExpandedMember =
+        isExpanded &&
+        memberId !== null &&
+        expandedSequence.members.some((member) => member.id === memberId);
+      setOuterFocusSettled(0);
+      setPhotoFocusRequest({
+        id: photoFocusIdRef.current,
+        routeKey,
+        sequenceId: sequence.id,
+        memberId,
+        sourceId: sequenceFocusRequest.id,
+        photoId: isExpanded ? -sequence.id : sequence.photo.id,
+        ...(isExpandedMember ? { targetRect: null } : {}),
+      });
+    }, [
+      sequenceFocusRequest,
+      orderedSequences,
+      expandedSequence,
+      clickFocusEnabled,
+      routeKey,
+    ]);
+    useEffect(() => {
+      const cancel = () => {
+        const current = latestFocusRequestRef.current;
+        if (current) {
+          consumePhotoFocus(current.id);
+        }
+      };
+      const cancelScroll = (event: Event) => {
+        if (
+          event.target instanceof Element &&
+          containerRef.current?.contains(event.target)
+        ) {
+          cancel();
+        }
+      };
+      const cancelKey = (event: KeyboardEvent) => {
+        if (
+          [
+            "ArrowUp",
+            "ArrowDown",
+            "PageUp",
+            "PageDown",
+            "Home",
+            "End",
+            " ",
+          ].includes(event.key)
+        ) {
+          cancelScroll(event);
+        }
+      };
+      window.addEventListener("pointerdown", cancel, true);
+      window.addEventListener("wheel", cancelScroll, {
+        passive: true,
+        capture: true,
+      });
+      window.addEventListener("touchstart", cancelScroll, {
+        passive: true,
+        capture: true,
+      });
+      window.addEventListener("keydown", cancelKey, true);
+      return () => {
+        window.removeEventListener("pointerdown", cancel, true);
+        window.removeEventListener("wheel", cancelScroll, true);
+        window.removeEventListener("touchstart", cancelScroll, true);
+        window.removeEventListener("keydown", cancelKey, true);
+      };
+    }, [consumePhotoFocus]);
     const displayPhotos = useMemo<DisplayPhoto[]>(() => {
       const trayColumns = Math.max(1, Math.min(columnCount, 6));
       const tray = expandedSequence
@@ -1248,8 +1551,8 @@ export const PhotoGrid = memo(
     const deletingIdsRef = useRef(deletingIds);
     deletingIdsRef.current = deletingIds;
     const itemStateVersion = useMemo(
-      () =>
-        createPhotoGridItemStateVersion(
+      () => ({
+        ...createPhotoGridItemStateVersion(
           deletingIds,
           faceOverlayByPhotoId,
           faceOverlaysVisible,
@@ -1261,6 +1564,9 @@ export const PhotoGrid = memo(
           recentlyViewedReturnRequest,
           trayReadyRequest
         ),
+        photoFocusRequest,
+        outerFocusSettled,
+      }),
       [
         deletingIds,
         faceOverlayByPhotoId,
@@ -1272,6 +1578,8 @@ export const PhotoGrid = memo(
         recentlyViewedTarget,
         recentlyViewedReturnRequest,
         trayReadyRequest,
+        photoFocusRequest,
+        outerFocusSettled,
       ]
     );
     const groupHeaderCacheRef = useRef<{
@@ -1314,6 +1622,71 @@ export const PhotoGrid = memo(
       }
       return null;
     }, [expandedSequence, selectedIds]);
+    const activePhotoFocusRequest = useMemo(() => {
+      if (
+        !photoFocusRequest ||
+        photoFocusRequest.routeKey !== routeKey ||
+        !clickFocusEnabled
+      ) {
+        return null;
+      }
+      if (photoFocusRequest.sequenceId !== undefined) {
+        const matchingTray =
+          photoFocusRequest.photoId >= 0 ||
+          expandedSequence?.id === photoFocusRequest.sequenceId;
+        if (photoFocusRequest.keyboard) {
+          return matchingTray &&
+            selectedIds.size === 1 &&
+            selectedIds.has(
+              photoFocusRequest.memberId ?? photoFocusRequest.photoId
+            )
+            ? photoFocusRequest
+            : null;
+        }
+        const matchingDetail =
+          inlineDetailSequenceId === photoFocusRequest.sequenceId ||
+          (photoFocusRequest.memberId != null &&
+            inlineDetailPhotoId === photoFocusRequest.memberId);
+        return matchingDetail && matchingTray ? photoFocusRequest : null;
+      }
+      return !expandedSequence &&
+        selectedIds.size === 1 &&
+        photoFocusRequest.photoId === scrollToId &&
+        inlineDetailPhotoId === scrollToId
+        ? photoFocusRequest
+        : null;
+    }, [
+      photoFocusRequest,
+      routeKey,
+      clickFocusEnabled,
+      inlineDetailSequenceId,
+      inlineDetailPhotoId,
+      expandedSequence,
+      selectedIds,
+      scrollToId,
+    ]);
+    useLayoutEffect(() => {
+      if (activePhotoFocusRequest) {
+        activeFocusIdRef.current = activePhotoFocusRequest.id;
+      } else if (
+        photoFocusRequest &&
+        (photoFocusRequest.routeKey !== routeKey ||
+          !clickFocusEnabled ||
+          (photoFocusRequest.sequenceId !== undefined &&
+            (activeFocusIdRef.current === photoFocusRequest.id ||
+              (photoFocusRequest.sourceId !== undefined &&
+                !sequenceFocusRequest))))
+      ) {
+        consumePhotoFocus(photoFocusRequest.id);
+      }
+    }, [
+      activePhotoFocusRequest,
+      photoFocusRequest,
+      routeKey,
+      clickFocusEnabled,
+      sequenceFocusRequest,
+      consumePhotoFocus,
+    ]);
 
     // Keyboard navigation (arrow keys)
     useEffect(() => {
@@ -1335,39 +1708,119 @@ export const PhotoGrid = memo(
         e.preventDefault();
         const currentId =
           selectedIds.size === 1 ? [...selectedIds][0] : keyboardReturnId;
+        const navigationPhotos = expandedSequence?.members.some(
+          (member) => member.id === currentId
+        )
+          ? expandedSequence.members
+          : keyboardPhotos;
         let currentIdx = currentId
-          ? keyboardPhotos.findIndex((p) => p.id === currentId)
+          ? navigationPhotos.findIndex((p) => p.id === currentId)
           : -1;
         if (currentIdx < 0) {
           currentIdx = 0;
         }
 
         let nextIdx = currentIdx;
+        const navigationColumns =
+          navigationPhotos === keyboardPhotos
+            ? columnCount
+            : Math.min(columnCount, 6);
         if (e.key === "ArrowRight") {
-          nextIdx = Math.min(keyboardPhotos.length - 1, currentIdx + 1);
+          nextIdx = Math.min(navigationPhotos.length - 1, currentIdx + 1);
         } else if (e.key === "ArrowLeft") {
           nextIdx = Math.max(0, currentIdx - 1);
         } else if (e.key === "ArrowDown") {
           nextIdx = Math.min(
-            keyboardPhotos.length - 1,
-            currentIdx + columnCount
+            navigationPhotos.length - 1,
+            currentIdx + navigationColumns
           );
         } else if (e.key === "ArrowUp") {
-          nextIdx = Math.max(0, currentIdx - columnCount);
+          nextIdx = Math.max(0, currentIdx - navigationColumns);
         }
 
         if (nextIdx !== currentIdx || currentId === null) {
-          onKeyboardSelect?.(keyboardPhotos[nextIdx].id);
+          const nextId = navigationPhotos[nextIdx].id;
+          if (expandedSequence && clickFocusEnabled) {
+            const isMember = expandedSequence.members.some(
+              (member) => member.id === nextId
+            );
+            photoFocusIdRef.current += 1;
+            setOuterFocusSettled(0);
+            setPhotoFocusRequest({
+              id: photoFocusIdRef.current,
+              photoId: isMember ? -expandedSequence.id : nextId,
+              routeKey,
+              sequenceId: expandedSequence.id,
+              memberId: isMember ? nextId : null,
+              keyboard: true,
+              ...(isMember ? { targetRect: null } : {}),
+            });
+          }
+          onKeyboardSelect?.(nextId);
         }
       }
+      const handleSequenceKeyDown = (event: KeyboardEvent) => {
+        const target = event.target;
+        const currentId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+        const memberIndex =
+          expandedSequence?.members.findIndex(
+            (member) => member.id === currentId
+          ) ?? -1;
+        if (
+          memberIndex < 0 ||
+          !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(
+            event.key
+          ) ||
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement
+        ) {
+          return;
+        }
+        const atBoundary =
+          (memberIndex === 0 && ["ArrowLeft", "ArrowUp"].includes(event.key)) ||
+          (memberIndex === (expandedSequence?.members.length ?? 0) - 1 &&
+            ["ArrowRight", "ArrowDown"].includes(event.key));
+        const fromGallery =
+          target === window ||
+          target === document ||
+          target === document.body ||
+          target === document.documentElement ||
+          (target instanceof Node && containerRef.current?.contains(target));
+        const fromDetail =
+          target instanceof Element &&
+          target.closest('[data-surface="inspector"]');
+        if (atBoundary && (fromGallery || fromDetail)) {
+          // Also stop the detail panel from navigating past this sequence.
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+        if (!clickFocusEnabled) {
+          return;
+        }
+        if (fromGallery) {
+          // Own this arrow before the detail panel's one-photo navigation can
+          // overwrite the tray's row-based target. Recycled rows may leave
+          // keyboard focus on the document until the next member is mounted.
+          handleKeyDown(event);
+          event.stopImmediatePropagation();
+        }
+      };
+      window.addEventListener("keydown", handleSequenceKeyDown, true);
       window.addEventListener("keydown", handleKeyDown);
-      return () => window.removeEventListener("keydown", handleKeyDown);
+      return () => {
+        window.removeEventListener("keydown", handleSequenceKeyDown, true);
+        window.removeEventListener("keydown", handleKeyDown);
+      };
     }, [
       keyboardPhotos,
       selectedIds,
       columnCount,
       onKeyboardSelect,
       keyboardReturnId,
+      expandedSequence,
+      clickFocusEnabled,
+      routeKey,
     ]);
 
     const skeletonAspects = useCallback(
@@ -1390,6 +1843,12 @@ export const PhotoGrid = memo(
         if ("sequenceTray" in photo) {
           return (
             <SequenceFocusTray
+              clickFocusRequest={
+                activePhotoFocusRequest?.photoId === photo.id &&
+                activePhotoFocusRequest.targetRect !== undefined
+                  ? activePhotoFocusRequest
+                  : null
+              }
               columns={photo.trayColumns}
               completeMembers={expandedSequenceComplete?.members}
               containerWidth={containerWidth}
@@ -1397,15 +1856,18 @@ export const PhotoGrid = memo(
               faceOverlayByPhotoId={faceOverlayByPhotoId}
               faceOverlaysVisible={faceOverlaysVisible}
               getDragIds={getDragIds}
+              onClickFocusGeometry={handleFocusGeometry}
+              onClickFocusSettled={finishPhotoFocus}
               onDoubleClick={onDoubleClick}
               onNameFace={onNameFace}
               onReturnLocated={onReturnLocated}
-              onSelect={onSelect}
+              onSelect={handlePhotoClick}
               onSelectSequenceMembers={onSelectSequenceMembers}
               onSequenceMutationComplete={onSequenceMutationComplete}
               onSequenceOrderChange={onSequenceOrderChange}
               onToggleFavorite={onToggleFavorite}
               onToggleSequenceExpand={onToggleSequenceExpand}
+              outerFocusSettled={outerFocusSettled}
               recentlyViewedMemberId={returnPresentation.memberId}
               recentlyViewedPulseActive={recentlyViewedPulseActive}
               recentlyViewedPulseKey={recentlyViewedPulseKey}
@@ -1548,6 +2010,10 @@ export const PhotoGrid = memo(
       },
       [
         handlePhotoClick,
+        activePhotoFocusRequest,
+        outerFocusSettled,
+        handleFocusGeometry,
+        finishPhotoFocus,
         onSelect,
         onSelectSequence,
         onSelectSequenceMembers,
@@ -1870,22 +2336,15 @@ export const PhotoGrid = memo(
             isPlaceholderData={isPlaceholderData}
             itemStateVersion={itemStateVersion}
             items={displayPhotos}
-            onBackToTop={onBackToTop}
+            onBackToTop={handleGridBackToTop}
             onEndReached={onEndReached}
             onMarqueeSelect={handleGridMarqueeSelect}
+            onPhotoFocusSettled={handleOuterFocusSettled}
             onRestoreSettled={onRestoreSettled}
             onReturnLocated={handleReturnLocated}
             onScrollRestored={onScrollRestored}
             onScrollTopChange={handleGridScrollTopChange}
-            photoFocusRequest={
-              !expandedSequence &&
-              selectedIds.size === 1 &&
-              photoFocusRequest?.routeKey === routeKey &&
-              photoFocusRequest.photoId === scrollToId &&
-              inlineDetailPhotoId === scrollToId
-                ? photoFocusRequest
-                : null
-            }
+            photoFocusRequest={activePhotoFocusRequest}
             ref={gridRef}
             renderItem={renderItem}
             restoreGateReady={restoreGateReady}
@@ -2006,6 +2465,13 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.inlineDetailPhotoId !== nextProps.inlineDetailPhotoId) {
+      return false;
+    }
+    if (
+      prevProps.inlineDetailSequenceId !== nextProps.inlineDetailSequenceId ||
+      prevProps.sequenceFocusRequest !== nextProps.sequenceFocusRequest ||
+      prevProps.onSequenceFocusHandled !== nextProps.onSequenceFocusHandled
+    ) {
       return false;
     }
     if (prevProps.onBackToTop !== nextProps.onBackToTop) {

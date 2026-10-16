@@ -23,7 +23,7 @@ import { toLocalMediaUrl } from "@/utils/local-media-url";
 interface SequenceDetailPanelProps {
   onClose: () => void;
   onDeleteManual?: (id: number) => void;
-  onOpenPhoto: (photoId: number) => void;
+  onOpenPhoto: (photoId: number, event?: React.MouseEvent) => void;
   onPlay: () => void;
   onRestoreAutomatic?: (id: number) => void;
   onSetRepresentative?: (sequenceId: number, photoId: number) => void;
@@ -321,7 +321,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                       name: photo.filename,
                     })}
                     className={`h-16 w-16 overflow-hidden rounded border ${photo.id === representative?.id ? "border-primary" : "border-border"}`}
-                    onClick={() => onOpenPhoto(photo.id)}
+                    onClick={(event) => onOpenPhoto(photo.id, event)}
                     type="button"
                   >
                     {photo.thumbnailPath && (

@@ -34,6 +34,7 @@ import {
 import { useGalleryReturn } from "@/hooks/useGalleryReturn";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
+import { useSequenceClickFocusRequest } from "@/hooks/useSequenceClickFocusRequest";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { PhotoSequenceDetail } from "@/types/photo-sequence";
@@ -69,6 +70,8 @@ function loadSortOrder(): SortOrder {
 function AlbumDetailPage() {
   const { t } = useTranslation();
   const compactDetailOverlay = useMediaQuery("(max-width: 1023px)");
+  const { sequenceFocusRequest, requestSequenceFocus, clearSequenceFocus } =
+    useSequenceClickFocusRequest();
   const detailOverlayRef = useRef<HTMLDivElement>(null);
   const { albumId } = Route.useParams() as { albumId: string };
   const navigate = useNavigate();
@@ -273,25 +276,37 @@ function AlbumDetailPage() {
       sequenceView.sequencesRefreshing
     ),
   });
+  const backToTopSequenceIdRef = useRef<number | null>(null);
+  const sequenceDetailIdRef = useRef<number | null>(null);
   const dismissSequenceDetail = useCallback(() => {
     if (sequenceView.selectedSequence) {
-      markSequence(sequenceView.selectedSequence.id);
+      markSequence(sequenceView.selectedSequence.id, {
+        restorePosition:
+          backToTopSequenceIdRef.current !== sequenceView.selectedSequence.id,
+      });
     }
+    backToTopSequenceIdRef.current = null;
+    sequenceDetailIdRef.current = null;
+    clearSequenceFocus();
     sequenceView.setSelectedSequence(null);
     setSequenceReturnTarget(null);
   }, [
     sequenceView.selectedSequence,
     sequenceView.setSelectedSequence,
     markSequence,
+    clearSequenceFocus,
   ]);
   const backToTopDetailIdRef = useRef<number | null>(null);
   const handleKeyboardPhotoSelect = useCallback(
     (id: number) => {
       backToTopDetailIdRef.current = null;
+      backToTopSequenceIdRef.current = null;
+      sequenceDetailIdRef.current = null;
+      clearSequenceFocus();
       clearRecentlyViewed(id);
       handleKeyboardSelect(id);
     },
-    [clearRecentlyViewed, handleKeyboardSelect]
+    [clearRecentlyViewed, clearSequenceFocus, handleKeyboardSelect]
   );
   const {
     detailDismissed,
@@ -312,11 +327,25 @@ function AlbumDetailPage() {
       });
     }
     backToTopDetailIdRef.current = null;
+    backToTopSequenceIdRef.current = null;
+    sequenceDetailIdRef.current = null;
+    clearSequenceFocus();
     dismissDetail();
-  }, [detailPhoto, dismissDetail, markRecentlyViewed]);
+  }, [detailPhoto, dismissDetail, markRecentlyViewed, clearSequenceFocus]);
   const handleGalleryBackToTop = useCallback(() => {
     backToTopDetailIdRef.current = detailPhoto?.id ?? null;
-  }, [detailPhoto]);
+    backToTopSequenceIdRef.current =
+      sequenceDetailIdRef.current ??
+      sequenceView.selectedSequence?.id ??
+      sequenceReturnTarget?.id ??
+      null;
+    clearSequenceFocus();
+  }, [
+    detailPhoto,
+    sequenceView.selectedSequence,
+    sequenceReturnTarget,
+    clearSequenceFocus,
+  ]);
   const handleClearSelection = useCallback(() => {
     if (sequenceView.selectedSequence) {
       dismissSequenceDetail();
@@ -368,10 +397,13 @@ function AlbumDetailPage() {
   const handlePhotoSelect = useCallback(
     (id: number, event: React.MouseEvent) => {
       backToTopDetailIdRef.current = null;
+      backToTopSequenceIdRef.current = null;
+      sequenceDetailIdRef.current = null;
+      clearSequenceFocus();
       clearRecentlyViewed(id);
       handleSelect(id, event);
     },
-    [clearRecentlyViewed, handleSelect]
+    [clearRecentlyViewed, clearSequenceFocus, handleSelect]
   );
 
   // handleSelect, handleKeyboardSelect, handleMarqueeSelect 由 usePhotoSelection hook 提供
@@ -1080,6 +1112,11 @@ function AlbumDetailPage() {
             inlineDetailPhotoId={
               compactDetailOverlay ? undefined : (detailPhoto?.id ?? null)
             }
+            inlineDetailSequenceId={
+              compactDetailOverlay
+                ? undefined
+                : (sequenceView.selectedSequence?.id ?? null)
+            }
             isPlaceholderData={pageLoading}
             loading={
               pageLoading ||
@@ -1099,12 +1136,21 @@ function AlbumDetailPage() {
             onKeyboardSelect={handleKeyboardPhotoSelect}
             onMarqueeSelect={wrappedMarqueeSelect}
             onOpenSequence={(id) => {
+              clearSequenceFocus();
               beginSequence(id);
               dismissDetail();
               setSequenceReturnTarget(null);
               sequenceView.openPlayback(id);
             }}
-            onOpenSequenceDetails={(id) => {
+            onOpenSequenceDetails={(id, event) => {
+              backToTopDetailIdRef.current = null;
+              backToTopSequenceIdRef.current = null;
+              sequenceDetailIdRef.current = id;
+              if (compactDetailOverlay) {
+                clearSequenceFocus();
+              } else {
+                requestSequenceFocus(id, null, event);
+              }
               beginSequence(id);
               sequenceView.openDetails(id);
             }}
@@ -1113,12 +1159,17 @@ function AlbumDetailPage() {
             onSelect={handlePhotoSelect}
             onSelectSequence={handleSequenceSelect}
             onSelectSequenceMembers={handleSelectSequenceMembers}
-            onSequenceModeChange={sequenceView.setMode}
+            onSequenceFocusHandled={clearSequenceFocus}
+            onSequenceModeChange={(mode) => {
+              clearSequenceFocus();
+              sequenceView.setMode(mode);
+            }}
             onSequenceMutationComplete={sequenceView.refreshSequences}
             onSequenceOrderChange={sequenceView.updateSequenceOrder}
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
             onToggleSequenceExpand={(id) => {
+              clearSequenceFocus();
               if (
                 recentlyViewedTarget &&
                 "sequenceId" in recentlyViewedTarget &&
@@ -1143,6 +1194,7 @@ function AlbumDetailPage() {
             sequenceError={
               sequenceView.sequencesError ? t("loadFailedRetry") : null
             }
+            sequenceFocusRequest={sequenceFocusRequest}
             sequenceLoading={sequenceView.sequencesLoading}
             sequenceMode={sequenceView.mode}
             sequences={sequenceView.sequences}
@@ -1247,7 +1299,7 @@ function AlbumDetailPage() {
           {sequenceView.selectedSequence ? (
             <SequenceDetailPanel
               onClose={dismissSequenceDetail}
-              onOpenPhoto={(photoId) => {
+              onOpenPhoto={(photoId, event) => {
                 const member = sequenceView.selectedSequence?.members.find(
                   (m) => m.id === photoId
                 );
@@ -1259,6 +1311,13 @@ function AlbumDetailPage() {
                 handleKeyboardPhotoSelect(photoId);
                 if (member) {
                   showPhoto(member);
+                }
+                if (sequenceView.selectedSequence && !compactDetailOverlay) {
+                  requestSequenceFocus(
+                    sequenceView.selectedSequence.id,
+                    photoId,
+                    event
+                  );
                 }
               }}
               onPlay={() => {
@@ -1304,6 +1363,7 @@ function AlbumDetailPage() {
                       }
                       dismissDetail();
                       clearSelection();
+                      sequenceDetailIdRef.current = sequenceReturnTarget.id;
                       sequenceView.setSelectedSequence(sequenceReturnTarget);
                       setSequenceReturnTarget(null);
                     }

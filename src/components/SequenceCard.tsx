@@ -27,7 +27,7 @@ interface SequenceCardProps {
   loading?: "eager" | "lazy";
   onClick: (id: number, event: React.MouseEvent) => void;
   onOpen: (sequenceId: number) => void;
-  onOpenDetails: (sequenceId: number) => void;
+  onOpenDetails: (sequenceId: number, event?: React.MouseEvent) => void;
   onToggleExpand?: (sequenceId: number) => void;
   recentlyViewed?: boolean;
   recentlyViewedFrame?: number;
@@ -119,7 +119,7 @@ export const SequenceCard = memo(function SequenceCard({
         clickTimerRef.current = setTimeout(() => {
           clickTimerRef.current = null;
           onClick(photo.id, event);
-          onOpenDetails(sequence.id);
+          onOpenDetails(sequence.id, event);
         }, SINGLE_CLICK_DELAY_MS);
       }}
       onDoubleClick={() => {
@@ -235,7 +235,7 @@ export const SequenceCard = memo(function SequenceCard({
         className="absolute right-2 bottom-2 left-2 flex items-center gap-1 rounded bg-black/65 px-2 py-1 text-left text-[11px] text-white backdrop-blur"
         onClick={(event) => {
           event.stopPropagation();
-          onOpenDetails(sequence.id);
+          onOpenDetails(sequence.id, event);
         }}
         type="button"
       >

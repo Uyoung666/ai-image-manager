@@ -244,6 +244,147 @@ afterEach(() => {
 });
 
 describe("masonry reflow continuity", () => {
+  it("mounts an offscreen member tray without scrolling until the joint plan is ready", () => {
+    const items = [...photos];
+    items.splice(1000, 0, {
+      id: -42,
+      width: 1024,
+      height: 680,
+      fullWidth: true,
+    } as (typeof items)[number]);
+    const renderTray: typeof renderItem = (item, index, style, options) =>
+      item.id === -42 ? (
+        <div data-photo-id={-42} data-sequence-tray-id={42}>
+          {options.renderImage && (
+            <div data-sequence-virtual-scroll="">
+              <div style={{ height: 2000 }} />
+            </div>
+          )}
+        </div>
+      ) : (
+        renderItem(item, index, style, options)
+      );
+    const request = { id: 1, photoId: -42, targetRect: null };
+    const view = render(
+      <MasonryGrid {...props} items={items} renderItem={renderTray} />
+    );
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        items={items}
+        photoFocusRequest={request}
+        renderItem={renderTray}
+      />
+    );
+    settleFocus();
+    expect(scroll.scrollTop).toBe(0);
+    const tray = requireElement(scroll, '[data-photo-id="-42"]');
+    const inner = requireElement(tray, "[data-sequence-virtual-scroll]");
+    const layoutWidth = Number.parseFloat(
+      tray.parentElement?.style.width ?? "0"
+    );
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        items={items}
+        photoFocusRequest={{
+          ...request,
+          targetRect: {
+            top: 200,
+            height: 180,
+            layoutWidth,
+            innerScrollTop: 320,
+            outerScrollTop: 50,
+          },
+        }}
+        renderItem={renderTray}
+      />
+    );
+    // Both scrolls must be committed by the same layout pass, before any RAF.
+    expect(inner.scrollTop).toBe(320);
+    expect(scroll.scrollTop).toBe(50);
+    expect(requireElement(scroll, '[data-photo-id="-42"]')).toBe(tray);
+  });
+  it("centers a measured sequence member and replans when its local position changes", () => {
+    const items = [...photos];
+    items.splice(100, 0, {
+      id: -42,
+      width: 1024,
+      height: 680,
+      fullWidth: true,
+    } as (typeof items)[number]);
+    const settled = vi.fn();
+    const view = render(
+      <MasonryGrid
+        {...props}
+        items={items}
+        onPhotoFocusSettled={settled}
+        topInset={80}
+      />
+    );
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    scroll.style.paddingBottom = "24px";
+    const request = { id: 1, photoId: -42, targetRect: null };
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        items={items}
+        onPhotoFocusSettled={settled}
+        photoFocusRequest={request}
+        topInset={80}
+      />
+    );
+    settleFocus();
+    expect(settled).not.toHaveBeenCalled();
+    const tray = requireElement(scroll, '[data-photo-id="-42"]');
+    const layoutWidth = Number.parseFloat(
+      tray.parentElement?.style.width ?? "0"
+    );
+    for (const top of [160, 260]) {
+      view.rerender(
+        <MasonryGrid
+          {...props}
+          items={items}
+          onPhotoFocusSettled={settled}
+          photoFocusRequest={{
+            ...request,
+            targetRect: { top, height: 180, layoutWidth },
+          }}
+          topInset={80}
+        />
+      );
+      settleFocus();
+      const paddingTop =
+        Number.parseFloat(getComputedStyle(scroll).paddingTop) || 0;
+      const center = 80 + (700 - 80 - 24) / 2;
+      expect(
+        Math.abs(
+          position(tray).top + paddingTop + top + 90 - scroll.scrollTop - center
+        )
+      ).toBeLessThanOrEqual(2);
+      expect(requireElement(scroll, '[data-photo-id="-42"]')).toBe(tray);
+    }
+    expect(settled.mock.calls).toEqual([[1], [1]]);
+    fireEvent.wheel(scroll);
+    const userTop = scroll.scrollTop + 100;
+    scrollTo(scroll, userTop);
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        items={items}
+        onPhotoFocusSettled={settled}
+        photoFocusRequest={{
+          ...request,
+          targetRect: { top: 360, height: 180, layoutWidth },
+        }}
+        topInset={80}
+      />
+    );
+    settleFocus();
+    expect(scroll.scrollTop).toBe(userTop);
+    expect(settled).toHaveBeenCalledTimes(2);
+  });
   for (const visibility of [
     "fully visible",
     "clipped above",
@@ -335,6 +476,68 @@ describe("masonry reflow continuity", () => {
         columnCount={3}
         containerWidth={664}
         photoFocusRequest={request}
+      />
+    );
+    settleFocus();
+    expectPhotoCentered(scroll, 1000);
+  });
+
+  it("keeps a new click pending through an earlier layout scroll notification", () => {
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    scrollTo(scroll, 10_000);
+    Object.defineProperty(scroll, "clientWidth", {
+      configurable: true,
+      value: 664,
+    });
+    const request = { id: 1, photoId: 1000 };
+    view.rerender(<MasonryGrid {...props} photoFocusRequest={request} />);
+    // A previous layout can change/clamp the offset before its native scroll
+    // notification arrives. No wheel, pointer or scrolling key occurred.
+    scrollTo(scroll, 10_100);
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        columnCount={3}
+        containerWidth={664}
+        photoFocusRequest={request}
+      />
+    );
+    settleFocus();
+    expectPhotoCentered(scroll, 1000);
+  });
+
+  it("keeps a new click pending when an earlier return is cancelled before resize measurement", () => {
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    view.rerender(
+      <MasonryGrid {...props} returnToPhotoId={700} returnToPhotoRequest={1} />
+    );
+    settleFocus();
+    const oldScrollTop = scroll.scrollTop;
+    Object.defineProperty(scroll, "clientWidth", {
+      configurable: true,
+      value: 664,
+    });
+    const request = { id: 1, photoId: 1000 };
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        photoFocusRequest={request}
+        returnToPhotoId={null}
+        returnToPhotoRequest={0}
+      />
+    );
+    settleFocus();
+    expect(scroll.scrollTop).toBe(oldScrollTop);
+    view.rerender(
+      <MasonryGrid
+        {...props}
+        columnCount={3}
+        containerWidth={664}
+        photoFocusRequest={request}
+        returnToPhotoId={null}
+        returnToPhotoRequest={0}
       />
     );
     settleFocus();

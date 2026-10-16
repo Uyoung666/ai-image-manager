@@ -113,6 +113,14 @@ export interface MasonryScrollRestoreRequest {
 export interface MasonryPhotoFocusRequest {
   id: number;
   photoId: number;
+  /** null keeps a virtual sequence mounted until its member is measured. */
+  targetRect?: {
+    top: number;
+    height: number;
+    layoutWidth: number;
+    innerScrollTop?: number;
+    outerScrollTop?: number;
+  } | null;
 }
 
 interface MasonryGridProps {
@@ -135,6 +143,7 @@ interface MasonryGridProps {
   onBackToTop?: () => void;
   onEndReached?: () => void;
   onMarqueeSelect?: (ids: Set<number>) => void;
+  onPhotoFocusSettled?: (request: number) => void;
   onRestoreSettled?: (routeKey: string) => void;
   onReturnLocated?: (request: number) => void;
   onScrollRestored?: (request: number) => void;
@@ -182,6 +191,7 @@ export const MasonryGrid = memo(
       scrollToAlignment = "center",
       scrollToId,
       photoFocusRequest,
+      onPhotoFocusSettled,
       className,
       selectionActive = false,
       showGroupHeaders = true,
@@ -224,12 +234,18 @@ export const MasonryGrid = memo(
     const returnToPhotoAutoScrollRef = useRef(false);
     const returnToPhotoFocusFrameRef = useRef<number>(0);
     const completedPhotoFocusRef = useRef<number | null>(null);
+    const completedPhotoFocusRectRef =
+      useRef<MasonryPhotoFocusRequest["targetRect"]>(undefined);
+    const cancelledPhotoFocusRef = useRef<number | null>(null);
+    const onPhotoFocusSettledRef = useRef(onPhotoFocusSettled);
+    onPhotoFocusSettledRef.current = onPhotoFocusSettled;
     const photoFocusFrameRef = useRef(0);
     const latestPhotoFocusRef = useRef(photoFocusRequest);
     latestPhotoFocusRef.current = photoFocusRequest;
     const cancelPhotoFocus = useCallback(() => {
       if (latestPhotoFocusRef.current) {
         completedPhotoFocusRef.current = latestPhotoFocusRef.current.id;
+        cancelledPhotoFocusRef.current = latestPhotoFocusRef.current.id;
       }
       if (photoFocusFrameRef.current) {
         cancelAnimationFrame(photoFocusFrameRef.current);
@@ -376,7 +392,8 @@ export const MasonryGrid = memo(
       }
       if (!(returnToPhotoAutoScrollRef.current || isReflowScroll)) {
         reflowAnchorRef.current = null;
-        cancelPhotoFocus();
+        // Scroll notifications can arrive from an earlier resize or return.
+        // Explicit input gestures cancel click focus, not these notifications.
       }
       if (returnToPhotoAutoScrollRef.current || isReflowScroll) {
         returnToPhotoAutoScrollRef.current = false;
@@ -482,7 +499,6 @@ export const MasonryGrid = memo(
         );
       });
     }, [
-      cancelPhotoFocus,
       checkNearBottom,
       onScrollTopChange,
       syncScrollMetrics,
@@ -605,7 +621,9 @@ export const MasonryGrid = memo(
       Number.parseFloat(scrollStyle?.paddingBottom ?? "0") || 0;
     const photoFocusPending =
       photoFocusRequest != null &&
-      photoFocusRequest.id !== completedPhotoFocusRef.current;
+      photoFocusRequest.id !== cancelledPhotoFocusRef.current &&
+      (photoFocusRequest.id !== completedPhotoFocusRef.current ||
+        photoFocusRequest.targetRect !== completedPhotoFocusRectRef.current);
     const clampScrollTop = (value: number) =>
       Math.max(
         0,
@@ -719,6 +737,19 @@ export const MasonryGrid = memo(
         const position = index === undefined ? undefined : positions[index];
         if (position) {
           pendingReflowAnchor = null;
+          const rect = photoFocusRequest.targetRect;
+          const matchingRect =
+            rect && Math.abs(rect.layoutWidth - position.width) <= 1
+              ? rect
+              : null;
+          // A member request must wait for its projected rectangle. Centering
+          // the whole tray here creates a visible detour before member focus.
+          if (rect !== undefined && !matchingRect) {
+            return null;
+          }
+          if (matchingRect?.outerScrollTop !== undefined) {
+            return clampScrollTop(matchingRect.outerScrollTop);
+          }
           const availableHeight = Math.max(
             0,
             effectiveViewportHeight - topInset - paddingBottom
@@ -726,7 +757,9 @@ export const MasonryGrid = memo(
           return clampScrollTop(
             position.top +
               paddingTop +
-              position.height / 2 -
+              (matchingRect
+                ? matchingRect.top + matchingRect.height / 2
+                : position.height / 2) -
               (topInset + availableHeight / 2)
           );
         }
@@ -789,7 +822,7 @@ export const MasonryGrid = memo(
         returnToPhotoRequest !== prevReturnToPhotoRequest;
       if (
         prevRouteKey !== routeKey ||
-        returnRequestChanged ||
+        (returnRequestChanged && returnToPhotoRequest > 0) ||
         scrollRestorePending
       ) {
         cancelPhotoFocus();
@@ -797,7 +830,7 @@ export const MasonryGrid = memo(
       if (
         photoFocusPending &&
         photoFocusRequest &&
-        completedPhotoFocusRef.current !== photoFocusRequest.id &&
+        cancelledPhotoFocusRef.current !== photoFocusRequest.id &&
         plannedScrollTop !== null
       ) {
         gridRef.current?.cancelEnforceLock();
@@ -860,6 +893,17 @@ export const MasonryGrid = memo(
         plannedScrollTop !== null &&
         hasMatchingLayoutWidth(el, containerWidth)
       ) {
+        const memberRect = photoFocusPending
+          ? photoFocusRequest?.targetRect
+          : null;
+        if (memberRect?.innerScrollTop !== undefined && photoFocusRequest) {
+          const inner = el.querySelector<HTMLElement>(
+            `[data-sequence-tray-id="${-photoFocusRequest.photoId}"] [data-sequence-virtual-scroll]`
+          );
+          if (inner) {
+            inner.scrollTop = memberRect.innerScrollTop;
+          }
+        }
         el.scrollTop = plannedScrollTop;
         // Keep one ID and screen offset through a continuous resize, even when
         // its column changes. User scrolling or explicit navigation releases it.
@@ -1014,7 +1058,8 @@ export const MasonryGrid = memo(
           hasInitialPositionedRef.current
         ) ||
         plannedScrollTop === null ||
-        completedPhotoFocusRef.current === photoFocusRequest.id
+        cancelledPhotoFocusRef.current === photoFocusRequest.id ||
+        photoFocusRequest.targetRect === null
       ) {
         return;
       }
@@ -1026,7 +1071,7 @@ export const MasonryGrid = memo(
         if (
           !el ||
           latestPhotoFocusRef.current?.id !== photoFocusRequest.id ||
-          completedPhotoFocusRef.current === photoFocusRequest.id
+          cancelledPhotoFocusRef.current === photoFocusRequest.id
         ) {
           photoFocusFrameRef.current = 0;
           return;
@@ -1034,11 +1079,19 @@ export const MasonryGrid = memo(
         const stable =
           hasMatchingLayoutWidth(el, containerWidth) &&
           el.clientHeight === effectiveViewportHeight &&
+          (!photoFocusRequest.targetRect ||
+            Math.abs(
+              photoFocusRequest.targetRect.layoutWidth -
+                (positions[idToIndexMap.get(photoFocusRequest.photoId) ?? -1]
+                  ?.width ?? 0)
+            ) <= 1) &&
           Math.abs(el.scrollTop - plannedScrollTop) <= 1;
         stableFrames = stable ? stableFrames + 1 : 0;
         if (stableFrames >= 2) {
           completedPhotoFocusRef.current = photoFocusRequest.id;
+          completedPhotoFocusRectRef.current = photoFocusRequest.targetRect;
           photoFocusFrameRef.current = 0;
+          onPhotoFocusSettledRef.current?.(photoFocusRequest.id);
           return;
         }
         photoFocusFrameRef.current = requestAnimationFrame(settle);
@@ -1056,6 +1109,8 @@ export const MasonryGrid = memo(
       photoFocusRequest,
       plannedScrollTop,
       restoreReady,
+      positions,
+      idToIndexMap,
     ]);
 
     useEffect(() => {
@@ -1071,16 +1126,50 @@ export const MasonryGrid = memo(
       };
     }, []);
 
-    const { visibleHeaders, visibleItems } = useMasonryVirtualWindow({
-      columnCount,
-      headerPositions,
-      overscan,
+    const { visibleHeaders, visibleItems: windowItems } =
+      useMasonryVirtualWindow({
+        columnCount,
+        headerPositions,
+        overscan,
+        positions,
+        scrollTop: effectiveScrollTop,
+        velocity: scrollVelocity,
+        visibilityIndex,
+        viewportHeight: effectiveViewportHeight,
+      });
+    const visibleItems = useMemo(() => {
+      const index =
+        photoFocusPending && photoFocusRequest?.targetRect !== undefined
+          ? idToIndexMap.get(photoFocusRequest.photoId)
+          : undefined;
+      const position = index === undefined ? undefined : positions[index];
+      if (
+        index === undefined ||
+        !position ||
+        windowItems.some((item) => item.index === index)
+      ) {
+        return windowItems;
+      }
+      return [
+        ...windowItems,
+        {
+          index,
+          style: {
+            position: "absolute" as const,
+            top: position.top,
+            left: position.left,
+            width: position.width,
+            height: position.height,
+          },
+        },
+      ].sort((a, b) => a.index - b.index);
+    }, [
+      windowItems,
+      photoFocusPending,
+      photoFocusRequest,
+      idToIndexMap,
       positions,
-      scrollTop: effectiveScrollTop,
-      velocity: scrollVelocity,
-      visibilityIndex,
-      viewportHeight: effectiveViewportHeight,
-    });
+    ]);
 
     useEffect(() => {
       let renderImageCount = 0;
@@ -1303,11 +1392,15 @@ export const MasonryGrid = memo(
               {visibleItems.map(({ index, style }) => (
                 <div key={items[index].id} style={style}>
                   {renderItem(items[index], index, style, {
-                    renderImage: shouldRenderItemImage(
-                      style,
-                      effectiveScrollTop,
-                      effectiveViewportHeight
-                    ),
+                    renderImage:
+                      (photoFocusPending &&
+                        photoFocusRequest?.targetRect !== undefined &&
+                        items[index].id === photoFocusRequest.photoId) ||
+                      shouldRenderItemImage(
+                        style,
+                        effectiveScrollTop,
+                        effectiveViewportHeight
+                      ),
                   })}
                 </div>
               ))}
@@ -1393,6 +1486,7 @@ export const MasonryGrid = memo(
     prevProps.selectionActive === nextProps.selectionActive &&
     prevProps.onBackToTop === nextProps.onBackToTop &&
     prevProps.photoFocusRequest === nextProps.photoFocusRequest &&
+    prevProps.onPhotoFocusSettled === nextProps.onPhotoFocusSettled &&
     prevProps.scrollToId === nextProps.scrollToId &&
     prevProps.returnToPhotoId === nextProps.returnToPhotoId &&
     prevProps.returnToMemberId === nextProps.returnToMemberId &&

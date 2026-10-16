@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SequenceFocusTray } from "@/components/PhotoGrid";
 import type { PhotoSequenceDetail } from "@/types/photo-sequence";
 
@@ -40,6 +40,53 @@ const sequence: PhotoSequenceDetail = {
 };
 
 describe("SequenceFocusTray", () => {
+  afterEach(() => vi.restoreAllMocks());
+  it("refreshes cached row heights when width or columns change with the same row count", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(560);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(900);
+    const shortSequence = {
+      ...sequence,
+      members: sequence.members.slice(0, 6),
+    };
+    const props = {
+      sequence: shortSequence,
+      columns: 3,
+      containerWidth: 900,
+      getDragIds: (id: number) => [id],
+      onDoubleClick: vi.fn(),
+      onSelect: vi.fn(),
+      renderImage: true,
+      selectedIds: new Set<number>(),
+    };
+    const view = render(<SequenceFocusTray {...props} />);
+    const grid = view.container.querySelector<HTMLElement>(
+      "[data-sequence-virtual-grid]"
+    );
+    if (!grid) {
+      throw new Error("Missing sequence grid");
+    }
+    const totalHeight = () => Number.parseFloat(grid.style.height);
+    const originalHeight = totalHeight();
+    view.rerender(<SequenceFocusTray {...props} containerWidth={700} />);
+    expect(view.container.querySelector("[data-sequence-virtual-grid]")).toBe(
+      grid
+    );
+    expect(totalHeight()).toBeLessThan(originalHeight);
+    const rowHeight = (700 - 24 - 8 * 2) / 3 / 1.5 + 8;
+    const secondRow = grid.querySelector<HTMLElement>(
+      '[data-sequence-virtual-row="1"]'
+    );
+    expect(secondRow?.style.transform).toBe(`translateY(${rowHeight}px)`);
+    expect(Number.parseFloat(secondRow?.style.minHeight ?? "0")).toBeCloseTo(
+      rowHeight
+    );
+    const narrowedHeight = totalHeight();
+    view.rerender(
+      <SequenceFocusTray {...props} columns={4} containerWidth={700} />
+    );
+    expect(totalHeight()).toBeLessThan(narrowedHeight);
+    expect(totalHeight()).toBeCloseTo(((700 - 24 - 8 * 3) / 4 / 1.5 + 8) * 2);
+  });
   it("optimistically shows the new order without collapsing the tray", async () => {
     updateMembers.mockClear();
     const heightSpy = vi

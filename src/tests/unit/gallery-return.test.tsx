@@ -152,6 +152,31 @@ describe("gallery return state", () => {
     expect(result.current.recentlyViewedPulseActive).toBe(false);
     expect(result.current.recentlyViewedPhotoId).toBe(99);
   });
+  it("records a sequence after returning to the top without restoring its position", () => {
+    const { result } = renderHook(() => useGalleryReturn(options));
+    act(() => result.current.beginSequence(7));
+    act(() => result.current.markSequence(7, { restorePosition: false }));
+    expect(result.current.recentlyViewedTarget).toEqual({
+      kind: "sequence",
+      sequenceId: 7,
+    });
+    expect(result.current.recentlyViewedReturnRequest).toBe(0);
+    act(() => result.current.settleReturn(1));
+    expect(result.current.recentlyViewedPulseActive).toBe(false);
+    act(() => result.current.markSequence(7));
+    expect(result.current.recentlyViewedReturnRequest).toBe(2);
+  });
+  it("preserves the last viewed sequence member while suppressing a sequence return", () => {
+    const { result } = renderHook(() => useGalleryReturn(options));
+    act(() => {
+      result.current.beginSequence(7);
+      result.current.rememberPhoto(30, 7);
+      result.current.markSequence(7, { restorePosition: false });
+    });
+    expect(result.current.recentlyViewedTarget).toEqual(memberTarget);
+    expect(result.current.recentlyViewedReturnRequest).toBe(0);
+    expect(result.current.recentlyViewedPulseActive).toBe(false);
+  });
   it("cancels a pending return while allowing a later default photo return", () => {
     const { result } = renderHook(() => useGalleryReturn(options));
     act(() => result.current.markRecentlyViewed(99));

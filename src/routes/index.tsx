@@ -60,6 +60,7 @@ import { useGallerySnapshot } from "@/hooks/useGallerySnapshot";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotos } from "@/hooks/usePhotos";
 import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
+import { useSequenceClickFocusRequest } from "@/hooks/useSequenceClickFocusRequest";
 import { useSequenceSuggestions } from "@/hooks/useSequenceSuggestions";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
@@ -161,6 +162,8 @@ function isSearchMode(value: string | null): value is SearchMode {
 function HomePage() {
   const { t } = useTranslation();
   const compactDetailOverlay = useMediaQuery("(max-width: 1120px)");
+  const { sequenceFocusRequest, requestSequenceFocus, clearSequenceFocus } =
+    useSequenceClickFocusRequest();
   const detailOverlayRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const filter = useSidebarFilter();
@@ -1383,11 +1386,18 @@ function HomePage() {
       !photosIsPlaceholder &&
       !searchLoading,
   });
+  const backToTopSequenceIdRef = useRef<number | null>(null);
+  const sequenceDetailIdRef = useRef<number | null>(null);
   const dismissSequenceDetail = useCallback(() => {
     const sequence = selectedSequence;
     if (sequence) {
-      markSequence(sequence.id);
+      markSequence(sequence.id, {
+        restorePosition: backToTopSequenceIdRef.current !== sequence.id,
+      });
     }
+    backToTopSequenceIdRef.current = null;
+    sequenceDetailIdRef.current = null;
+    clearSequenceFocus();
     sequenceDetailsRequestRef.current += 1;
     setSelectedSequence(null);
     setSequenceDetailsLoading(false);
@@ -1395,6 +1405,7 @@ function HomePage() {
   }, [
     selectedSequence,
     markSequence,
+    clearSequenceFocus,
     sequenceDetailsRequestRef,
     setSelectedSequence,
     setSequenceDetailsLoading,
@@ -1404,10 +1415,13 @@ function HomePage() {
   const handleKeyboardPhotoSelect = useCallback(
     (id: number) => {
       backToTopDetailIdRef.current = null;
+      backToTopSequenceIdRef.current = null;
+      sequenceDetailIdRef.current = null;
+      clearSequenceFocus();
       clearRecentlyViewed(id);
       handleKeyboardSelect(id);
     },
-    [clearRecentlyViewed, handleKeyboardSelect]
+    [clearRecentlyViewed, clearSequenceFocus, handleKeyboardSelect]
   );
   const previousSequenceModeRef = useRef(sequenceMode);
   useEffect(() => {
@@ -1415,6 +1429,7 @@ function HomePage() {
       return;
     }
     previousSequenceModeRef.current = sequenceMode;
+    clearSequenceFocus();
     clearSelection();
     expandSequenceRequestRef.current += 1;
     setExpandedSequence(null);
@@ -1423,6 +1438,7 @@ function HomePage() {
     clearRecentlyViewed();
   }, [
     clearRecentlyViewed,
+    clearSequenceFocus,
     clearSelection,
     sequenceMode,
     expandSequenceRequestRef,
@@ -1432,6 +1448,7 @@ function HomePage() {
   ]);
   const handleScopedSequenceExpand = useCallback(
     (sequenceId: number) => {
+      clearSequenceFocus();
       if (
         recentlyViewedTarget &&
         "sequenceId" in recentlyViewedTarget &&
@@ -1449,6 +1466,7 @@ function HomePage() {
     },
     [
       clearRecentlyViewed,
+      clearSequenceFocus,
       handleToggleSequenceExpand,
       recentlyViewedTarget,
       stopPulse,
@@ -1493,11 +1511,20 @@ function HomePage() {
       });
     }
     backToTopDetailIdRef.current = null;
+    backToTopSequenceIdRef.current = null;
+    sequenceDetailIdRef.current = null;
+    clearSequenceFocus();
     dismissDetail();
-  }, [detailPhoto, dismissDetail, markRecentlyViewed]);
+  }, [detailPhoto, dismissDetail, markRecentlyViewed, clearSequenceFocus]);
   const handleGalleryBackToTop = useCallback(() => {
     backToTopDetailIdRef.current = detailPhoto?.id ?? null;
-  }, [detailPhoto]);
+    backToTopSequenceIdRef.current =
+      sequenceDetailIdRef.current ??
+      selectedSequence?.id ??
+      sequenceReturnTarget?.id ??
+      null;
+    clearSequenceFocus();
+  }, [detailPhoto, selectedSequence, sequenceReturnTarget, clearSequenceFocus]);
   // 底部操作胶囊清空选择时，详情面板也会随选中状态关闭，先记录最后查看的照片。
   const handleClearSelection = useCallback(() => {
     if (selectedSequence) {
@@ -1553,6 +1580,9 @@ function HomePage() {
   const handlePhotoSelect = useCallback(
     (id: number, event: React.MouseEvent) => {
       backToTopDetailIdRef.current = null;
+      backToTopSequenceIdRef.current = null;
+      sequenceDetailIdRef.current = null;
+      clearSequenceFocus();
       clearRecentlyViewed(id);
       setSelectedSequence(null);
       setSequenceDetailsLoading(false);
@@ -1560,26 +1590,48 @@ function HomePage() {
     },
     [
       clearRecentlyViewed,
+      clearSequenceFocus,
       handleSelect,
       setSelectedSequence,
       setSequenceDetailsLoading,
     ]
   );
   const handleSequenceDetails = useCallback(
-    (sequenceId: number) => {
+    (sequenceId: number, event?: React.MouseEvent) => {
+      backToTopDetailIdRef.current = null;
+      backToTopSequenceIdRef.current = null;
+      sequenceDetailIdRef.current = sequenceId;
+      if (compactDetailOverlay) {
+        clearSequenceFocus();
+      } else {
+        requestSequenceFocus(sequenceId, null, event);
+      }
       beginSequence(sequenceId);
       handleOpenSequenceDetails(sequenceId);
     },
-    [beginSequence, handleOpenSequenceDetails]
+    [
+      beginSequence,
+      handleOpenSequenceDetails,
+      compactDetailOverlay,
+      clearSequenceFocus,
+      requestSequenceFocus,
+    ]
   );
   const handleSequencePlayback = useCallback(
     (sequenceId: number) => {
+      clearSequenceFocus();
       beginSequence(sequenceId);
       dismissDetail();
       setSequenceReturnTarget(null);
       handleOpenSequence(sequenceId);
     },
-    [beginSequence, dismissDetail, handleOpenSequence, setSequenceReturnTarget]
+    [
+      beginSequence,
+      clearSequenceFocus,
+      dismissDetail,
+      handleOpenSequence,
+      setSequenceReturnTarget,
+    ]
   );
   const searchDisplayCount =
     searchExactTotal !== null &&
@@ -2374,6 +2426,11 @@ function HomePage() {
                   inlineDetailPhotoId={
                     compactDetailOverlay ? undefined : (detailPhoto?.id ?? null)
                   }
+                  inlineDetailSequenceId={
+                    compactDetailOverlay
+                      ? undefined
+                      : (selectedSequence?.id ?? null)
+                  }
                   isLoadingMore={
                     isPhotoPaginationActive &&
                     (isSearching
@@ -2408,6 +2465,7 @@ function HomePage() {
                   onSelect={handlePhotoSelect}
                   onSelectSequence={handleSequenceSelect}
                   onSelectSequenceMembers={handleSelectSequenceMembers}
+                  onSequenceFocusHandled={clearSequenceFocus}
                   onSequenceModeChange={handleSequenceModeChange}
                   onSequenceMutationComplete={handleSequenceMutationComplete}
                   onSequenceOrderChange={handleSequenceOrderChange}
@@ -2439,6 +2497,7 @@ function HomePage() {
                   selectedIds={selectedIds}
                   semanticTopSimilarity={searchSemantic?.topSimilarity}
                   sequenceError={sequenceError}
+                  sequenceFocusRequest={sequenceFocusRequest}
                   sequenceLoading={
                     !(sequenceViewReady || gallerySnapshot.retaining)
                   }
@@ -2516,6 +2575,7 @@ function HomePage() {
                         }
                         dismissDetail();
                         clearSelection();
+                        sequenceDetailIdRef.current = sequenceReturnTarget.id;
                         setSelectedSequence(sequenceReturnTarget);
                         setSequenceReturnTarget(null);
                       }
@@ -2528,7 +2588,7 @@ function HomePage() {
                   onDeleteManual: (id) => {
                     setPendingSequenceAction({ id, type: "ungroup" });
                   },
-                  onOpenPhoto: (photoId) => {
+                  onOpenPhoto: (photoId, event) => {
                     const member = selectedSequence?.members.find(
                       (m) => m.id === photoId
                     );
@@ -2541,6 +2601,9 @@ function HomePage() {
                     // 直接设置详情照片，确保即使照片不在 actionPhotos 中也能显示
                     if (member) {
                       showPhoto(member);
+                    }
+                    if (selectedSequence && !compactDetailOverlay) {
+                      requestSequenceFocus(selectedSequence.id, photoId, event);
                     }
                   },
                   onPlay: () => {

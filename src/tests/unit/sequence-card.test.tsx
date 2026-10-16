@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { SequenceCard } from "@/components/SequenceCard";
 import type { PhotoSequence } from "@/types/photo-sequence";
 
+const SEQUENCE_BADGE_LABEL = /^sequenceBurst/;
+
 const sequence: PhotoSequence = {
   endedAt: 1000,
   frameCount: 3,
@@ -103,7 +105,10 @@ describe("SequenceCard", () => {
       sequence.photo.id,
       expect.objectContaining({ ctrlKey: false })
     );
-    expect(onOpenDetails).toHaveBeenCalledWith(sequence.id);
+    expect(onOpenDetails).toHaveBeenCalledWith(
+      sequence.id,
+      expect.objectContaining({ type: "click" })
+    );
     vi.useRealTimers();
   });
 
@@ -201,5 +206,50 @@ describe("SequenceCard", () => {
     expect(onToggleExpand).toHaveBeenCalledWith(sequence.id);
     expect(onOpen).not.toHaveBeenCalled();
     expect(onOpenDetails).not.toHaveBeenCalled();
+  });
+
+  it("forwards a details badge click without selecting the group", () => {
+    const onClick = vi.fn();
+    const onOpenDetails = vi.fn();
+    render(
+      <SequenceCard
+        isSelected={false}
+        onClick={onClick}
+        onOpen={vi.fn()}
+        onOpenDetails={onOpenDetails}
+        sequence={sequence}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: SEQUENCE_BADGE_LABEL }),
+      {
+        detail: 1,
+      }
+    );
+    expect(onOpenDetails).toHaveBeenCalledWith(
+      sequence.id,
+      expect.objectContaining({ type: "click", detail: 1 })
+    );
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("keeps Enter detail opening separate from mouse click focus", () => {
+    const onOpenDetails = vi.fn();
+    render(
+      <SequenceCard
+        isSelected={false}
+        onClick={vi.fn()}
+        onOpen={vi.fn()}
+        onOpenDetails={onOpenDetails}
+        sequence={sequence}
+      />
+    );
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "sequenceCardLabel" }),
+      {
+        key: "Enter",
+      }
+    );
+    expect(onOpenDetails).toHaveBeenCalledExactlyOnceWith(sequence.id);
   });
 });

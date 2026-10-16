@@ -101,14 +101,18 @@ export function useGalleryReturn({
     [markTarget, rememberPhoto]
   );
   const markSequence = useCallback(
-    (sequenceId: number) => {
+    (
+      sequenceId: number,
+      { restorePosition = true }: { restorePosition?: boolean } = {}
+    ) => {
       const remembered = browsingTargetRef.current;
       markTarget(
         remembered &&
           "sequenceId" in remembered &&
           remembered.sequenceId === sequenceId
           ? remembered
-          : { kind: "sequence", sequenceId }
+          : { kind: "sequence", sequenceId },
+        restorePosition
       );
     },
     [markTarget]

@@ -78,4 +78,27 @@ describe("SequenceDetailPanel", () => {
 
     expect(onSetRepresentative).toHaveBeenCalledWith(10, 2);
   });
+
+  it("forwards frame click metadata for sequence member focus", () => {
+    const onOpenPhoto = vi.fn();
+    render(
+      <SequenceDetailPanel
+        onClose={vi.fn()}
+        onOpenPhoto={onOpenPhoto}
+        onPlay={vi.fn()}
+        sequence={sequence}
+        width={360}
+      />
+    );
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "sequenceOpenFrameAria" })[1],
+      {
+        detail: 1,
+      }
+    );
+    expect(onOpenPhoto).toHaveBeenCalledWith(
+      2,
+      expect.objectContaining({ type: "click", detail: 1 })
+    );
+  });
 });
