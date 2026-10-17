@@ -18,6 +18,7 @@ const RETRY_SPACE =
   /^(释放空间后重试|Retry after freeing space|空き容量を確保して再試行)$/;
 const VIEW = /^(查看更新|View update|更新を確認)$/;
 const ACTIVE_TOAST = '[data-sonner-toast]:not([data-removed="true"])';
+const CHECKED_AT = "2026-10-03T10:45:06.000Z";
 
 declare global {
   interface Window {
@@ -178,6 +179,10 @@ for (const locale of LOCALES) {
     await page.reload();
     await page.waitForFunction(() => Boolean(window.__e2eNavigate));
     await expect(page.locator("html")).toHaveAttribute("lang", locale);
+    const checkedTime = await page.evaluate(
+      ({ value, language }) => new Date(value).toLocaleString(language),
+      { value: CHECKED_AT, language: locale }
+    );
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0].focus()
     );
@@ -217,6 +222,7 @@ for (const locale of LOCALES) {
           transferred: 28 * 1024 ** 2,
           total: 67 * 1024 ** 2,
           bytesPerSecond: 2.1 * 1024 ** 2,
+          lastCheckedAt: CHECKED_AT,
           phaseStartedAt: new Date().toISOString(),
         });
         const trigger = page.getByTestId("update-header-control");
@@ -228,6 +234,8 @@ for (const locale of LOCALES) {
         const details = page.getByTestId("update-details");
         await expect(details).toBeVisible();
         await expect(details).toHaveCSS("opacity", "1");
+        await expect(details).toContainText(checkedTime);
+        await expect(details).not.toContainText("&#x2F;");
         await expect(details.getByRole("progressbar")).toHaveAttribute(
           "aria-valuenow",
           "42"
@@ -263,6 +271,7 @@ for (const locale of LOCALES) {
           canResume: true,
           canUseFull: true,
           version: "2.2.4",
+          lastCheckedAt: CHECKED_AT,
         });
         await expect(
           details.getByRole("button", { name: RETRY_SPACE })
@@ -279,6 +288,8 @@ for (const locale of LOCALES) {
         await details.getByRole("button", { name: SETTINGS }).click();
         await expect(details).toBeHidden();
         const task = page.getByTestId("update-task-card");
+        await expect(task).toContainText(checkedTime);
+        await expect(task).not.toContainText("&#x2F;");
         await expect(
           task.getByRole("button", { name: RETRY_SPACE })
         ).toBeVisible();

@@ -139,6 +139,7 @@ function UpdateTaskStatus({ view }: { view: UpdateTaskView }) {
         <p className="text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
           {t("updateLastCheck", {
             time: new Date(status.lastCheckedAt).toLocaleString(i18n?.language),
+            interpolation: { escapeValue: false },
           })}
         </p>
       )}
