@@ -9,6 +9,9 @@ import { TestRuntime } from "../helpers/test-runtime";
 
 const mocks = vi.hoisted(() => ({
   state: { phase: "idle" } as UpdateStatus,
+  releaseCache: null as
+    | import("@/services/update-state").ReleaseListCache
+    | null,
   profile: "",
   version: "2.2.3",
   fetch: vi.fn(),
@@ -46,6 +49,19 @@ vi.mock("@/services/diagnostics/logging", () => ({
   appendDiagnosticLog: mocks.log,
 }));
 vi.mock("@/services/update-state", () => ({
+  getReleaseListCache: () => mocks.releaseCache,
+  setReleaseListCache: (
+    value: import("@/services/update-state").ReleaseListCache
+  ) => {
+    mocks.releaseCache = value;
+  },
+  isReleaseListEntry: (value: unknown) =>
+    Boolean(
+      value &&
+        typeof value === "object" &&
+        "tag_name" in value &&
+        typeof value.tag_name === "string"
+    ),
   getUpdateState: () => ({ ...mocks.state }),
   setUpdateState: (next: UpdateStatus) => {
     mocks.state = { ...next };
@@ -85,6 +101,7 @@ beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
   mocks.state = { phase: "idle" };
+  mocks.releaseCache = null;
   mocks.version = "2.2.3";
   runtime = new TestRuntime("update-production");
   mocks.profile = path.join(runtime.root, "profile");
@@ -171,6 +188,487 @@ async function download() {
   expect(manager.checkForUpdatesManually().ok).toBe(true);
   await vi.waitFor(() => expect(mocks.state.phase).toBe("downloaded"));
 }
+
+function metadataResponse(
+  status: number,
+  value: unknown,
+  headers: Record<string, string> = {}
+) {
+  const request = Object.assign(new EventEmitter(), {
+    setHeader: vi.fn(),
+    abort: vi.fn(),
+    followRedirect: vi.fn(),
+    end() {
+      queueMicrotask(() => {
+        const response = Object.assign(new EventEmitter(), {
+          statusCode: status,
+          headers,
+        });
+        request.emit("response", response);
+        response.emit("data", Buffer.from(JSON.stringify(value)));
+        response.emit("end");
+      });
+    },
+  });
+  return request;
+}
+
+async function reloadManager() {
+  manager.stopAutomaticChecks();
+  vi.resetModules();
+  manager = await import("@/services/update-manager");
+}
+
+describe("release list cache and downloaded cache recovery", () => {
+  it("compares cached releases after 304 when the update cache has disappeared", async () => {
+    mocks.request.mockImplementationOnce(() =>
+      metadataResponse(200, [{ tag_name: "v2.2.4", body: null }], {
+        etag: "releases-v1",
+      })
+    );
+    await download();
+    const directory = path.join(mocks.profile, "updates", "github", "2.2.4");
+    await fs.unlink(path.join(directory, "update-manifest.json"));
+    await fs.unlink(path.join(directory, "RELEASES"));
+    await fs.unlink(path.join(directory, manifest.packages.delta.filename));
+    await reloadManager();
+    const request = metadataResponse(304, null);
+    mocks.request.mockImplementationOnce(() => request);
+    await download();
+    expect(request.setHeader).toHaveBeenCalledWith(
+      "If-None-Match",
+      "releases-v1"
+    );
+    expect(mocks.state.version).toBe("2.2.4");
+    expect(mocks.state.releaseNotes).toBeUndefined();
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a legacy ETag without a release list and retries an unsolicited 304 once", async () => {
+    mocks.state = { phase: "idle", etag: "legacy" };
+    const request = metadataResponse(304, null);
+    mocks.request.mockImplementationOnce(() => request);
+    await download();
+    expect(request.setHeader).not.toHaveBeenCalledWith(
+      "If-None-Match",
+      expect.anything()
+    );
+    expect(mocks.request).toHaveBeenCalledTimes(3);
+  });
+
+  it("retains the same transaction budget and full selection when its manifest is lost", async () => {
+    mocks.state = {
+      phase: "downloaded",
+      version: "2.2.4",
+      updateMethod: "full",
+      transactionId: "same-target",
+      cacheRepairs: { delta: true, full: true },
+      fullFallbackAttempted: true,
+    };
+    await download();
+    expect(mocks.state).toMatchObject({
+      transactionId: "same-target",
+      updateMethod: "full",
+      cacheRepairs: { delta: true, full: true },
+      fullFallbackAttempted: true,
+    });
+    expect(mocks.fetch.mock.calls[0][0]).toBe(manifest.packages.full.url);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it("retains a repair budget even if fetching the replacement manifest fails", async () => {
+    mocks.state = {
+      phase: "downloaded",
+      version: "2.2.4",
+      updateMethod: "full",
+      transactionId: "same-target",
+      cacheRepairs: { full: true },
+      fullFallbackAttempted: true,
+    };
+    mocks.request
+      .mockImplementationOnce(() =>
+        metadataResponse(200, [{ tag_name: "v2.2.4" }])
+      )
+      .mockImplementationOnce(() => metadataResponse(404, {}));
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() =>
+      expect(mocks.state).toMatchObject({
+        phase: "error",
+        transactionId: "same-target",
+        cacheRepairs: { full: true },
+      })
+    );
+    await download();
+    expect(mocks.state).toMatchObject({
+      transactionId: "same-target",
+      updateMethod: "full",
+      cacheRepairs: { full: true },
+      fullFallbackAttempted: true,
+    });
+  });
+
+  it("persists repair budgets while replacement metadata is still in flight", async () => {
+    mocks.state = {
+      phase: "downloaded",
+      version: "2.2.4",
+      updateMethod: "full",
+      transactionId: "checking-target",
+      cacheRepairs: { delta: true, full: true },
+      fullFallbackAttempted: true,
+      resumeInstallation: true,
+    };
+    const request = Object.assign(new EventEmitter(), {
+      setHeader: vi.fn(),
+      abort: vi.fn(),
+      end: vi.fn(),
+    });
+    mocks.request.mockImplementationOnce(() => request);
+    manager.checkForUpdatesManually();
+    const interrupted = { ...mocks.state };
+    expect(interrupted).toMatchObject({
+      phase: "checking",
+      version: "2.2.4",
+      transactionId: "checking-target",
+      cacheRepairs: { delta: true, full: true },
+      fullFallbackAttempted: true,
+      resumeInstallation: true,
+    });
+    request.emit("error", new Error("ECONNRESET"));
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
+    mocks.state = interrupted;
+    await reloadManager();
+    manager.startUpdateManager();
+    expect(mocks.state).toMatchObject({
+      phase: "error",
+      transactionId: "checking-target",
+      cacheRepairs: { delta: true, full: true },
+      fullFallbackAttempted: true,
+      resumeInstallation: true,
+    });
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("restarting"));
+    expect(mocks.state).toMatchObject({
+      transactionId: "checking-target",
+      cacheRepairs: { delta: true, full: true },
+      fullFallbackAttempted: true,
+    });
+  });
+
+  it("continues confirmed installation after explicitly retrying with a missing manifest", async () => {
+    mocks.state = {
+      phase: "error",
+      operation: "check",
+      version: "2.2.4",
+      updateMethod: "full",
+      transactionId: "confirmed-target",
+      cacheRepairs: { full: true },
+      resumeInstallation: true,
+    };
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("restarting"));
+    expect(mocks.spawn).toHaveBeenCalledTimes(1);
+    expect(mocks.state).toMatchObject({
+      transactionId: "confirmed-target",
+      updateMethod: "full",
+      cacheRepairs: { full: true },
+    });
+  });
+
+  it("does not install during background metadata recovery, even with a saved install intent", async () => {
+    vi.useFakeTimers();
+    mocks.state = {
+      phase: "error",
+      operation: "check",
+      version: "2.2.4",
+      updateMethod: "full",
+      transactionId: "background-target",
+      resumeInstallation: true,
+      cacheRepairs: { full: true },
+    };
+    manager.startUpdateManager();
+    await vi.advanceTimersByTimeAsync(manager.UPDATE_INITIAL_DELAY_MS);
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("downloaded"));
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.state).toMatchObject({
+      resumeInstallation: true,
+      cacheRepairs: { full: true },
+    });
+  });
+
+  it("reports repeated 304 without a cache as a failure", async () => {
+    mocks.request.mockImplementation(() => metadataResponse(304, null));
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+    expect(mocks.state.lastCheckResult).not.toBe("up-to-date");
+  });
+
+  it("retries manifest retrieval using the cached release list after an earlier failure", async () => {
+    mocks.request
+      .mockImplementationOnce(() =>
+        metadataResponse(200, [{ tag_name: "v2.2.4" }], { etag: "list" })
+      )
+      .mockImplementationOnce(() => metadataResponse(404, {}));
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
+    mocks.request.mockImplementationOnce(() => metadataResponse(304, null));
+    await download();
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+  });
+
+  it("accepts an empty release list and its subsequent 304", async () => {
+    mocks.request.mockImplementationOnce(() =>
+      metadataResponse(200, [], { etag: "empty" })
+    );
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("up-to-date"));
+    mocks.request.mockImplementationOnce(() => metadataResponse(304, null));
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("up-to-date"));
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "delta",
+    "full",
+  ] as const)("repairs damaged %s bytes before installing exactly once", async (method) => {
+    if (method === "full") {
+      mocks.version = "2.2.2";
+    }
+    await download();
+    const info = manifest.packages[method];
+    await fs.writeFile(
+      path.join(mocks.profile, "updates", "github", "2.2.4", info.filename),
+      "broken"
+    );
+    expect(manager.installUpdate().ok).toBe(true);
+    expect(manager.installUpdate()).toEqual({ ok: true, skipped: true });
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(mocks.state.cacheRepairs?.[method]).toBe(true);
+    expect(mocks.state.recoveryReason).toBe("cache-corrupt");
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores a missing package from its manifest without automatically installing", async () => {
+    await download();
+    await fs.unlink(
+      path.join(
+        mocks.profile,
+        "updates",
+        "github",
+        "2.2.4",
+        manifest.packages.delta.filename
+      )
+    );
+    await reloadManager();
+    manager.startUpdateManager();
+    expect(mocks.state).toMatchObject({
+      phase: "error",
+      canResume: true,
+      recoveryReason: "cache-missing",
+    });
+    manager.resumeUpdateDownload();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("downloaded"));
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it("falls back to full once when a repaired delta is still corrupt", async () => {
+    await download();
+    await fs.writeFile(
+      path.join(
+        mocks.profile,
+        "updates",
+        "github",
+        "2.2.4",
+        manifest.packages.delta.filename
+      ),
+      "broken"
+    );
+    mocks.fetch.mockImplementation(
+      async (url: string) =>
+        new Response(
+          url.includes("delta") ? Buffer.alloc(deltaBytes.length, 1) : fullBytes
+        )
+    );
+    manager.installUpdate();
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+    expect(mocks.state).toMatchObject({
+      updateMethod: "full",
+      fullFallbackAttempted: true,
+      cacheRepairs: { delta: true },
+    });
+    expect(mocks.fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("preserves the repair budget and install intent across a failed repair and process restart", async () => {
+    await download();
+    await fs.writeFile(
+      path.join(
+        mocks.profile,
+        "updates",
+        "github",
+        "2.2.4",
+        manifest.packages.delta.filename
+      ),
+      "broken"
+    );
+    mocks.fetch.mockRejectedValue(new Error("EACCES"));
+    manager.installUpdate();
+    await vi.waitFor(() =>
+      expect(mocks.state).toMatchObject({
+        phase: "error",
+        canResume: true,
+        cacheRepairs: { delta: true },
+      })
+    );
+    expect(mocks.state.resumeInstallation).toBe(true);
+    await reloadManager();
+    vi.useFakeTimers();
+    manager.startUpdateManager();
+    expect(mocks.state.cacheRepairs).toEqual({ delta: true });
+    const calls = mocks.fetch.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(mocks.fetch).toHaveBeenCalledTimes(calls);
+    vi.useRealTimers();
+    await vi.waitFor(() =>
+      expect(manager.checkForUpdatesManually().ok).toBe(true)
+    );
+    // Explicit retry starts another round; the periodic timer alone never does.
+    await vi.waitFor(() =>
+      expect(mocks.fetch.mock.calls.length).toBeGreaterThan(calls)
+    );
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
+    mocks.fetch.mockImplementation(async () => new Response(deltaBytes));
+    manager.resumeUpdateDownload();
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+  });
+
+  it("stops after a corrupted full fallback and allows an explicit retry", async () => {
+    await download();
+    await fs.unlink(
+      path.join(
+        mocks.profile,
+        "updates",
+        "github",
+        "2.2.4",
+        manifest.packages.delta.filename
+      )
+    );
+    mocks.fetch.mockImplementation(
+      async (url: string) =>
+        new Response(
+          Buffer.alloc(
+            url.includes("delta") ? deltaBytes.length : fullBytes.length,
+            1
+          )
+        )
+    );
+    manager.installUpdate();
+    await vi.waitFor(() =>
+      expect(mocks.state).toMatchObject({
+        phase: "error",
+        canResume: true,
+        updateMethod: "full",
+        fullFallbackAttempted: true,
+      })
+    );
+    expect(mocks.fetch).toHaveBeenCalledTimes(5);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    mocks.fetch.mockImplementation(async () => new Response(fullBytes));
+    manager.resumeUpdateDownload();
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+  });
+
+  it("does not renew an exhausted persisted repair budget until explicit retry", async () => {
+    await download();
+    mocks.state.cacheRepairs = { delta: true };
+    await fs.writeFile(
+      path.join(
+        mocks.profile,
+        "updates",
+        "github",
+        "2.2.4",
+        manifest.packages.delta.filename
+      ),
+      "broken"
+    );
+    await reloadManager();
+    manager.startUpdateManager();
+    manager.installUpdate();
+    await vi.waitFor(() =>
+      expect(mocks.state).toMatchObject({ phase: "error", canResume: true })
+    );
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    manager.resumeUpdateDownload();
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the task resumable when preflight detects insufficient download space", async () => {
+    const space = vi
+      .spyOn(fs, "statfs")
+      .mockResolvedValue({ bavail: 1n, bsize: 1n } as Awaited<
+        ReturnType<typeof fs.statfs>
+      >);
+    try {
+      manager.checkForUpdatesManually();
+      await vi.waitFor(() =>
+        expect(mocks.state).toMatchObject({
+          phase: "error",
+          message: "UPDATE_DISK_SPACE",
+          canResume: true,
+          updateMethod: "delta",
+        })
+      );
+      expect(mocks.fetch).not.toHaveBeenCalled();
+    } finally {
+      space.mockRestore();
+    }
+    manager.resumeUpdateDownload();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("downloaded"));
+  });
+
+  it("reports disk exhaustion during the download without retrying or switching packages", async () => {
+    mocks.fetch.mockRejectedValue(new Error("ENOSPC"));
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() =>
+      expect(mocks.state).toMatchObject({
+        phase: "error",
+        message: "UPDATE_DISK_SPACE",
+        canResume: true,
+        updateMethod: "delta",
+      })
+    );
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it("does not launch the installer or download full when installation space is insufficient", async () => {
+    await download();
+    const space = vi
+      .spyOn(fs, "statfs")
+      .mockResolvedValue({ bavail: 1n, bsize: 1n } as Awaited<
+        ReturnType<typeof fs.statfs>
+      >);
+    try {
+      manager.installUpdate();
+      await vi.waitFor(() =>
+        expect(mocks.state).toMatchObject({
+          phase: "error",
+          message: "UPDATE_DISK_SPACE",
+          operation: "install",
+        })
+      );
+      expect(mocks.fetch).toHaveBeenCalledOnce();
+      expect(mocks.spawn).not.toHaveBeenCalled();
+    } finally {
+      space.mockRestore();
+    }
+    manager.installUpdate();
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+  });
+});
 
 describe("GitHub download, local installer and restart transaction", () => {
   it("installs delta and explicitly relaunches the target executable once", async () => {

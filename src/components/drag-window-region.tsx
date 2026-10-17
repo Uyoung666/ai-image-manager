@@ -15,11 +15,13 @@ import {
 import icon from "../../assets/icon.png";
 
 interface DragWindowRegionProps {
+  actions?: ReactNode;
   immersive?: boolean;
   title?: ReactNode;
 }
 
 export default function DragWindowRegion({
+  actions,
   immersive = false,
   title,
 }: DragWindowRegionProps) {
@@ -102,6 +104,11 @@ export default function DragWindowRegion({
         )}
         {isMacOS && <div className="flex flex-1" style={{ height: 28 }} />}
       </button>
+      {actions && (
+        <div className="window-buttons flex shrink-0 items-center">
+          {actions}
+        </div>
+      )}
       {!isMacOS && (
         <div className="window-buttons shrink-0">
           <WindowButtons isMaximized={isMaximized} />

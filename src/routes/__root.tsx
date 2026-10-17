@@ -24,6 +24,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StartupSplash } from "@/components/startup-splash";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { UpdateHeaderControl } from "@/components/update-header-control";
 import { BrowseSessionProvider } from "@/contexts/BrowseSessionContext";
 import { ImportDropProvider } from "@/contexts/import-drop-context";
 import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
@@ -296,7 +297,10 @@ export function RootSurface({
 function StandaloneLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-background">
-      <DragWindowRegion title="AI Image Manager" />
+      <DragWindowRegion
+        actions={<UpdateHeaderControl />}
+        title="AI Image Manager"
+      />
       <main className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
     </div>
   );

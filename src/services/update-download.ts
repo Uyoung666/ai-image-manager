@@ -4,6 +4,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { net } from "electron";
 import type { UpdatePackage } from "@/services/github-update";
+import { assertUpdateDownloadSpace } from "@/services/update-storage";
 import type { UpdateStatus } from "@/types/update";
 import { classifyUpdateError } from "@/utils/update-error";
 
@@ -106,6 +107,7 @@ export async function downloadUpdatePackage(
         if (size >= info.size) {
           await fsp.rm(partial, { force: true });
         }
+        await assertUpdateDownloadSpace(info, destination);
         await downloadAttempt(info, partial, progress);
         if (!(await verifyUpdatePackage(partial, info))) {
           throw new Error("UPDATE_PACKAGE_CORRUPT");

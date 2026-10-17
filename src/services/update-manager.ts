@@ -22,7 +22,20 @@ import {
   verifyUpdatePackage,
 } from "@/services/update-download";
 import { recordUpdateError } from "@/services/update-error";
-import { getUpdateState, setUpdateState } from "@/services/update-state";
+import {
+  getReleaseListCache,
+  getUpdateState,
+  isReleaseListEntry,
+  type ReleaseListEntry,
+  setReleaseListCache,
+  setUpdateState,
+} from "@/services/update-state";
+import {
+  assertUpdateInstallSpace,
+  cleanupUpdateCache,
+  invalidateUpdatePackage,
+  touchUpdateCache,
+} from "@/services/update-storage";
 import {
   APP_PREFERENCE_DEFAULTS,
   APP_PREFERENCE_KEYS,
@@ -107,6 +120,35 @@ let installTask: Promise<void> | null = null;
 let installRecoveryTimer: ReturnType<typeof setInterval> | null = null;
 let updateQuitAllowed = false;
 let downloadedStatus: UpdatePayload | null = null;
+let cacheCleanupTask: Promise<void> | null = null;
+
+function maintainUpdateCache(): void {
+  if (isLegacyUpdaterPath() || cacheCleanupTask) {
+    return;
+  }
+  const canClean = () =>
+    !(
+      isLockedPhase(activePhase) ||
+      downloadTask ||
+      installTask ||
+      isProcessRunning(getUpdateState().installerPid)
+    );
+  if (!canClean()) {
+    return;
+  }
+  cacheCleanupTask = cleanupUpdateCache(
+    path.join(app.getPath("userData"), "updates", "github"),
+    () =>
+      new Set([
+        app.getVersion(),
+        getUpdateState().version ?? "",
+        pendingDownload?.plan.targetVersion ?? "",
+      ]),
+    canClean
+  ).finally(() => {
+    cacheCleanupTask = null;
+  });
+}
 
 function isSupportedEnvironment(): boolean {
   return process.platform === "win32" && app.isPackaged;
@@ -356,7 +398,13 @@ function hydrateDownloadedLock() {
       }
       if (
         ["downloading", "retry-wait", "recovering"].includes(current.phase) ||
-        (current.phase === "error" && current.operation === "download")
+        (current.phase === "error" && current.operation === "download") ||
+        (current.phase === "downloaded" &&
+          !(
+            customDownloaded &&
+            existsSync(path.join(directory, customDownloaded.package.filename))
+          )) ||
+        current.resumeInstallation
       ) {
         pendingDownload = restoreDownloadTask(current, directory);
       }
@@ -395,6 +443,7 @@ function hydrateDownloadedLock() {
     pendingDownload = null;
     customDownloaded = null;
     cachedFeedDirectory = null;
+    maintainUpdateCache();
     return;
   }
   if (installation && version) {
@@ -412,20 +461,37 @@ function hydrateDownloadedLock() {
         return;
       }
     }
-    markInterruptedInstall(current);
+    if (pendingDownload) {
+      broadcast({
+        ...current,
+        phase: "error",
+        operation: "download",
+        canResume: true,
+        canUseFull: pendingDownload.plan.method === "delta",
+        resumeInstallation: true,
+        message: current.message ?? "UPDATE_INSTALL_INTERRUPTED",
+        networkWaiting: false,
+        bytesPerSecond: 0,
+      });
+    } else {
+      markInterruptedInstall(current);
+    }
     return;
   }
   if (current.phase === "downloaded") {
     // Legacy native-updater tests have no custom feed; production needs a cache.
-    if (customDownloaded || isLegacyUpdaterPath()) {
+    if ((customDownloaded && !pendingDownload) || isLegacyUpdaterPath()) {
       activePhase = "downloaded";
       downloadedStatus = current;
     } else {
       broadcast({
         ...current,
         phase: "error",
-        operation: "check",
+        operation: pendingDownload ? "download" : "check",
         message: "UPDATE_NOT_READY",
+        canResume: !!pendingDownload,
+        canUseFull: pendingDownload?.plan.method === "delta",
+        recoveryReason: "cache-missing",
       });
     }
   } else if (pendingDownload) {
@@ -474,9 +540,7 @@ function restoreDownloadedMetadata(
       : "full";
   const packageInfo =
     method === "delta" ? manifest.packages.delta : manifest.packages.full;
-  if (
-    !(packageInfo && existsSync(path.join(directory, packageInfo.filename)))
-  ) {
+  if (!packageInfo) {
     return null;
   }
   return {
@@ -498,7 +562,6 @@ function broadcast(payload: UpdatePayload) {
     ...(previous.lastCheckResult && !payload.lastCheckResult
       ? { lastCheckResult: previous.lastCheckResult }
       : {}),
-    ...(previous.etag && !payload.etag ? { etag: previous.etag } : {}),
     ...payload,
   };
   setUpdateState(next);
@@ -679,6 +742,7 @@ function configure(): boolean {
       attachListeners();
     }
     configured = true;
+    maintainUpdateCache();
     return true;
   } catch (error) {
     configurationError = recordUpdateError(error, "configure");
@@ -686,7 +750,7 @@ function configure(): boolean {
   }
 }
 
-function check(): UpdateResult {
+function check(userInitiated = false): UpdateResult {
   if (!isSupportedEnvironment()) {
     broadcast({ phase: "error", message: "DEV_MODE" });
     return { ok: false, error: "DEV_MODE" };
@@ -719,17 +783,30 @@ function check(): UpdateResult {
           : "NETWORK_ERROR",
     };
   }
-  if (isLockedPhase(activePhase)) {
+  if (
+    downloadTask ||
+    installTask ||
+    isLockedPhase(activePhase) ||
+    isProcessRunning(getUpdateState().installerPid)
+  ) {
     return { ok: true, skipped: true };
   }
 
+  const recoveryState = getUpdateState();
   activePhase = "checking";
   // Mark the lock before calling into Electron. Some updater versions emit
   // checking-for-update asynchronously, and a second IPC call can otherwise
   // slip through during that gap.
-  broadcast({ operation: "check", phase: "checking" });
+  broadcast({
+    ...recoveryState,
+    operation: "check",
+    phase: "checking",
+    message: undefined,
+    canResume: false,
+    canUseFull: false,
+  });
   if (!isLegacyUpdaterPath()) {
-    checkGitHubUpdate().catch(() => undefined);
+    checkGitHubUpdate(recoveryState, userInitiated).catch(() => undefined);
     return { ok: true };
   }
   try {
@@ -743,7 +820,34 @@ function check(): UpdateResult {
   }
 }
 
-async function checkGitHubUpdate(): Promise<void> {
+function preserveFullUpdatePlan(
+  selected: UpdatePlan,
+  recoveryState: UpdatePayload
+): UpdatePlan {
+  if (
+    recoveryState.version === selected.targetVersion &&
+    recoveryState.transactionId &&
+    recoveryState.updateMethod === "full"
+  ) {
+    return { ...selected, method: "full", package: selected.fallback };
+  }
+  return selected;
+}
+
+function downloadOperationForCheck(
+  sameTransaction: boolean,
+  recoveryState: UpdatePayload,
+  userInitiated: boolean
+): DownloadTask["operation"] {
+  return sameTransaction && recoveryState.resumeInstallation && userInitiated
+    ? "install"
+    : "download";
+}
+
+async function checkGitHubUpdate(
+  recoveryState: UpdatePayload,
+  userInitiated: boolean
+): Promise<void> {
   let targetVersion: string | undefined;
   let targetURL: string | undefined;
   try {
@@ -751,7 +855,6 @@ async function checkGitHubUpdate(): Promise<void> {
     if (!metadata) {
       activePhase = null;
       broadcast({
-        etag: getCurrentUpdateStatus()?.etag,
         lastCheckedAt: nowISO(),
         lastCheckResult: "up-to-date",
         operation: "check",
@@ -759,11 +862,10 @@ async function checkGitHubUpdate(): Promise<void> {
       });
       return;
     }
-    const plan = chooseUpdatePlan(app.getVersion(), metadata.manifest);
-    if (!plan) {
+    const selected = chooseUpdatePlan(app.getVersion(), metadata.manifest);
+    if (!selected) {
       activePhase = null;
       broadcast({
-        etag: metadata.etag,
         lastCheckedAt: nowISO(),
         lastCheckResult: "up-to-date",
         operation: "check",
@@ -771,15 +873,32 @@ async function checkGitHubUpdate(): Promise<void> {
       });
       return;
     }
+    const sameTransaction =
+      recoveryState.version === selected.targetVersion &&
+      Boolean(recoveryState.transactionId);
+    const plan = preserveFullUpdatePlan(selected, recoveryState);
+    const operation = downloadOperationForCheck(
+      sameTransaction,
+      recoveryState,
+      userInitiated
+    );
     targetVersion = plan.targetVersion;
     targetURL = plan.package.url;
     broadcast({
-      transactionId: randomUUID(),
+      transactionId: sameTransaction
+        ? recoveryState.transactionId
+        : randomUUID(),
+      ...(sameTransaction
+        ? {
+            cacheRepairs: recoveryState.cacheRepairs,
+            fullFallbackAttempted: recoveryState.fullFallbackAttempted,
+            resumeInstallation: recoveryState.resumeInstallation,
+          }
+        : {}),
       sourceVersion: app.getVersion(),
-      etag: metadata.etag,
       lastCheckedAt: nowISO(),
       lastCheckResult: "update-available",
-      operation: "download",
+      operation,
       phase: "downloading",
       version: plan.targetVersion,
       updateMethod: plan.method,
@@ -789,9 +908,12 @@ async function checkGitHubUpdate(): Promise<void> {
     pendingDownload = {
       plan,
       releaseNotes: metadata.release.body,
-      operation: "download",
+      operation,
     };
-    await executeDownloadTask();
+    downloadTask = executeDownloadTask().finally(() => {
+      downloadTask = null;
+    });
+    await downloadTask;
   } catch (error) {
     activePhase = null;
     if (error instanceof UpdateRequestError) {
@@ -820,6 +942,12 @@ async function checkGitHubUpdate(): Promise<void> {
             : undefined))
         : undefined;
     broadcast({
+      transactionId: recoveryState.transactionId,
+      cacheRepairs: recoveryState.cacheRepairs,
+      fullFallbackAttempted: recoveryState.fullFallbackAttempted,
+      resumeInstallation: recoveryState.resumeInstallation,
+      version: recoveryState.version,
+      updateMethod: recoveryState.updateMethod,
       ...(targetURL ? { updateURL: targetURL } : {}),
       ...(targetVersion ? { version: targetVersion } : {}),
       message,
@@ -838,8 +966,61 @@ function fullDownloadTask(task: DownloadTask, reason: string): DownloadTask {
   };
 }
 
-async function executeDownloadTask(): Promise<void> {
+async function downloadPendingPackage(): Promise<CustomDownloadedUpdate> {
   let task = pendingDownload;
+  if (!task) {
+    throw new Error("UPDATE_NOT_READY");
+  }
+  let downloaded: CustomDownloadedUpdate;
+  try {
+    downloaded = await downloadAndPrepare(
+      task.plan,
+      task.releaseNotes,
+      task.fallbackReason,
+      task.fallbackReason,
+      task.operation
+    );
+  } catch (error) {
+    const code = classifyUpdateError(error);
+    if (
+      task.plan.method !== "delta" ||
+      getUpdateState().fullFallbackAttempted ||
+      !["UPDATE_NOT_FOUND", "UPDATE_PACKAGE_CORRUPT"].includes(code)
+    ) {
+      throw error;
+    }
+    recordUpdateDiagnostic({
+      stage: "delta-download-fallback",
+      failure: code,
+    });
+    task = fullDownloadTask(
+      task,
+      code === "UPDATE_NOT_FOUND" ? "delta-missing" : "delta-corrupt"
+    );
+    pendingDownload = task;
+    broadcast({
+      ...getUpdateState(),
+      fullFallbackAttempted: true,
+      updateMethod: "full",
+      fallbackReason: task.fallbackReason,
+      updateURL: task.plan.package.url,
+      transferred: 0,
+      total: task.plan.package.size,
+      percent: 0,
+    });
+    downloaded = await downloadAndPrepare(
+      task.plan,
+      task.releaseNotes,
+      task.fallbackReason,
+      task.fallbackReason,
+      task.operation
+    );
+  }
+  return downloaded;
+}
+
+async function executeDownloadTask(): Promise<void> {
+  const task = pendingDownload;
   if (!task) {
     return;
   }
@@ -848,7 +1029,8 @@ async function executeDownloadTask(): Promise<void> {
     ...getUpdateState(),
     phase: "downloading",
     operation: task.operation,
-    resumeInstallation: task.operation === "install",
+    resumeInstallation:
+      task.operation === "install" || getUpdateState().resumeInstallation,
     version: task.plan.targetVersion,
     updateMethod: task.plan.method,
     updateURL: task.plan.package.url,
@@ -861,49 +1043,7 @@ async function executeDownloadTask(): Promise<void> {
     retryAfter: undefined,
   });
   try {
-    let downloaded: CustomDownloadedUpdate;
-    try {
-      downloaded = await downloadAndPrepare(
-        task.plan,
-        task.releaseNotes,
-        task.fallbackReason,
-        task.fallbackReason,
-        task.operation
-      );
-    } catch (error) {
-      const code = classifyUpdateError(error);
-      if (
-        task.plan.method !== "delta" ||
-        !["UPDATE_NOT_FOUND", "UPDATE_PACKAGE_CORRUPT"].includes(code)
-      ) {
-        throw error;
-      }
-      recordUpdateDiagnostic({
-        stage: "delta-download-fallback",
-        failure: code,
-      });
-      task = fullDownloadTask(
-        task,
-        code === "UPDATE_NOT_FOUND" ? "delta-missing" : "delta-corrupt"
-      );
-      pendingDownload = task;
-      broadcast({
-        ...getUpdateState(),
-        updateMethod: "full",
-        fallbackReason: task.fallbackReason,
-        updateURL: task.plan.package.url,
-        transferred: 0,
-        total: task.plan.package.size,
-        percent: 0,
-      });
-      downloaded = await downloadAndPrepare(
-        task.plan,
-        task.releaseNotes,
-        task.fallbackReason,
-        task.fallbackReason,
-        task.operation
-      );
-    }
+    const downloaded = await downloadPendingPackage();
     customDownloaded = downloaded;
     cachedFeedDirectory = downloaded.feedDirectory;
     pendingDownload = null;
@@ -927,13 +1067,16 @@ async function executeDownloadTask(): Promise<void> {
     if (task.operation === "install") {
       downloadedStatus = status;
       broadcast(status);
-      installUpdate();
+      setInstallStatus("installing", { resumeInstallation: true });
+      await applyLocalUpdate(downloaded.feedDirectory);
     } else {
       notifyDownloaded(status);
     }
   } catch (error) {
     activePhase = null;
-    const message = recordUpdateError(error, "download-update");
+    const code = recordUpdateError(error, "download-update");
+    const message =
+      code === "UPDATE_INSTALL_DISK_FULL" ? "UPDATE_DISK_SPACE" : code;
     broadcast({
       ...getUpdateState(),
       phase: "error",
@@ -942,14 +1085,14 @@ async function executeDownloadTask(): Promise<void> {
       bytesPerSecond: 0,
       networkWaiting: false,
       canResume: true,
-      canUseFull: task.plan.method === "delta",
+      canUseFull: pendingDownload?.plan.method === "delta",
       retryAfter:
         error instanceof PackageRequestError ? error.retryAfter : undefined,
     });
     recordUpdateDiagnostic({
       stage: "download-interrupted",
       failure: message,
-      method: task.plan.method,
+      method: pendingDownload?.plan.method ?? task.plan.method,
     });
   }
 }
@@ -976,6 +1119,11 @@ export function resumeUpdateDownload(useFull = false): UpdateResult {
   if (retryAfter && Date.parse(retryAfter) > Date.now()) {
     return { ok: false, error: "UPDATE_RATE_LIMITED" };
   }
+  broadcast({
+    ...getUpdateState(),
+    cacheRepairs: {},
+    fullFallbackAttempted: false,
+  });
   if (useFull) {
     pendingDownload = fullDownloadTask(pendingDownload, "user-selected");
   }
@@ -1022,18 +1170,29 @@ async function fetchLatestGitHubRelease(): Promise<{
   manifest: GitHubUpdateManifest;
   release: { body?: string; tag_name: string };
 } | null> {
-  const response = await requestJSON(releaseApiURL(), {
-    etag: getCurrentUpdateStatus()?.etag,
-  });
-  if (response.status === 304) {
-    return null;
+  const cache = getReleaseListCache();
+  let response = await requestJSON(releaseApiURL(), { etag: cache?.etag });
+  if (response.status === 304 && !cache) {
+    response = await requestJSON(releaseApiURL());
   }
-  const releases = response.value as Array<{
-    body?: string;
-    draft?: boolean;
-    prerelease?: boolean;
-    tag_name?: string;
-  }>;
+  let releases: ReleaseListEntry[];
+  if (response.status === 304) {
+    if (!cache) {
+      throw new Error("GitHub returned 304 without cached release metadata");
+    }
+    releases = cache.releases;
+  } else {
+    if (
+      !(
+        Array.isArray(response.value) &&
+        response.value.every(isReleaseListEntry)
+      )
+    ) {
+      throw new Error("GitHub returned invalid release metadata");
+    }
+    releases = response.value;
+    setReleaseListCache({ etag: response.etag, releases });
+  }
   const release = selectLatestRelease(releases, app.getVersion());
   if (!release?.tag_name) {
     return null;
@@ -1055,7 +1214,7 @@ async function fetchLatestGitHubRelease(): Promise<{
   return {
     etag: response.etag,
     manifest,
-    release: { body: release.body, tag_name: release.tag_name },
+    release: { body: release.body ?? undefined, tag_name: release.tag_name },
   };
 }
 
@@ -1301,6 +1460,7 @@ async function downloadAndPrepare(
     JSON.stringify(plan.manifest),
     "utf8"
   );
+  await touchUpdateCache(feedDirectory);
   const packagePath = path.join(feedDirectory, plan.package.filename);
   await downloadToFile(
     plan.package,
@@ -1440,7 +1600,7 @@ export function checkForUpdatesManually() {
   if (pendingDownload && !downloadTask && !isLockedPhase(activePhase)) {
     return resumeUpdateDownload();
   }
-  return check();
+  return check(true);
 }
 
 export function setReminderEnabled(enabled: boolean) {
@@ -1467,43 +1627,7 @@ export function installUpdate(): UpdateResult {
   }
 
   if (!isLegacyUpdaterPath()) {
-    if (installTask) {
-      return { ok: true, skipped: true };
-    }
-    const feedDirectory =
-      customDownloaded?.feedDirectory ?? cachedFeedDirectory;
-    const current = getCurrentUpdateStatus();
-    if (isProcessRunning(current?.installerPid)) {
-      return { ok: false, error: "UPDATE_BUSY" };
-    }
-    const canRetryInstall =
-      current?.phase === "error" && current.operation === "install";
-    if (
-      !(
-        (activePhase === "downloaded" || canRetryInstall) &&
-        feedDirectory &&
-        customDownloaded
-      )
-    ) {
-      return { ok: false, error: "UPDATE_NOT_READY" };
-    }
-    const update = customDownloaded;
-    updateQuitAllowed = false;
-    setInstallStatus("installing", {
-      fallbackReason: update.fallbackReason,
-      updateMethod: update.method,
-      updateURL: update.package.url,
-      version: update.manifest.version,
-      relaunchToken: randomUUID(),
-      restartAttempts: 0,
-      installCompletedAt: undefined,
-      installerPid: undefined,
-      resumeInstallation: false,
-    });
-    installTask = applyLocalUpdate(feedDirectory).finally(() => {
-      installTask = null;
-    });
-    return { ok: true };
+    return installCustomUpdate();
   }
 
   if (activePhase !== "downloaded") {
@@ -1538,6 +1662,52 @@ export function installUpdate(): UpdateResult {
     });
     return { ok: false, error: message };
   }
+}
+
+function installCustomUpdate(): UpdateResult {
+  if (isProcessRunning(getUpdateState().installerPid)) {
+    return { ok: false, error: "UPDATE_BUSY" };
+  }
+  if (
+    installTask ||
+    downloadTask ||
+    (isLockedPhase(activePhase) && activePhase !== "downloaded")
+  ) {
+    return { ok: true, skipped: true };
+  }
+  const feedDirectory = customDownloaded?.feedDirectory ?? cachedFeedDirectory;
+  const current = getCurrentUpdateStatus();
+  const canRetryInstall =
+    current?.phase === "error" && current.operation === "install";
+  if (
+    !(
+      (activePhase === "downloaded" || canRetryInstall) &&
+      feedDirectory &&
+      customDownloaded
+    )
+  ) {
+    return { ok: false, error: "UPDATE_NOT_READY" };
+  }
+  const update = customDownloaded;
+  updateQuitAllowed = false;
+  setInstallStatus("installing", {
+    fallbackReason: update.fallbackReason,
+    updateMethod: update.method,
+    updateURL: update.package.url,
+    version: update.manifest.version,
+    relaunchToken: randomUUID(),
+    restartAttempts: 0,
+    installCompletedAt: undefined,
+    installerPid: undefined,
+    resumeInstallation: true,
+    ...(current?.phase === "error"
+      ? { cacheRepairs: {}, fullFallbackAttempted: false }
+      : {}),
+  });
+  installTask = applyLocalUpdate(feedDirectory).finally(() => {
+    installTask = null;
+  });
+  return { ok: true };
 }
 
 function getInstallRoot(): string {
@@ -1617,99 +1787,149 @@ function launchInstalledVersion(version: string): void {
   app.quit();
 }
 
+function installedDownloadTask(update: CustomDownloadedUpdate): DownloadTask {
+  return {
+    plan: {
+      currentVersion: app.getVersion(),
+      fallback: update.manifest.packages.full,
+      manifest: update.manifest,
+      method: update.method,
+      package: update.package,
+      targetVersion: update.manifest.version,
+    },
+    operation: "install",
+    releaseNotes: update.releaseNotes,
+    fallbackReason: update.fallbackReason,
+  };
+}
+
+async function prepareInstallDownload(): Promise<CustomDownloadedUpdate> {
+  const task = pendingDownload;
+  if (!task) {
+    throw new Error("UPDATE_NOT_READY");
+  }
+  broadcast({
+    ...getUpdateState(),
+    phase: "downloading",
+    operation: "install",
+    resumeInstallation: true,
+    updateMethod: task.plan.method,
+    updateURL: task.plan.package.url,
+    fallbackReason: task.fallbackReason,
+    transferred: 0,
+    total: task.plan.package.size,
+    percent: 0,
+    canResume: false,
+    canUseFull: false,
+    message: undefined,
+  });
+  activePhase = "downloading";
+  const downloaded = await downloadPendingPackage();
+  customDownloaded = downloaded;
+  cachedFeedDirectory = downloaded.feedDirectory;
+  pendingDownload = null;
+  setInstallStatus("installing", {
+    updateMethod: downloaded.method,
+    fallbackReason: downloaded.fallbackReason,
+    updateURL: downloaded.package.url,
+    total: downloaded.package.size,
+    transferred: downloaded.package.size,
+    resumeInstallation: true,
+  });
+  return downloaded;
+}
+
+async function repairInstallCache(
+  update: CustomDownloadedUpdate
+): Promise<CustomDownloadedUpdate> {
+  pendingDownload = installedDownloadTask(update);
+  const current = getUpdateState();
+  // Record the repair before any asynchronous work so crashes cannot reset it.
+  if (current.cacheRepairs?.[update.method]) {
+    throw new Error("UPDATE_PACKAGE_CORRUPT");
+  }
+  const packagePath = path.join(update.feedDirectory, update.package.filename);
+  setInstallStatus("recovering", {
+    cacheRepairs: { ...current.cacheRepairs, [update.method]: true },
+    recoveryReason: existsSync(packagePath) ? "cache-corrupt" : "cache-missing",
+    resumeInstallation: true,
+  });
+  // Only invalidate the verified manifest's selected package, never its siblings.
+  await invalidateUpdatePackage(update.feedDirectory, update.package);
+  return prepareInstallDownload();
+}
+
 async function applyLocalUpdate(feedDirectory: string): Promise<void> {
   try {
-    if (
-      !(
-        customDownloaded &&
-        (await verifyUpdatePackage(
-          path.join(feedDirectory, customDownloaded.package.filename),
-          customDownloaded.package
-        ))
-      )
-    ) {
-      throw new Error("UPDATE_PACKAGE_CORRUPT");
+    let update = customDownloaded;
+    if (!update) {
+      throw new Error("UPDATE_NOT_READY");
     }
-    await runLocalSquirrelUpdate(feedDirectory);
-    const targetVersion = customDownloaded?.manifest.version;
-    if (!targetVersion) {
-      throw new Error("UPDATE_RESTART_REQUIRED");
-    }
-    launchInstalledVersion(targetVersion);
-  } catch (error) {
-    let installError = error;
     if (
-      customDownloaded?.method === "delta" &&
-      !customDownloaded.fallbackReason &&
-      shouldFallbackFromDelta(error)
+      !(await verifyUpdatePackage(
+        path.join(feedDirectory, update.package.filename),
+        update.package
+      ))
     ) {
-      const reason = error instanceof Error ? error.message : String(error);
-      recordUpdateDiagnostic({
-        fallbackReason: "delta-failed",
-        failure: reason,
-        stage: "delta-install-fallback",
+      update = await repairInstallCache(update);
+    }
+    for (;;) {
+      await assertUpdateInstallSpace({
+        packagePath: path.join(update.feedDirectory, update.package.filename),
+        method: update.method,
+        fullSize: update.manifest.packages.full.size,
+        applicationDirectory: path.dirname(process.execPath),
+        installRoot: getInstallRoot(),
+        temporaryDirectory: app.getPath("temp"),
       });
       try {
+        await runLocalSquirrelUpdate(update.feedDirectory);
+        break;
+      } catch (error) {
+        if (
+          update.method !== "delta" ||
+          getUpdateState().fullFallbackAttempted ||
+          !shouldFallbackFromDelta(error)
+        ) {
+          throw error;
+        }
+        recordUpdateDiagnostic({
+          stage: "delta-install-fallback",
+          failure: String(error),
+        });
+        pendingDownload = fullDownloadTask(
+          installedDownloadTask(update),
+          "delta-failed"
+        );
         setInstallStatus("recovering", {
+          fullFallbackAttempted: true,
           fallbackReason: "delta-failed",
+          recoveryReason: undefined,
           updateMethod: "full",
           resumeInstallation: true,
         });
-        const fallbackPackage = customDownloaded.manifest.packages.full;
-        const fallbackPlan: UpdatePlan = {
-          currentVersion: app.getVersion(),
-          fallback: fallbackPackage,
-          manifest: customDownloaded.manifest,
-          method: "full",
-          package: fallbackPackage,
-          targetVersion: customDownloaded.manifest.version,
-        };
-        pendingDownload = {
-          plan: fallbackPlan,
-          operation: "install",
-          releaseNotes: customDownloaded.releaseNotes,
-          fallbackReason: "delta-failed",
-        };
-        const downloaded = await downloadAndPrepare(
-          fallbackPlan,
-          customDownloaded.releaseNotes,
-          "delta-failed",
-          "delta-failed",
-          "install"
-        );
-        pendingDownload = null;
-        customDownloaded = downloaded;
-        cachedFeedDirectory = downloaded.feedDirectory;
-        setInstallStatus("installing", {
-          fallbackReason: downloaded.fallbackReason,
-          releaseNotes: downloaded.releaseNotes,
-          total: downloaded.package.size,
-          transferred: downloaded.package.size,
-          updateMethod: downloaded.method,
-          updateURL: downloaded.package.url,
-          version: downloaded.manifest.version,
-        });
-        await runLocalSquirrelUpdate(downloaded.feedDirectory);
-        launchInstalledVersion(downloaded.manifest.version);
-        return;
-      } catch (fallbackError) {
-        installError = fallbackError;
+        update = await prepareInstallDownload();
       }
     }
+    launchInstalledVersion(update.manifest.version);
+  } catch (error) {
     updateQuitAllowed = false;
     activePhase = !pendingDownload && customDownloaded ? "downloaded" : null;
-    const message = recordUpdateError(installError, "install-github-update");
+    const code = recordUpdateError(error, "install-github-update");
+    const message =
+      pendingDownload && code === "UPDATE_INSTALL_DISK_FULL"
+        ? "UPDATE_DISK_SPACE"
+        : code;
     broadcast({
       ...getCurrentUpdateStatus(),
       message,
       operation: pendingDownload ? "download" : "install",
       retryAfter:
-        installError instanceof PackageRequestError
-          ? installError.retryAfter
-          : undefined,
+        error instanceof PackageRequestError ? error.retryAfter : undefined,
       canResume: !!pendingDownload,
       canUseFull: pendingDownload?.plan.method === "delta",
       bytesPerSecond: 0,
+      networkWaiting: false,
       phase: "error",
       phaseStartedAt: nowISO(),
     });

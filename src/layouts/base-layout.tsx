@@ -19,6 +19,7 @@ import {
 import { PerfOverlay, usePerfMonitor } from "@/components/PerfMonitor";
 import { Sidebar } from "@/components/Sidebar";
 import { SpotlightSearch } from "@/components/SpotlightSearch";
+import { UpdateHeaderControl } from "@/components/update-header-control";
 import { useImportDropContext } from "@/contexts/import-drop-context";
 import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { GlobalAiStatusProvider } from "@/hooks/use-global-ai-status";
@@ -201,6 +202,7 @@ function BaseLayoutContent({ children }: { children: ReactNode }) {
               role="application"
             >
               <DragWindowRegion
+                actions={<UpdateHeaderControl />}
                 immersive={isCullSession}
                 title="AI Image Manager"
               />

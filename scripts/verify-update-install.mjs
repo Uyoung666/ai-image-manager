@@ -241,12 +241,14 @@ if (delta.size >= full.size) {
   throw new Error("Fixture must exercise delta selection");
 }
 let mode = "delta";
+let scenarioMode = "normal";
 const server = createServer(async (request, response) => {
   try {
     const remote = new URL(decodeURIComponent(request.url.slice(1)));
     const filename = path.basename(remote.pathname);
     trace.push({
       method: mode,
+      scenario: scenarioMode,
       url: remote.toString(),
       range: request.headers.range,
     });
@@ -298,88 +300,92 @@ const serverURL = `http://127.0.0.1:${server.address().port}`;
 try {
   for (const installer of ["squirrel", "msi"]) {
     for (const method of ["delta", "full"]) {
-      mode = method;
-      const installRoot = path.join(root, `${installer}-${method}`);
-      const profile = path.join(root, `${installer}-${method}-profile`);
-      await fsp.mkdir(profile);
-      await fsp.mkdir(path.join(installRoot, "packages"), { recursive: true });
-      await fsp.cp(
-        path.join(root, "payload-2.2.3"),
-        path.join(installRoot, "app-2.2.3"),
-        { recursive: true }
-      );
-      await fsp.copyFile(
-        path.join(feed, baseline.filename),
-        path.join(installRoot, "packages", baseline.filename)
-      );
-      await fsp.writeFile(
-        path.join(installRoot, "packages", "RELEASES"),
-        `${baseline.sha1} ${baseline.filename} ${baseline.size}\n`
-      );
-      await fsp.copyFile(
-        installer === "msi"
-          ? path.resolve("node_modules/electron-wix-msi/vendor/msq.exe")
-          : path.join(vendor, "Squirrel.exe"),
-        path.join(installRoot, "Update.exe")
-      );
-      if (installer === "msi") {
-        // Read the installed product's auto-update policy only. A fresh random
-        // productCode ensures this fixture cannot update its uninstall record.
+      for (const scenario of releasedBaseline
+        ? ["normal"]
+        : ["normal", "corrupt-cache"]) {
+        mode = method;
+        scenarioMode = scenario;
+        const requestStart = trace.length;
+        const installRoot = path.join(
+          root,
+          `${installer}-${method}-${scenario}`
+        );
+        const profile = path.join(
+          root,
+          `${installer}-${method}-${scenario}-profile`
+        );
+        await fsp.mkdir(profile);
+        await fsp.mkdir(path.join(installRoot, "packages"), {
+          recursive: true,
+        });
+        await fsp.cp(
+          path.join(root, "payload-2.2.3"),
+          path.join(installRoot, "app-2.2.3"),
+          { recursive: true }
+        );
+        await fsp.copyFile(
+          path.join(feed, baseline.filename),
+          path.join(installRoot, "packages", baseline.filename)
+        );
         await fsp.writeFile(
-          path.join(installRoot, ".installInfo.json"),
-          JSON.stringify({
-            manufacturer: "Uyoung",
-            appName: "AIImageManager",
-            productCode: randomUUID(),
-            arch: "x86",
-            installVersion: "2.2.3",
-          })
+          path.join(installRoot, "packages", "RELEASES"),
+          `${baseline.sha1} ${baseline.filename} ${baseline.size}\n`
         );
-      }
-      const debugPort =
-        19_400 + (installer === "msi" ? 2 : 0) + (method === "full" ? 1 : 0);
-      const child = spawn(
-        path.join(installRoot, "app-2.2.3", `${id}.exe`),
-        [
-          `--remote-debugging-port=${debugPort}`,
-          "--remote-debugging-address=127.0.0.1",
-        ],
-        {
-          env: {
-            ...process.env,
-            ELECTRON_RUN_AS_NODE: undefined,
-            AIM_FIXTURE_PROFILE: profile,
-            AIM_FIXTURE_SERVER: serverURL,
-          },
-          windowsHide: true,
-          stdio: ["ignore", "pipe", "pipe"],
+        await fsp.copyFile(
+          installer === "msi"
+            ? path.resolve("node_modules/electron-wix-msi/vendor/msq.exe")
+            : path.join(vendor, "Squirrel.exe"),
+          path.join(installRoot, "Update.exe")
+        );
+        if (installer === "msi") {
+          // Read the installed product's auto-update policy only. A fresh random
+          // productCode ensures this fixture cannot update its uninstall record.
+          await fsp.writeFile(
+            path.join(installRoot, ".installInfo.json"),
+            JSON.stringify({
+              manufacturer: "Uyoung",
+              appName: "AIImageManager",
+              productCode: randomUUID(),
+              arch: "x86",
+              installVersion: "2.2.3",
+            })
+          );
         }
-      );
-      const output = fs.createWriteStream(path.join(profile, "process.log"));
-      child.stdout.pipe(output, { end: false });
-      child.stderr.pipe(output, { end: false });
-      child.once("exit", (code) => output.end(`\nExit: ${code}\n`));
-      let browser;
-      let targetPid;
-      try {
-        await waitFor(async () => {
-          if (child.exitCode !== null) {
-            throw new Error(`Fixture exited ${child.exitCode}; see ${profile}`);
+        const debugPort =
+          19_400 +
+          (installer === "msi" ? 2 : 0) +
+          (method === "full" ? 1 : 0) +
+          (scenario === "corrupt-cache" ? 4 : 0);
+        const child = spawn(
+          path.join(installRoot, "app-2.2.3", `${id}.exe`),
+          [
+            `--remote-debugging-port=${debugPort}`,
+            "--remote-debugging-address=127.0.0.1",
+          ],
+          {
+            env: {
+              ...process.env,
+              ELECTRON_RUN_AS_NODE: undefined,
+              AIM_FIXTURE_PROFILE: profile,
+              AIM_FIXTURE_SERVER: serverURL,
+            },
+            windowsHide: true,
+            stdio: ["ignore", "pipe", "pipe"],
           }
-          const state = JSON.parse(
-            await fsp.readFile(path.join(profile, "update-state.json"), "utf8")
-          ).state;
-          if (state.phase === "error") {
-            throw new Error(JSON.stringify(state));
-          }
-          return state.phase === "downloaded" && state.updateMethod === method;
-        }, `${installer} ${method} downloaded`);
-        browser = await chromium.connectOverCDP(
-          `http://127.0.0.1:${debugPort}`
         );
-        await browser.contexts()[0].pages()[0].locator("#install").click();
-        const target = await waitFor(
-          async () => {
+        const output = fs.createWriteStream(path.join(profile, "process.log"));
+        child.stdout.pipe(output, { end: false });
+        child.stderr.pipe(output, { end: false });
+        child.once("exit", (code) => output.end(`\nExit: ${code}\n`));
+        let browser;
+        let targetPid;
+        try {
+          await waitFor(async () => {
+            if (child.exitCode !== null) {
+              throw new Error(
+                `Fixture exited ${child.exitCode}; see ${profile}`
+              );
+            }
             const state = JSON.parse(
               await fsp.readFile(
                 path.join(profile, "update-state.json"),
@@ -387,37 +393,81 @@ try {
               )
             ).state;
             if (state.phase === "error") {
-              throw new Error(`Install failed: ${JSON.stringify(state)}`);
+              throw new Error(JSON.stringify(state));
             }
-            return JSON.parse(
-              await fsp.readFile(
-                path.join(profile, "launched-2.2.4.json"),
-                "utf8"
-              )
+            return (
+              state.phase === "downloaded" && state.updateMethod === method
             );
-          },
-          `${installer} ${method} target started`,
-          180_000
-        );
-        targetPid = target.pid;
-        if (
-          target.status.phase !== "idle" ||
-          path.basename(path.dirname(target.path)) !== "app-2.2.4"
-        ) {
-          throw new Error(
-            `Invalid target acknowledgement: ${JSON.stringify(target)}`
+          }, `${installer} ${method} downloaded`);
+          browser = await chromium.connectOverCDP(
+            `http://127.0.0.1:${debugPort}`
           );
-        }
-        trace.push({ installer, method, result: "passed", target });
-        console.log(
-          `PASS ${installer} ${method}: ${target.version}, ${target.status.phase}`
-        );
-      } finally {
-        await browser?.close().catch(() => undefined);
-        for (const pid of [child.pid, targetPid].filter(Boolean)) {
-          await run("taskkill.exe", ["/PID", String(pid), "/T", "/F"]).catch(
-            () => undefined
+          if (scenario === "corrupt-cache") {
+            await fsp.writeFile(
+              path.join(
+                profile,
+                "updates",
+                "github",
+                "2.2.4",
+                method === "delta" ? delta.filename : full.filename
+              ),
+              "damaged update cache"
+            );
+          }
+          await browser.contexts()[0].pages()[0].locator("#install").click();
+          const target = await waitFor(
+            async () => {
+              const state = JSON.parse(
+                await fsp.readFile(
+                  path.join(profile, "update-state.json"),
+                  "utf8"
+                )
+              ).state;
+              if (state.phase === "error") {
+                throw new Error(`Install failed: ${JSON.stringify(state)}`);
+              }
+              return JSON.parse(
+                await fsp.readFile(
+                  path.join(profile, "launched-2.2.4.json"),
+                  "utf8"
+                )
+              );
+            },
+            `${installer} ${method} target started`,
+            180_000
           );
+          targetPid = target.pid;
+          if (
+            target.status.phase !== "idle" ||
+            path.basename(path.dirname(target.path)) !== "app-2.2.4"
+          ) {
+            throw new Error(
+              `Invalid target acknowledgement: ${JSON.stringify(target)}`
+            );
+          }
+          if (scenario === "corrupt-cache") {
+            const filename =
+              method === "delta" ? delta.filename : full.filename;
+            const requests = trace
+              .slice(requestStart)
+              .filter((entry) => entry.url?.endsWith(`/${filename}`));
+            if (requests.length !== 2) {
+              throw new Error(
+                `Expected one cache repair download, got ${requests.length} package requests`
+              );
+            }
+          }
+          trace.push({ installer, method, scenario, result: "passed", target });
+          console.log(
+            `PASS ${installer} ${method} ${scenario}: ${target.version}, ${target.status.phase}`
+          );
+        } finally {
+          await browser?.close().catch(() => undefined);
+          for (const pid of [child.pid, targetPid].filter(Boolean)) {
+            await run("taskkill.exe", ["/PID", String(pid), "/T", "/F"]).catch(
+              () => undefined
+            );
+          }
         }
       }
     }

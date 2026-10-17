@@ -11,6 +11,7 @@ export const UPDATE_ERROR_KEYS = {
   UPDATE_INSTALL_INTERRUPTED: "updateErrorInstallInterrupted",
   UPDATE_INSTALL_ACCESS_DENIED: "updateErrorInstallAccessDenied",
   UPDATE_INSTALL_DISK_FULL: "updateErrorInstallDiskFull",
+  UPDATE_DISK_SPACE: "updateErrorDiskSpace",
   UPDATE_RESTART_REQUIRED: "updateErrorRestartRequired",
   UPDATE_INSTALLER_UNSUPPORTED: "updateErrorInstallerUnsupported",
   UPDATE_NOT_READY: "updateErrorNotReady",
@@ -29,10 +30,12 @@ export interface UpdateResult {
 export interface UpdateStatus {
   attempt?: number;
   bytesPerSecond?: number;
+  cacheRepairs?: { delta?: boolean; full?: boolean };
   canResume?: boolean;
   canUseFull?: boolean;
   etag?: string;
   fallbackReason?: string;
+  fullFallbackAttempted?: boolean;
   installCompletedAt?: string;
   installerPath?: string;
   installerPid?: number;
@@ -56,6 +59,7 @@ export interface UpdateStatus {
     | "restarting"
     | "error";
   phaseStartedAt?: string;
+  recoveryReason?: "cache-missing" | "cache-corrupt";
   relaunchToken?: string;
   releaseDate?: string;
   releaseNotes?: string;
