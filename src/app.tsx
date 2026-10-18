@@ -14,9 +14,16 @@ import { UpdateUiProvider } from "./hooks/use-update-ui";
 import { ipc } from "./ipc/manager";
 import { PluginBackdropHost, PluginHostProvider } from "./plugins/runtime";
 import { QueryProvider } from "./providers/QueryProvider";
+import { scheduleDevRendererFirstFrame } from "./utils/dev-startup-readiness";
 import { router } from "./utils/routes";
 
 export default function App() {
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      return scheduleDevRendererFirstFrame();
+    }
+  }, []);
+
   useEffect(() => {
     syncWithLocalTheme();
   }, []);

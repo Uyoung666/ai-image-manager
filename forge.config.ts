@@ -89,9 +89,6 @@ function cleanSourceModelCaches(): void {
   }
 }
 
-cleanSourceModelCaches();
-stageReleaseModels();
-
 // 递归删除 node_modules 中指定后缀的开发文件
 function removeFilesByExt(dir: string, ext: string, label: string) {
   if (!fs.existsSync(dir)) {
@@ -475,6 +472,11 @@ const config: ForgeConfig = {
 
   // asar 打包后再清理一次 app.asar.unpacked，确保最终输出干净
   hooks: {
+    prePackage: () => {
+      cleanSourceModelCaches();
+      stageReleaseModels();
+      return Promise.resolve();
+    },
     postPackage: (_forgeConfig, packageResult) => {
       for (const outputPath of packageResult.outputPaths) {
         cleanBuildNodeModules(

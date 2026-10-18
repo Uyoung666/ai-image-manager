@@ -4,15 +4,14 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-
-const TEST_RUNTIME_DIRECTORY = /(^|[/\\])\.(cache|test-runtime)([/\\]|$)/;
+import { createDevWatchIgnored } from "./src/utils/dev-watch-ignore";
 
 export default defineConfig({
   server: {
     watch: {
-      // Test profiles are disposable; watching them holds Windows directory
-      // handles and can race with cleanup or a subsequent packaging scan.
-      ignored: (file) => TEST_RUNTIME_DIRECTORY.test(file),
+      // Generated reports and packaged apps can contain entire source trees.
+      // Keep them outside the watcher without excluding same-named source dirs.
+      ignored: createDevWatchIgnored(import.meta.dirname),
     },
   },
   plugins: [

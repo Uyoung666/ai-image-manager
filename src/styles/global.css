@@ -1,8 +1,12 @@
-@import "tailwindcss";
+@import "tailwindcss" source("../");
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
+
+@source "../../index.html";
+/* Preserve the previous output, including utilities detected in scripts. */
+@source inline("lowercase !paused");
 
 @custom-variant dark (&:is(.dark *));
 

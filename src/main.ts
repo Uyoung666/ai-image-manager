@@ -44,6 +44,11 @@ import {
 import { copyModelsOnce } from "@/services/ai/model-loader";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import {
+  createDevLoadingWindow,
+  createDevStartupWindow,
+  devStartupDocument,
+} from "@/services/dev-startup-window";
+import {
   appendDiagnosticLog,
   installConsoleDiagnostics,
   recordDiagnosticIncident,
@@ -292,6 +297,43 @@ let wanderLifecycleBridge: WanderLifecycleBridge | null = null;
 // shutdown). Without this flag, every close is intercepted and app.quit()
 // becomes a no-op, breaking app.relaunch() and similar flows.
 let isQuitting = false;
+let devStartupWindow: ReturnType<typeof createDevStartupWindow> | null = null;
+
+function ensureDevStartupWindow() {
+  if (
+    typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined" ||
+    devStartupWindow?.pending ||
+    isQuitting
+  ) {
+    return;
+  }
+  const title = getMainLocaleText("tooltip");
+  const createdAt = Date.now();
+  devStartupWindow = createDevStartupWindow({
+    createLoadingWindow: () => createDevLoadingWindow(title),
+    document: devStartupDocument(
+      title,
+      getSetting(APP_PREFERENCE_KEYS.reduceMotion) === "true"
+    ),
+    quit: () => app.quit(),
+    onShown: () =>
+      log.info(
+        { elapsedMs: Date.now() - createdAt },
+        "Dev loading window visible"
+      ),
+    onHandoff: (firstFrameAt) =>
+      log.info(
+        { firstFrameAt, handoffDelayMs: Date.now() - firstFrameAt },
+        "Dev renderer first frame displayed"
+      ),
+    onSlow: () =>
+      log.warn(
+        "Dev renderer has not produced its first frame after 30 seconds"
+      ),
+    onError: (error) =>
+      log.warn({ err: error }, "Dev startup frame observation failed"),
+  });
+}
 
 // Periodic trash cleanup timer (runs every 6 hours to enforce 30-day retention)
 let trashCleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -369,6 +411,13 @@ function isBoundsVisible(bounds: {
 }
 
 function showMainWindow() {
+  if (isQuitting) {
+    return;
+  }
+  if (devStartupWindow?.pending) {
+    devStartupWindow.show();
+    return;
+  }
   try {
     showOrCreateWindow({
       createWindow: () => {
@@ -752,8 +801,37 @@ function applyUiZoomScale() {
   }
 }
 
+function showInitialProductionWindow(window: BrowserWindow) {
+  if (
+    typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" ||
+    isQuitting ||
+    window.isDestroyed() ||
+    mainWindow !== window
+  ) {
+    return;
+  }
+  window.show();
+  window.focus();
+}
+
+function restoreMaximizedWindow(window: BrowserWindow) {
+  if (devStartupWindow?.pending) {
+    window.once("show", () => {
+      if (!(window.isDestroyed() || isQuitting)) {
+        window.maximize();
+      }
+    });
+  } else {
+    window.maximize();
+  }
+}
+
 // ── Create main window ───────────────────────────────────────────────
 function createWindow(httpPort: number, httpAuthToken: string) {
+  if (isQuitting) {
+    return;
+  }
+  ensureDevStartupWindow();
   const modulePath = getBasePath();
   const basePath =
     path.basename(modulePath) === "chunks"
@@ -846,7 +924,7 @@ function createWindow(httpPort: number, httpAuthToken: string) {
   wanderLifecycleBridge = lifecycleBridge;
 
   if (windowPreferences.rememberBounds && store.get("isMaximized", false)) {
-    mainWindow.maximize();
+    restoreMaximizedWindow(mainWindow);
   }
 
   let closePromptOpen = false;
@@ -958,9 +1036,13 @@ function createWindow(httpPort: number, httpAuthToken: string) {
     }
     mainWindow?.webContents.send("window:maximize-change", false);
   });
+  const initialWindow = mainWindow;
+  devStartupWindow?.attach(
+    initialWindow,
+    () => !isQuitting && mainWindow === initialWindow
+  );
   mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
-    mainWindow?.focus();
+    showInitialProductionWindow(initialWindow);
   });
   mainWindow.webContents.on("did-finish-load", () => {
     lifecycleBridge.publish("initial");
@@ -1599,6 +1681,7 @@ app.whenReady().then(async () => {
     log.info({ dataPath: getDataPath() }, "Data path initialized");
     await initializeMainLocalization();
     log.info("Main-process localization initialized");
+    ensureDevStartupWindow();
 
     // Register custom protocol handler for local file access.
     // Must be set up before createWindow() since the window loads
@@ -1611,13 +1694,16 @@ app.whenReady().then(async () => {
     log.info({ port: httpPort }, "HTTP server started");
 
     await setupORPC();
+    if (isQuitting) {
+      return;
+    }
     createWindow(httpPort, getHttpServerAuthToken());
     createTray();
     registerGlobalShortcuts();
     checkForUpdates();
     setupSendToShortcut();
 
-    log.info("Window ready — starting background services...");
+    log.info("Window created — starting background services...");
 
     // ── Step 3: Non-blocking background initialization ───────────────
     // GPU detection is now handled on-demand by the Onboarding overlay
@@ -1822,6 +1908,8 @@ const handleBeforeQuit = createBeforeQuitHandler({
   destroyTray,
   markQuitting: () => {
     isQuitting = true;
+    devStartupWindow?.dispose();
+    devStartupWindow = null;
   },
   onCleanupError: (error) => {
     log.error({ err: error }, "Unexpected failure during quit cleanup");
