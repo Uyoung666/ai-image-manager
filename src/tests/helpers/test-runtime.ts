@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -7,6 +8,7 @@ const OWNER_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const PROTECTED_EXTENSION = /\.(csv|xlsx)$/i;
 const DIAGNOSTIC_EXTENSION = /\.(log|jsonl|png|jpg|json)$/i;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const PROCESS_REGISTRATION_PATTERN = /^process-launch-[a-f0-9-]+\.json$/;
 
 interface RuntimeMetadata {
   childPids: number[];
@@ -16,6 +18,7 @@ interface RuntimeMetadata {
   launchPending: boolean;
   owner: string;
   ownerPid: number;
+  pendingRegistration?: string;
   version: 1;
 }
 
@@ -100,7 +103,10 @@ function readMetadata(root: string): RuntimeMetadata {
     !Array.isArray(value.childPids) ||
     !value.childPids.every(validPid) ||
     typeof value.keep !== "boolean" ||
-    typeof value.launchPending !== "boolean"
+    typeof value.launchPending !== "boolean" ||
+    (value.pendingRegistration !== undefined &&
+      (typeof value.pendingRegistration !== "string" ||
+        !PROCESS_REGISTRATION_PATTERN.test(value.pendingRegistration)))
   ) {
     throw new Error(`Invalid test runtime marker: ${root}`);
   }
@@ -115,6 +121,37 @@ export function isProcessAlive(pid: number): boolean {
     // Access denied and unknown errors do not prove a process has exited.
     return (error as NodeJS.ErrnoException).code !== "ESRCH";
   }
+}
+
+function registeredProcessPids(root: string): number[] {
+  return fs
+    .readdirSync(root)
+    .filter((name) => PROCESS_REGISTRATION_PATTERN.test(name))
+    .flatMap((name) => {
+      const file = path.join(root, name);
+      if (fs.lstatSync(file).isSymbolicLink()) {
+        throw new Error(`Runtime process registration is a link: ${file}`);
+      }
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (!validPid(record.pid) || typeof record.exited !== "boolean") {
+        throw new Error(`Invalid runtime process registration: ${file}`);
+      }
+      return record.exited ? [] : [record.pid];
+    });
+}
+
+function hasUnconfirmedLaunch(
+  root: string,
+  metadata: RuntimeMetadata
+): boolean {
+  return (
+    metadata.launchPending &&
+    !(
+      metadata.pendingRegistration &&
+      PROCESS_REGISTRATION_PATTERN.test(metadata.pendingRegistration) &&
+      fs.existsSync(path.join(root, metadata.pendingRegistration))
+    )
+  );
 }
 
 export class TestRuntime {
@@ -149,10 +186,19 @@ export class TestRuntime {
   setLaunchPending(): void {
     const metadata = readMetadata(this.root);
     metadata.launchPending = true;
+    metadata.pendingRegistration = undefined;
     this.writeMetadata(metadata);
   }
 
-  trackProcess(child: ChildProcess): void {
+  registerLaunch(): string {
+    const metadata = readMetadata(this.root);
+    metadata.launchPending = true;
+    metadata.pendingRegistration = `process-launch-${randomUUID()}.json`;
+    this.writeMetadata(metadata);
+    return path.join(this.root, metadata.pendingRegistration);
+  }
+
+  trackProcess(child: ChildProcess, registration?: string): void {
     if (!child.pid) {
       throw new Error(`Test process has no PID: ${this.root}`);
     }
@@ -170,6 +216,12 @@ export class TestRuntime {
         (tracked) => tracked !== pid
       );
       this.writeMetadata(current);
+      if (registration && fs.existsSync(registration)) {
+        const record = JSON.parse(fs.readFileSync(registration, "utf8"));
+        if (record.pid === pid) {
+          fs.writeFileSync(registration, JSON.stringify({ pid, exited: true }));
+        }
+      }
     };
     // A PID can belong to another process by worker teardown. Only an observed
     // exit proves that this particular child no longer owns the runtime.
@@ -240,10 +292,10 @@ function cleanupRuntime(
   if (metadata.keep || process.env.AIM_KEEP_TEST_RUNTIME === "1") {
     return { root, status: "retained", reason: "AIM_KEEP_TEST_RUNTIME=1" };
   }
-  if (metadata.launchPending) {
+  if (hasUnconfirmedLaunch(root, metadata)) {
     return { root, status: "skipped", reason: "Unconfirmed Electron launch" };
   }
-  const pids = [...metadata.childPids];
+  const pids = [...metadata.childPids, ...registeredProcessPids(root)];
   if (!(ownRuntime && metadata.ownerPid === process.pid)) {
     pids.push(metadata.ownerPid);
   }
@@ -310,8 +362,12 @@ function inspectStaleRuntime(
       return { root, status: "retained", reason: "Explicitly retained" };
     }
     if (
-      metadata.launchPending ||
-      [metadata.ownerPid, ...metadata.childPids].some(isProcessAlive)
+      hasUnconfirmedLaunch(root, metadata) ||
+      [
+        metadata.ownerPid,
+        ...metadata.childPids,
+        ...registeredProcessPids(root),
+      ].some(isProcessAlive)
     ) {
       return {
         root,

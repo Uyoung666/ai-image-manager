@@ -1,4 +1,10 @@
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -13,6 +19,8 @@ import type {
 } from "@/types/photo-sequence";
 
 const grid = vi.hoisted(() => ({
+  indexOffset: 0,
+  renderImage: true,
   latestRequest: null as MasonryPhotoFocusRequest | null,
   onBackToTop: undefined as ComponentProps<typeof MasonryGrid>["onBackToTop"],
   onPhotoFocusSettled: undefined as ComponentProps<
@@ -35,7 +43,12 @@ vi.mock("@/components/MasonryGrid", () => ({
       <div data-testid="grid">
         {items.map((photo, index) => (
           <div key={photo.id}>
-            {renderItem(photo, index, {}, { renderImage: true })}
+            {renderItem(
+              photo,
+              index + grid.indexOffset,
+              {},
+              { renderImage: grid.renderImage }
+            )}
           </div>
         ))}
       </div>
@@ -100,6 +113,8 @@ function clickPhoto(card: HTMLElement, modifiers: MouseEventInit = {}) {
 }
 
 beforeEach(() => {
+  grid.indexOffset = 0;
+  grid.renderImage = true;
   grid.latestRequest = null;
   grid.onPhotoFocusSettled = undefined;
   vi.clearAllMocks();
@@ -568,6 +583,24 @@ afterEach(() => {
 });
 
 describe("photo grid click focus", () => {
+  it("loads restored visible thumbnails eagerly while keeping out-of-window images unmounted", () => {
+    grid.indexOffset = 100;
+    const thumbnailPhotos = photos.map((photo) => ({
+      ...photo,
+      thumbnailPath: `C:/thumbnails/${photo.id}.webp`,
+    }));
+    const { rerender } = render(
+      <PhotoGrid {...props} photos={thumbnailPhotos} />
+    );
+    for (const image of screen.getAllByRole("img")) {
+      expect(image).toHaveAttribute("loading", "eager");
+    }
+    grid.renderImage = false;
+    rerender(
+      <PhotoGrid {...props} columnWidth={150} photos={thumbnailPhotos} />
+    );
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+  });
   it("consumes pending positioning when back to top is activated without a pointer gesture", () => {
     const onBackToTop = vi.fn();
     const view = render(

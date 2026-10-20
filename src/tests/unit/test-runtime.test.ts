@@ -119,6 +119,99 @@ describe("managed test runtime cleanup", () => {
     expect(runtime.cleanup().status).toBe("deleted");
   });
 
+  it("keeps an unconfirmed launch until its own process record exists", () => {
+    const runtime = createRuntime();
+    const registration = runtime.registerLaunch();
+    expect(runtime.cleanup().status).toBe("skipped");
+    fs.writeFileSync(
+      registration,
+      JSON.stringify({ pid: process.pid, exited: false })
+    );
+    expect(runtime.cleanup()).toMatchObject({
+      status: "skipped",
+      reason: "A related process is still running",
+    });
+    fs.writeFileSync(
+      registration,
+      JSON.stringify({ pid: process.pid, exited: true })
+    );
+    expect(runtime.cleanup().status).toBe("deleted");
+  });
+
+  it("isolates consecutive launch records and retires only the observed child", () => {
+    const runtime = createRuntime();
+    const first = runtime.registerLaunch();
+    fs.writeFileSync(first, JSON.stringify({ pid: 12_345, exited: false }));
+    const child = Object.assign(new EventEmitter(), {
+      pid: 12_345,
+      exitCode: null,
+      signalCode: null,
+    });
+    runtime.trackProcess(child as unknown as ChildProcess, first);
+    const second = runtime.registerLaunch();
+    fs.writeFileSync(
+      second,
+      JSON.stringify({ pid: process.pid, exited: false })
+    );
+    child.emit("exit", 0, null);
+    expect(JSON.parse(fs.readFileSync(first, "utf8")).exited).toBe(true);
+    expect(JSON.parse(fs.readFileSync(second, "utf8")).exited).toBe(false);
+    expect(runtime.cleanup().status).toBe("skipped");
+    fs.writeFileSync(
+      second,
+      JSON.stringify({ pid: process.pid, exited: true })
+    );
+    expect(runtime.cleanup().status).toBe("deleted");
+  });
+
+  it("preserves the ownership marker and per-launch PID diagnostics", () => {
+    const runtime = createRuntime();
+    const destination = createRuntime();
+    const registration = runtime.registerLaunch();
+    fs.writeFileSync(
+      registration,
+      JSON.stringify({ pid: process.pid, exited: true })
+    );
+    const output = path.join(destination.root, "evidence");
+    const saved = runtime.saveDiagnostics(output);
+    expect(saved).toContain(path.join(output, RUNTIME_MARKER));
+    expect(saved).toContain(path.join(output, path.basename(registration)));
+  });
+
+  it("keeps a live worker's directory after the main process has exited", () => {
+    const runtime = createRuntime();
+    const registration = runtime.registerLaunch();
+    fs.writeFileSync(
+      registration,
+      JSON.stringify({ pid: 12_345, exited: true })
+    );
+    const worker = `${registration.slice(0, -5)}-${process.pid}.json`;
+    fs.writeFileSync(
+      worker,
+      JSON.stringify({ pid: process.pid, exited: false })
+    );
+    expect(runtime.cleanup().status).toBe("skipped");
+    fs.writeFileSync(
+      worker,
+      JSON.stringify({ pid: process.pid, exited: true })
+    );
+    expect(runtime.cleanup().status).toBe("deleted");
+  });
+
+  it("retains a malformed process registration instead of deleting the runtime", () => {
+    const runtime = createRuntime();
+    const registration = runtime.registerLaunch();
+    fs.writeFileSync(registration, JSON.stringify({ pid: process.pid }));
+    expect(() => runtime.cleanup()).toThrow(
+      "Invalid runtime process registration"
+    );
+    expect(fs.existsSync(runtime.root)).toBe(true);
+    fs.writeFileSync(
+      registration,
+      JSON.stringify({ pid: process.pid, exited: true })
+    );
+  });
+
   it("keeps another active child registered when one child exits", () => {
     const runtime = createRuntime();
     const child = Object.assign(new EventEmitter(), {

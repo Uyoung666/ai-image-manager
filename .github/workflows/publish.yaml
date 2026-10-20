@@ -115,6 +115,7 @@ jobs:
       with:
         ref: ${{ needs.preflight.outputs.commit }}
         path: app
+        fetch-depth: 0
     - name: Install application dependencies
       if: inputs.source_run_id == ''
       working-directory: app
@@ -226,6 +227,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: release-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        include-hidden-files: true
         path: |
           app/test-results/
           app/playwright-report/
@@ -253,6 +255,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: japanese-locale-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        include-hidden-files: true
         path: |
           app/test-results/
           app/playwright-report/

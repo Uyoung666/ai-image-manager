@@ -89,6 +89,7 @@ jobs:
         if: always()
         with:
           name: playwright-report
+          include-hidden-files: true
           path: |
             playwright-report/
             test-results/

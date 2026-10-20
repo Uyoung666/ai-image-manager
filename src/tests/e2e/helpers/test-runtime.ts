@@ -6,7 +6,7 @@ import {
   test as base,
   type ElectronApplication,
 } from "@playwright/test";
-import { RUNTIME_MARKER, TestRuntime } from "../../helpers/test-runtime";
+import { TestRuntime } from "../../helpers/test-runtime";
 
 interface ManagedRuntime {
   apps: {
@@ -36,18 +36,43 @@ export async function launchTestApp(
   }
   // Record the real PID before Playwright's launch handshake, including launches
   // that deliberately quit or fail before a window becomes available.
-  const hook = path.join(root, "runtime-process.cjs");
+  const registration = managed.runtime.registerLaunch();
+  const hook = `${registration}.cjs`;
   fs.writeFileSync(
     hook,
-    `const fs=require('node:fs');const path=require('node:path');const marker=path.join(__dirname,${JSON.stringify(RUNTIME_MARKER)});const data=JSON.parse(fs.readFileSync(marker,'utf8'));data.childPids=[...new Set([...data.childPids,process.pid])];data.launchPending=false;fs.writeFileSync(marker,JSON.stringify(data));`
+    // Each launch owns a separate record. A previous exit must never race a
+    // later preload's read/modify/write of the shared ownership marker.
+    `const fs = require('node:fs');
+const childProcess = require('node:child_process');
+const {randomUUID} = require('node:crypto');
+const launchFile = ${JSON.stringify(registration)};
+const childFile = pid => launchFile.slice(0, -5) + '-' + pid + '.json';
+const record = (file, pid, exited) => fs.writeFileSync(file, JSON.stringify({pid, exited}));
+const file = process.type === 'browser' ? launchFile : process.env.AIM_TEST_PROCESS_REGISTRATION || childFile(process.pid);
+record(file, process.pid, false);
+process.once('exit', () => record(file, process.pid, true));
+const fork = childProcess.fork;
+childProcess.fork = function(modulePath, args, options) {
+  if (!Array.isArray(args)) { options = args ?? options; args = []; }
+  const file = launchFile.slice(0, -5) + '-' + randomUUID() + '.json';
+  const child = fork.call(this, modulePath, args, {
+    ...options,
+    env: {...(options?.env ?? process.env), AIM_TEST_PROCESS_REGISTRATION: file},
+  });
+  if (child.pid) {
+    record(file, child.pid, false);
+    child.once('exit', () => record(file, child.pid, true));
+  }
+  return child;
+};
+require('node:module').syncBuiltinESMExports();`
   );
-  managed.runtime.setLaunchPending();
   const app = await _electron.launch({
     ...options,
     args: ["-r", hook, ...(options.args ?? [])],
   });
   const child = app.process();
-  managed.runtime.trackProcess(child);
+  managed.runtime.trackProcess(child, registration);
   const closed = new Promise<void>((resolve) =>
     child.once("close", () => resolve())
   );

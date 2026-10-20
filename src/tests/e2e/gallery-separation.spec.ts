@@ -312,23 +312,54 @@ for (const size of SIZES) {
       .toBe(1200);
     await expect
       .poll(() =>
-        scroll.evaluate((element) => {
-          const bounds = element.getBoundingClientRect();
-          const images = [...element.querySelectorAll("img")].filter(
-            (image) => {
-              const rect = image.getBoundingClientRect();
+        scroll.evaluate(async (element) => {
+          // Resizing and programmatic scrolling can leave the previous virtual
+          // window mounted for a frame. Warm the settled visible cards, including
+          // cards whose image is still a placeholder, before testing remounts.
+          let previous = "";
+          for (let frame = 0; frame < 12; frame++) {
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve())
+            );
+            const bounds = element.getBoundingClientRect();
+            const cards = [
+              ...element.querySelectorAll<HTMLElement>(
+                '[data-photo-id][role="option"]:not([data-sequence-id])'
+              ),
+            ].filter((card) => {
+              const rect = card.getBoundingClientRect();
               return rect.bottom > bounds.top + 60 && rect.top < bounds.bottom;
+            });
+            const signature = JSON.stringify(
+              cards.map((card) => {
+                const rect = card.getBoundingClientRect();
+                return [
+                  card.dataset.photoId,
+                  rect.x,
+                  rect.y,
+                  rect.width,
+                  card.querySelector("img")?.currentSrc,
+                ];
+              })
+            );
+            if (
+              element.scrollTop !== 1200 ||
+              cards.length === 0 ||
+              (previous && signature !== previous) ||
+              !cards.every((card) => {
+                const image = card.querySelector("img");
+                return (
+                  image?.complete &&
+                  image.naturalWidth > 0 &&
+                  Number(getComputedStyle(image).opacity) > 0.99
+                );
+              })
+            ) {
+              return false;
             }
-          );
-          return (
-            images.length > 0 &&
-            images.every(
-              (image) =>
-                image.complete &&
-                image.naturalWidth > 0 &&
-                Number(getComputedStyle(image).opacity) > 0.99
-            )
-          );
+            previous = signature;
+          }
+          return true;
         })
       )
       .toBe(true);

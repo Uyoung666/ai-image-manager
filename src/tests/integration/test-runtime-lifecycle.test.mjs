@@ -21,12 +21,17 @@ test("cleans success, assertion failure and setup failure runtimes while preserv
       .replaceAll("\\", "/");
     const executablePath = createRequire(import.meta.url)("electron");
     const fixtureApp = path.join(harness.root, "fixture-app.cjs");
+    const fixtureWorker = path.join(harness.root, "fixture-worker.cjs");
+    fs.writeFileSync(
+      fixtureWorker,
+      "process.send('ready');setInterval(()=>{},1000);"
+    );
     fs.writeFileSync(
       fixtureApp,
-      "const {app,BrowserWindow}=require('electron');const fs=require('node:fs');const path=require('node:path');const root=process.argv.find(arg=>arg.startsWith('--runtime-root=')).slice('--runtime-root='.length);for(const [key,part] of Object.entries({appData:'appdata',cache:'cache',userData:'profile',sessionData:'profile',temp:'scratch',logs:'logs',crashDumps:'crashes'})){const dir=path.join(root,part);fs.mkdirSync(dir,{recursive:true});app.setPath(key,dir);}app.whenReady().then(()=>{const window=new BrowserWindow({show:false});window.loadURL('data:text/html,Runtime probe');});app.on('window-all-closed',()=>app.quit());"
+      `const {app,BrowserWindow}=require('electron');const {fork}=require('node:child_process');const fs=require('node:fs');const path=require('node:path');const root=process.argv.find(arg=>arg.startsWith('--runtime-root=')).slice('--runtime-root='.length);for(const [key,part] of Object.entries({appData:'appdata',cache:'cache',userData:'profile',sessionData:'profile',temp:'scratch',logs:'logs',crashDumps:'crashes'})){const dir=path.join(root,part);fs.mkdirSync(dir,{recursive:true});app.setPath(key,dir);}app.whenReady().then(()=>{if(process.argv.includes('--quit-before-window'))return app.exit(0);const options={execArgv:['-r',path.join(root,JSON.parse(fs.readFileSync(path.join(root,'.aim-test-runtime.json'),'utf8')).pendingRegistration+'.cjs')],env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}};const workerFile=${JSON.stringify(fixtureWorker)};const workers=[fork(workerFile,[],options),fork(workerFile,options),fork(workerFile,undefined,options)];Promise.all(workers.map(worker=>new Promise(resolve=>{worker.once('message',()=>worker.kill());worker.once('exit',resolve);}))).then(()=>{const window=new BrowserWindow({show:false});window.loadURL('data:text/html,Runtime probe');});});app.on('window-all-closed',()=>app.quit());`
     );
     const spec = `import fs from 'node:fs';import path from 'node:path';import {expect} from '@playwright/test';import {test,createTestRuntime,launchTestApp} from ${JSON.stringify(helper)};
-for(const mode of ['success','assertion','setup']){test.describe(mode,()=>{let root;test.beforeAll(()=>{root=createTestRuntime('lifecycle-'+mode);fs.writeFileSync(path.join(root,'electron.log'),'diagnostic-'+mode);fs.writeFileSync(path.join(root,'model.onnx'),'generated model');fs.writeFileSync(${JSON.stringify(harness.root)}+'/'+mode+'.txt',root);if(mode==='setup')throw new Error('controlled setup failure');});test('lifecycle',async()=>{for(let launch=0;launch<2;launch++){const app=await launchTestApp(root,{executablePath:${JSON.stringify(executablePath)},args:[${JSON.stringify(fixtureApp)},'--runtime-root='+root,'--user-data-dir='+path.join(root,'profile')]});await app.close();expect(JSON.parse(fs.readFileSync(path.join(root,'.aim-test-runtime.json'),'utf8')).childPids).toEqual([]);}if(mode==='assertion')expect('actual','controlled assertion failure').toBe('expected');});});}`;
+for(const mode of ['success','assertion','setup','early']){test.describe(mode,()=>{let root;test.beforeAll(()=>{root=createTestRuntime('lifecycle-'+mode);fs.writeFileSync(path.join(root,'electron.log'),'diagnostic-'+mode);fs.writeFileSync(path.join(root,'model.onnx'),'generated model');fs.writeFileSync(${JSON.stringify(harness.root)}+'/'+mode+'.txt',root);if(mode==='setup')throw new Error('controlled setup failure');});test('lifecycle',async()=>{if(mode==='early'){await expect(launchTestApp(root,{executablePath:${JSON.stringify(executablePath)},args:[${JSON.stringify(fixtureApp)},'--runtime-root='+root,'--quit-before-window']})).rejects.toThrow();return;}for(let launch=0;launch<2;launch++){const app=await launchTestApp(root,{executablePath:${JSON.stringify(executablePath)},args:[${JSON.stringify(fixtureApp)},'--runtime-root='+root,'--user-data-dir='+path.join(root,'profile')]});await app.close();expect(JSON.parse(fs.readFileSync(path.join(root,'.aim-test-runtime.json'),'utf8')).childPids).toEqual([]);const records=fs.readdirSync(root).filter(name=>name.startsWith('process-launch-')&&name.endsWith('.json')).map(name=>JSON.parse(fs.readFileSync(path.join(root,name),'utf8')));expect(records).toHaveLength((launch+1)*4);expect(records.every(record=>record.exited)).toBe(true);}if(mode==='assertion')expect('actual','controlled assertion failure').toBe('expected');});});}`;
     fs.writeFileSync(path.join(harness.root, "lifecycle.spec.ts"), spec);
     const config = path.join(harness.root, "playwright.config.mjs");
     fs.writeFileSync(
@@ -47,7 +52,7 @@ for(const mode of ['success','assertion','setup']){test.describe(mode,()=>{let r
     assert.equal(result.status, 1, result.stderr);
     assert.ok(result.stdout.includes("controlled setup failure"));
     assert.ok(result.stdout.includes("controlled assertion failure"));
-    for (const mode of ["success", "assertion", "setup"]) {
+    for (const mode of ["success", "assertion", "setup", "early"]) {
       const root = fs.readFileSync(
         path.join(harness.root, `${mode}.txt`),
         "utf8"

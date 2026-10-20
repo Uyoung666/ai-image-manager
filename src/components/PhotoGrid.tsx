@@ -1954,9 +1954,9 @@ export const PhotoGrid = memo(
             id={photo.id}
             isFavorite={photo.isFavorite}
             isSelected={selectedIdsRef.current.has(photo.id)}
-            loading={
-              index < columnCount * INITIAL_EAGER_ROWS ? "eager" : "lazy"
-            }
+            // The masonry image window already limits requests. Native lazy
+            // loading defers even cached images after restoring a scrolled view.
+            loading="eager"
             match={photo.match}
             onClick={handlePhotoClick}
             onDoubleClick={onDoubleClick}
