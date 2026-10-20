@@ -55,6 +55,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { useFolders } from "@/hooks/useFolders";
+import { useGalleryModeTransition } from "@/hooks/useGalleryModeTransition";
 import { useGalleryReturn } from "@/hooks/useGalleryReturn";
 import { useGallerySnapshot } from "@/hooks/useGallerySnapshot";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
@@ -787,9 +788,6 @@ function HomePage() {
     },
     []
   );
-  useEffect(() => {
-    commitDisplayedSequenceMode(requestedDisplayedSequenceMode);
-  }, [commitDisplayedSequenceMode, requestedDisplayedSequenceMode]);
   useEffect(
     () => () => {
       cancelGalleryViewTransition();
@@ -1156,6 +1154,14 @@ function HomePage() {
       rawPhotos === photos &&
       displayedSequenceMode === sequenceMode,
     value: galleryValue,
+  });
+  useGalleryModeTransition({
+    currentMode: displayedSequenceMode,
+    nextMode: requestedDisplayedSequenceMode,
+    onCommit: commitDisplayedSequenceMode,
+    renderedScopeKey: gallerySnapshot.value.routeKey,
+    scopeKey: routeKey,
+    surfaceRef: gallerySurfaceRef,
   });
   // Sequence ownership can take a little longer than the photo query. Keep
   // the gallery surface visible while its own skeleton is shown; hiding the

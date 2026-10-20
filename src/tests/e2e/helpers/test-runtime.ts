@@ -69,7 +69,13 @@ require('node:module').syncBuiltinESMExports();`
   );
   const app = await _electron.launch({
     ...options,
-    args: ["-r", hook, ...(options.args ?? [])],
+    args: [
+      "-r",
+      hook,
+      // Match Windows CI instead of silently inheriting the developer's DPI.
+      `--force-device-scale-factor=${process.env.AIM_E2E_DEVICE_SCALE_FACTOR ?? "1"}`,
+      ...(options.args ?? []),
+    ],
   });
   const child = app.process();
   managed.runtime.trackProcess(child, registration);

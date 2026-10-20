@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   _electron,
   type ElectronApplication,
+  expect,
   type Page,
 } from "@playwright/test";
 
@@ -67,7 +68,39 @@ export async function launchWanderApp(
     },
     timeout: 30_000,
   });
-  return app;
+  try {
+    const page = await app.firstWindow();
+    // firstWindow() can resolve before the initial navigation and window show.
+    // Wait for the real visible, focused window before reloading or starting a
+    // session whose normal lifecycle ends when the app becomes ineligible.
+    await page.waitForLoadState("load");
+    await page.locator("main").first().waitFor({ state: "visible" });
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]?.isVisible()
+        )
+      )
+      .toBe(true);
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.focus()
+    );
+    await page.bringToFront();
+    await page.waitForFunction(
+      () => window.electronAPI?.getWanderLifecycleState?.()?.eligible === true
+    );
+    return app;
+  } catch (error) {
+    try {
+      await app.close();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Wander test startup and cleanup failed"
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -92,6 +125,10 @@ export async function setWanderOverrides(
     .join("");
   await page.addInitScript(script);
   await page.reload();
+  await page.locator("main").first().waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () => window.electronAPI?.getWanderLifecycleState?.()?.eligible === true
+  );
 }
 
 /** The Playwright window focus is unreliable; force the lifecycle eligible. */
