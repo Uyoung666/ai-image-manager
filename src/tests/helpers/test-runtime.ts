@@ -160,6 +160,23 @@ export class TestRuntime {
     metadata.childPids = [...new Set([...metadata.childPids, child.pid])];
     metadata.launchPending = false;
     this.writeMetadata(metadata);
+    const pid = child.pid;
+    const forgetExitedProcess = () => {
+      if (!fs.existsSync(this.root)) {
+        return;
+      }
+      const current = readMetadata(this.root);
+      current.childPids = current.childPids.filter(
+        (tracked) => tracked !== pid
+      );
+      this.writeMetadata(current);
+    };
+    // A PID can belong to another process by worker teardown. Only an observed
+    // exit proves that this particular child no longer owns the runtime.
+    child.once("exit", forgetExitedProcess);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      forgetExitedProcess();
+    }
   }
 
   private writeMetadata(metadata: RuntimeMetadata): void {

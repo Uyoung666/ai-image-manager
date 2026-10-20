@@ -50,6 +50,16 @@ export function assertIdentity(metadata, expected = {}) {
   }
 }
 
+export function recoveredReleaseIdentity(requested, original) {
+  assertIdentity(original, requested);
+  return {
+    ...requested,
+    toolingCommit: original.toolingCommit,
+    releaseTitle: original.releaseTitle ?? `AI Image Manager ${original.tag}`,
+    releaseNotes: original.releaseNotes ?? requested.releaseNotes,
+  };
+}
+
 export async function writeJson(file, value) {
   await fsp.mkdir(path.dirname(file), { recursive: true });
   await fsp.writeFile(file, `${JSON.stringify(value, null, 2)}\n`);

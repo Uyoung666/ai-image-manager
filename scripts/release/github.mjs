@@ -10,6 +10,7 @@ const UPLOAD_TEMPLATE_PATTERN = /\{.*$/;
 const TAG_PREFIX_PATTERN = /^v/;
 const BOM_PATTERN = /^\uFEFF/;
 const LINE_PATTERN = /\r?\n/;
+const TITLE_NEWLINE_PATTERN = /[\r\n]/u;
 const NOTES_METADATA_PATTERN =
   /^(?:#|\*{0,2}Full Changelog\*{0,2}\s*:|\[Full Changelog\]|https?:\/\/|Release v\d+\.\d+\.\d+$)/i;
 const TRANSITION_PACKAGE_VERSION_PATTERN =
@@ -29,6 +30,20 @@ export function validateReleaseNotes(text) {
     );
   }
   return body;
+}
+
+export function loadReleaseTitle(
+  manifest,
+  suppliedTitle = process.env.RELEASE_TITLE
+) {
+  const title = String(
+    manifest.releaseTitle ??
+      (suppliedTitle?.trim() || `AI Image Manager ${manifest.tag}`)
+  ).trim();
+  if (!title || TITLE_NEWLINE_PATTERN.test(title)) {
+    throw new Error("Release title must be a nonempty single line");
+  }
+  return title;
 }
 
 export async function loadReleaseNotes(
@@ -344,22 +359,23 @@ export async function stageGitHub(repo, root, manifest) {
   }
   const body =
     !release || release.draft ? await loadReleaseNotes(manifest) : null;
+  const title = loadReleaseTitle(manifest);
   if (!release) {
     release = await api(`repos/${repo}/releases`, {
       method: "POST",
       body: {
         tag_name: manifest.tag,
         target_commitish: manifest.commit,
-        name: `AI Image Manager ${manifest.tag}`,
+        name: title,
         body,
         draft: true,
       },
     });
   }
-  if (release.draft && release.body !== body) {
+  if (release.draft && (release.body !== body || release.name !== title)) {
     await api(`repos/${repo}/releases/${release.id}`, {
       method: "PATCH",
-      body: { body },
+      body: { body, name: title },
     });
   }
   for (const record of await githubRecords(root, manifest)) {

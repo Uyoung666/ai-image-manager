@@ -599,11 +599,18 @@ test("sequence all-select resolves unloaded members and toggles their actual fav
 test("rapid mode changes restore photo scroll after the query and layout settle", async () => {
   await navigate("/?reset=true");
   await page.getByRole("button", { name: PHOTO_MODE }).click();
+  await expect(page.locator("[data-sequence-id]")).toHaveCount(0);
+  await expect(
+    page.locator('[data-photo-id][role="option"]').first()
+  ).toBeVisible();
   const scroll = page.locator("[data-masonry-scroll]");
   await expect(scroll).toBeVisible();
-  await scroll.evaluate((element) => {
-    element.scrollTop = 700;
-  });
+  // A real scroll gesture releases any photo-focus lock from the previous test.
+  await scroll.hover();
+  await page.mouse.wheel(
+    0,
+    700 - (await scroll.evaluate((element) => element.scrollTop))
+  );
   await expect
     .poll(() => scroll.evaluate((element) => element.scrollTop))
     .toBe(700);

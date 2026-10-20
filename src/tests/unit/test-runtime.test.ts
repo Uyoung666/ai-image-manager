@@ -1,4 +1,6 @@
 /** @vitest-environment node */
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs, { type PathLike } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -102,6 +104,48 @@ describe("managed test runtime cleanup", () => {
     updateMarker(runtime, { launchPending: false, childPids: [process.pid] });
     expect(runtime.cleanup().status).toBe("skipped");
     expect(fs.existsSync(runtime.root)).toBe(true);
+  });
+
+  it("forgets a confirmed exited child even when its PID is alive again", () => {
+    const runtime = createRuntime();
+    const child = Object.assign(new EventEmitter(), {
+      pid: process.pid,
+      exitCode: null,
+      signalCode: null,
+    });
+    runtime.trackProcess(child as unknown as ChildProcess);
+    expect(runtime.cleanup().status).toBe("skipped");
+    child.emit("exit", 0, null);
+    expect(runtime.cleanup().status).toBe("deleted");
+  });
+
+  it("keeps another active child registered when one child exits", () => {
+    const runtime = createRuntime();
+    const child = Object.assign(new EventEmitter(), {
+      pid: 12_345,
+      exitCode: null,
+      signalCode: null,
+    });
+    runtime.trackProcess(child as unknown as ChildProcess);
+    updateMarker(runtime, { childPids: [12_345, process.pid] });
+    child.emit("exit", 0, null);
+    expect(runtime.cleanup().status).toBe("skipped");
+    expect(
+      JSON.parse(
+        fs.readFileSync(path.join(runtime.root, RUNTIME_MARKER), "utf8")
+      ).childPids
+    ).toEqual([process.pid]);
+  });
+
+  it("does not retain a child that exited before registration", () => {
+    const runtime = createRuntime();
+    const child = Object.assign(new EventEmitter(), {
+      pid: process.pid,
+      exitCode: 0,
+      signalCode: null,
+    });
+    runtime.trackProcess(child as unknown as ChildProcess);
+    expect(runtime.cleanup().status).toBe("deleted");
   });
 
   it("treats access denied as a possibly active process", () => {

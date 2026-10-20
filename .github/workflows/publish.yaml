@@ -17,8 +17,15 @@ name: Release
         required: false
         default: ''
         type: string
+      release_title:
+        description: 中文发布标题（与说明一起固定到构建产物）
+        required: false
+        type: string
   workflow_call:
     inputs:
+      release_title:
+        required: false
+        type: string
       release_notes:
         required: false
         default: ''
@@ -68,6 +75,7 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
         RELEASE_NOTES: ${{ inputs.release_notes }}
+        RELEASE_TITLE: ${{ inputs.release_title }}
       run: node scripts/release-pipeline.mjs preflight
     - name: Save release context
       uses: actions/upload-artifact@v4
@@ -80,7 +88,7 @@ jobs:
     needs:
     - preflight
     runs-on: windows-2022
-    timeout-minutes: 40
+    timeout-minutes: 60
     environment: release-stable
     steps:
     - name: Preserve repository line endings
@@ -203,6 +211,26 @@ jobs:
         }
       if: inputs.source_run_id == ''
       working-directory: app
+    - name: Install Playwright browsers for release tests
+      if: inputs.source_run_id == ''
+      working-directory: app
+      run: npx playwright install chromium --with-deps
+    - name: Gate - complete Electron E2E against the built application
+      if: inputs.source_run_id == ''
+      working-directory: app
+      run: |
+        npm run test:e2e -- --no-build --workers=1
+        if ($LASTEXITCODE -ne 0) { throw "Complete Electron E2E release gate failed" }
+    - name: Save complete Electron E2E diagnostics
+      if: always() && inputs.source_run_id == ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          app/test-results/
+          app/playwright-report/
+        retention-days: 30
+        if-no-files-found: ignore
     - name: Gate - packaged Japanese locale installation
       if: inputs.source_run_id == ''
       working-directory: app
@@ -228,7 +256,7 @@ jobs:
         path: |
           app/test-results/
           app/playwright-report/
-        retention-days: 7
+        retention-days: 30
         if-no-files-found: ignore
     - name: Verify Squirrel and WiX release payload
       id: payload
@@ -376,7 +404,7 @@ jobs:
       with:
         name: release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
         path: release-evidence/installer-logs/
-        retention-days: 7
+        retention-days: 30
         if-no-files-found: ignore
   github:
     needs:

@@ -6,6 +6,7 @@ import {
   importLegacyBundle,
   prepareBundle,
   readJson,
+  recoveredReleaseIdentity,
   sealBundle,
   validateSmoke,
   verifyBundle,
@@ -27,6 +28,7 @@ import {
   findRelease,
   listReleases,
   loadReleaseNotes,
+  loadReleaseTitle,
   selectBaselineRelease,
   sourceArtifacts,
   stageGitHub,
@@ -126,10 +128,12 @@ export async function preflight() {
     ),
   };
   assertIdentity(identity);
-  const releaseNotes = await loadReleaseNotes(identity);
-  if (sourceRunId) {
-    await sourceArtifacts(repo(), sourceRunId);
-  }
+  const source = sourceRunId
+    ? await sourceArtifacts(repo(), sourceRunId)
+    : null;
+  let releaseNotes = source?.modern
+    ? undefined
+    : await loadReleaseNotes(identity);
   const existingRelease = await findRelease(repo(), tag);
   if (!sourceRunId && existingRelease) {
     throw new Error(
@@ -139,12 +143,14 @@ export async function preflight() {
   const baseline = await resolveGitHubBaseline(version);
   const updateBaseUrl =
     process.env.GITHUB_UPDATE_BASE_URL ?? DEFAULT_UPDATE_BASE;
+  if (identity.localeRequired && releaseNotes !== undefined) {
+    releaseNotes += `\n\n日语插件 ${version}（适配软件 ${version}）：[独立下载](https://github.com/${repo()}/releases/download/${tag}/com.aiimagemanager.japanese-locale-${version}.aim-plugin)。下载后在设置 → 插件中导入并选择日本語。`;
+  }
   const config = {
     ...identity,
     repository: repo(),
-    releaseNotes: identity.localeRequired
-      ? `${releaseNotes}\n\n日语插件 ${version}（适配软件 ${version}）：[独立下载](https://github.com/${repo()}/releases/download/${tag}/com.aiimagemanager.japanese-locale-${version}.aim-plugin)。下载后在设置 → 插件中导入并选择日本語。`
-      : releaseNotes,
+    releaseTitle: loadReleaseTitle(identity),
+    releaseNotes,
     baseline,
     updateBaseUrl,
   };
@@ -263,11 +269,13 @@ async function recover(identity) {
   let smoke;
   let artifact;
   let sourceIdentity = null;
+  let originalManifest;
   if (source.modern) {
     artifact = await download(`release-bundle-${identity.version}`, root());
     const smokeDirectory = path.join(recovery, "smoke");
     await download(`release-smoke-${identity.version}`, smokeDirectory);
     const original = await verifyBundle(root(), identity);
+    originalManifest = original;
     const identityArtifactName = `release-artifact-${identity.version}`;
     if (!source.artifacts.some((item) => item.name === identityArtifactName)) {
       throw new Error(
@@ -354,8 +362,8 @@ async function recover(identity) {
     sourceArtifact: artifact,
   });
   const recoveredIdentity =
-    source.modern && sourceIdentity
-      ? { ...identity, toolingCommit: sourceIdentity.toolingCommit }
+    source.modern && originalManifest
+      ? recoveredReleaseIdentity(identity, originalManifest)
       : identity;
   await sealBundle(root(), { ...recoveredIdentity, sourceArtifact: artifact });
 }

@@ -15,6 +15,12 @@ const CLEANUP_RESTORE_BUTTON = /^撤销清理批次/;
 const IGNORED_TAB = /^已忽略/;
 const ACTIVE_TAB = /^全部待处理/;
 
+declare global {
+  interface Window {
+    releaseDuplicateRescan: (() => void) | undefined;
+  }
+}
+
 test("mixed media summary, restart, and cleanup session exclusions", async () => {
   test.setTimeout(240_000);
   const root = createTestRuntime("round46-batch-a");
@@ -180,30 +186,48 @@ test("mixed media summary, restart, and cleanup session exclusions", async () =>
       });
       const before = await main.boundingBox();
       const scroll = await main.evaluate((el) => el.scrollTop);
+      // Keep background polls flowing while this scan waits for layout checks.
       await page.evaluate(() => {
+        window.releaseDuplicateRescan = undefined;
         const original = MessagePort.prototype.postMessage;
         MessagePort.prototype.postMessage = function (
           this: MessagePort,
           message: unknown,
           transfer?: Transferable[] | StructuredSerializeOptions
         ) {
-          MessagePort.prototype.postMessage = original;
-          setTimeout(() => {
+          const request = (
+            typeof message === "string" ? JSON.parse(message) : message
+          ) as { p?: { u?: string[] } };
+          const send = () => {
             if (Array.isArray(transfer)) {
               original.call(this, message, { transfer });
             } else {
               original.call(this, message, transfer);
             }
-          }, 1500);
+          };
+          if (request?.p?.u?.includes("findDuplicates")) {
+            MessagePort.prototype.postMessage = original;
+            window.releaseDuplicateRescan = send;
+          } else {
+            send();
+          }
         };
       });
       await page.getByRole("button", { name: "重新扫描", exact: true }).click();
+      await expect
+        .poll(() => page.evaluate(() => Boolean(window.releaseDuplicateRescan)))
+        .toBe(true);
       const status = page.getByRole("status").filter({
         has: page.getByRole("button", { name: "取消", exact: true }),
       });
       await expect(status).toBeVisible();
       expect(await main.boundingBox()).toEqual(before);
       expect(await main.evaluate((el) => el.scrollTop)).toBe(scroll);
+      await page.evaluate(() => {
+        const release = window.releaseDuplicateRescan;
+        window.releaseDuplicateRescan = undefined;
+        release?.();
+      });
       await expect(status).not.toBeVisible();
       expect(await main.boundingBox()).toEqual(before);
       expect(await main.evaluate((el) => el.scrollTop)).toBe(scroll);

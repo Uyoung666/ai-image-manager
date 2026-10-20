@@ -60,6 +60,7 @@ describe("release model staging lifecycle", () => {
     disk.existing.clear();
   });
 
+  // The first import loads Forge makers and can exceed 5s on Windows.
   it("loads the configuration without models or filesystem writes", async () => {
     await expect(loadConfig()).resolves.toHaveProperty(
       "rebuildConfig.force",
@@ -68,7 +69,7 @@ describe("release model staging lifecycle", () => {
     expect(disk.rmSync).not.toHaveBeenCalled();
     expect(disk.mkdirSync).not.toHaveBeenCalled();
     expect(disk.copyFileSync).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it("cleans caches before staging only bundled models for packaging", async () => {
     const caches = [

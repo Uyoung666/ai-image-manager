@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   prepareBundle,
   readJson,
+  recoveredReleaseIdentity,
   sealBundle,
   validateSmoke,
   verifyBundle,
@@ -25,6 +26,7 @@ import {
 } from "../../../scripts/release/deploy.mjs";
 import {
   loadReleaseNotes,
+  loadReleaseTitle,
   validateReleaseNotes,
   validateSourceRun,
   verifyAsset,
@@ -398,6 +400,49 @@ describe("local installer feed", () => {
 });
 
 describe("publication and recovery", () => {
+  it("pins a supplied Chinese title and preserves historical fallback titles", () => {
+    const title = "AI Image Manager v2.2.4：搜索、浏览与更新体验改进";
+    expect(loadReleaseTitle(identity, title)).toBe(title);
+    expect(loadReleaseTitle({ ...identity, releaseTitle: title }, "new")).toBe(
+      title
+    );
+    expect(loadReleaseTitle(identity, undefined)).toBe(
+      "AI Image Manager v2.2.0"
+    );
+    expect(loadReleaseTitle(identity, " ")).toBe("AI Image Manager v2.2.0");
+    expect(() => loadReleaseTitle({ ...identity, releaseTitle: " " })).toThrow(
+      /single line/
+    );
+    expect(() => loadReleaseTitle(identity, "title\nother")).toThrow(
+      /single line/
+    );
+  });
+
+  it("recovers original publication text instead of new workflow inputs", () => {
+    const original = {
+      ...identity,
+      releaseTitle: "原始中文标题",
+      releaseNotes: "- 已审阅的发布说明。",
+    };
+    expect(
+      recoveredReleaseIdentity(
+        {
+          ...identity,
+          releaseTitle: "新标题",
+          releaseNotes: "新说明",
+          sourceRunId: "7",
+          toolingCommit: "c".repeat(40),
+        },
+        original
+      )
+    ).toMatchObject({ ...original, sourceRunId: "7" });
+    expect(
+      recoveredReleaseIdentity(
+        { ...identity, releaseTitle: "新标题" },
+        identity
+      ).releaseTitle
+    ).toBe("AI Image Manager v2.2.0");
+  });
   it("accepts workflow notes without a tracked file and preserves pinned notes", async () => {
     const body = "# v2.2.2\n\n- 通过 GitHub 发布和更新。";
     const noGit = () => {

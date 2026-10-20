@@ -1,8 +1,8 @@
-# AI Image Manager v2.2.3 User Guide
+# AI Image Manager v2.2.4 User Guide
 
 > A local-first photo manager for Windows. Build an index over your existing folders, then search, organize, curate, analyze, export, and share your library.
 
-This guide follows the normal user workflow and describes v2.2.3. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
+This guide follows the normal user workflow and describes v2.2.4. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
 
 ---
 
@@ -65,6 +65,12 @@ RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews r
 
 ## Quick start
 
+### Upgrading from an older version
+
+This version changes image preprocessing and adds a search-data revision migration. The database schema is updated on first launch.
+
+If your library contains an older AI index, open **Settings → AI Index → Rebuild AI Index**. Semantic search and image search are unavailable while the existing index is incompatible; filename, tag and person searches remain available. Rebuilding preserves original images, manual tags and favorites, and does not require importing your photos again. Processing time depends on your library and hardware.
+
 ### 0. Choose an installation method
 
 - Download `Setup.exe` for a one-click per-user installation with in-app updates. This is the recommended option for most users.
@@ -115,6 +121,8 @@ The home page and sidebar show scanning and AI status. Import, thumbnail creatio
 ---
 
 ## Photo browsing
+
+Selecting a photo reveals its position when needed; closing details preserves your current browsing position. Sequence selection and arrow-key navigation reveal the target frame within its group, and paused playback keeps the current frame.
 
 ### Main interface
 
@@ -176,6 +184,8 @@ Lightbox actions affect the viewing session and do not rewrite the original file
 ---
 
 ## Search
+
+Combined queries and filters use stable pagination. Library and tag changes refresh affected results, while obsolete requests are cancelled to keep delayed responses from replacing the current search.
 
 The home search bar supports several modes. Date, tag, and EXIF constraints can be combined with a search.
 
@@ -275,6 +285,12 @@ AI indexing uses local vision models to create image vectors for semantic search
 
 Import and AI indexing are separate. After adding a new folder, prefer incremental indexing instead of reprocessing completed photos.
 
+### Index upgrades and rebuilding
+
+This version changes image preprocessing and adds a search-data revision migration. The database schema is updated on first launch.
+
+If your library contains an older AI index, open **Settings → AI Index → Rebuild AI Index**. Semantic search and image search are unavailable while the existing index is incompatible; filename, tag and person searches remain available. Rebuilding preserves original images, manual tags and favorites, and does not require importing your photos again. Processing time depends on your library and hardware.
+
 ### GPU acceleration
 
 DirectML can be used for image embedding and face recognition:
@@ -309,7 +325,7 @@ The current standard embedding adapter is `siglip-v1-base-patch16-224` (SigLIP B
 - Image/label similarity for AI tag suggestions.
 - Visual duplicate detection and visually similar candidate groups.
 
-The standard model uses the officially calibrated `siglip-v1-base-patch16-224-default` threshold profile. Chinese queries may be translated to English locally by OPUS-MT before entering the text-to-image flow; people-related capabilities are handled separately by YuNet (detection and landmarks) and SFace (face features). Model results support retrieval and assisted organization and should still be reviewed against the actual photo content.
+The standard model uses updated image preprocessing and index fingerprints. Semantic retrieval policies have dedicated regression coverage; tag and visual duplicate thresholds remain under further validation, so the new vector space is not considered fully recalibrated. Chinese queries may be translated to English locally by OPUS-MT before entering the text-to-image flow; people-related capabilities are handled separately by YuNet (detection and landmarks) and SFace (face features). Model results support retrieval and assisted organization and should still be reviewed against the actual photo content.
 
 ### Custom AI models
 
@@ -682,7 +698,7 @@ If a source file was moved or deleted outside the app, restoration to its origin
 ### Appearance and interaction
 
 - Dark, Light, or Follow System theme
-- Chinese / English
+- Chinese / English; Japanese is available after installing the official language pack
 - Accent color, UI scale, and reduced motion
 - Search sensitivity
 - Default sidebar state
@@ -691,7 +707,9 @@ If a source file was moved or deleted outside the app, restoration to its origin
 
 ### Plugins
 
-Use **Settings → Plugins** to install and manage theme plugins. Plugins are currently imported from local `.aim-plugin` files; there is no online plugin marketplace yet.
+Chinese and English are built in. For Japanese, download the matching official `.aim-plugin`, import it under **Settings → Plugins**, confirm installation and select **日本語**. Installing the pack does not automatically change the current language.
+
+Use **Settings → Plugins** to install and manage theme plugins and official signed language packs. Plugins are currently imported from local `.aim-plugin` files; there is no online plugin marketplace yet.
 
 #### Install, preview, and enable
 
@@ -714,7 +732,7 @@ When uninstalling, the confirmation defaults to deleting the plugin settings and
 
 #### Security
 
-Public plugins provide only approved declarative themes and local media resources. They cannot execute third-party code, read your library, or initiate network access. Images and videos selected by the user are managed by the app; plugins do not receive the original file paths.
+Public plugins provide only approved declarative themes, signed language resources and local media resources. They cannot execute third-party code, read your library, or initiate network access. Images and videos selected by the user are managed by the app; plugins do not receive the original file paths.
 
 If you want to create a plugin, read the [Plugin development guide](docs/plugin-development.en.md) for the directory layout, manifest, resource limits, CLI validation, and packaging rules.
 
@@ -741,6 +759,8 @@ Use **Settings → Wander** to configure idle time, photo interval, automatic ac
 
 ### Software updates
 
+The header update control shows task status, download progress and recovery actions across pages. Interrupted downloads can resume, and update tasks can recover after restarting the app. Follow the prompts for insufficient disk space or damaged caches, then retry. Once downloaded, choose to install and restart.
+
 Under **Settings → Software Update**, you can:
 
 - Enable or disable automatic updates
@@ -750,7 +770,7 @@ Under **Settings → Software Update**, you can:
 - Restart to install a downloaded update
 - Open Releases for a manual download
 
-Update checks and downloads contact the update service. If GitHub is not directly reachable, configure an HTTP proxy such as `127.0.0.1:7890` and click **Test**.
+Update checks and downloads contact GitHub using the Windows system proxy. Configure a system proxy that can reach GitHub; proxy settings for model downloads or other in-app services do not configure the updater.
 
 ### About
 

@@ -17,19 +17,31 @@ Index, search, organize, curate, analyze, and share your photo library on your o
 
 ---
 
-## Current source version: v2.2.3
+AI Image Manager is designed for photographers, creators, designers, and anyone with a long-lived photo library on Windows. The workflow is built around your existing folders: index them in place, find photos with natural language, visual similarity, metadata, or folders, then organize, curate, analyze, export, or share them.
 
-v2.0.0 was the new public starting point for AI Image Manager. This document covers v2.2.3; GitHub Releases identifies the available stable release. It is designed for photographers, creators, designers, and anyone with a long-lived photo library on Windows. The workflow is built around your existing folders: index them in place, find photos with natural language, visual similarity, metadata, or folders, then organize, curate, analyze, export, or share them.
+## Current code version: v2.2.4
 
-The current feature and privacy statements describe v2.2.3. The v2.0.0 screenshots and performance data retain their actual measurement version; this documentation does not make an upgrade, data-format, or feature-continuity promise for historical releases.
+This update improves search consistency, photo and sequence navigation, and recovery during in-app updates. GitHub Releases identifies the available stable version.
 
-### v2.2.3 highlights
+### v2.2.4 highlights
 
-- Separate photo and sequence views with improved folder switching, return navigation, scroll restoration, selections and favorite synchronization.
-- Timelapse continuation suggestions with previews and confirmed merging; merged sequences are manually locked.
-- Parallax Wander with flow-speed controls and a settings preview, alongside the existing slideshow.
-- Circular theme transitions, smooth input carets, and an About page with a photo gallery and interactive animation.
-- Clearer update progress, installation, restart and recovery, plus offline release notes for 2.2.2 and 2.2.3.
+- Improves Chinese semantic queries, composed-object queries and combined filters, with more reliable pagination, request cancellation and cache invalidation.
+- Fixes missing search results after library changes or AI initialization delays, and refreshes Smart Album contents and covers after tag changes.
+- Improves photo selection positioning, navigation after closing details, sequence-member visibility and keyboard navigation within a sequence. Paused playback keeps the current frame.
+- Adds resumable update downloads and task recovery, with clearer disk-space checks, cache repair, retry and installation feedback. Update status remains accessible from the header across pages.
+- Provides an official signed Japanese language pack matched to the application version as a separate release asset.
+
+### Upgrading
+
+This version changes image preprocessing and adds a search-data revision migration. The database schema is updated on first launch.
+
+If your library contains an older AI index, open **Settings → AI Index → Rebuild AI Index**. Semantic search and image search are unavailable while the existing index is incompatible; filename, tag and person searches remain available. Rebuilding preserves original images, manual tags and favorites, and does not require importing your photos again. Processing time depends on your library and hardware.
+
+Setup and MSI installations with the updater enabled support in-app updates. ZIP installations and MSI installations with the updater disabled require manual upgrades. Updates continue to use GitHub Releases and the Windows system proxy.
+
+### Interface languages
+
+Chinese and English are built in. For Japanese, download the matching official `.aim-plugin`, import it under **Settings → Plugins**, confirm installation and select **日本語**. Installing the pack does not automatically change the current language.
 
 ## Product principles
 
@@ -243,7 +255,7 @@ The app does not take ownership of or automatically migrate your original photos
 - When WebDAV/S3 is configured and an upload or share action is initiated, the corresponding data is sent to the selected service.
 - **Settings → Help & Diagnostics** creates a strictly redacted diagnostic bundle locally. It is not uploaded automatically; it leaves the device only if the user exports it or attaches it to an Issue. Native crash dumps are off by default.
 
-These statements describe the current v2.2.3 implementation. Screenshots and performance data retain their actual measurement versions and do not replace the privacy policies of connected cloud or update services.
+These statements describe the current v2.2.4 implementation. Screenshots and performance data retain their actual measurement versions and do not replace the privacy policies of connected cloud or update services.
 
 ## Bundled AI models and licenses
 
@@ -265,7 +277,7 @@ The current standard embedding adapter is `siglip-v1-base-patch16-224` (SigLIP B
 - Supports image-to-image search and visual-similarity ranking.
 - Provides the image/label similarity used for AI tag suggestions.
 - Supports visual duplicate detection and visually similar candidate groups.
-- Uses the current officially calibrated `siglip-v1-base-patch16-224-default` threshold profile.
+- Uses updated image preprocessing and the `siglip-v2-bicubic-pending` threshold profile. Semantic retrieval policies have dedicated regression coverage; tag and visual duplicate thresholds remain under further validation.
 
 Before entering the text-to-image flow, Chinese queries may be translated to English locally by OPUS-MT; people-related capabilities are handled separately by YuNet (detection and landmarks) and SFace (face features). Model output supports similarity, retrieval, and assisted organization; it is not an absolute judgment about photo content.
 
