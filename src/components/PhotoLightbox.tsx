@@ -23,9 +23,9 @@ import {
   type WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -36,6 +36,7 @@ import {
   saveLightboxPanelMode,
 } from "@/actions/lightbox-panel-preferences";
 import { wanderActions } from "@/actions/wander";
+import { GalleryLightboxThumbnail } from "@/components/GalleryLightboxThumbnail";
 import {
   LightboxInfoPanel,
   type LightboxInfoPhoto,
@@ -57,12 +58,19 @@ import {
 } from "@/components/ui/tooltip";
 import { useLightboxImage } from "@/hooks/use-lightbox-image";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
+import { useHorizontalGalleryWindow } from "@/hooks/useHorizontalGalleryWindow";
 import { ipc } from "@/ipc/manager";
+import {
+  ensureGalleryPhotos,
+  getGalleryDataVersion,
+  subscribeGalleryData,
+} from "@/utils/gallery-data-source";
 import { preloadImage, toLocalMediaUrl } from "@/utils/local-media-url";
 
 export interface LightboxPhoto extends LightboxInfoPhoto {
   isFavorite?: boolean | null;
   thumbnailPath?: string | null;
+  thumbnailVersion?: string;
 }
 
 interface PhotoLightboxProps {
@@ -134,6 +142,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   sequencePlayback = false,
   autoPlay = false,
 }: PhotoLightboxProps) {
+  useSyncExternalStore(subscribeGalleryData, getGalleryDataVersion);
   const { t } = useTranslation();
   const reduceMotion = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -146,7 +155,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const focusFrameRef = useRef<number | null>(null);
   const currentPhotoIdRef = useRef<number | null>(null);
-  const thumbnailRefs = useRef(new Map<number, HTMLButtonElement>());
+  const thumbnailScrollRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -166,6 +175,15 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const [controlsVisible, setControlsVisible] = useState(true);
   const [infoVisible, setInfoVisible] = useState(false);
   const [thumbnailsVisible, setThumbnailsVisible] = useState(false);
+  const {
+    items: thumbnailItems,
+    totalSize: thumbnailTotalWidth,
+    scrollToIndex: scrollThumbnailToIndex,
+  } = useHorizontalGalleryWindow(
+    photos.length,
+    open && thumbnailsVisible,
+    thumbnailScrollRef
+  );
 
   const [moreOpen, setMoreOpen] = useState(false);
   const moreAnchorRef = useRef<HTMLDivElement>(null);
@@ -189,6 +207,13 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
   const safeIndex = photos.length ? clamp(photoIndex, 0, photos.length - 1) : 0;
   const photo = photos[safeIndex];
+  useEffect(() => {
+    if (open) {
+      ensureGalleryPhotos(
+        photos.slice(Math.max(0, safeIndex - 1), safeIndex + 2)
+      ).catch(() => undefined);
+    }
+  }, [open, photos, safeIndex]);
   const previewPlayback = sequencePlayback && slideshowMode && playing;
   const previewUrl = photo?.thumbnailPath
     ? toLocalMediaUrl(photo.thumbnailPath)
@@ -197,7 +222,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     enabled: open && !(previewPlayback && previewUrl),
     photoId: photo?.id,
     retry: sourceKey,
-    src: photo ? toLocalMediaUrl(photo.path) : null,
+    src: photo?.path ? toLocalMediaUrl(photo.path) : null,
   });
   const showPreview =
     sequencePlayback && Boolean(previewUrl) && !original.loaded;
@@ -518,32 +543,50 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     const ahead = previewPlayback ? 12 : 2;
     const behind = previewPlayback ? 1 : 2;
     const preloadedIndices = new Set<number>();
+    const releases: Array<() => void> = [];
     for (let offset = -behind; offset <= ahead; offset += 1) {
       const index = (safeIndex + offset + photos.length) % photos.length;
       if (index === safeIndex || preloadedIndices.has(index)) {
         continue;
       }
       preloadedIndices.add(index);
-      preloadImage(photos[index].thumbnailPath ?? photos[index].path);
+      const release = preloadImage(
+        photos[index].thumbnailPath ?? photos[index].path
+      );
+      if (typeof release === "function") {
+        releases.push(release);
+      }
     }
+    return () => {
+      for (const release of releases) {
+        release();
+      }
+    };
   }, [open, photo, photos, previewPlayback, safeIndex]);
 
   useEffect(() => {
     if (!(open && thumbnailsVisible && photo)) {
       return;
     }
-    thumbnailRefs.current.get(photo.id)?.scrollIntoView?.({
+    scrollThumbnailToIndex(safeIndex, {
+      align: "center",
       behavior: reduceMotion ? "auto" : "smooth",
-      block: "nearest",
-      inline: "center",
     });
-  }, [open, photo, reduceMotion, thumbnailsVisible]);
+  }, [
+    open,
+    photo,
+    reduceMotion,
+    thumbnailsVisible,
+    safeIndex,
+    scrollThumbnailToIndex,
+  ]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
     previousFocusRef.current = document.activeElement as HTMLElement | null;
+    const focusRoot = rootRef.current;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     focusFrameRef.current = requestAnimationFrame(() => {
@@ -558,8 +601,12 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       document.body.style.overflow = previousOverflow;
       const previousFocus = previousFocusRef.current;
       previousFocusRef.current = null;
-      if (previousFocus?.isConnected) {
-        previousFocus.focus();
+      const active = document.activeElement;
+      if (
+        previousFocus?.isConnected &&
+        (!active || active === document.body || focusRoot?.contains(active))
+      ) {
+        previousFocus.focus({ preventScroll: true });
       }
     };
   }, [open]);
@@ -764,15 +811,15 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     : "pointer-events-none opacity-0";
   const zoomLabel = `${Math.round(zoom * 100)}%`;
   const isQuarterTurn = Math.abs(rotation % 180) === 90;
-  const thumbnailItems = useMemo(
-    () =>
-      photos.map((item, index) => ({
-        item,
-        index,
-        src: toLocalMediaUrl(item.thumbnailPath ?? item.path),
-      })),
-    [photos]
-  );
+  const firstThumbnail = thumbnailItems[0]?.index ?? 0;
+  const lastThumbnail = thumbnailItems.at(-1)?.index ?? 0;
+  useEffect(() => {
+    if (open && thumbnailsVisible) {
+      ensureGalleryPhotos(
+        photos.slice(firstThumbnail, lastThumbnail + 1)
+      ).catch(() => undefined);
+    }
+  }, [open, thumbnailsVisible, photos, firstThumbnail, lastThumbnail]);
 
   if (!(open && photo && photos.length)) {
     return null;
@@ -1151,7 +1198,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               }}
               onWheel={handleWheelZoom}
               ref={frame.state.ref}
-              src={frame.src}
               style={imageStyle}
               width={photo.width || undefined}
             />
@@ -1328,46 +1374,53 @@ export const PhotoLightbox = memo(function PhotoLightbox({
           <div className="absolute inset-x-0 bottom-0 z-20 h-24 border-white/10 border-t bg-black/80 px-3 py-2 backdrop-blur-xl">
             <div
               className="flex h-full gap-2 overflow-x-auto overscroll-contain"
+              data-lightbox-thumbnail-strip
               onWheel={(event) => {
                 if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
                   event.currentTarget.scrollLeft += event.deltaY;
                 }
               }}
+              ref={thumbnailScrollRef}
             >
-              {thumbnailItems.map(({ item, index, src }) => (
-                <button
-                  aria-label={`${index + 1}: ${item.filename}`}
-                  className={`relative h-full w-24 shrink-0 overflow-hidden rounded-md border-2 transition-all ${index === safeIndex ? "border-primary opacity-100" : "border-transparent opacity-45 hover:opacity-80"}`}
-                  key={item.id}
-                  onClick={() => {
-                    setPhotoIndex(index);
-                    resetView();
-                    setPlaying(false);
-                  }}
-                  ref={(node) => {
-                    if (node) {
-                      thumbnailRefs.current.set(item.id, node);
-                    } else {
-                      thumbnailRefs.current.delete(item.id);
-                    }
-                  }}
-                  type="button"
-                >
-                  <img
-                    alt=""
-                    className="h-full w-full object-cover"
-                    draggable={false}
-                    height={item.height || undefined}
-                    src={src}
-                    width={item.width || undefined}
-                  />
-                  {index === safeIndex && (
-                    <span className="absolute right-1 bottom-1 rounded bg-primary px-1 text-[9px] text-primary-foreground">
-                      {index + 1}
-                    </span>
-                  )}
-                </button>
-              ))}
+              <div
+                style={{
+                  position: "relative",
+                  height: "100%",
+                  width: thumbnailTotalWidth,
+                  flexShrink: 0,
+                }}
+              >
+                {thumbnailItems.map((virtualItem) => {
+                  const index = virtualItem.index;
+                  const item = photos[index];
+                  return (
+                    <button
+                      aria-label={`${index + 1}: ${item.filename}`}
+                      className={`relative h-full w-24 shrink-0 overflow-hidden rounded-md border-2 transition-all ${index === safeIndex ? "border-primary opacity-100" : "border-transparent opacity-45 hover:opacity-80"}`}
+                      key={item.id}
+                      onClick={() => {
+                        setPhotoIndex(index);
+                        resetView();
+                        setPlaying(false);
+                      }}
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        top: 0,
+                        transform: `translateX(${virtualItem.start}px)`,
+                      }}
+                      type="button"
+                    >
+                      <GalleryLightboxThumbnail photo={item} />
+                      {index === safeIndex && (
+                        <span className="absolute right-1 bottom-1 rounded bg-primary px-1 text-[9px] text-primary-foreground">
+                          {index + 1}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}

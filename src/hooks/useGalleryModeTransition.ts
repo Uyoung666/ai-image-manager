@@ -1,4 +1,5 @@
 import { type RefObject, useEffect, useRef } from "react";
+import { scheduleImage } from "@/utils/image-scheduler";
 
 type GalleryMode = "photos" | "sequences";
 const MAX_RESTORE_IMAGES = 64;
@@ -43,23 +44,11 @@ function visibleImageSources(surface: HTMLElement | null): string[] {
 }
 
 function decodeImage(source: string, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const image = new Image();
-    const finish = () => {
-      signal.removeEventListener("abort", abort);
-      resolve();
-    };
-    const abort = () => {
-      image.src = "";
-      finish();
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    image.src = source;
-    // A remembered URL or a completed, detached <img> does not prove that a
-    // newly mounted image can use Chromium's memory cache. Decode a fresh
-    // request while the previous gallery is still visible.
-    image.decode().then(finish, finish);
-  });
+  return scheduleImage(source, {
+    signal,
+    priority: 0,
+    consumer: "mode-restore",
+  }).promise.then(() => undefined);
 }
 
 async function prepareImages(sources: string[], signal: AbortSignal) {

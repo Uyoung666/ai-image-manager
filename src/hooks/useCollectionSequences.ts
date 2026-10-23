@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { photoSequenceActions } from "@/actions/photo-sequences";
+import { useGalleryGeometryPhotos } from "@/hooks/useGalleryGeometryPhotos";
 import { useSequenceDetailRefresh } from "@/hooks/useSequenceDetailRefresh";
 import type { Photo } from "@/types/photo";
 import type {
@@ -8,6 +9,7 @@ import type {
   PhotoSequenceDetail,
   SequenceOrderChange,
 } from "@/types/photo-sequence";
+import { isWindowedGalleryPhoto } from "@/utils/gallery-data-source";
 
 export type CollectionSequenceMode = "photos" | "sequences";
 
@@ -108,11 +110,13 @@ function applySequenceOrderToSummary(
 }
 
 export function useCollectionSequences({
+  albumId,
   photos,
   storageKey,
   onClearSelection,
   onRemoveSelection,
 }: {
+  albumId?: number;
   photos: Photo[];
   storageKey: string;
   onClearSelection: () => void;
@@ -173,9 +177,14 @@ export function useCollectionSequences({
   }, []);
 
   // Ownership depends on membership, not object identity or gallery sorting.
-  const photoIdsKey = [...new Set(photos.map((photo) => photo.id))]
-    .sort((a, b) => a - b)
-    .join(",");
+  const geometryPhotos = useGalleryGeometryPhotos(photos);
+  const photoIdsKey = useMemo(
+    () =>
+      [...new Set(geometryPhotos.map((photo) => photo.id))]
+        .sort((a, b) => a - b)
+        .join(","),
+    [geometryPhotos]
+  );
   const photoIds = useMemo(
     () => (photoIdsKey ? photoIdsKey.split(",").map(Number) : []),
     [photoIdsKey]
@@ -190,13 +199,13 @@ export function useCollectionSequences({
     string | null
   >(null);
   const photosById = useMemo(
-    () => new Map(photos.map((photo) => [photo.id, photo])),
-    [photos]
+    () => new Map(geometryPhotos.map((photo) => [photo.id, photo])),
+    [geometryPhotos]
   );
   const hydratePhoto = useCallback(
     (photo: Photo): Photo => {
       const current = photosById.get(photo.id);
-      return current
+      return current && (!isWindowedGalleryPhoto(current) || current.path)
         ? {
             ...photo,
             ...current,
@@ -324,7 +333,11 @@ export function useCollectionSequences({
       return;
     }
     photoSequenceActions
-      .list({ photoIds, scope: "members" })
+      .list(
+        albumId === undefined
+          ? { photoIds, scope: "members" }
+          : { albumId, scope: "gallery" }
+      )
       .then((result) => {
         if (!cancelled && requestedVersion === refreshVersion) {
           setSequences(result as PhotoSequence[]);
@@ -347,7 +360,7 @@ export function useCollectionSequences({
     return () => {
       cancelled = true;
     };
-  }, [photoIds, refreshVersion, sequenceRequestKey, sequenceScopeKey]);
+  }, [photoIds, refreshVersion, sequenceRequestKey, sequenceScopeKey, albumId]);
 
   const loadDetail = useCallback(async (sequenceId: number) => {
     const cached = detailCacheRef.current.get(sequenceId);

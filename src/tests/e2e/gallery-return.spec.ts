@@ -2,7 +2,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { type ElectronApplication, expect, type Page } from "@playwright/test";
+import {
+  type ElectronApplication,
+  expect,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import sharp from "sharp";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
@@ -21,6 +26,33 @@ let page: Page;
 let root: string;
 let profile: string;
 let env: Record<string, string>;
+
+async function selectPlaybackFrame80(lightbox: Locator) {
+  const strip = lightbox.locator("[data-lightbox-thumbnail-strip]");
+  await expect(strip).toBeVisible();
+  await strip.evaluate((element) => {
+    element.scrollLeft = 0;
+  });
+  const target = lightbox.getByRole("button", { name: THUMBNAIL_80 });
+  // A normal photo lightbox can include ungrouped photos before the sequence.
+  // Scroll the virtual strip as a user would, without assuming a global index.
+  for (let step = 0; step < 40; step++) {
+    await strip.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        )
+    );
+    if (await target.count()) {
+      await target.click();
+      return;
+    }
+    await strip.evaluate((element) => {
+      element.scrollLeft += Math.max(200, element.clientWidth * 0.75);
+    });
+  }
+  await expect(target).toBeVisible();
+}
 
 async function launch() {
   app = await launchTestApp(root, {
@@ -217,7 +249,7 @@ for (const size of SIZES) {
       await group.dblclick();
       const directPlayback = page.locator(".lightbox-interactive");
       await expect(directPlayback).toBeVisible();
-      await directPlayback.getByRole("button", { name: THUMBNAIL_80 }).click();
+      await selectPlaybackFrame80(directPlayback);
       await directPlayback
         .getByRole("button", { name: "Close", exact: true })
         .click();
@@ -237,7 +269,7 @@ for (const size of SIZES) {
       if (route === "/") {
         await page.keyboard.press("Space");
       }
-      await lightbox.getByRole("button", { name: THUMBNAIL_80 }).click();
+      await selectPlaybackFrame80(lightbox);
       await lightbox
         .getByRole("button", { name: "Close", exact: true })
         .click();
@@ -275,7 +307,7 @@ for (const size of SIZES) {
       if ((await thumbnailToggle.getAttribute("aria-pressed")) !== "true") {
         await thumbnailToggle.click();
       }
-      await lightbox.getByRole("button", { name: THUMBNAIL_80 }).click();
+      await selectPlaybackFrame80(lightbox);
       await assertBounds();
       await lightbox
         .getByRole("button", { name: "Close", exact: true })

@@ -67,10 +67,13 @@ export interface ScrollAnchor {
   estimatedGlobalIndex?: number;
   /** 可见区域第一个 item 的 ID */
   itemId: number;
+  nextPhotoId?: number;
   /** 该 item 顶部距离 viewport 顶部的偏移量（px） */
   offsetFromTop: number;
   /** 偏移比例 (0~1)，offsetFromTop / itemHeight，窗口尺寸变化后更鲁棒 */
   offsetRatio: number;
+  previousPhotoId?: number;
+  queryVersion?: number;
   /** 保存时的时间戳，用于判断是否过期 */
   timestamp: number;
 }

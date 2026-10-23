@@ -307,6 +307,10 @@ for (const size of SIZES) {
               sample();
             })
         );
+        await test.info().attach("paused-preview-samples", {
+          body: JSON.stringify({ pausedFrame, pausedSource, samples }),
+          contentType: "application/json",
+        });
         expect(samples.length).toBeGreaterThan(1);
         expect(
           samples.every(

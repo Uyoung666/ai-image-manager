@@ -25,23 +25,75 @@ const inputPath = process.argv[2] ? path.resolve(process.argv[2]) : null;
 
 function readSnapshot() {
   if (!inputPath) {
-    return {
-      galleryMediaStats: {},
-      galleryPerf: {},
-      notes: [
-        "No snapshot file was provided. Run this after exporting runtime counters from a dev session.",
-      ],
-      scenario: "manual-gallery-browsing",
-    };
+    throw new Error(
+      "需要有效的采集 JSON 路径；先运行 npm run perf:gallery:auto。空采样不能生成成功报告。"
+    );
   }
-  return JSON.parse(fs.readFileSync(inputPath, "utf8"));
+  const input = JSON.parse(fs.readFileSync(inputPath, "utf8"));
+  const runs = input.results ?? [input];
+  for (const run of runs) {
+    if (
+      !(
+        run.datasetCount > 0 &&
+        run.loaded > 0 &&
+        run.galleryPerf?.firstViewport80Ms?.count > 0 &&
+        run.galleryPerf.firstViewport80Ms.total > 0 &&
+        run.galleryPerf?.scrollStop95Ms?.count > 0 &&
+        run.galleryPerf.scrollStop95Ms.total > 0 &&
+        run.galleryPerf?.frameIntervalMs?.count > 0 &&
+        run.galleryPerf.frameIntervalMs.total > 0
+      )
+    ) {
+      throw new Error(
+        "无效样本：未验证图库数据量、有效图片、首屏、停止滚动补齐或实际帧间隔。"
+      );
+    }
+  }
+  if (runs.length === 1) {
+    return runs[0];
+  }
+  const combined = {};
+  for (const run of runs) {
+    for (const [name, bucket] of Object.entries(run.galleryPerf)) {
+      const target = combined[name] ?? {
+        count: 0,
+        total: 0,
+        max: 0,
+        samples: [],
+      };
+      target.count += bucket.count;
+      target.total += bucket.total;
+      target.max = Math.max(target.max, bucket.max);
+      target.samples.push(...(bucket.samples ?? []));
+      combined[name] = target;
+    }
+  }
+  return { ...runs[0], galleryPerf: combined, runCount: runs.length };
 }
 
 function normalizeBucket(bucket) {
   const count = Number(bucket?.count ?? 0);
   const total = Number(bucket?.total ?? 0);
   const max = Number(bucket?.max ?? 0);
+  const samples = (bucket?.samples ?? [])
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  const percentile = (ratio) =>
+    samples.length
+      ? Number(
+          samples[
+            Math.min(
+              samples.length - 1,
+              Math.max(0, Math.ceil(samples.length * ratio) - 1)
+            )
+          ].toFixed(3)
+        )
+      : null;
   return {
+    p50: percentile(0.5),
+    p95: percentile(0.95),
+    p99: percentile(0.99),
+    sampleCount: samples.length,
     avg: count > 0 ? Number((total / count).toFixed(3)) : 0,
     count,
     max: Number(max.toFixed(3)),
@@ -93,11 +145,11 @@ function generateMarkdown(report) {
   lines.push("");
   lines.push("## Renderer Counters");
   lines.push("");
-  lines.push("| Metric | Count | Avg | Max | Total |");
-  lines.push("| --- | ---: | ---: | ---: | ---: |");
+  lines.push("| Metric | Count | Avg | P50 | P95 | P99 | Max |");
+  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
   for (const [name, bucket] of Object.entries(report.galleryPerf)) {
     lines.push(
-      `| ${name} | ${formatNumber(bucket.count)} | ${formatNumber(bucket.avg)} | ${formatNumber(bucket.max)} | ${formatNumber(bucket.total)} |`
+      `| ${name} | ${formatNumber(bucket.count)} | ${formatNumber(bucket.avg)} | ${bucket.p50 ?? "n/a"} | ${bucket.p95 ?? "n/a"} | ${bucket.p99 ?? "n/a"} | ${formatNumber(bucket.max)} |`
     );
   }
   if (Object.keys(report.galleryPerf).length === 0) {
@@ -130,7 +182,7 @@ function generateMarkdown(report) {
   lines.push("- Navigate away and back once to verify restoration stability.");
   lines.push("- Select 1 photo and marquee-select about 100 photos.");
   lines.push(
-    "- Compare masonryScrollFrameMs avg/max and masonryVisibleItems max."
+    "- frameIntervalMs records actual animation frames; masonryScrollFrameMs records only scroll callback work. Percentiles use up to 2048 retained samples per metric/run."
   );
   return `${lines.join("\n")}\n`;
 }
@@ -150,6 +202,15 @@ function main() {
       platform: process.platform,
     },
     scenario: snapshot.scenario ?? "manual-gallery-browsing",
+    datasetCount: snapshot.datasetCount,
+    runCount: snapshot.runCount ?? 1,
+    build: snapshot.build,
+    bundleHash: snapshot.bundleHash,
+    sourceCommit: snapshot.sourceCommit,
+    sourceDiffHash: snapshot.sourceDiffHash,
+    viewport: snapshot.viewport,
+    cache: snapshot.cache,
+    memory: snapshot.memory,
   };
 
   fs.mkdirSync(reportDir, { recursive: true });

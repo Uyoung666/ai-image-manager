@@ -73,7 +73,7 @@ const ExportSchema = z.object({
   ids: z
     .array(z.number().int().positive().max(2_147_483_646))
     .min(1)
-    .max(50_000),
+    .max(100_000),
   format: z.enum(["original", "compressed"]).default("original"),
   maxWidth: z.number().optional().default(1920),
   quality: z.number().min(10).max(100).optional().default(85),

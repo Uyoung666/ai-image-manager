@@ -22,11 +22,13 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { photoSequenceActions } from "@/actions/photo-sequences";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useGalleryGeometryPhotos } from "@/hooks/useGalleryGeometryPhotos";
 import { useSequenceClickFocus } from "@/hooks/useSequenceClickFocus";
 import type { SequenceClickFocusRequest } from "@/hooks/useSequenceClickFocusRequest";
 import { useSequenceReturnFocus } from "@/hooks/useSequenceReturnFocus";
@@ -37,9 +39,16 @@ import type {
   SequenceOrderChange,
 } from "@/types/photo-sequence";
 import {
+  getGalleryDataVersion,
+  getGalleryGeometryKey,
+  registerGalleryGeometryView,
+  subscribeGalleryData,
+} from "@/utils/gallery-data-source";
+import {
   type GalleryReturnTarget,
   getGalleryReturnPresentation,
 } from "@/utils/gallery-return";
+import { releaseImageGeneration } from "@/utils/image-scheduler";
 import {
   buildPhotoGroupHeaders,
   hasMatchingPhotoGroupPrefix,
@@ -74,6 +83,7 @@ interface Photo {
   path: string;
   thumbnailPath: string | null;
   thumbnailSmallPath?: string | null;
+  thumbnailVersion?: string;
   width: number;
 }
 
@@ -990,6 +1000,7 @@ export function SequenceFocusTray({
                         renderImage={renderImage}
                         searchQuery={searchQuery}
                         thumbnailPath={member.thumbnailPath}
+                        thumbnailVersion={member.thumbnailVersion}
                         width={member.width}
                       />
                     </div>
@@ -1394,6 +1405,12 @@ export const PhotoGrid = memo(
         window.removeEventListener("keydown", cancelKey, true);
       };
     }, [consumePhotoFocus]);
+    const geometryPhotos = useGalleryGeometryPhotos(photos);
+    useEffect(() => () => releaseImageGeneration(routeKey), [routeKey]);
+    const galleryContentVersion = useSyncExternalStore(
+      subscribeGalleryData,
+      getGalleryDataVersion
+    );
     const displayPhotos = useMemo<DisplayPhoto[]>(() => {
       const trayColumns = Math.max(1, Math.min(columnCount, 6));
       const tray = expandedSequence
@@ -1419,9 +1436,13 @@ export const PhotoGrid = memo(
           ...visible.slice(representativeIndex + 1),
         ];
       }
-      return photos.filter((photo) => !sequenceMemberIds.has(photo.id));
+      return registerGalleryGeometryView(
+        geometryPhotos.filter((photo) => !sequenceMemberIds.has(photo.id)),
+        geometryPhotos,
+        `ungrouped:${[...sequenceMemberIds].join(",")}`
+      );
     }, [
-      photos,
+      geometryPhotos,
       sequenceMode,
       sequenceMemberIds,
       orderedSequences,
@@ -1566,6 +1587,7 @@ export const PhotoGrid = memo(
         ),
         photoFocusRequest,
         outerFocusSettled,
+        galleryContentVersion,
       }),
       [
         deletingIds,
@@ -1580,9 +1602,12 @@ export const PhotoGrid = memo(
         trayReadyRequest,
         photoFocusRequest,
         outerFocusSettled,
+        galleryContentVersion,
       ]
     );
     const groupHeaderCacheRef = useRef<{
+      geometryKey?: string | null;
+      count?: number;
       headers: GroupHeader[];
       language: string;
       photoSnapshot: PhotoGroupInputSnapshot[];
@@ -1838,7 +1863,7 @@ export const PhotoGrid = memo(
         photo: DisplayPhoto,
         index: number,
         _style: React.CSSProperties,
-        options: { renderImage: boolean }
+        options: { renderImage: boolean; imagePriority?: 0 | 1 | 2 }
       ) => {
         if ("sequenceTray" in photo) {
           return (
@@ -1910,6 +1935,7 @@ export const PhotoGrid = memo(
               expanding={expandingSequenceId === sequence.id}
               faceOverlays={faceOverlayByPhotoId?.get(photo.id)}
               faceOverlaysVisible={faceOverlaysVisible}
+              imagePriority={options.imagePriority}
               isSelected={
                 memberIds.length > 0 &&
                 memberIds.every((id) => selectedIdsRef.current.has(id))
@@ -1927,6 +1953,7 @@ export const PhotoGrid = memo(
               onOpen={onOpenSequence}
               onOpenDetails={onOpenSequenceDetails}
               onToggleExpand={onToggleSequenceExpand}
+              queryGeneration={routeKey}
               recentlyViewed={returnPresentation.itemId === photo.id}
               recentlyViewedFrame={
                 returnPresentation.itemId === photo.id
@@ -1952,6 +1979,7 @@ export const PhotoGrid = memo(
             getDragIds={getDragIds}
             height={photo.height}
             id={photo.id}
+            imagePriority={options.imagePriority}
             isFavorite={photo.isFavorite}
             isSelected={selectedIdsRef.current.has(photo.id)}
             // The masonry image window already limits requests. Native lazy
@@ -1963,6 +1991,7 @@ export const PhotoGrid = memo(
             onNameFace={onNameFace}
             onToggleFavorite={onToggleFavorite}
             path={photo.path}
+            queryGeneration={routeKey}
             recentlyViewed={recentlyViewedPhotoId === photo.id}
             recentlyViewedPulseActive={
               recentlyViewedPulseActive && recentlyViewedPhotoId === photo.id
@@ -1972,6 +2001,7 @@ export const PhotoGrid = memo(
             semanticTopSimilarity={semanticTopSimilarity}
             thumbnailPath={photo.thumbnailPath}
             thumbnailSmallPath={photo.thumbnailSmallPath}
+            thumbnailVersion={photo.thumbnailVersion}
             width={photo.width}
           />
         );
@@ -2048,6 +2078,7 @@ export const PhotoGrid = memo(
         faceOverlaysVisible,
         t,
         semanticTopSimilarity,
+        routeKey,
       ]
     );
 
@@ -2058,14 +2089,19 @@ export const PhotoGrid = memo(
       }
 
       const cached = groupHeaderCacheRef.current;
+      const geometryKey = getGalleryGeometryKey(displayPhotos);
+      const knownGeometry =
+        geometryKey !== null && cached?.geometryKey === geometryKey;
+      const cachedCount = cached?.count ?? cached?.photoSnapshot.length ?? 0;
       const cacheContextMatches =
         cached?.sort === sort &&
         cached.language === i18n.language &&
         cached.routeKey === routeKey;
       if (
         cacheContextMatches &&
-        cached.photoSnapshot.length === displayPhotos.length &&
-        hasMatchingPhotoGroupPrefix(cached.photoSnapshot, displayPhotos)
+        cachedCount === displayPhotos.length &&
+        (knownGeometry ||
+          hasMatchingPhotoGroupPrefix(cached.photoSnapshot, displayPhotos))
       ) {
         return cached.headers;
       }
@@ -2074,11 +2110,12 @@ export const PhotoGrid = memo(
       let existingHeaders: GroupHeader[] = [];
       if (
         cacheContextMatches &&
-        cached.photoSnapshot.length < displayPhotos.length &&
-        hasMatchingPhotoGroupPrefix(cached.photoSnapshot, displayPhotos)
+        cachedCount < displayPhotos.length &&
+        (knownGeometry ||
+          hasMatchingPhotoGroupPrefix(cached.photoSnapshot, displayPhotos))
       ) {
         existingHeaders = cached.headers;
-        startIndex = cached.photoSnapshot.length;
+        startIndex = cachedCount;
       }
       const headers = buildPhotoGroupHeaders(
         displayPhotos,
@@ -2087,9 +2124,13 @@ export const PhotoGrid = memo(
         existingHeaders
       );
       groupHeaderCacheRef.current = {
+        geometryKey,
+        count: displayPhotos.length,
         headers,
         language: i18n.language,
-        photoSnapshot: snapshotPhotoGroupInputs(displayPhotos),
+        photoSnapshot: geometryKey
+          ? []
+          : snapshotPhotoGroupInputs(displayPhotos),
         routeKey,
         sort,
       };

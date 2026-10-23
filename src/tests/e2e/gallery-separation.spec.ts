@@ -31,7 +31,7 @@ declare global {
     };
     gallerySequenceGate: {
       armed: boolean;
-      operation: "listSequences" | "listPhotos";
+      operation: "listSequences" | "listPhotoPage";
       held: number;
       skip: number;
       sequenceRequests: number;
@@ -89,7 +89,7 @@ async function launch() {
     const searchRequests = new Set<unknown>();
     const gate = {
       armed: false,
-      operation: "listSequences" as "listSequences" | "listPhotos",
+      operation: "listSequences" as "listSequences" | "listPhotoPage",
       held: 0,
       skip: 0,
       sequenceRequests: 0,
@@ -826,7 +826,7 @@ for (const [folderIndex, size] of SIZES.entries()) {
     await expect(gallery.locator('[data-photo-id="230"]')).toBeVisible();
     await expect(gallery.locator('[data-photo-id="270"]')).toHaveCount(0);
     await page.evaluate(() => {
-      window.gallerySequenceGate.operation = "listPhotos";
+      window.gallerySequenceGate.operation = "listPhotoPage";
       window.gallerySequenceGate.armed = true;
     });
     await clickFolder(folderCId);

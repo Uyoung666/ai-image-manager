@@ -4,11 +4,37 @@ import { z } from "zod";
 import { getDatabase } from "@/db";
 import { albumPhotos, albums, photos } from "@/db/schema";
 import {
+  getGalleryAlbumInfo,
+  getGalleryAlbumLayout,
+  getGalleryAlbumPage,
+} from "@/services/gallery-albums";
+import {
   evaluateSmartAlbum,
   validateSmartRules,
 } from "@/services/smart-album-engine";
 
 const IdSchema = z.object({ id: z.number() });
+export const getAlbumInfo = os
+  .input(IdSchema)
+  .handler(({ input }) => getGalleryAlbumInfo(input.id));
+export const getAlbumLayout = os
+  .input(
+    IdSchema.extend({
+      sort: z.enum(["date", "name", "size"]),
+      order: z.enum(["asc", "desc"]),
+      locale: z.string().max(40).optional(),
+    })
+  )
+  .handler(({ input }) => getGalleryAlbumLayout(input));
+export const getAlbumPhotoPage = os
+  .input(
+    z.object({
+      snapshotId: z.string().uuid(),
+      offset: z.number().int().min(0),
+      limit: z.number().int().min(1).max(200).default(100),
+    })
+  )
+  .handler(({ input }) => getGalleryAlbumPage(input));
 const CreateAlbumSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().optional(),
@@ -324,31 +350,50 @@ export const addPhotosToAlbum = os
     let nextOrder = (maxOrder?.maxOrder ?? -1) + 1;
     let addedCount = 0;
 
-    for (const photoId of photoIds) {
-      try {
-        db.insert(albumPhotos)
-          .values({
-            albumId,
-            photoId,
-            sortOrder: nextOrder,
-          })
-          .run();
-        nextOrder++;
-        addedCount++;
-      } catch {
-        // Skip duplicates (unique constraint on albumId+photoId)
+    db.transaction(() => {
+      for (const photoId of photoIds) {
+        try {
+          db.insert(albumPhotos)
+            .values({
+              albumId,
+              photoId,
+              sortOrder: nextOrder,
+            })
+            .run();
+          nextOrder++;
+          addedCount++;
+        } catch {
+          // Skip duplicates (unique constraint on albumId+photoId)
+        }
       }
-    }
-
+    });
     if (!album.coverPhotoId && addedCount > 0) {
       // 选择最新添加的照片作为封面
-      const bestCover = db
-        .select({ id: photos.id })
-        .from(photos)
-        .where(and(inArray(photos.id, photoIds), isNull(photos.deletedAt)))
-        .orderBy(desc(photos.fileDate))
-        .limit(1)
-        .get();
+      let bestCover: { id: number; fileDate: number | null } | undefined;
+      for (let offset = 0; offset < photoIds.length; offset += 1000) {
+        const candidate = db
+          .select({ id: photos.id, fileDate: photos.fileDate })
+          .from(photos)
+          .where(
+            and(
+              inArray(photos.id, photoIds.slice(offset, offset + 1000)),
+              isNull(photos.deletedAt)
+            )
+          )
+          .orderBy(desc(photos.fileDate))
+          .limit(1)
+          .get();
+        if (
+          candidate &&
+          (!bestCover ||
+            (candidate.fileDate ?? Number.NEGATIVE_INFINITY) >
+              (bestCover.fileDate ?? Number.NEGATIVE_INFINITY) ||
+            (candidate.fileDate === bestCover.fileDate &&
+              candidate.id < bestCover.id))
+        ) {
+          bestCover = candidate;
+        }
+      }
       if (bestCover) {
         db.update(albums)
           .set({ coverPhotoId: bestCover.id })
@@ -370,15 +415,24 @@ export const removePhotosFromAlbum = os
       return { success: true, removedCount: 0 };
     }
 
-    const result = db
-      .delete(albumPhotos)
-      .where(
-        and(
-          eq(albumPhotos.albumId, albumId),
-          inArray(albumPhotos.photoId, photoIds)
-        )
-      )
-      .run();
+    let removedCount = 0;
+    db.transaction(() => {
+      for (let offset = 0; offset < photoIds.length; offset += 1000) {
+        const result = db
+          .delete(albumPhotos)
+          .where(
+            and(
+              eq(albumPhotos.albumId, albumId),
+              inArray(
+                albumPhotos.photoId,
+                photoIds.slice(offset, offset + 1000)
+              )
+            )
+          )
+          .run();
+        removedCount += result.changes;
+      }
+    });
 
     // If cover photo was removed, pick a new one
     const album = db.select().from(albums).where(eq(albums.id, albumId)).get();
@@ -396,7 +450,7 @@ export const removePhotosFromAlbum = os
         .run();
     }
 
-    return { success: true, removedCount: result.changes };
+    return { success: true, removedCount };
   });
 
 export const reorderAlbumPhotos = os

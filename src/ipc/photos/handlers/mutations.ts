@@ -47,6 +47,7 @@ import {
   cleanOrphanThumbnails as cleanOrphanThumbnailsService,
   clearThumbnailDiskCache,
   deletePhotoThumbnails,
+  generateGalleryThumbnail,
   generateThumbnail,
   getThumbnailPath,
   scanOrphanThumbnails as scanOrphanThumbnailsService,
@@ -749,7 +750,12 @@ export const backfillMissingThumbnails = os
     }
 
     const candidates = db
-      .select({ id: photos.id, path: photos.path })
+      .select({
+        id: photos.id,
+        path: photos.path,
+        width: photos.width,
+        height: photos.height,
+      })
       .from(photos)
       .where(
         and(
@@ -773,11 +779,27 @@ export const backfillMissingThumbnails = os
           failed++;
           continue;
         }
-        const result = await generateThumbnail(photo.path, "md");
-        db.update(photos)
+        const result = await generateGalleryThumbnail(
+          photo.path,
+          512,
+          undefined,
+          2,
+          photo
+        );
+        const changed = db
+          .update(photos)
           .set({ thumbnailPath: result.thumbnailPath })
-          .where(eq(photos.id, photo.id))
+          .where(
+            and(
+              eq(photos.id, photo.id),
+              eq(photos.path, photo.path),
+              isNull(photos.deletedAt)
+            )
+          )
           .run();
+        if (changed.changes === 0) {
+          continue;
+        }
         generated++;
         updated.push({
           id: photo.id,
@@ -803,10 +825,14 @@ export const toggleFavorite = os
   .input(z.object({ ids: z.array(z.number()), favorite: z.boolean() }))
   .handler(({ input }) => {
     const db = getDatabase();
-    db.update(photos)
-      .set({ isFavorite: input.favorite })
-      .where(inArray(photos.id, input.ids))
-      .run();
+    db.transaction(() => {
+      for (let offset = 0; offset < input.ids.length; offset += 1000) {
+        db.update(photos)
+          .set({ isFavorite: input.favorite })
+          .where(inArray(photos.id, input.ids.slice(offset, offset + 1000)))
+          .run();
+      }
+    });
     invalidateStatsCache();
     return { success: true };
   });

@@ -12,6 +12,11 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  photoFavoriteActions,
+  withPhotoFavorite,
+} from "@/actions/photo-favorites";
+import { photoListingActions } from "@/actions/photo-listing";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyStateCard } from "@/components/EmptyStateCard";
 import type { MasonryGridHandle } from "@/components/MasonryGrid";
@@ -63,7 +68,6 @@ import { usePhotos } from "@/hooks/usePhotos";
 import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
 import { useSequenceClickFocusRequest } from "@/hooks/useSequenceClickFocusRequest";
 import { useSequenceSuggestions } from "@/hooks/useSequenceSuggestions";
-import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo, PhotoListResponse } from "@/types/photo";
 import type { PhotoSequenceDetail } from "@/types/photo-sequence";
@@ -854,8 +858,8 @@ function HomePage() {
     let idleHandle: number | null = null;
     const runBackfill = () => {
       recordGalleryPerf("thumbnailBackfillQueuedIds", missingIds.length);
-      ipc.client.photos
-        .backfillMissingThumbnails({
+      photoListingActions
+        .backfillThumbnails({
           ids: missingIds,
           limit: THUMBNAIL_BACKFILL_BATCH_SIZE,
         })
@@ -1146,6 +1150,7 @@ function HomePage() {
     ]
   );
   const gallerySnapshot = useGallerySnapshot({
+    contextKey: JSON.stringify([routeKey, sequenceMode, filter.tagMode]),
     enabled: !(isSearching || photosError || sequenceError),
     ready:
       sequenceViewReady &&
@@ -1283,7 +1288,7 @@ function HomePage() {
     (ids: number[], favorite: boolean) => {
       const targets = new Set(ids);
       const updatePhoto = (photo: Photo) =>
-        targets.has(photo.id) ? { ...photo, isFavorite: favorite } : photo;
+        targets.has(photo.id) ? withPhotoFavorite(photo, favorite) : photo;
       const updateDetail = (detail: PhotoSequenceDetail | null) =>
         detail ? { ...detail, members: detail.members.map(updatePhoto) } : null;
       setSearchResults((current) => current?.map(updatePhoto) ?? current);
@@ -1993,7 +1998,7 @@ function HomePage() {
       }
       const prevVal = !!photo.isFavorite;
       const newVal = requestedValue ?? !prevVal;
-      await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
+      await photoFavoriteActions.set({ ids: [id], favorite: newVal });
       // 同步更新展开的序列成员状态，因为 expandedSequence 是本地状态，
       // 不会随 TanStack Query 重新获取而更新
       setExpandedSequence((prev) => {
@@ -2003,7 +2008,7 @@ function HomePage() {
         return {
           ...prev,
           members: prev.members.map((m) =>
-            m.id === id ? { ...m, isFavorite: newVal } : m
+            m.id === id ? withPhotoFavorite(m, newVal) : m
           ),
         };
       });
@@ -2014,7 +2019,7 @@ function HomePage() {
         return {
           ...prev,
           members: prev.members.map((m) =>
-            m.id === id ? { ...m, isFavorite: newVal } : m
+            m.id === id ? withPhotoFavorite(m, newVal) : m
           ),
         };
       });
@@ -2028,7 +2033,7 @@ function HomePage() {
           action: {
             label: t("toastUndo"),
             onClick: async () => {
-              await ipc.client.photos.toggleFavorite({
+              await photoFavoriteActions.set({
                 ids: [id],
                 favorite: prevVal,
               });
@@ -2040,7 +2045,7 @@ function HomePage() {
                 return {
                   ...prev,
                   members: prev.members.map((m) =>
-                    m.id === id ? { ...m, isFavorite: prevVal } : m
+                    m.id === id ? withPhotoFavorite(m, prevVal) : m
                   ),
                 };
               });
@@ -2051,7 +2056,7 @@ function HomePage() {
                 return {
                   ...prev,
                   members: prev.members.map((m) =>
-                    m.id === id ? { ...m, isFavorite: prevVal } : m
+                    m.id === id ? withPhotoFavorite(m, prevVal) : m
                   ),
                 };
               });
@@ -2405,7 +2410,7 @@ function HomePage() {
               className="relative flex min-w-0 flex-1"
               inert={
                 (compactDetailOverlay && detailOverlayOpen) ||
-                gallerySnapshot.retaining
+                gallerySnapshot.blocksInput
               }
             >
               <div

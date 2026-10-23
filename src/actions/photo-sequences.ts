@@ -14,6 +14,7 @@ export const photoSequenceActions = {
   ignore: (photoIds: number[]) =>
     ipc.client.photos.ignoreSequencePhotos({ photoIds }),
   list: (input: {
+    albumId?: number;
     favoriteOnly?: boolean;
     folderId?: number;
     photoIds?: number[];

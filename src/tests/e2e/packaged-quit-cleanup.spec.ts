@@ -11,7 +11,13 @@ test.setTimeout(120_000);
 function listPackagedProcessIds(): number[] {
   const output = execFileSync(
     "tasklist.exe",
-    ["/FI", "IMAGENAME eq ai-image-manager.exe", "/FO", "CSV", "/NH"],
+    [
+      "/FI",
+      `IMAGENAME eq ${path.basename(packagedExecutable ?? "ai-image-manager.exe")}`,
+      "/FO",
+      "CSV",
+      "/NH",
+    ],
     { encoding: "utf8", windowsHide: true }
   );
   return [...output.matchAll(/"[^"]+","(\d+)"/g)].map((match) =>

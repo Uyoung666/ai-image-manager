@@ -133,15 +133,19 @@ test("automatically shows the loader, routes tray requests and hands off without
         )
       )
       .toBe(true);
-    expect(
-      await app.evaluate(({ BrowserWindow }) => {
-        const windows = BrowserWindow.getAllWindows();
-        const target = windows.find((window) =>
-          window.webContents.getURL().startsWith("http")
-        );
-        return target?.isVisible();
-      })
-    ).toBe(false);
+    // Creating the tray precedes assigning the main window's URL. Wait for
+    // that window, then still require it to stay hidden during the handoff.
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }) => {
+          const windows = BrowserWindow.getAllWindows();
+          const target = windows.find((window) =>
+            window.webContents.getURL().startsWith("http")
+          );
+          return target?.isVisible();
+        })
+      )
+      .toBe(false);
     await app.evaluate(() => {
       (
         globalThis as unknown as { __devTestTray: { emit(name: string): void } }

@@ -3,6 +3,11 @@ import { ArrowLeft, Trash2, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  photoFavoriteActions,
+  withPhotoFavorite,
+} from "@/actions/photo-favorites";
+import { photoOperationActions } from "@/actions/photo-operations";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
 import { CloudUploadDialog } from "@/components/CloudUploadDialog";
@@ -76,7 +81,17 @@ function AlbumDetailPage() {
   const { albumId } = Route.useParams() as { albumId: string };
   const navigate = useNavigate();
   const albumNumber = Number(albumId);
-  const { album, setAlbum, loading, loadAlbum } = useAlbumDetail(albumNumber);
+  const [sortField, setSortField] = useState<SortField>(loadSortField);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
+  const sortLocale = useMemo(
+    () => new Intl.Collator().resolvedOptions().locale,
+    []
+  );
+  const { album, setAlbum, loading, loadAlbum } = useAlbumDetail(albumNumber, {
+    sort: sortField,
+    order: sortOrder,
+    locale: sortLocale,
+  });
   const { markRouteDirty } = useScrollPosition();
   const routeKey = `album-${albumId}`;
   const activeAlbum = album?.id === albumNumber ? album : null;
@@ -99,8 +114,6 @@ function AlbumDetailPage() {
   });
   const [sequenceReturnTarget, setSequenceReturnTarget] =
     useState<PhotoSequenceDetail | null>(null);
-  const [sortField, setSortField] = useState<SortField>(loadSortField);
-  const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
   const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
@@ -125,6 +138,9 @@ function AlbumDetailPage() {
 
   const photos = useMemo(() => {
     const raw = activeAlbum?.photos || [];
+    if (activeAlbum?.galleryOrder) {
+      return raw;
+    }
     const sorted = [...raw];
     sorted.sort((a, b) => {
       let cmp = 0;
@@ -139,7 +155,7 @@ function AlbumDetailPage() {
       return sortOrder === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [activeAlbum?.photos, sortField, sortOrder]);
+  }, [activeAlbum?.photos, sortField, sortOrder, activeAlbum?.galleryOrder]);
 
   const photosRef = useRef(photos);
   photosRef.current = photos;
@@ -152,6 +168,7 @@ function AlbumDetailPage() {
     removeFromSelection: () => undefined,
   });
   const sequenceView = useCollectionSequences({
+    albumId: albumNumber,
     onClearSelection: () => selectionActionsRef.current.clearSelection(),
     onRemoveSelection: (ids) =>
       selectionActionsRef.current.removeFromSelection(ids),
@@ -425,7 +442,7 @@ function AlbumDetailPage() {
     const ids = Array.from(selectedIds);
     const nextFav = !allFavorite;
     try {
-      await ipc.client.photos.toggleFavorite({ ids, favorite: nextFav });
+      await photoFavoriteActions.set({ ids, favorite: nextFav });
     } catch (err) {
       console.error("[handleFavoriteSelected] failed:", err);
     }
@@ -447,7 +464,7 @@ function AlbumDetailPage() {
       }
       const prevVal = !!photo.isFavorite;
       const newVal = requestedValue ?? !prevVal;
-      await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
+      await photoFavoriteActions.set({ ids: [id], favorite: newVal });
       setAlbum((prev) => {
         if (!prev) {
           return prev;
@@ -455,7 +472,7 @@ function AlbumDetailPage() {
         return {
           ...prev,
           photos: prev.photos.map((p) =>
-            p.id === id ? { ...p, isFavorite: newVal } : p
+            p.id === id ? withPhotoFavorite(p, newVal) : p
           ),
         };
       });
@@ -470,7 +487,7 @@ function AlbumDetailPage() {
           action: {
             label: t("toastUndo"),
             onClick: async () => {
-              await ipc.client.photos.toggleFavorite({
+              await photoFavoriteActions.set({
                 ids: [id],
                 favorite: prevVal,
               });
@@ -481,7 +498,7 @@ function AlbumDetailPage() {
                 return {
                   ...prev,
                   photos: prev.photos.map((p) =>
-                    p.id === id ? { ...p, isFavorite: prevVal } : p
+                    p.id === id ? withPhotoFavorite(p, prevVal) : p
                   ),
                 };
               });
@@ -504,7 +521,7 @@ function AlbumDetailPage() {
 
   async function performDelete() {
     try {
-      await ipc.client.photos.deletePhotos({ ids: confirmDeleteIds });
+      await photoOperationActions.deletePhotos({ ids: confirmDeleteIds });
       markRouteDirty(routeKey);
       removeFromSelection(confirmDeleteIds);
       toast.success(
@@ -546,7 +563,7 @@ function AlbumDetailPage() {
     setPendingDeleteIds([]);
     setPendingDeleteSequenceGroup(false);
     try {
-      await ipc.client.photos.deletePhotos({ ids });
+      await photoOperationActions.deletePhotos({ ids });
       markRouteDirty(routeKey);
       removeFromSelection(ids);
       setAlbum((prev) =>
@@ -871,7 +888,7 @@ function AlbumDetailPage() {
           (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
         );
         const newVal = !allFav;
-        ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
+        photoFavoriteActions.set({ ids, favorite: newVal }).then(() => {
           setAlbum((prev) => {
             if (!prev) {
               return prev;
@@ -880,7 +897,7 @@ function AlbumDetailPage() {
             return {
               ...prev,
               photos: prev.photos.map((p) =>
-                idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
+                idSet.has(p.id) ? withPhotoFavorite(p, newVal) : p
               ),
             };
           });
@@ -896,7 +913,7 @@ function AlbumDetailPage() {
               action: {
                 label: t("toastUndo"),
                 onClick: async () => {
-                  await ipc.client.photos.toggleFavorite({
+                  await photoFavoriteActions.set({
                     ids,
                     favorite: allFav,
                   });
@@ -1232,45 +1249,43 @@ function AlbumDetailPage() {
                 (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
               );
               const newVal = !allFav;
-              ipc.client.photos
-                .toggleFavorite({ ids, favorite: newVal })
-                .then(() => {
-                  setAlbum((prev) => {
-                    if (!prev) {
-                      return prev;
-                    }
-                    const idSet = new Set(ids);
-                    return {
-                      ...prev,
-                      photos: prev.photos.map((p) =>
-                        idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
-                      ),
-                    };
-                  });
-                  queryClient.invalidateQueries({
-                    queryKey: ["photos"],
-                    refetchType: "active",
-                  });
-                  toast.success(
-                    newVal
-                      ? t("toastFavoriteAddedCount", { count: ids.length })
-                      : t("toastFavoriteRemoved"),
-                    {
-                      action: {
-                        label: t("toastUndo"),
-                        onClick: async () => {
-                          await ipc.client.photos.toggleFavorite({
-                            ids,
-                            favorite: allFav,
-                          });
-                          queryClient.invalidateQueries({
-                            queryKey: ["photos"],
-                          });
-                        },
-                      },
-                    }
-                  );
+              photoFavoriteActions.set({ ids, favorite: newVal }).then(() => {
+                setAlbum((prev) => {
+                  if (!prev) {
+                    return prev;
+                  }
+                  const idSet = new Set(ids);
+                  return {
+                    ...prev,
+                    photos: prev.photos.map((p) =>
+                      idSet.has(p.id) ? withPhotoFavorite(p, newVal) : p
+                    ),
+                  };
                 });
+                queryClient.invalidateQueries({
+                  queryKey: ["photos"],
+                  refetchType: "active",
+                });
+                toast.success(
+                  newVal
+                    ? t("toastFavoriteAddedCount", { count: ids.length })
+                    : t("toastFavoriteRemoved"),
+                  {
+                    action: {
+                      label: t("toastUndo"),
+                      onClick: async () => {
+                        await photoFavoriteActions.set({
+                          ids,
+                          favorite: allFav,
+                        });
+                        queryClient.invalidateQueries({
+                          queryKey: ["photos"],
+                        });
+                      },
+                    },
+                  }
+                );
+              });
             }}
             onUploadToCloud={handleUploadSelectedToCloud}
             selectedCount={selectedIds.size}
@@ -1448,34 +1463,32 @@ function AlbumDetailPage() {
             (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
           );
           const newVal = !allFav;
-          ipc.client.photos
-            .toggleFavorite({ ids, favorite: newVal })
-            .then(() => {
-              queryClient.invalidateQueries({
-                queryKey: ["photos"],
-                refetchType: "active",
-              });
-              toast.success(
-                newVal
-                  ? t("toastFavoriteAddedCount", { count: ids.length })
-                  : t("toastFavoriteRemoved"),
-                {
-                  action: {
-                    label: t("toastUndo"),
-                    onClick: async () => {
-                      await ipc.client.photos.toggleFavorite({
-                        ids,
-                        favorite: allFav,
-                      });
-                      queryClient.invalidateQueries({
-                        queryKey: ["photos"],
-                        refetchType: "active",
-                      });
-                    },
-                  },
-                }
-              );
+          photoFavoriteActions.set({ ids, favorite: newVal }).then(() => {
+            queryClient.invalidateQueries({
+              queryKey: ["photos"],
+              refetchType: "active",
             });
+            toast.success(
+              newVal
+                ? t("toastFavoriteAddedCount", { count: ids.length })
+                : t("toastFavoriteRemoved"),
+              {
+                action: {
+                  label: t("toastUndo"),
+                  onClick: async () => {
+                    await photoFavoriteActions.set({
+                      ids,
+                      favorite: allFav,
+                    });
+                    queryClient.invalidateQueries({
+                      queryKey: ["photos"],
+                      refetchType: "active",
+                    });
+                  },
+                },
+              }
+            );
+          });
         }}
         onBatchUploadToCloud={handleUploadSelectedToCloud}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}

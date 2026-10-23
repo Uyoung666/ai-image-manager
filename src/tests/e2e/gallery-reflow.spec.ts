@@ -2,12 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import {
-  type CDPSession,
-  type ElectronApplication,
-  expect,
-  type Page,
-} from "@playwright/test";
+import { type ElectronApplication, expect, type Page } from "@playwright/test";
 import sharp from "sharp";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
@@ -40,7 +35,6 @@ declare global {
 }
 let app: ElectronApplication;
 let page: Page;
-let focusSession: CDPSession;
 let root: string;
 let profile: string;
 let env: Record<string, string>;
@@ -63,7 +57,6 @@ async function launch() {
   });
   await page.reload();
   await page.waitForFunction(() => Boolean(window.__e2eNavigate));
-  focusSession = await page.context().newCDPSession(page);
 }
 
 test.describe.configure({ mode: "serial" });
@@ -277,7 +270,12 @@ async function startProbe(prepareClick = false, preferredTargetId?: string) {
     const initialOffset = getAnchorOffset(bounds.top);
     const initialScrollTop = scroll.scrollTop;
     const images = new Map(
-      visible.map((card) => [card.dataset.photoId, card.querySelector("img")])
+      // Queued cards have no image node until the shared scheduler decodes
+      // them. Their first image is an arrival, not a replaced old image.
+      visible.flatMap((card) => {
+        const image = card.querySelector("img");
+        return image ? [[card.dataset.photoId, image] as const] : [];
+      })
     );
     const targetImage = clickTarget.querySelector("img");
     const removed = new Set<Element>();
@@ -820,11 +818,6 @@ for (const closeMethod of ["button", "Escape"] as const) {
 
 for (const size of sizes) {
   test(`${size.width}x${size.height} preserves masonry when switching windows and restoring from desktop`, async () => {
-    // Playwright otherwise forces document.hasFocus() to stay true even when
-    // another native window is active, hiding real window-focus regressions.
-    await focusSession.send("Emulation.setFocusEmulationEnabled", {
-      enabled: false,
-    });
     await app.evaluate(
       ({ BrowserWindow }, requested) =>
         BrowserWindow.getAllWindows()[0].setSize(
@@ -854,6 +847,7 @@ for (const size of sizes) {
       });
       await page.waitForTimeout(700);
       await startProbe();
+      const otherPageReady = app.waitForEvent("window");
       const windows = await app.evaluate(async ({ BrowserWindow }) => {
         const main = BrowserWindow.getAllWindows()[0];
         const other = new BrowserWindow({
@@ -866,10 +860,44 @@ for (const size of sizes) {
         other.focus();
         return { main: main.id, other: other.id };
       });
+      const otherPage = await otherPageReady;
+      await otherPage.waitForLoadState("domcontentloaded");
+      // Playwright emulates document focus. Native BrowserWindow state is the
+      // authority for this real window-switching and desktop-restore check.
+      await app.evaluate(({ BrowserWindow }, ids) => {
+        BrowserWindow.fromId(ids.main)?.blur();
+        BrowserWindow.fromId(ids.other)?.focus();
+      }, windows);
       try {
         await expect
-          .poll(() => page.evaluate(() => document.hasFocus()))
-          .toBe(false);
+          .poll(() =>
+            app.evaluate(
+              ({ BrowserWindow }, ids) => ({
+                main: BrowserWindow.fromId(ids.main)?.isFocused(),
+                other: BrowserWindow.fromId(ids.other)?.isFocused(),
+              }),
+              windows
+            )
+          )
+          .toEqual({ main: false, other: true });
+      } catch (error) {
+        await test.info().attach("native-focus-state", {
+          body: JSON.stringify({
+            scope,
+            documentFocused: await page.evaluate(() => document.hasFocus()),
+            windows: await app.evaluate(
+              ({ BrowserWindow }, ids) => ({
+                focused: BrowserWindow.getFocusedWindow()?.id,
+                main: BrowserWindow.fromId(ids.main)?.isFocused(),
+                other: BrowserWindow.fromId(ids.other)?.isFocused(),
+                otherVisible: BrowserWindow.fromId(ids.other)?.isVisible(),
+              }),
+              windows
+            ),
+          }),
+          contentType: "application/json",
+        });
+        throw error;
       } finally {
         await app.evaluate(({ BrowserWindow }, ids) => {
           BrowserWindow.fromId(ids.other)?.close();
@@ -877,7 +905,12 @@ for (const size of sizes) {
         }, windows);
       }
       await expect
-        .poll(() => page.evaluate(() => document.hasFocus()))
+        .poll(() =>
+          app.evaluate(
+            ({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.isFocused(),
+            windows.main
+          )
+        )
         .toBe(true);
       await finishProbe(`${scope}-window-focus`, true);
 
@@ -899,15 +932,17 @@ for (const size of sizes) {
         main?.focus();
       }, windows.main);
       await expect
-        .poll(() => page.evaluate(() => document.hasFocus()))
+        .poll(() =>
+          app.evaluate(
+            ({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.isFocused(),
+            windows.main
+          )
+        )
         .toBe(true);
       await finishProbe(`${scope}-desktop-return`, true);
     }
     await input.fill("");
     await input.press("Enter");
-    await focusSession.send("Emulation.setFocusEmulationEnabled", {
-      enabled: true,
-    });
   });
 
   test(`${size.width}x${size.height} preserves deep masonry images during detail reflow`, async () => {

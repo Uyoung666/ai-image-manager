@@ -99,6 +99,7 @@ function installGeometry(outer: HTMLElement) {
     outerScrollHeight: 2600,
     cardTop: 900,
     cardHeight: 100,
+    translationY: 0,
   };
   outer.scrollTop = 500;
   Object.defineProperties(outer, {
@@ -114,9 +115,13 @@ function installGeometry(outer: HTMLElement) {
   });
   outer.getBoundingClientRect = () => rect(0, 600);
   tray.getBoundingClientRect = () =>
-    rect(layout.trayOffset - outer.scrollTop, 500, layout.trayWidth);
+    rect(
+      layout.trayOffset - outer.scrollTop + layout.translationY,
+      500,
+      layout.trayWidth
+    );
   inner.getBoundingClientRect = () =>
-    rect(layout.trayOffset - outer.scrollTop + 80, 400);
+    rect(layout.trayOffset - outer.scrollTop + 80 + layout.translationY, 400);
   const attachCard = () => {
     const card = outer.querySelector<HTMLElement>("[data-photo-id]");
     if (card) {
@@ -125,6 +130,7 @@ function installGeometry(outer: HTMLElement) {
           layout.trayOffset -
             outer.scrollTop +
             80 +
+            layout.translationY +
             layout.cardTop -
             inner.scrollTop,
           layout.cardHeight
@@ -170,6 +176,36 @@ afterEach(() => {
 });
 
 describe("sequence click focus", () => {
+  it("plans the final member rectangle while its tray is entering above the selection bar", () => {
+    const view = render(<Harness request={0} />);
+    surface.outer.scrollTop = 880;
+    surface.inner.scrollTop = 616;
+    surface.layout.translationY = -8;
+    const tray = surface.outer.querySelector<HTMLElement>(
+      "[data-sequence-tray-id]"
+    );
+    if (!tray) {
+      throw new Error("Missing tray");
+    }
+    tray.style.transform = "matrix(1, 0, 0, 1, 0, -8)";
+    vi.stubGlobal(
+      "DOMMatrixReadOnly",
+      class {
+        m42 = -8;
+      }
+    );
+    view.rerender(<Harness alignment="nearest" />);
+    expect(onGeometry).toHaveBeenLastCalledWith(
+      expect.objectContaining({ innerScrollTop: 624, outerScrollTop: 880 })
+    );
+    surface.inner.scrollTop = 624;
+    surface.layout.translationY = 0;
+    tray.style.transform = "none";
+    view.rerender(<Harness alignment="nearest" outerSettled={1} />);
+    advanceFrames(2);
+    expect(onSettled).toHaveBeenCalledExactlyOnceWith(1);
+    expect(surface.attachCard()?.getBoundingClientRect().bottom).toBe(576);
+  });
   it("keeps a visible keyboard target still and publishes its outer scroll unchanged", () => {
     const view = render(<Harness request={0} />);
     surface.outer.scrollTop = 968;

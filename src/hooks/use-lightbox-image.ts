@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { scheduleImage } from "@/utils/image-scheduler";
 
 /** Tracks one mounted image request, including cached loads and async decoding. */
 export function useLightboxImage({
@@ -50,7 +51,27 @@ export function useLightboxImage({
     };
     image.addEventListener("load", load);
     image.addEventListener("error", fail);
-    if (image.complete) {
+    const handle = scheduleImage(src, {
+      priority: 0,
+      consumer: "lightbox",
+      element: image,
+    });
+    handle.promise.then((status) => {
+      if (!active || status === "cancelled") {
+        return;
+      }
+      if (status === "failed") {
+        fail();
+        return;
+      }
+      if (image.src !== src) {
+        image.src = src;
+      }
+      load();
+    });
+    // A queued element has no src yet. Only inspect a cache result once the
+    // scheduler has assigned this request's source to the real DOM image.
+    if (image.getAttribute("src") === src && image.complete) {
       if (image.naturalWidth > 0) {
         load();
       } else {
@@ -59,6 +80,7 @@ export function useLightboxImage({
     }
     return () => {
       active = false;
+      handle.release();
       image.removeEventListener("load", load);
       image.removeEventListener("error", fail);
     };

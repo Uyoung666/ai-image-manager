@@ -33,6 +33,12 @@ import {
   setWatermarkSettings,
 } from "./handlers/export";
 import {
+  getPhotoLayoutPrefix,
+  getPhotosByIds,
+  getPhotoThumbnailVersions,
+  listPhotoPage,
+} from "./handlers/gallery-listing";
+import {
   cancelAllImports_h,
   cancelQueuedImports_h,
   deleteFolder,
@@ -123,6 +129,10 @@ import {
 } from "./handlers/tags";
 
 export const photos = {
+  listPhotoPage,
+  getPhotoLayoutPrefix,
+  getPhotosByIds,
+  getPhotoThumbnailVersions,
   applyDuplicateKeepCount: applyDuplicateKeepCountHandler,
   addTag,
   backfillMissingThumbnails,

@@ -827,6 +827,10 @@ function restoreMaximizedWindow(window: BrowserWindow) {
 }
 
 // ── Create main window ───────────────────────────────────────────────
+function galleryPerfArguments(): string[] {
+  return process.env.AIM_GALLERY_PERF === "1" ? ["--gallery-perf"] : [];
+}
+
 function createWindow(httpPort: number, httpAuthToken: string) {
   if (isQuitting) {
     return;
@@ -879,6 +883,7 @@ function createWindow(httpPort: number, httpAuthToken: string) {
       additionalArguments: [
         `--http-port=${httpPort}`,
         `--http-token=${httpAuthToken}`,
+        ...galleryPerfArguments(),
         ...(isE2E ? ["--e2e"] : []),
       ],
       devTools: inDevelopment,

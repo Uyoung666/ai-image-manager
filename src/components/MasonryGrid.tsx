@@ -34,7 +34,7 @@ import {
   useMasonryVirtualWindow,
 } from "@/hooks/useMasonryVirtualWindow";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
-import { recordGalleryPerf } from "@/utils/gallery-perf";
+import { recordGalleryPerf, startGalleryPerfProbe } from "@/utils/gallery-perf";
 import {
   getMasonryReflowAnchor,
   getMasonryReflowScrollTop,
@@ -43,6 +43,8 @@ import {
 
 export type { GroupHeaderInput as GroupHeader, MasonryGridHandle };
 
+import { GALLERY_CONFIG } from "@/utils/gallery-config";
+import { ensureGalleryPhotos } from "@/utils/gallery-data-source";
 import { getReturnScrollTop } from "@/utils/gallery-return";
 
 const SCROLL_TOP_EPSILON = 0.5;
@@ -67,17 +69,24 @@ function hasMatchingLayoutWidth(element: HTMLElement, width: number): boolean {
 export function shouldRenderItemImage(
   style: React.CSSProperties,
   scrollTop: number,
-  viewportHeight: number
+  viewportHeight: number,
+  direction?: number,
+  velocity = 0
 ): boolean {
   if (viewportHeight <= 0) {
     return true;
   }
   const itemTop = Number(style.top) || 0;
   const itemHeight = Number(style.height) || 0;
-  const imageTop =
-    scrollTop - viewportHeight * IMAGE_RENDER_OVERSCAN_VIEWPORTS_BEFORE;
-  const imageBottom =
-    scrollTop + viewportHeight * IMAGE_RENDER_OVERSCAN_VIEWPORTS_AFTER;
+  const forward = velocity >= 10.8 ? 0.5 : 2;
+  let before = IMAGE_RENDER_OVERSCAN_VIEWPORTS_BEFORE;
+  let after = IMAGE_RENDER_OVERSCAN_VIEWPORTS_AFTER - 1;
+  if (direction !== undefined) {
+    before = direction < 0 ? forward : 0.5;
+    after = direction < 0 ? 0.5 : forward;
+  }
+  const imageTop = scrollTop - viewportHeight * before;
+  const imageBottom = scrollTop + viewportHeight * (1 + after);
   return itemTop + itemHeight >= imageTop && itemTop <= imageBottom;
 }
 
@@ -154,7 +163,7 @@ interface MasonryGridProps {
     item: any,
     index: number,
     style: React.CSSProperties,
-    options: { renderImage: boolean }
+    options: { renderImage: boolean; imagePriority?: 0 | 1 | 2 }
   ) => ReactNode;
   restoreGateReady?: boolean;
   returnToMemberId?: number | null;
@@ -172,7 +181,7 @@ interface MasonryGridProps {
 export const MasonryGrid = memo(
   forwardRef<MasonryGridHandle, MasonryGridProps>(function MasonryGrid(
     {
-      items,
+      items: inputItems,
       containerWidth,
       columnCount,
       gap,
@@ -209,6 +218,10 @@ export const MasonryGrid = memo(
     const { t } = useTranslation();
     const scrollRef = useRef<HTMLDivElement>(null);
     const sentinelRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+      const surface = scrollRef.current;
+      return surface ? startGalleryPerfProbe(surface) : undefined;
+    }, []);
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
     const [scrollHeight, setScrollHeight] = useState(0);
@@ -227,6 +240,8 @@ export const MasonryGrid = memo(
     const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rafRef = useRef<number>(0);
     const prevScrollYRef = useRef(0);
+    const prevScrollTimeRef = useRef(performance.now());
+    const scrollDirectionRef = useRef(1);
     const reflowScrollTopRef = useRef<number | null>(null);
     const reflowAnchorRef = useRef<
       (MasonryReflowAnchor & { expiresAt: number }) | null
@@ -261,16 +276,17 @@ export const MasonryGrid = memo(
       travel: number;
     } | null>(null);
 
-    const { positions, totalHeight, headerPositions, visibilityIndex } =
-      useMasonryLayout(
-        items,
-        containerWidth,
-        columnCount,
-        gap,
-        groupHeaders,
-        routeKey,
-        showGroupHeaders
-      );
+    const layout = useMasonryLayout(
+      inputItems,
+      containerWidth,
+      columnCount,
+      gap,
+      groupHeaders,
+      routeKey,
+      showGroupHeaders
+    );
+    const { positions, totalHeight, headerPositions, visibilityIndex } = layout;
+    const items = (layout.renderItems ?? inputItems) as typeof inputItems;
 
     const idToIndexMap = useMemo(
       () => new Map(items.map((item, i) => [item.id, i])),
@@ -423,7 +439,14 @@ export const MasonryGrid = memo(
           return;
         }
 
-        const dy = Math.abs(el.scrollTop - prevScrollYRef.current);
+        const now = performance.now();
+        const delta = el.scrollTop - prevScrollYRef.current;
+        const dy =
+          Math.abs(delta) / Math.max(1, now - prevScrollTimeRef.current);
+        prevScrollTimeRef.current = now;
+        if (delta !== 0) {
+          scrollDirectionRef.current = Math.sign(delta);
+        }
         onScrollTopChange?.(el.scrollTop);
         prevScrollYRef.current = el.scrollTop;
         const nextOverscanMultiplier = getVelocityOverscanMultiplier(dy);
@@ -472,17 +495,22 @@ export const MasonryGrid = memo(
             setScrollTop(latest);
             recordGalleryPerf("masonryScrollRenderTopUpdates", 1);
           }
-        }, 600);
+        }, GALLERY_CONFIG.scrollIdleMs);
 
         const headers = headerPositionsRef.current;
         let nextLabel = "";
         if (headers.length > 0) {
-          for (let i = headers.length - 1; i >= 0; i--) {
-            if (headers[i].top <= el.scrollTop + 100) {
-              nextLabel = headers[i].label;
-              break;
+          let lo = 0;
+          let hi = headers.length;
+          while (lo < hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            if (headers[mid].top <= el.scrollTop + 100) {
+              lo = mid + 1;
+            } else {
+              hi = mid;
             }
           }
+          nextLabel = headers[Math.max(0, lo - 1)]?.label ?? "";
           if (!nextLabel) {
             nextLabel = headers[0]?.label || "";
           }
@@ -1172,6 +1200,12 @@ export const MasonryGrid = memo(
     ]);
 
     useEffect(() => {
+      const photos = visibleItems.map(({ index }) => items[index]);
+      const refresh = () => {
+        ensureGalleryPhotos(photos, true).catch(() => undefined);
+      };
+      refresh();
+      const keepVisible = setInterval(refresh, 60_000);
       let renderImageCount = 0;
       for (const { style } of visibleItems) {
         if (
@@ -1185,7 +1219,34 @@ export const MasonryGrid = memo(
         }
       }
       recordGalleryPerf("masonryImageItems", renderImageCount);
-    }, [visibleItems, effectiveScrollTop, effectiveViewportHeight]);
+      return () => clearInterval(keepVisible);
+    }, [visibleItems, effectiveScrollTop, effectiveViewportHeight, items]);
+
+    // Keep an already displayed image until its virtual DOM card leaves the
+    // window. Width reflow must not briefly replace it with a placeholder.
+    const retainedImagesRef = useRef(new Set<number>());
+    const renderedImageIds = new Set<number>();
+    for (const { index, style } of visibleItems) {
+      const id = items[index].id;
+      if (
+        (photoFocusPending &&
+          photoFocusRequest?.targetRect !== undefined &&
+          id === photoFocusRequest.photoId) ||
+        retainedImagesRef.current.has(id) ||
+        shouldRenderItemImage(
+          style,
+          effectiveScrollTop,
+          effectiveViewportHeight,
+          scrollDirectionRef.current,
+          scrollVelocity
+        )
+      ) {
+        renderedImageIds.add(id);
+      }
+    }
+    useLayoutEffect(() => {
+      retainedImagesRef.current = renderedImageIds;
+    });
 
     const scrollToTop = useCallback(
       (e: React.MouseEvent) => {
@@ -1392,15 +1453,18 @@ export const MasonryGrid = memo(
               {visibleItems.map(({ index, style }) => (
                 <div key={items[index].id} style={style}>
                   {renderItem(items[index], index, style, {
+                    imagePriority:
+                      Number(style.top) + Number(style.height) >=
+                        effectiveScrollTop &&
+                      Number(style.top) <=
+                        effectiveScrollTop + effectiveViewportHeight
+                        ? 0
+                        : 1,
                     renderImage:
                       (photoFocusPending &&
                         photoFocusRequest?.targetRect !== undefined &&
                         items[index].id === photoFocusRequest.photoId) ||
-                      shouldRenderItemImage(
-                        style,
-                        effectiveScrollTop,
-                        effectiveViewportHeight
-                      ),
+                      renderedImageIds.has(items[index].id),
                   })}
                 </div>
               ))}

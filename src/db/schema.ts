@@ -40,6 +40,11 @@ export const folders = sqliteTable(
   })
 );
 
+export const galleryDataRevision = sqliteTable("gallery_data_revision", {
+  id: integer("id").primaryKey(),
+  revision: integer("revision").notNull().default(0),
+});
+
 export const photos = sqliteTable(
   "photos",
   {
@@ -113,6 +118,40 @@ export const photos = sqliteTable(
       table.thumbnailPath
     ),
     filenameIdx: index("idx_photos_filename").on(table.filename),
+    deletedNameIdx: index("idx_photos_deleted_name").on(
+      table.deletedAt,
+      table.filename,
+      table.id
+    ),
+    deletedSizeIdx: index("idx_photos_deleted_size").on(
+      table.deletedAt,
+      table.fileSize,
+      table.id
+    ),
+    deletedFolderNameIdx: index("idx_photos_deleted_folder_name").on(
+      table.deletedAt,
+      table.folderId,
+      table.filename,
+      table.id
+    ),
+    deletedFolderSizeIdx: index("idx_photos_deleted_folder_size").on(
+      table.deletedAt,
+      table.folderId,
+      table.fileSize,
+      table.id
+    ),
+    deletedFavNameIdx: index("idx_photos_deleted_fav_name").on(
+      table.deletedAt,
+      table.isFavorite,
+      table.filename,
+      table.id
+    ),
+    deletedFavSizeIdx: index("idx_photos_deleted_fav_size").on(
+      table.deletedAt,
+      table.isFavorite,
+      table.fileSize,
+      table.id
+    ),
     colorBucketIdx: index("idx_photos_color_bucket").on(table.colorBucket),
   })
 );

@@ -52,11 +52,13 @@ vi.mock("@/ipc/manager", () => ({
 }));
 
 vi.mock("@/utils/local-media-url", () => ({
+  toGalleryThumbnailUrl: () => "",
   preloadImage: vi.fn(),
   toLocalMediaUrl: (filePath: string | null | undefined) =>
     filePath ? `local-media://${filePath}` : "",
 }));
 
+const THUMBNAIL_NAME = /^\d+: image-/;
 const photos = [
   {
     fileDate: new Date("2024-01-01").getTime(),
@@ -128,6 +130,27 @@ function deferImageDecode(image: HTMLImageElement) {
 }
 
 describe("PhotoLightbox", () => {
+  it("keeps a 100k thumbnail strip bounded and opens directly near a deep current photo", () => {
+    const many = Array.from({ length: 100_000 }, (_, index) => ({
+      ...photos[0],
+      id: index + 1,
+      filename: `image-${index + 1}.jpg`,
+    }));
+    render(
+      <PhotoLightbox
+        initialIndex={99_990}
+        onClose={vi.fn()}
+        open
+        photos={many}
+        showThumbnailsInitially
+      />
+    );
+    const thumbnails = screen.getAllByRole("button", { name: THUMBNAIL_NAME });
+    expect(thumbnails.length).toBeLessThan(25);
+    expect(
+      screen.getByRole("button", { name: "99991: image-99991.jpg" })
+    ).toBeInTheDocument();
+  });
   beforeEach(() => {
     localStorage.clear();
   });
@@ -177,6 +200,30 @@ describe("PhotoLightbox", () => {
     expect(document.body.style.overflow).toBe("scroll");
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
+  });
+
+  it("preserves focus already restored to another gallery photo before modal cleanup", () => {
+    render(
+      <>
+        <button type="button">Original photo</button>
+        <button type="button">Returned photo</button>
+      </>
+    );
+    screen.getByRole("button", { name: "Original photo" }).focus();
+    const { rerender } = render(
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />
+    );
+    const returned = screen.getByRole("button", { name: "Returned photo" });
+    returned.focus();
+    rerender(
+      <PhotoLightbox
+        initialIndex={0}
+        onClose={vi.fn()}
+        open={false}
+        photos={photos}
+      />
+    );
+    expect(document.activeElement).toBe(returned);
   });
 
   it("keeps secondary review surfaces collapsed by default", () => {

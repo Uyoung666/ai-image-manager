@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 import { buildMasonryVisibilityIndex } from "@/utils/masonry-utils";
+import { useBlockedMasonryLayout } from "./useBlockedMasonryLayout";
 
 export interface MasonryItem {
   height: number;
@@ -17,6 +18,7 @@ export interface HeaderPosition {
 export interface MasonryLayout {
   headerPositions: HeaderPosition[];
   positions: MasonryItem[];
+  renderItems?: MasonryLayoutInput[];
   totalHeight: number;
   visibilityIndex: number[];
 }
@@ -27,6 +29,7 @@ export interface GroupHeaderInput {
 }
 
 export interface MasonryLayoutInput {
+  fileDate?: number | null;
   fullWidth?: boolean;
   height: number;
   id: number;
@@ -235,8 +238,20 @@ export function useMasonryLayout(
   showGroupHeaders = true
 ): MasonryLayout {
   const previousRef = useRef<MasonryLayoutCache | null>(null);
+  const blocked = useBlockedMasonryLayout(
+    items,
+    containerWidth,
+    columnCount,
+    gap,
+    groupHeaders,
+    layoutKey,
+    showGroupHeaders
+  );
 
   return useMemo(() => {
+    if (blocked) {
+      return blocked;
+    }
     const start = performance.now();
     if (containerWidth <= 0 || columnCount <= 0 || items.length === 0) {
       previousRef.current = null;
@@ -333,6 +348,7 @@ export function useMasonryLayout(
     recordGalleryPerf("masonryLayoutMs", performance.now() - start);
     return layout;
   }, [
+    blocked,
     items,
     containerWidth,
     columnCount,

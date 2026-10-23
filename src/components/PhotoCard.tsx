@@ -14,9 +14,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
 import type { SearchMatch } from "@/types/photo";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
-import { toLocalMediaUrl } from "@/utils/local-media-url";
+import type { ImagePriority } from "@/utils/image-scheduler";
+import {
+  toGalleryThumbnailUrl,
+  toLocalMediaUrl,
+} from "@/utils/local-media-url";
 import { RecentlyViewedBadge } from "./RecentlyViewedBadge";
 
 export interface FaceOverlay {
@@ -65,6 +70,7 @@ interface PhotoCardProps {
   getDragIds?: (id: number) => number[];
   height: number;
   id: number;
+  imagePriority?: ImagePriority;
   isFavorite?: boolean;
   isSelected: boolean;
   loading?: "eager" | "lazy";
@@ -74,6 +80,7 @@ interface PhotoCardProps {
   onNameFace?: (id: number) => void;
   onToggleFavorite?: (id: number) => void;
   path: string;
+  queryGeneration?: string;
   recentlyViewed?: boolean;
   recentlyViewedPulseActive?: boolean;
   recentlyViewedPulseKey?: number;
@@ -84,6 +91,7 @@ interface PhotoCardProps {
   semanticTopSimilarity?: number;
   thumbnailPath: string | null;
   thumbnailSmallPath?: string | null;
+  thumbnailVersion?: string;
   width: number;
 }
 
@@ -93,7 +101,9 @@ interface PhotoCardImageProps {
   hasThumbnail: boolean;
   height: number;
   loading: "eager" | "lazy";
+  onDisplayed?: () => void;
   onError: () => void;
+  preserveLoaded?: boolean;
   renderImage: boolean;
   srcSet?: string;
   url: string;
@@ -168,6 +178,8 @@ function FaceOverlayBox({
 }
 
 function PhotoCardImage({
+  onDisplayed,
+  preserveLoaded = false,
   draggable,
   filename,
   hasThumbnail,
@@ -190,16 +202,31 @@ function PhotoCardImage({
     const image = imageRef.current;
     // Cached thumbnails can already be decoded before their new load event.
     // Reveal them before paint when switching back to the photo gallery.
-    setLoadState(
-      hasThumbnail && renderImage && image?.complete && image.naturalWidth > 0
-        ? "cached"
-        : "loading"
-    );
-  }, [hasThumbnail, renderImage, srcSet, url]);
+    setLoadState((current) => {
+      if (
+        hasThumbnail &&
+        renderImage &&
+        image?.complete &&
+        image.naturalWidth > 0
+      ) {
+        onDisplayed?.();
+        return "cached";
+      }
+      if (
+        preserveLoaded &&
+        hasThumbnail &&
+        renderImage &&
+        current !== "loading"
+      ) {
+        return current;
+      }
+      return "loading";
+    });
+  }, [hasThumbnail, renderImage, srcSet, url, preserveLoaded, onDisplayed]);
 
   if (!(hasThumbnail && renderImage)) {
     return (
-      <div className="absolute inset-0 bg-muted/70">
+      <div className="absolute inset-0 bg-muted/15">
         <div className="absolute inset-0 bg-gradient-to-br from-foreground/[0.03] to-transparent" />
       </div>
     );
@@ -221,9 +248,10 @@ function PhotoCardImage({
       height={height || undefined}
       loading={loading}
       onError={onError}
-      onLoad={() =>
-        setLoadState((current) => (current === "cached" ? current : "loaded"))
-      }
+      onLoad={() => {
+        onDisplayed?.();
+        setLoadState((current) => (current === "cached" ? current : "loaded"));
+      }}
       ref={imageRef}
       sizes="(max-width: 900px) 160px, 220px"
       src={url}
@@ -235,10 +263,12 @@ function PhotoCardImage({
 
 export const PhotoCard = memo(function PhotoCard({
   id,
+  imagePriority = 0,
   path,
   disableDrag = false,
   thumbnailPath,
   thumbnailSmallPath,
+  thumbnailVersion,
   loading = "lazy",
   dominantColors,
   filename,
@@ -256,6 +286,7 @@ export const PhotoCard = memo(function PhotoCard({
   match,
   semanticTopSimilarity,
   renderImage = true,
+  queryGeneration,
   recentlyViewed = false,
   recentlyViewedPulseActive = false,
   recentlyViewedPulseKey = 0,
@@ -265,26 +296,47 @@ export const PhotoCard = memo(function PhotoCard({
   onToggleFavorite,
 }: PhotoCardProps) {
   const { t } = useTranslation();
-  const hasThumbnail = Boolean(thumbnailPath);
+  const [retryCount, setRetryCount] = useState(0);
+  const managed = Boolean(toGalleryThumbnailUrl(id, 256));
+  const gallery = useGalleryThumbnail({
+    id,
+    version: `${id}:${width}:${height}:${retryCount}`,
+    sourceVersion: thumbnailVersion,
+    width: 220,
+    height: 220 / Math.max(0.6, Math.min(3, width / (height || 1))),
+    enabled: managed && renderImage,
+    priority: imagePriority,
+    generation: queryGeneration,
+  });
+  const hasThumbnail = managed ? Boolean(gallery.url) : Boolean(thumbnailPath);
 
   // ── URL 计算 ──────────────────────────────────────────────────────
   // toLocalMediaUrl 现在是同步函数（端口由 preload 在窗口创建时注入），
   // URL 在组件生命周期内稳定不变。
-  const [retryCount, setRetryCount] = useState(0);
   const url = useMemo(() => {
-    const base = thumbnailPath ? toLocalMediaUrl(thumbnailPath) : "";
-    return retryCount > 0 ? `${base}?retry=${retryCount}` : base;
-  }, [thumbnailPath, retryCount]);
+    let base = gallery.url;
+    if (!managed) {
+      base = thumbnailPath ? toLocalMediaUrl(thumbnailPath) : "";
+    }
+    return !managed && retryCount > 0
+      ? `${base}${base.includes("?") ? "&" : "?"}retry=${retryCount}`
+      : base;
+  }, [thumbnailPath, retryCount, managed, gallery.url]);
   const srcSet = useMemo(() => {
-    if (!(thumbnailSmallPath && thumbnailPath)) {
+    if (managed || !(thumbnailSmallPath && thumbnailPath)) {
       return undefined;
     }
     const smallUrl = toLocalMediaUrl(thumbnailSmallPath);
     const mediumUrl = toLocalMediaUrl(thumbnailPath);
     return `${smallUrl} 256w, ${mediumUrl} 512w`;
-  }, [thumbnailSmallPath, thumbnailPath]);
+  }, [thumbnailSmallPath, thumbnailPath, managed]);
 
   const [imgError, setImgError] = useState(false);
+  useEffect(() => {
+    if (gallery.failed) {
+      setImgError(true);
+    }
+  }, [gallery.failed]);
   const [isRecentlyViewedPulseActive, setIsRecentlyViewedPulseActive] =
     useState(false);
 
@@ -556,6 +608,7 @@ export const PhotoCard = memo(function PhotoCard({
       onDoubleClick={handleDoubleClick}
       onDragStart={disableDrag ? undefined : handleDragStart}
       onKeyDown={handleKeyDown}
+      ref={gallery.ref}
       role="option"
       style={{
         aspectRatio,
@@ -568,9 +621,11 @@ export const PhotoCard = memo(function PhotoCard({
         filename={filename}
         hasThumbnail={hasThumbnail}
         height={height}
-        key={url}
+        key={id}
         loading={loading}
+        onDisplayed={managed ? () => gallery.onDisplayed(url) : undefined}
         onError={handleImageError}
+        preserveLoaded={managed}
         renderImage={renderImage}
         srcSet={srcSet}
         url={url}

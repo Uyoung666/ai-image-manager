@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import chokidar, { type FSWatcher } from "chokidar";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import exifr from "exifr";
 import PQueue from "p-queue";
@@ -9,6 +8,10 @@ import { getDatabase } from "@/db";
 import { exifData, folders, photos } from "@/db/schema";
 import { createLogger } from "@/utils/logger";
 import { deletePhotoVectors } from "./ai-embedder";
+import {
+  createBackgroundWatcher,
+  type FileWatcherHandle,
+} from "./background-file-watcher";
 import { extractDominantColors } from "./color-extractor";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
@@ -17,6 +20,7 @@ import {
   getOrientedDimensions,
   resolveImageOrientation,
 } from "./image-orientation";
+import { findMissingPhotoIds } from "./orphan-photo-check";
 import { extractRawPreview, isRawFile, readRawDimensions } from "./raw-preview";
 import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
 
@@ -94,7 +98,7 @@ interface WatcherContext {
   folderId: number | null;
   folderPath: string;
   key: string;
-  watcher: FSWatcher;
+  watcher: FileWatcherHandle;
 }
 
 const watchers = new Map<string, WatcherContext>();
@@ -252,9 +256,9 @@ function createWatcher(
   folderId: number | null
 ): WatcherContext | null {
   const key = watcherPathKey(folderPath);
-  let watcher: FSWatcher;
+  let watcher: FileWatcherHandle;
   try {
-    watcher = chokidar.watch(folderPath, {
+    watcher = createBackgroundWatcher(folderPath, {
       ignored: WATCHER_IGNORED_PATTERNS,
       ignorePermissionErrors: true,
       ignoreInitial: true,
@@ -1850,55 +1854,34 @@ export async function stopWatching(): Promise<void> {
   };
 }
 
-export async function cleanupOrphanedRecords(): Promise<{
+export function cleanupOrphanedRecords(): Promise<{
   checked: number;
   removed: number;
 }> {
-  const db = getDatabase();
-  const allPhotos = db
-    .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
+  return cleanupOrphanedRecordsAsync();
+}
+
+async function confirmOrphanedPhoto(
+  db: ReturnType<typeof getDatabase>,
+  photo: { id: number; path: string },
+  signal?: AbortSignal
+) {
+  // Recheck rare missing files and their database paths after the async gap.
+  const missing = await findMissingPhotoIds([photo], signal);
+  if (signal?.aborted || !missing.has(photo.id)) {
+    return;
+  }
+  return db
+    .select({ folderId: photos.folderId })
     .from(photos)
-    .where(sql`${photos.deletedAt} IS NULL`)
-    .all();
-
-  let removed = 0;
-  const removedPhotoIds: number[] = [];
-  const folderUpdates = new Map<number, number>();
-
-  for (const photo of allPhotos) {
-    if (!fs.existsSync(photo.path)) {
-      // Clean up orphaned thumbnail files before removing DB records
-      deletePhotoThumbnails(photo.path);
-
-      db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
-      db.delete(photos).where(eq(photos.id, photo.id)).run();
-      removedPhotoIds.push(photo.id);
-
-      if (photo.folderId) {
-        folderUpdates.set(
-          photo.folderId,
-          (folderUpdates.get(photo.folderId) || 0) + 1
-        );
-      }
-
-      removed++;
-    }
-  }
-
-  if (removedPhotoIds.length > 0) {
-    await deletePhotoVectors(removedPhotoIds).catch((err) => {
-      log.warn({ err }, "Failed to remove orphaned photo vectors");
-    });
-  }
-
-  for (const [folderId, count] of folderUpdates) {
-    db.update(folders)
-      .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
-      .where(eq(folders.id, folderId))
-      .run();
-  }
-
-  return { checked: allPhotos.length, removed };
+    .where(
+      and(
+        eq(photos.id, photo.id),
+        eq(photos.path, photo.path),
+        isNull(photos.deletedAt)
+      )
+    )
+    .get();
 }
 
 /**
@@ -1906,7 +1889,8 @@ export async function cleanupOrphanedRecords(): Promise<{
  * BATCH_SIZE photos so the UI stays responsive during startup cleanup.
  */
 export async function cleanupOrphanedRecordsAsync(
-  onProgress?: (checked: number, removed: number, total: number) => void
+  onProgress?: (checked: number, removed: number, total: number) => void,
+  signal?: AbortSignal
 ): Promise<{ checked: number; removed: number }> {
   const db = getDatabase();
   const allPhotos = db
@@ -1919,27 +1903,37 @@ export async function cleanupOrphanedRecordsAsync(
   const removedPhotoIds: number[] = [];
   const folderUpdates = new Map<number, number>();
   const BATCH_SIZE = 200;
+  let checked = 0;
 
   for (let i = 0; i < allPhotos.length; i += BATCH_SIZE) {
     const batch = allPhotos.slice(i, i + BATCH_SIZE);
+    const missing = await findMissingPhotoIds(batch, signal);
+    if (signal?.aborted) {
+      break;
+    }
     for (const photo of batch) {
-      if (!fs.existsSync(photo.path)) {
-        // Clean up orphaned thumbnail files before removing DB records
-        deletePhotoThumbnails(photo.path);
-
+      if (missing.has(photo.id)) {
+        const current = await confirmOrphanedPhoto(db, photo, signal);
+        if (!current) {
+          continue;
+        }
         db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
         db.delete(photos).where(eq(photos.id, photo.id)).run();
+        await deletePhotoThumbnails(photo.path).catch((err) => {
+          log.warn({ err }, "Failed to remove orphaned thumbnails");
+        });
         removedPhotoIds.push(photo.id);
 
-        if (photo.folderId) {
+        if (current.folderId) {
           folderUpdates.set(
-            photo.folderId,
-            (folderUpdates.get(photo.folderId) || 0) + 1
+            current.folderId,
+            (folderUpdates.get(current.folderId) || 0) + 1
           );
         }
         removed++;
       }
     }
+    checked = Math.min(i + BATCH_SIZE, allPhotos.length);
     // Yield the event loop every batch to keep UI responsive
     await new Promise<void>((resolve) => setImmediate(resolve));
     onProgress?.(
@@ -1962,7 +1956,7 @@ export async function cleanupOrphanedRecordsAsync(
       .run();
   }
 
-  return { checked: allPhotos.length, removed };
+  return { checked, removed };
 }
 
 export function stopScanning(): void {

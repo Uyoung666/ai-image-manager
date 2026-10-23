@@ -8,15 +8,46 @@ import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
+import {
+  GALLERY_CONFIG,
+  type GalleryThumbnailEdge,
+} from "@/utils/gallery-config";
+import { registerGalleryCleanup } from "@/utils/gallery-lifecycle";
+import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { createLogger } from "@/utils/logger";
+import { PrioritySemaphore } from "@/utils/priority-semaphore";
 import {
   applyExifOrientation,
   type ExifOrientation,
   resolveImageOrientation,
 } from "./image-orientation";
 import { extractRawPreview, isRawFile } from "./raw-preview";
+import { thumbnailSourceIdentity } from "./thumbnail-identity";
+import {
+  clearThumbnailValidation,
+  validateThumbnail,
+} from "./thumbnail-validation";
 
 const log = createLogger("thumbnailer");
+const MANAGED_THUMBNAIL_EXTENSION =
+  /^(?:[a-f0-9]{32}\.(?:webp|jpg)|g-[a-f0-9]{32}-[a-f0-9]{32}-(?:256|512|1024|2048)\.webp)$/i;
+const GALLERY_SOURCE_PREFIX = /^g-[a-f0-9]{32}-/;
+
+async function removeCachedThumbnail(filePath: string): Promise<void> {
+  await fs.promises.unlink(filePath);
+  const name = path.basename(filePath);
+  const prefix = GALLERY_SOURCE_PREFIX.exec(name)?.[0];
+  if (prefix) {
+    const names = galleryVariantNames.get(prefix);
+    names?.delete(name);
+    if (names?.size === 0) {
+      galleryVariantNames.delete(prefix);
+    }
+  }
+  diskAccessLog.delete(name);
+  knownDiskBytes -= knownDiskFiles.get(name) ?? 0;
+  knownDiskFiles.delete(name);
+}
 
 // Base sizes at 1x DPI — actual generation size is multiplied by devicePixelRatio
 const THUMBNAIL_BASE_SIZES = {
@@ -56,7 +87,7 @@ interface ThumbnailCacheConfig {
 const CACHE_CONFIG: ThumbnailCacheConfig = {
   maxMemoryMB: 250,
   maxDiskMB: 20_480, // 20GB（含对比预览 .jpg）
-  maxDiskFiles: 100_000,
+  maxDiskFiles: GALLERY_CONFIG.maxDiskFiles,
   cleanupThresholdMB: 18_432, // ~90% of max, triggers cleanup at 18GB
 };
 
@@ -65,6 +96,8 @@ let memoryCache: LRUCache<string, Buffer>;
 interface ThumbnailResult {
   buffer?: Buffer;
   height: number;
+  sourceIdentity?: string;
+  stat?: fs.Stats;
   thumbnailPath: string;
   width: number;
 }
@@ -79,7 +112,21 @@ interface DuelPreviewResult {
 }
 let dprScale = 2; // default to 2x for HiDPI displays
 const diskAccessLog = new Map<string, number>();
+const knownDiskFiles = new Map<string, number>();
+const galleryVariantNames = new Map<string, Set<string>>();
+let variantDirectoryReady = false;
+let variantDirectoryRead: Promise<void> | null = null;
+let knownDiskBytes = 0;
+let diskUsageCheckedAt = 0;
 const inFlightThumbnails = new Map<string, Promise<ThumbnailResult>>();
+const galleryJobs = new Map<
+  string,
+  {
+    controller: AbortController;
+    consumers: number;
+    promise: Promise<ThumbnailResult>;
+  }
+>();
 const inFlightDuelPreviews = new Map<
   string,
   Promise<DuelPreviewResult | null>
@@ -96,6 +143,7 @@ async function waitForActiveGenerations(): Promise<void> {
   await Promise.allSettled([
     ...inFlightThumbnails.values(),
     ...inFlightDuelPreviews.values(),
+    ...[...galleryJobs.values()].map((job) => job.promise),
   ]);
 }
 
@@ -103,43 +151,87 @@ async function waitForActiveGenerations(): Promise<void> {
 // 防止大量导入时 sharp 实例爆炸，限制同时执行的生成任务数。
 // 复用 http-server.ts 中 ConversionSemaphore 的同款模式。
 
-class GenerationSemaphore {
-  private running = 0;
-  private readonly pending: Array<() => void> = [];
-  private readonly max: number;
-
-  constructor(max: number) {
-    this.max = max;
-  }
-
-  acquire(): Promise<void> {
-    if (this.running < this.max) {
-      this.running++;
-      return Promise.resolve();
-    }
-    return new Promise<void>((resolve) => {
-      this.pending.push(resolve);
-    });
-  }
-
-  release(): void {
-    this.running--;
-    const next = this.pending.shift();
-    if (next) {
-      this.running++;
-      next();
-    }
-  }
-}
-
-// 并发数上限：取 CPU 核心数的一半，最少 2，最多 4
-const genSemaphore = new GenerationSemaphore(4);
+export const thumbnailGenerationSlots = new PrioritySemaphore(
+  GALLERY_CONFIG.generationConcurrency
+);
+const genSemaphore = thumbnailGenerationSlots;
 
 // ── 清理触发计数器（替代 1% 概率）───────────────────────────────────────
 let generationCount = 0;
 const CLEANUP_CHECK_INTERVAL = 50;
+let lastDiskCheck = 0;
+let diskCheck: Promise<{
+  cleaned: boolean;
+  freedMB: number;
+  filesRemoved: number;
+}> | null = null;
+let diskCheckTimer: ReturnType<typeof setTimeout> | undefined;
+let stopping = false;
+let thumbnailScope = 0;
+
+export function scheduleThumbnailMaintenance(delayMs = 0): void {
+  if (
+    stopping ||
+    diskCheckTimer ||
+    diskCheck ||
+    Date.now() - lastDiskCheck < GALLERY_CONFIG.diskCheckIntervalMs
+  ) {
+    return;
+  }
+  if (delayMs > 0) {
+    diskCheckTimer = setTimeout(() => {
+      diskCheckTimer = undefined;
+      scheduleThumbnailMaintenance();
+    }, delayMs);
+    diskCheckTimer.unref();
+    return;
+  }
+  lastDiskCheck = Date.now();
+  diskCheck = checkAndCleanDiskCache().finally(() => {
+    diskCheck = null;
+  });
+  diskCheck.catch((error) =>
+    log.warn({ err: error }, "Thumbnail cache maintenance failed")
+  );
+}
+
+function cancelThumbnailBackgroundWork(): void {
+  thumbnailScope++;
+  stopping = true;
+  clearTimeout(diskCheckTimer);
+  diskCheckTimer = undefined;
+  for (const job of galleryJobs.values()) {
+    job.controller.abort();
+  }
+  memoryCache?.clear();
+  clearThumbnailValidation();
+}
+registerGalleryCleanup(cancelThumbnailBackgroundWork);
+
+export async function stopThumbnailer(): Promise<void> {
+  cancelThumbnailBackgroundWork();
+  await Promise.allSettled([
+    waitForActiveGenerations(),
+    diskCheck,
+    cacheClearPromise,
+    variantDirectoryRead,
+  ]);
+}
 
 export function initThumbnailer(): void {
+  thumbnailScope++;
+  clearTimeout(diskCheckTimer);
+  diskCheckTimer = undefined;
+  stopping = false;
+  clearThumbnailValidation();
+  lastDiskCheck = 0;
+  knownDiskFiles.clear();
+  galleryVariantNames.clear();
+  variantDirectoryReady = false;
+  variantDirectoryRead = null;
+  diskAccessLog.clear();
+  knownDiskBytes = 0;
+  diskUsageCheckedAt = 0;
   thumbnailDir = path.join(getDataPath(), "thumbnails");
   if (!fs.existsSync(thumbnailDir)) {
     fs.mkdirSync(thumbnailDir, { recursive: true });
@@ -159,6 +251,7 @@ export function initThumbnailer(): void {
   });
 
   reconcileThumbnailCachePaths();
+  scheduleThumbnailMaintenance(GALLERY_CONFIG.initialDiskAuditDelayMs);
 }
 
 /**
@@ -236,8 +329,13 @@ async function writeFileAtomic(
   try {
     await fs.promises.writeFile(tempPath, data);
     await fs.promises.rename(tempPath, targetPath);
+    const filename = path.basename(targetPath);
+    knownDiskBytes += data.byteLength - (knownDiskFiles.get(filename) ?? 0);
+    knownDiskFiles.set(filename, data.byteLength);
+    indexGalleryVariant(filename);
+    diskAccessLog.set(filename, Date.now());
   } catch (err) {
-    await fs.promises.unlink(tempPath).catch(() => {
+    await removeCachedThumbnail(tempPath).catch(() => {
       /* ignore */
     });
     throw err;
@@ -293,6 +391,9 @@ export function getDuelPreviewStrategy(
 export async function generateDuelPreview(
   imagePath: string
 ): Promise<DuelPreviewResult | null> {
+  if (stopping) {
+    throw new DOMException("Cancelled", "AbortError");
+  }
   await waitForCacheClear();
   const cacheKey = `${imagePath}_duel`;
   const previewPath = getDuelPreviewPath(imagePath);
@@ -310,7 +411,7 @@ export async function generateDuelPreview(
     } catch {
       // 文件损坏 → 删除并重新生成
       try {
-        await fs.promises.unlink(previewPath);
+        await removeCachedThumbnail(previewPath);
       } catch {
         /* skip */
       }
@@ -320,6 +421,9 @@ export async function generateDuelPreview(
   }
 
   // L3: 生成（inflight 去重，同 generateThumbnail 模式）
+  if (stopping) {
+    throw new DOMException("Cancelled", "AbortError");
+  }
   const existing = inFlightDuelPreviews.get(cacheKey);
   if (existing) {
     // 复用进行中的 Promise（类型不同但模式相同）
@@ -350,7 +454,7 @@ async function doGenerateDuelPreview(
         await sharp(previewPath).metadata();
       } catch {
         // 文件存在但损坏 → 删除
-        await fs.promises.unlink(previewPath).catch(() => {
+        await removeCachedThumbnail(previewPath).catch(() => {
           /* ignore */
         });
       }
@@ -392,9 +496,7 @@ async function doGenerateDuelPreview(
     if (generationCount >= CLEANUP_CHECK_INTERVAL) {
       generationCount = 0;
       setTimeout(() => {
-        checkAndCleanDiskCache().catch(() => {
-          /* ignore */
-        });
+        scheduleThumbnailMaintenance();
       }, 0);
     }
 
@@ -418,7 +520,7 @@ export async function deleteDuelPreview(imagePath: string): Promise<void> {
   const previewPath = getDuelPreviewPath(imagePath);
   try {
     await fs.promises.access(previewPath);
-    await fs.promises.unlink(previewPath).catch(() => {
+    await removeCachedThumbnail(previewPath).catch(() => {
       /* ignore */
     });
   } catch {
@@ -426,12 +528,17 @@ export async function deleteDuelPreview(imagePath: string): Promise<void> {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: bounded cache cleanup tolerates per-file races while preserving managed-file-only deletion.
 export async function checkAndCleanDiskCache(): Promise<{
   cleaned: boolean;
   freedMB: number;
   filesRemoved: number;
 }> {
+  const scope = thumbnailScope;
   const usage = await getThumbnailDiskUsage();
+  if (scope !== thumbnailScope) {
+    return { cleaned: false, freedMB: 0, filesRemoved: 0 };
+  }
   const usageMB = usage.bytes / (1024 * 1024);
 
   if (
@@ -455,7 +562,7 @@ export async function checkAndCleanDiskCache(): Promise<{
         const entryPath = path.join(thumbnailDir, entry);
         try {
           const stat = await fs.promises.stat(entryPath);
-          if (stat.isFile()) {
+          if (stat.isFile() && MANAGED_THUMBNAIL_EXTENSION.test(entry)) {
             const atime = diskAccessLog.get(entry) || stat.atimeMs;
             files.push({ path: entryPath, atime, size: stat.size });
           }
@@ -477,6 +584,9 @@ export async function checkAndCleanDiskCache(): Promise<{
   let freedBytes = 0;
 
   for (const file of files) {
+    if (scope !== thumbnailScope) {
+      break;
+    }
     if (
       currentMB <= targetMB &&
       filesRemoved >= usage.fileCount - CACHE_CONFIG.maxDiskFiles
@@ -485,7 +595,7 @@ export async function checkAndCleanDiskCache(): Promise<{
     }
 
     try {
-      await fs.promises.unlink(file.path);
+      await removeCachedThumbnail(file.path);
       freedBytes += file.size;
       currentMB -= file.size / (1024 * 1024);
       filesRemoved++;
@@ -511,6 +621,9 @@ export async function generateThumbnail(
   size: ThumbSize = "md",
   options: ThumbnailOptions = {}
 ): Promise<ThumbnailResult> {
+  if (stopping) {
+    throw new DOMException("Cancelled", "AbortError");
+  }
   await waitForCacheClear();
   const cacheKey = `${imagePath}_${size}`;
 
@@ -545,12 +658,15 @@ export async function generateThumbnail(
     };
   } catch {
     // 文件损坏或不存在 → 删除损坏文件后重新生成
-    await fs.promises.unlink(thumbPath).catch(() => {
+    await removeCachedThumbnail(thumbPath).catch(() => {
       /* skip */
     });
   }
 
   // ── 请求去重：正在生成中的缩略图直接 await 同一个 Promise ──
+  if (stopping) {
+    throw new DOMException("Cancelled", "AbortError");
+  }
   const existing = inFlightThumbnails.get(cacheKey);
   if (existing) {
     return existing;
@@ -616,9 +732,7 @@ async function doGenerate(
     if (generationCount >= CLEANUP_CHECK_INTERVAL) {
       generationCount = 0;
       setTimeout(() => {
-        checkAndCleanDiskCache().catch(() => {
-          /* ignore */
-        });
+        scheduleThumbnailMaintenance();
       }, 0);
     }
 
@@ -631,6 +745,249 @@ async function doGenerate(
   } finally {
     genSemaphore.release();
   }
+}
+
+function gallerySourcePrefix(imagePath: string): string {
+  return `g-${crypto.createHash("md5").update(imagePath).digest("hex")}-`;
+}
+
+function indexGalleryVariant(name: string): void {
+  const prefix = GALLERY_SOURCE_PREFIX.exec(name)?.[0];
+  if (!(prefix && MANAGED_THUMBNAIL_EXTENSION.test(name))) {
+    return;
+  }
+  const names = galleryVariantNames.get(prefix) ?? new Set<string>();
+  names.add(name);
+  galleryVariantNames.set(prefix, names);
+}
+
+async function ensureGalleryVariantIndex(): Promise<void> {
+  if (variantDirectoryReady) {
+    return;
+  }
+  if (!variantDirectoryRead) {
+    const scope = thumbnailScope;
+    const pending = fs.promises
+      .readdir(thumbnailDir)
+      .then((names) => {
+        if (scope !== thumbnailScope) {
+          return;
+        }
+        for (const name of names) {
+          indexGalleryVariant(name);
+        }
+        variantDirectoryReady = true;
+      })
+      .finally(() => {
+        if (variantDirectoryRead === pending) {
+          variantDirectoryRead = null;
+        }
+      });
+    variantDirectoryRead = pending;
+  }
+  await variantDirectoryRead;
+}
+
+async function readGalleryVariant(
+  target: string,
+  identity: string,
+  signal?: AbortSignal
+): Promise<ThumbnailResult | null> {
+  try {
+    const stats = await fs.promises.stat(target);
+    const metadata = await validateThumbnail(target, stats);
+    diskAccessLog.set(path.basename(target), Date.now());
+    recordGalleryMediaStat("thumbnailHit");
+    return {
+      thumbnailPath: target,
+      width: metadata.width ?? 0,
+      height: metadata.height ?? 0,
+      stat: stats,
+      sourceIdentity: identity,
+    };
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      await removeCachedThumbnail(target).catch(() => undefined);
+    }
+    return null;
+  }
+}
+
+/** The source's filesystem identity is part of every new physical-pixel variant. */
+export async function generateGalleryThumbnail(
+  imagePath: string,
+  edge: GalleryThumbnailEdge,
+  signal?: AbortSignal,
+  priority = 0,
+  sourceSize?: { width: number | null; height: number | null }
+): Promise<ThumbnailResult> {
+  if (stopping) {
+    throw new DOMException("Cancelled", "AbortError");
+  }
+  await waitForCacheClear();
+  signal?.throwIfAborted();
+  const source = await fs.promises.stat(imagePath);
+  const identity = thumbnailSourceIdentity(source);
+  const sourceChangedAt = Math.max(
+    source.mtimeMs,
+    source.ctimeMs,
+    source.birthtimeMs
+  );
+  const target = path.join(
+    thumbnailDir,
+    `${gallerySourcePrefix(imagePath)}${identity}-${edge}.webp`
+  );
+  const knownVariant = knownDiskFiles.has(path.basename(target));
+  if (knownVariant) {
+    const cached = await readGalleryVariant(target, identity, signal);
+    if (cached) {
+      return cached;
+    }
+  }
+  // The v4 legacy preview already has corrected orientation. Reuse an adequate
+  // unchanged preview directly instead of decoding and encoding a duplicate.
+  const sourceLongEdge = Math.max(
+    sourceSize?.width ?? 0,
+    sourceSize?.height ?? 0
+  );
+  const requiredEdge =
+    sourceLongEdge > 0 ? Math.min(edge, sourceLongEdge) : edge;
+  try {
+    const existing = getThumbnailPath(imagePath, "md");
+    const stat = await fs.promises.stat(existing);
+    const metadata = await validateThumbnail(existing, stat);
+    if (
+      stat.mtimeMs >= sourceChangedAt &&
+      Math.max(metadata.width ?? 0, metadata.height ?? 0) >= requiredEdge
+    ) {
+      diskAccessLog.set(path.basename(existing), Date.now());
+      recordGalleryMediaStat("thumbnailHit");
+      return {
+        thumbnailPath: existing,
+        width: metadata.width ?? 0,
+        height: metadata.height ?? 0,
+        stat,
+        sourceIdentity: identity,
+      };
+    }
+  } catch {
+    /* Missing or undersized legacy previews use the shared generation queue. */
+  }
+  if (!knownVariant) {
+    const cached = await readGalleryVariant(target, identity, signal);
+    if (cached) {
+      return cached;
+    }
+  }
+  let job = galleryJobs.get(target);
+  if (stopping) {
+    throw new DOMException("Cancelled", "AbortError");
+  }
+  if (!job) {
+    const controller = new AbortController();
+    const promise = (async (): Promise<ThumbnailResult> => {
+      const queued = performance.now();
+      await genSemaphore.acquire(controller.signal, priority);
+      recordGalleryMediaStat(
+        "thumbnailGenerationQueueMs",
+        performance.now() - queued
+      );
+      const started = performance.now();
+      try {
+        recordGalleryMediaStat("thumbnailRegenerate");
+        let input: string | Buffer = imagePath;
+        // Existing orientation-safe medium previews avoid re-decoding RAWs.
+        let orientation: ExifOrientation | undefined;
+        try {
+          const existing = getThumbnailPath(imagePath, "md");
+          const stats = await fs.promises.stat(existing);
+          const meta = await validateThumbnail(existing, stats);
+          if (
+            stats.mtimeMs >= sourceChangedAt &&
+            Math.max(meta.width ?? 0, meta.height ?? 0) >= requiredEdge
+          ) {
+            input = existing;
+            orientation = 1;
+          }
+        } catch {
+          /* Generate from source when no suitable preview exists. */
+        }
+        if (input === imagePath && isRawFile(imagePath)) {
+          input = (await extractRawPreview(imagePath)) ?? imagePath;
+        }
+        const metadata = await sharp(input, { failOn: "none" }).metadata();
+        orientation ??= await resolveImageOrientation(imagePath, metadata);
+        const { data, info } = await applyExifOrientation(
+          sharp(input, { failOn: "none" }),
+          orientation
+        )
+          .resize(edge, edge, { fit: "inside", withoutEnlargement: true })
+          .webp({ quality: 85, effort: 1 })
+          .toBuffer({ resolveWithObject: true });
+        if (!(info.width && info.height)) {
+          throw new Error("Invalid generated thumbnail");
+        }
+        await writeFileAtomic(target, data);
+        scheduleThumbnailMaintenance();
+        return {
+          thumbnailPath: target,
+          width: info.width,
+          height: info.height,
+          sourceIdentity: identity,
+        };
+      } finally {
+        recordGalleryMediaStat(
+          "thumbnailGenerationMs",
+          performance.now() - started
+        );
+        genSemaphore.release();
+      }
+    })().finally(() => galleryJobs.delete(target));
+    job = { controller, consumers: 0, promise };
+    galleryJobs.set(target, job);
+  }
+  const active = job;
+  genSemaphore.promote(active.controller.signal, priority);
+  active.consumers++;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const release = () => {
+      if (settled) {
+        return false;
+      }
+      settled = true;
+      signal?.removeEventListener("abort", abort);
+      active.consumers--;
+      if (active.consumers === 0) {
+        active.controller.abort();
+      }
+      return true;
+    };
+    const abort = () => {
+      if (release()) {
+        reject(new DOMException("Cancelled", "AbortError"));
+      }
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) {
+      abort();
+    }
+    active.promise.then(
+      (result) => {
+        if (release()) {
+          resolve(result);
+        }
+      },
+      (error) => {
+        if (release()) {
+          reject(error);
+        }
+      }
+    );
+  });
 }
 
 export async function getThumbnailBuffer(
@@ -651,20 +1008,31 @@ export function getThumbnailSizes(): Record<ThumbSize, number> {
 
 export function clearThumbnailCache(): void {
   memoryCache?.clear();
+  clearThumbnailValidation();
 }
 
 export function getThumbnailDir(): string {
   return thumbnailDir || "";
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: bounded filesystem batches handle missing files, service-scope changes and reconciliation without publishing stale usage.
 export async function getThumbnailDiskUsage(): Promise<{
   dir: string;
   bytes: number;
   fileCount: number;
 }> {
+  const scope = thumbnailScope;
   const dir = thumbnailDir || "";
+  if (
+    diskUsageCheckedAt > 0 &&
+    Date.now() - diskUsageCheckedAt < GALLERY_CONFIG.diskCheckIntervalMs
+  ) {
+    return { dir, bytes: knownDiskBytes, fileCount: knownDiskFiles.size };
+  }
   let bytes = 0;
   let fileCount = 0;
+  const knownBeforeScan = new Set(knownDiskFiles.keys());
+  const seen = new Set<string>();
   if (dir) {
     try {
       await fs.promises.access(dir);
@@ -672,13 +1040,28 @@ export async function getThumbnailDiskUsage(): Promise<{
       // 并发 stat，每批 64 个避免 FD 耗尽，60K 文件从串行 3-8s 降至 ~200ms
       const BATCH = 64;
       for (let i = 0; i < entries.length; i += BATCH) {
+        if (scope !== thumbnailScope) {
+          break;
+        }
         const batch = entries.slice(i, i + BATCH);
         const stats = await Promise.all(
           batch.map(async (entry) => {
             try {
               const entryPath = path.join(dir, entry);
               const st = await fs.promises.stat(entryPath);
-              return st.isFile() ? st.size : 0;
+              if (
+                scope === thumbnailScope &&
+                st.isFile() &&
+                MANAGED_THUMBNAIL_EXTENSION.test(entry)
+              ) {
+                seen.add(entry);
+                knownDiskBytes += st.size - (knownDiskFiles.get(entry) ?? 0);
+                knownDiskFiles.set(entry, st.size);
+                indexGalleryVariant(entry);
+              }
+              return st.isFile() && MANAGED_THUMBNAIL_EXTENSION.test(entry)
+                ? st.size
+                : 0;
             } catch {
               return 0;
             }
@@ -695,7 +1078,21 @@ export async function getThumbnailDiskUsage(): Promise<{
       /* directory unreadable */
     }
   }
-  return { dir, bytes, fileCount };
+  if (scope !== thumbnailScope) {
+    return { dir, bytes, fileCount };
+  }
+  for (const name of knownBeforeScan) {
+    if (!seen.has(name)) {
+      knownDiskBytes -= knownDiskFiles.get(name) ?? 0;
+      knownDiskFiles.delete(name);
+    }
+  }
+  diskUsageCheckedAt = Date.now();
+  return {
+    dir,
+    bytes: Math.max(bytes, knownDiskBytes),
+    fileCount: Math.max(fileCount, knownDiskFiles.size),
+  };
 }
 
 /**
@@ -707,11 +1104,22 @@ export async function deletePhotoThumbnails(imagePath: string): Promise<void> {
     return;
   }
 
+  const prefix = gallerySourcePrefix(imagePath);
+  await ensureGalleryVariantIndex().catch(() => undefined);
+  const variants = [...(galleryVariantNames.get(prefix) ?? [])];
+  await Promise.all(
+    variants.map((name) =>
+      removeCachedThumbnail(path.join(thumbnailDir, name)).catch(
+        () => undefined
+      )
+    )
+  );
+
   for (const size of ["sm", "md", "lg"] as ThumbSize[]) {
     const thumbPath = getThumbnailPath(imagePath, size);
     try {
       await fs.promises.access(thumbPath);
-      await fs.promises.unlink(thumbPath).catch(() => {
+      await removeCachedThumbnail(thumbPath).catch(() => {
         /* ignore */
       });
     } catch {
@@ -743,11 +1151,14 @@ export async function clearThumbnailDiskCache(): Promise<{
         await fs.promises.access(thumbnailDir);
         const entries = await fs.promises.readdir(thumbnailDir);
         for (const entry of entries) {
+          if (!MANAGED_THUMBNAIL_EXTENSION.test(entry)) {
+            continue;
+          }
           const entryPath = path.join(thumbnailDir, entry);
           try {
             const stat = await fs.promises.stat(entryPath);
             totalBytes += stat.size;
-            await fs.promises.unlink(entryPath);
+            await removeCachedThumbnail(entryPath);
             fileCount++;
           } catch {
             /* skip locked / inaccessible files */
@@ -759,6 +1170,7 @@ export async function clearThumbnailDiskCache(): Promise<{
     }
 
     memoryCache?.clear();
+    clearThumbnailValidation();
 
     return {
       fileCount,
@@ -799,6 +1211,7 @@ function buildExpectedThumbnailSet(): Set<string> | null {
         expected.add(path.basename(r.duelPreviewPath));
       }
       if (r.path) {
+        expected.add(gallerySourcePrefix(r.path));
         for (const size of ["sm", "md", "lg"] as ThumbSize[]) {
           expected.add(path.basename(getThumbnailPath(r.path, size)));
         }
@@ -810,6 +1223,14 @@ function buildExpectedThumbnailSet(): Set<string> | null {
   } catch {
     return null; // Database not ready
   }
+}
+
+function isExpectedThumbnail(expected: Set<string>, name: string): boolean {
+  if (expected.has(name)) {
+    return true;
+  }
+  const prefix = GALLERY_SOURCE_PREFIX.exec(name)?.[0];
+  return prefix !== undefined && expected.has(prefix);
 }
 
 /** Scan cache dir for orphan files with no corresponding photo record. */
@@ -838,12 +1259,12 @@ export async function scanOrphanThumbnails(): Promise<{
 
   const entries = await fs.promises.readdir(thumbnailDir);
   for (const entry of entries) {
-    const isManaged = entry.endsWith(".webp") || entry.endsWith(".jpg");
+    const isManaged = MANAGED_THUMBNAIL_EXTENSION.test(entry);
     if (!isManaged) {
       continue;
     }
     totalFiles++;
-    if (!expectedFiles.has(entry)) {
+    if (!isExpectedThumbnail(expectedFiles, entry)) {
       try {
         orphanSizeBytes += (
           await fs.promises.stat(path.join(thumbnailDir, entry))
@@ -882,11 +1303,11 @@ export async function cleanOrphanThumbnails(): Promise<{
 
   const entries = await fs.promises.readdir(thumbnailDir);
   for (const entry of entries) {
-    const isManaged = entry.endsWith(".webp") || entry.endsWith(".jpg");
+    const isManaged = MANAGED_THUMBNAIL_EXTENSION.test(entry);
     if (!isManaged) {
       continue;
     }
-    if (!expectedFiles.has(entry)) {
+    if (!isExpectedThumbnail(expectedFiles, entry)) {
       const entryPath = path.join(thumbnailDir, entry);
       let fileSize = 0;
       try {
@@ -896,7 +1317,7 @@ export async function cleanOrphanThumbnails(): Promise<{
       }
 
       try {
-        await fs.promises.unlink(entryPath);
+        await removeCachedThumbnail(entryPath);
         freedBytes += fileSize;
         removed++;
       } catch (err: unknown) {
@@ -933,7 +1354,15 @@ export function findPhotoPathByThumbnail(
     const db = getDatabase();
     const thumbFilename = path.basename(thumbPath);
 
-    // 快速路径：匹配 DB 中记录的 thumbnailPath 列
+    const direct = db
+      .select({ path: photos.path })
+      .from(photos)
+      .where(eq(photos.thumbnailPath, thumbPath))
+      .get();
+    if (direct) {
+      return { photoPath: direct.path, size: "md" };
+    }
+    // Compatibility for old sm/lg URLs only. New requests address photos by ID.
     const allPhotos = db
       .select({
         path: photos.path,

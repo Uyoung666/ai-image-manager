@@ -23,9 +23,11 @@ import {
   stopWatching,
 } from "@/services/indexer";
 import {
-  checkAndCleanDiskCache,
   initThumbnailer,
+  scheduleThumbnailMaintenance,
+  stopThumbnailer,
 } from "@/services/thumbnailer";
+import { GALLERY_CONFIG } from "@/utils/gallery-config";
 
 // ── Service lifecycle types ───────────────────────────────────────────
 
@@ -277,14 +279,15 @@ registry.register({
   start: () => {
     initThumbnailer();
   },
-  stop: () => {
-    // Thumbnails are file-based; no explicit cleanup needed
-  },
+  stop: stopThumbnailer,
   health: () => {
     // The thumbnailer is a thin wrapper around sharp — it cannot "fail"
     return { status: "ok" as const };
   },
 });
+
+let orphanCleanupController: AbortController | null = null;
+let orphanCleanupTask: Promise<void> | null = null;
 
 registry.register({
   name: "fileWatcher",
@@ -294,13 +297,21 @@ registry.register({
     const { BrowserWindow } = await import("electron");
 
     // 启动时清理孤立记录（fire-and-forget，不阻塞启动）
-    cleanupOrphanedRecordsAsync().then(({ removed }) => {
-      if (removed > 0) {
-        console.log(
-          `[Registry] Cleaned up ${removed} orphaned records on startup`
-        );
-      }
-    });
+    orphanCleanupController = new AbortController();
+    orphanCleanupTask = cleanupOrphanedRecordsAsync(
+      undefined,
+      orphanCleanupController.signal
+    )
+      .then(({ removed }) => {
+        if (removed > 0) {
+          console.log(
+            `[Registry] Cleaned up ${removed} orphaned records on startup`
+          );
+        }
+      })
+      .catch((error) => {
+        console.warn("[Registry] Startup orphan cleanup failed", error);
+      });
 
     startWatching((photoId, event) => {
       for (const win of BrowserWindow.getAllWindows()) {
@@ -310,6 +321,10 @@ registry.register({
     resumeInterruptedImports();
   },
   stop: async () => {
+    orphanCleanupController?.abort();
+    await orphanCleanupTask;
+    orphanCleanupController = null;
+    orphanCleanupTask = null;
     await stopImports();
     await stopWatching();
   },
@@ -430,29 +445,13 @@ registry.register({
 registry.register({
   name: "thumbnailCleaner",
   level: ServiceLevel.Optional,
-  start: async () => {
-    // 启动时清理一次
-    const result = await checkAndCleanDiskCache();
-    if (result.cleaned) {
-      console.log(
-        `[Registry] Thumbnail cache cleaned on startup: ${result.filesRemoved} files, ${result.freedMB.toFixed(1)}MB freed`
-      );
-    }
+  start: () => {
+    scheduleThumbnailMaintenance(GALLERY_CONFIG.initialDiskAuditDelayMs);
 
     // 每天清理一次
     const cleanupInterval = setInterval(
       () => {
-        checkAndCleanDiskCache()
-          .then((result) => {
-            if (result.cleaned) {
-              console.log(
-                `[Registry] Thumbnail cache cleaned: ${result.filesRemoved} files, ${result.freedMB.toFixed(1)}MB freed`
-              );
-            }
-          })
-          .catch(() => {
-            // Cleanup runs again on the next scheduled interval.
-          });
+        scheduleThumbnailMaintenance();
       },
       24 * 60 * 60 * 1000
     );

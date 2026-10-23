@@ -18,7 +18,14 @@ function getSequenceFocusSurface(
   if (Math.abs(trayRect.width - containerWidth) > 1) {
     return null;
   }
-  return { inner, outer, trayRect };
+  const transform = getComputedStyle(tray).transform;
+  const entranceOffset =
+    transform &&
+    transform !== "none" &&
+    typeof DOMMatrixReadOnly !== "undefined"
+      ? new DOMMatrixReadOnly(transform).m42
+      : 0;
+  return { inner, outer, trayRect, entranceOffset };
 }
 
 function measureSequenceMember(
@@ -27,7 +34,7 @@ function measureSequenceMember(
   topInset: number,
   alignment: "center" | "nearest"
 ) {
-  const { inner, outer, trayRect } = surface;
+  const { inner, outer, trayRect, entranceOffset } = surface;
   const card = inner.querySelector<HTMLElement>(
     `[data-photo-id="${memberId}"][role="option"]`
   );
@@ -50,9 +57,11 @@ function measureSequenceMember(
     return null;
   }
   const plan = getSequenceClickScrollPlan({
-    cardTop: cardRect.top,
+    // The tray's entrance animation moves the painted rectangle by 8px. Plan
+    // against its final layout so completion cannot leave the member clipped.
+    cardTop: cardRect.top - entranceOffset,
     cardHeight: cardRect.height,
-    innerTop,
+    innerTop: innerTop - entranceOffset,
     innerScrollTop: inner.scrollTop,
     innerScrollHeight: inner.scrollHeight,
     innerClientHeight: inner.clientHeight,

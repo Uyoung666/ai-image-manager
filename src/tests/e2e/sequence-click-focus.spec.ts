@@ -205,21 +205,30 @@ async function findSequence() {
       { timeout: 30_000, intervals: [100, 150] }
     )
     .toBe(true);
-  await card.evaluate((element) => {
-    const scroll = element.closest<HTMLElement>("[data-masonry-scroll]");
-    if (!scroll) {
-      throw new Error("Missing masonry scroll surface");
-    }
-    const inset =
-      document
-        .querySelector(".home-gallery-toolbar-layer, .page-toolbar.absolute")
-        ?.getBoundingClientRect().height ?? 0;
-    scroll.scrollTop +=
-      element.getBoundingClientRect().top -
-      scroll.getBoundingClientRect().top -
-      inset -
-      40;
-  });
+  await expect
+    .poll(() =>
+      gallery.evaluate((scroll, id) => {
+        const element = scroll.querySelector<HTMLElement>(
+          `[data-sequence-id="${id}"]`
+        );
+        if (!element) {
+          return false;
+        }
+        const inset =
+          document
+            .querySelector(
+              ".home-gallery-toolbar-layer, .page-toolbar.absolute"
+            )
+            ?.getBoundingClientRect().height ?? 0;
+        scroll.scrollTop +=
+          element.getBoundingClientRect().top -
+          scroll.getBoundingClientRect().top -
+          inset -
+          40;
+        return true;
+      }, targetSequence)
+    )
+    .toBe(true);
   await expect
     .poll(() =>
       card
@@ -643,15 +652,28 @@ async function expectKeyboardMember(tray: Locator, frame: number) {
 }
 
 async function expectMemberVisible(member: Locator) {
-  await expect
-    .poll(async () => {
-      const geometry = await focusGeometry(member);
-      return geometry.fits
-        ? geometry.fullyVisible
-        : geometry.cardTop < geometry.visibleBottom &&
-            geometry.cardBottom > geometry.visibleTop;
-    })
-    .toBe(true);
+  const samples: Awaited<ReturnType<typeof focusGeometry>>[] = [];
+  try {
+    await expect
+      .poll(async () => {
+        const geometry = await focusGeometry(member);
+        samples.push(geometry);
+        return geometry.fits
+          ? geometry.fullyVisible
+          : geometry.cardTop < geometry.visibleBottom &&
+              geometry.cardBottom > geometry.visibleTop;
+      })
+      .toBe(true);
+  } catch (error) {
+    await test.info().attach("member-focus-geometry", {
+      body: JSON.stringify(samples, null, 2),
+      contentType: "application/json",
+    });
+    await page.screenshot({
+      path: test.info().outputPath("member-focus-failure.png"),
+    });
+    throw error;
+  }
   await expect(member.locator("img")).toHaveAttribute(
     "data-load-state",
     "loaded"

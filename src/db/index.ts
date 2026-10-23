@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { app } from "electron";
 import { getDataPath } from "@/utils/data-path";
+import { releaseGalleryResources } from "@/utils/gallery-lifecycle";
 import { isSafePath } from "@/utils/path-security";
 import {
   advancedExifData,
@@ -34,6 +35,7 @@ import {
   faceReviewDecisions,
   faceVectors,
   folders,
+  galleryDataRevision,
   photoSequenceExclusions,
   photoSequenceMembers,
   photoSequenceSuggestions,
@@ -76,6 +78,7 @@ const schema = {
   faceReviewDecisions,
   faceVectors,
   folders,
+  galleryDataRevision,
   photoSequenceExclusions,
   photoSequenceMembers,
   photoSequenceSuggestions,
@@ -357,6 +360,7 @@ function dbDiag(msg: string) {
 }
 
 export function closeDatabase(): void {
+  releaseGalleryResources();
   const connection = sqliteConnection;
   if (!connection) {
     dbDiag("closeDatabase: sqliteConnection already null, skip");

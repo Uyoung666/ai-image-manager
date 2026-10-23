@@ -2,20 +2,29 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { and, eq, isNull } from "drizzle-orm";
 import sharp from "sharp";
+import { getDatabase } from "@/db";
+import { photos } from "@/db/schema";
 import {
   applyExifOrientation,
   resolveImageOrientation,
 } from "@/services/image-orientation";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
+import { validateThumbnail } from "@/services/thumbnail-validation";
 import {
   findPhotoPathByDuelPreview,
   findPhotoPathByThumbnail,
   generateDuelPreview,
+  generateGalleryThumbnail,
   generateThumbnail,
 } from "@/services/thumbnailer";
 import { getDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
+import {
+  GALLERY_THUMBNAIL_EDGES,
+  type GalleryThumbnailEdge,
+} from "@/utils/gallery-config";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { createLogger } from "@/utils/logger";
 import { resolveSafePath as resolveSecurePath } from "@/utils/path-security";
@@ -261,11 +270,14 @@ function serveStaticFile(
   filePath: string,
   res: http.ServerResponse,
   mimeType: string,
-  immutable: boolean
+  immutable: boolean,
+  knownStats?: fs.Stats
 ): void {
-  fs.promises
-    .stat(filePath)
+  (knownStats ? Promise.resolve(knownStats) : fs.promises.stat(filePath))
     .then((stats) => {
+      if (res.destroyed || res.writableEnded) {
+        return;
+      }
       if (!stats.isFile()) {
         res.writeHead(404);
         res.end("Not a file");
@@ -273,16 +285,23 @@ function serveStaticFile(
       }
 
       res.setHeader("content-type", mimeType);
-      res.setHeader(
-        "cache-control",
-        immutable
-          ? "public, max-age=31536000, immutable"
-          : "public, max-age=86400"
-      );
+      if (!res.hasHeader("cache-control")) {
+        res.setHeader(
+          "cache-control",
+          immutable
+            ? "public, max-age=31536000, immutable"
+            : "public, max-age=86400"
+        );
+      }
       res.setHeader("content-length", stats.size);
       res.writeHead(200);
 
       const readStream = fs.createReadStream(filePath);
+      const started = performance.now();
+      readStream.once("end", () =>
+        recordGalleryMediaStat("mediaStreamReadMs", performance.now() - started)
+      );
+      res.once("close", () => readStream.destroy());
       readStream.on("error", (err) => {
         if (res.headersSent) {
           res.destroy();
@@ -419,7 +438,7 @@ async function handleThumbnail(
   if (stats?.isFile()) {
     // Validate integrity: sharp.metadata() on a corrupt file will throw
     try {
-      await sharp(safePath).metadata();
+      await validateThumbnail(safePath, stats);
     } catch {
       // Corrupt file → delete and fall through to regeneration
       log.warn(`[HttpServer] /thumbnail corrupt file, deleting: ${safePath}`);
@@ -434,7 +453,7 @@ async function handleThumbnail(
     // Valid file → serve
     recordGalleryMediaStat("thumbnailHit");
     const diskExt = path.extname(safePath).toLowerCase();
-    serveStaticFile(safePath, res, getMimeType(diskExt), true);
+    serveStaticFile(safePath, res, getMimeType(diskExt), true, stats);
     return;
   }
 
@@ -773,6 +792,83 @@ function handleImage(
 
 // ── 请求分发 ──────────────────────────────────────────────────────────
 
+async function handlePhotoThumbnail(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  params: URLSearchParams
+): Promise<void> {
+  const id = Number(params.get("id"));
+  const edge = Number(params.get("edge"));
+  if (
+    !Number.isSafeInteger(id) ||
+    id <= 0 ||
+    !GALLERY_THUMBNAIL_EDGES.includes(edge as GalleryThumbnailEdge)
+  ) {
+    safeEndError(res, 400, "Invalid photo or thumbnail size");
+    return;
+  }
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  res.once("close", cancel);
+  try {
+    const photo = getDatabase()
+      .select({ path: photos.path, width: photos.width, height: photos.height })
+      .from(photos)
+      .where(and(eq(photos.id, id), isNull(photos.deletedAt)))
+      .get();
+    if (!photo) {
+      safeEndError(res, 404, "Not Found");
+      return;
+    }
+    const safePath = resolveSafePath(photo.path);
+    if (!safePath) {
+      safeEndError(res, 403, "Forbidden");
+      return;
+    }
+    recordGalleryMediaStat("thumbnailRequest");
+    const thumbnail = await generateGalleryThumbnail(
+      safePath,
+      edge as GalleryThumbnailEdge,
+      controller.signal,
+      0,
+      photo
+    );
+    if (controller.signal.aborted) {
+      return;
+    }
+    const stats =
+      thumbnail.stat ?? (await fs.promises.stat(thumbnail.thumbnailPath));
+    const etag = `"${path.basename(thumbnail.thumbnailPath)}"`;
+    res.setHeader("etag", etag);
+    res.setHeader(
+      "cache-control",
+      params.get("rv") === thumbnail.sourceIdentity
+        ? "private, max-age=31536000, immutable"
+        : "private, no-cache"
+    );
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304);
+      res.end();
+      return;
+    }
+    serveStaticFile(thumbnail.thumbnailPath, res, "image/webp", false, stats);
+  } catch (error) {
+    if (!(controller.signal.aborted || res.destroyed)) {
+      recordGalleryMediaStat("thumbnailFailed");
+      const code = (error as NodeJS.ErrnoException).code;
+      let status = 500;
+      if (code === "ENOENT") {
+        status = 404;
+      } else if (code === "EACCES" || code === "EPERM") {
+        status = 403;
+      }
+      safeEndError(res, status, "Thumbnail unavailable");
+    }
+  } finally {
+    res.removeListener("close", cancel);
+  }
+}
+
 function handleRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse
@@ -814,6 +910,10 @@ function handleRequest(
 
   setCorsHeaders(res, req.headers.origin);
 
+  if (pathname === "/photo-thumbnail") {
+    handlePhotoThumbnail(req, res, searchParams);
+    return;
+  }
   const filePath = searchParams.get("path");
   if (!filePath) {
     setCorsHeaders(res, req.headers.origin);

@@ -1,7 +1,7 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/noNoninteractiveElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: scoped component lint cleanup preserves existing UI behavior
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import {
   PreviewContextMenu,
@@ -16,6 +16,11 @@ import {
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
+import {
+  ensureGalleryPhotos,
+  getGalleryDataVersion,
+  subscribeGalleryData,
+} from "@/utils/gallery-data-source";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface QuickPreviewPhoto {
@@ -40,6 +45,10 @@ export function QuickPreview({
   onNavigate,
   onOpenLightbox,
 }: QuickPreviewProps) {
+  useSyncExternalStore(subscribeGalleryData, getGalleryDataVersion);
+  useEffect(() => {
+    ensureGalleryPhotos([photo]).catch(() => undefined);
+  }, [photo]);
   const { t, i18n } = useTranslation();
   const reduceMotion = useReducedMotion();
   const [loaded, setLoaded] = useState(false);
@@ -193,7 +202,7 @@ export function QuickPreview({
             }}
             onError={() => setImgError(true)}
             onLoad={() => setLoaded(true)}
-            src={toLocalMediaUrl(photo.path)}
+            src={photo.path ? toLocalMediaUrl(photo.path) : undefined}
             width={photo.width ?? 1}
           />
         )}

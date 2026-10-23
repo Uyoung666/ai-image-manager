@@ -73,6 +73,8 @@ interface PendingRestore {
 interface RestoreGridHandle {
   cancelEnforceLock(): void;
   getCurrentAnchor(): {
+    previousPhotoId?: number;
+    nextPhotoId?: number;
     estimatedGlobalIndex?: number;
     itemId: number;
     offsetFromTop: number;
@@ -475,8 +477,10 @@ function runRestoreEffect(
 interface ScrollFrameAnchor {
   estimatedGlobalIndex?: number;
   itemId: number;
+  nextPhotoId?: number;
   offsetFromTop: number;
   offsetRatio: number;
+  previousPhotoId?: number;
 }
 
 interface ScrollFrameState {
@@ -523,6 +527,8 @@ function saveScrollFrame(context: ScrollFrameContext): void {
     scrollHeight: context.el.scrollHeight,
     anchor: anchor
       ? {
+          previousPhotoId: anchor.previousPhotoId,
+          nextPhotoId: anchor.nextPhotoId,
           itemId: anchor.itemId,
           offsetFromTop: anchor.offsetFromTop,
           offsetRatio: anchor.offsetRatio,
@@ -545,6 +551,8 @@ function saveScrollFrame(context: ScrollFrameContext): void {
     scrollTop,
     anchor
       ? {
+          previousPhotoId: anchor.previousPhotoId,
+          nextPhotoId: anchor.nextPhotoId,
           itemId: anchor.itemId,
           offsetFromTop: anchor.offsetFromTop,
           offsetRatio: anchor.offsetRatio,
@@ -559,12 +567,7 @@ export function useRouteScrollRestoration(
   scrollRef: React.RefObject<HTMLElement | null>,
   options?: {
     getRouteKey?: () => string;
-    getCurrentAnchor?: () => {
-      itemId: number;
-      offsetFromTop: number;
-      offsetRatio: number;
-      estimatedGlobalIndex?: number;
-    } | null;
+    getCurrentAnchor?: () => ScrollFrameAnchor | null;
     restoreFromAnchor?: (anchorItemId: number) => number | null;
     restoreReady?: boolean;
     itemCount?: number;
@@ -577,12 +580,7 @@ export function useRouteScrollRestoration(
       scrollToItem: (itemId: number, offsetRatio: number) => void;
       scrollToPixel: (scrollTop: number) => void;
       cancelEnforceLock(): void;
-      getCurrentAnchor(): {
-        itemId: number;
-        offsetFromTop: number;
-        offsetRatio: number;
-        estimatedGlobalIndex?: number;
-      } | null;
+      getCurrentAnchor(): ScrollFrameAnchor | null;
       readonly scrollElement: HTMLDivElement | null;
     } | null>;
   }
@@ -678,16 +676,7 @@ export function useRouteScrollRestoration(
    * 最后已知良好快照。
    * 只在 scroll 事件的 RAF 回调中更新（所有锁+冻结检查通过后）。
    */
-  const lastKnownGoodStateRef = useRef<{
-    scrollTop: number;
-    scrollHeight: number;
-    anchor: {
-      itemId: number;
-      offsetFromTop: number;
-      offsetRatio: number;
-      estimatedGlobalIndex?: number;
-    } | null;
-  } | null>(null);
+  const lastKnownGoodStateRef = useRef<ScrollFrameState | null>(null);
 
   // ═══════════════════════════════════════════════════════════
   // 防御层 1：路由级导航冻结
@@ -1052,6 +1041,8 @@ export function useRouteScrollRestoration(
         finalScrollTop,
         effectiveAnchor
           ? {
+              previousPhotoId: effectiveAnchor.previousPhotoId,
+              nextPhotoId: effectiveAnchor.nextPhotoId,
               itemId: effectiveAnchor.itemId,
               offsetFromTop: effectiveAnchor.offsetFromTop,
               offsetRatio: effectiveAnchor.offsetRatio,

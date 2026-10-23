@@ -49,6 +49,47 @@ describe("gallery snapshot", () => {
     expect(result.current.value).toBe(c);
   });
 
+  it("keeps the retained page interactive while the same query appends", () => {
+    const a = gallery("A");
+    const { result, rerender } = renderHook(useGallerySnapshot, {
+      initialProps: {
+        enabled: true,
+        ready: true,
+        contextKey: "A:photos:and",
+        value: a,
+      },
+    });
+    rerender({
+      enabled: true,
+      ready: false,
+      contextKey: "A:photos:and",
+      value: { ...a, photos: [...a.photos, "next-photo"] },
+    });
+    expect(result.current.retaining).toBe(true);
+    expect(result.current.value).toBe(a);
+    expect(result.current.blocksInput).toBe(false);
+    for (const contextKey of [
+      "B:photos:and",
+      "A:sequences:and",
+      "A:photos:or",
+    ]) {
+      rerender({
+        enabled: true,
+        ready: false,
+        contextKey,
+        value: gallery("B"),
+      });
+      expect(result.current.blocksInput).toBe(true);
+    }
+    rerender({
+      enabled: true,
+      ready: true,
+      contextKey: "B:photos:and",
+      value: gallery("B"),
+    });
+    expect(result.current.blocksInput).toBe(false);
+  });
+
   it("allows the initial loading state and commits empty folders", () => {
     const empty: ReturnType<typeof gallery> = {
       routeKey: "empty",

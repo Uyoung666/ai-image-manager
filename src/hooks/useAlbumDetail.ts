@@ -4,10 +4,22 @@ import { toast } from "sonner";
 import {
   type AlbumDetail,
   getAlbum,
+  getWindowedAlbum,
   subscribeAlbumRuleChanges,
 } from "@/actions/albums";
+import { subscribeGalleryData } from "@/utils/gallery-data-source";
 
-export function useAlbumDetail(albumId: number) {
+export function useAlbumDetail(
+  albumId: number,
+  options?: {
+    sort: "date" | "name" | "size";
+    order: "asc" | "desc";
+    locale?: string;
+  }
+) {
+  const sort = options?.sort;
+  const order = options?.order;
+  const locale = options?.locale;
   const { t } = useTranslation();
   const translationRef = useRef(t);
   translationRef.current = t;
@@ -25,7 +37,10 @@ export function useAlbumDetail(albumId: number) {
     }
     const requestId = ++requestRef.current;
     try {
-      const result = await getAlbum(albumId);
+      const result =
+        sort && order
+          ? await getWindowedAlbum(albumId, sort, order, locale)
+          : await getAlbum(albumId);
       if (
         requestId === requestRef.current &&
         activeAlbumIdRef.current === albumId
@@ -43,7 +58,19 @@ export function useAlbumDetail(albumId: number) {
         setLoading(false);
       }
     }
-  }, [albumId]);
+  }, [albumId, sort, order, locale]);
+
+  useEffect(
+    () =>
+      subscribeGalleryData(() => {
+        setAlbum((current) =>
+          current?.galleryOrder
+            ? { ...current, photos: [...current.photos] }
+            : current
+        );
+      }),
+    []
+  );
 
   useEffect(() => {
     activeAlbumIdRef.current = albumId;

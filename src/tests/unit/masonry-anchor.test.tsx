@@ -54,6 +54,8 @@ describe("useMasonryAnchor", () => {
     );
 
     expect(result.current.getCurrentAnchor()).toEqual({
+      previousPhotoId: 10,
+      nextPhotoId: undefined,
       itemId: 20,
       offsetFromTop: 50,
       offsetRatio: 0.25,

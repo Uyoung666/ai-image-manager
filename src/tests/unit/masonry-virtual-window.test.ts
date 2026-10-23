@@ -43,8 +43,8 @@ describe("masonry virtual window helpers", () => {
 
   it("maps scroll velocity to three overscan tiers", () => {
     expect(getVelocityOverscanMultiplier(0)).toBe(1);
-    expect(getVelocityOverscanMultiplier(60)).toBe(2);
-    expect(getVelocityOverscanMultiplier(180)).toBe(3);
+    expect(getVelocityOverscanMultiplier(3.6)).toBe(2);
+    expect(getVelocityOverscanMultiplier(10.8)).toBe(3);
   });
 
   it("clamps dynamic overscan by viewport height", () => {

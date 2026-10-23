@@ -41,6 +41,7 @@ vi.mock("@/ipc/manager", () => ({
 }));
 
 vi.mock("@/utils/local-media-url", () => ({
+  toGalleryThumbnailUrl: () => "",
   preloadImage: vi.fn(),
   toLocalMediaUrl: (filePath: string | null | undefined) =>
     filePath ? `local-media://${filePath}` : "",

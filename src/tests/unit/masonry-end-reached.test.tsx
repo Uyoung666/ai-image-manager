@@ -21,8 +21,8 @@ describe("useMasonryEndReached", () => {
 
   it("uses shorter debounce windows for fast scrolling", () => {
     expect(getEndReachedDebounceMs(0)).toBe(400);
-    expect(getEndReachedDebounceMs(60)).toBe(200);
-    expect(getEndReachedDebounceMs(180)).toBe(100);
+    expect(getEndReachedDebounceMs(3.6)).toBe(200);
+    expect(getEndReachedDebounceMs(10.8)).toBe(100);
   });
 
   it("does not trigger without hasMore", () => {

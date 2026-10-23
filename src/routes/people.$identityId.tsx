@@ -5,6 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { faceActions } from "@/actions/faces";
+import {
+  photoFavoriteActions,
+  withPhotoFavorite,
+} from "@/actions/photo-favorites";
+import { photoOperationActions } from "@/actions/photo-operations";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
 import { CloudUploadDialog } from "@/components/CloudUploadDialog";
@@ -488,7 +493,7 @@ function PersonDetailPage() {
       }
       const prevVal = !!photo.isFavorite;
       const newVal = requestedValue ?? !prevVal;
-      await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
+      await photoFavoriteActions.set({ ids: [id], favorite: newVal });
       setIdentity((prev) => {
         if (!prev) {
           return prev;
@@ -496,7 +501,7 @@ function PersonDetailPage() {
         return {
           ...prev,
           photos: prev.photos.map((p) =>
-            p.id === id ? { ...p, isFavorite: newVal } : p
+            p.id === id ? withPhotoFavorite(p, newVal) : p
           ),
         };
       });
@@ -511,7 +516,7 @@ function PersonDetailPage() {
           action: {
             label: t("toastUndo"),
             onClick: async () => {
-              await ipc.client.photos.toggleFavorite({
+              await photoFavoriteActions.set({
                 ids: [id],
                 favorite: prevVal,
               });
@@ -522,7 +527,7 @@ function PersonDetailPage() {
                 return {
                   ...prev,
                   photos: prev.photos.map((p) =>
-                    p.id === id ? { ...p, isFavorite: prevVal } : p
+                    p.id === id ? withPhotoFavorite(p, prevVal) : p
                   ),
                 };
               });
@@ -721,7 +726,7 @@ function PersonDetailPage() {
     const ids = Array.from(selectedIds);
     const nextFav = !allFavorite;
     try {
-      await ipc.client.photos.toggleFavorite({ ids, favorite: nextFav });
+      await photoFavoriteActions.set({ ids, favorite: nextFav });
     } catch (err) {
       console.error("[handleFavoriteSelected] failed:", err);
     }
@@ -738,7 +743,7 @@ function PersonDetailPage() {
 
   async function performDelete() {
     try {
-      await ipc.client.photos.deletePhotos({ ids: confirmDeleteIds });
+      await photoOperationActions.deletePhotos({ ids: confirmDeleteIds });
       markRouteDirty(routeKey);
       removeFromSelection(confirmDeleteIds);
       toast.success(
@@ -773,7 +778,7 @@ function PersonDetailPage() {
     setPendingDeleteIds([]);
     setPendingDeleteSequenceGroup(false);
     try {
-      await ipc.client.photos.deletePhotos({ ids });
+      await photoOperationActions.deletePhotos({ ids });
       markRouteDirty(routeKey);
       removeFromSelection(ids);
       setIdentity((prev) =>
@@ -944,8 +949,8 @@ function PersonDetailPage() {
           (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
         );
         const newVal = !allFav;
-        ipc.client.photos
-          .toggleFavorite({ ids, favorite: newVal })
+        photoFavoriteActions
+          .set({ ids, favorite: newVal })
           .then(() => {
             setIdentity((prev) => {
               if (!prev) {
@@ -955,7 +960,7 @@ function PersonDetailPage() {
               return {
                 ...prev,
                 photos: prev.photos.map((p) =>
-                  idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
+                  idSet.has(p.id) ? withPhotoFavorite(p, newVal) : p
                 ),
               };
             });
@@ -974,7 +979,7 @@ function PersonDetailPage() {
                 action: {
                   label: t("toastUndo"),
                   onClick: async () => {
-                    await ipc.client.photos.toggleFavorite({
+                    await photoFavoriteActions.set({
                       ids,
                       favorite: allFav,
                     });
@@ -1274,8 +1279,8 @@ function PersonDetailPage() {
                 (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
               );
               const newVal = !allFav;
-              ipc.client.photos
-                .toggleFavorite({ ids, favorite: newVal })
+              photoFavoriteActions
+                .set({ ids, favorite: newVal })
                 .then(() => {
                   setIdentity((prev) => {
                     if (!prev) {
@@ -1285,7 +1290,7 @@ function PersonDetailPage() {
                     return {
                       ...prev,
                       photos: prev.photos.map((p) =>
-                        idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
+                        idSet.has(p.id) ? withPhotoFavorite(p, newVal) : p
                       ),
                     };
                   });
@@ -1304,7 +1309,7 @@ function PersonDetailPage() {
                       action: {
                         label: t("toastUndo"),
                         onClick: async () => {
-                          await ipc.client.photos.toggleFavorite({
+                          await photoFavoriteActions.set({
                             ids,
                             favorite: allFav,
                           });
@@ -1471,8 +1476,8 @@ function PersonDetailPage() {
             (id) => selectionPhotos.find((p) => p.id === id)?.isFavorite
           );
           const newVal = !allFav;
-          ipc.client.photos
-            .toggleFavorite({ ids, favorite: newVal })
+          photoFavoriteActions
+            .set({ ids, favorite: newVal })
             .then(() => {
               for (const favId of ids) {
                 sequenceView.updateMemberFavorite(favId, newVal);
@@ -1489,7 +1494,7 @@ function PersonDetailPage() {
                   action: {
                     label: t("toastUndo"),
                     onClick: async () => {
-                      await ipc.client.photos.toggleFavorite({
+                      await photoFavoriteActions.set({
                         ids,
                         favorite: allFav,
                       });

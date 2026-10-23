@@ -16,6 +16,7 @@ interface Window {
     preloadReady: boolean;
     /** HTTP 服务器端口（由主进程在 createWindow 时通过 --http-port 参数同步注入） */
     httpPort: number;
+    galleryPerfEnabled?: boolean;
     /** E2E 测试模式，用于跳过引导流程等 */
     isE2E: boolean;
     getWanderLifecycleState: () =>

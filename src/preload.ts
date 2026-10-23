@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // HTTP 服务器端口（由主进程在 createWindow 时通过 additionalArguments 注入）
   httpPort,
   httpAuthToken,
+  galleryPerfEnabled: process.argv.includes("--gallery-perf"),
   // E2E 测试模式
   isE2E,
   getWanderLifecycleState: (): WanderLifecycleState | null =>

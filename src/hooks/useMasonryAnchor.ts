@@ -13,8 +13,10 @@ import { binarySearchVisibilityStart } from "@/utils/masonry-utils";
 export interface MasonryAnchor {
   estimatedGlobalIndex?: number;
   itemId: number;
+  nextPhotoId?: number;
   offsetFromTop: number;
   offsetRatio: number;
+  previousPhotoId?: number;
 }
 
 export interface MasonryGridHandle {
@@ -115,6 +117,8 @@ export function useMasonryAnchor<T extends { id: number }>({
       pos.height > 0 ? Math.max(0, Math.min(1, offsetFromTop / pos.height)) : 0;
 
     const anchor = {
+      previousPhotoId: curItems[firstVisibleIdx - 1]?.id,
+      nextPhotoId: curItems[firstVisibleIdx + 1]?.id,
       itemId: item.id,
       offsetFromTop,
       offsetRatio,

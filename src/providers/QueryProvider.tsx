@@ -1,6 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useEffect } from "react";
 import { subscribeAlbumRuleChanges } from "@/actions/albums";
+import {
+  getGalleryPhotoSourceKey,
+  subscribeGalleryEvictions,
+} from "@/utils/gallery-data-source";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,6 +21,25 @@ const queryClient = new QueryClient({
 export { queryClient };
 
 export function QueryProvider({ children }: { children: ReactNode }) {
+  useEffect(
+    () =>
+      subscribeGalleryEvictions((key) => {
+        queryClient.removeQueries({
+          type: "inactive",
+          predicate: (query) => {
+            if (query.queryKey[0] !== "photos") {
+              return false;
+            }
+            const data = query.state.data as
+              | { pages?: Array<{ items?: object[] }> }
+              | undefined;
+            const first = data?.pages?.[0]?.items?.[0];
+            return !!first && getGalleryPhotoSourceKey(first) === key;
+          },
+        });
+      }),
+    []
+  );
   useEffect(
     () =>
       subscribeAlbumRuleChanges(() => {

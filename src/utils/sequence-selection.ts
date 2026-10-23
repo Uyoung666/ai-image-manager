@@ -11,6 +11,9 @@ export async function resolveSequenceSelection(
   sequences: PhotoSequence[],
   loadDetail: (id: number) => Promise<PhotoSequenceDetail | null>
 ): Promise<Photo[]> {
+  if (ids.length === 0) {
+    return [];
+  }
   const byId = new Map(photos.map((photo) => [photo.id, photo]));
   const missing = new Set(ids.filter((id) => !byId.has(id)));
   const needed = sequences.filter((sequence) =>

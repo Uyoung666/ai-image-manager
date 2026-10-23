@@ -22,6 +22,7 @@ import {
   photoTags,
 } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
+import { getGalleryAlbumMemberIds } from "@/services/gallery-albums";
 import {
   getSequenceFolderIds,
   notifySequencesChanged,
@@ -67,6 +68,7 @@ const RecommendSequenceRepresentativeSchema = z.object({
   photoIds: z.array(z.number().int().positive()).optional(),
 });
 const ListSequencesSchema = z.object({
+  albumId: z.number().int().positive().optional(),
   folderId: z.number().int().positive().optional(),
   favoriteOnly: z.boolean().optional(),
   photoIds: z.array(z.number().int().positive()).optional(),
@@ -110,6 +112,9 @@ function getVisiblePhotoIds(
   input: ListSequencesInput,
   folderIds: number[] | undefined
 ) {
+  if (input.albumId !== undefined) {
+    return new Set(getGalleryAlbumMemberIds(input.albumId));
+  }
   const scope = input.scope ?? (input.photoIds?.length ? "members" : "gallery");
   if (scope === "members") {
     return new Set(input.photoIds ?? []);
@@ -291,8 +296,14 @@ export function querySequences(input: ListSequencesInput) {
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(photoSequences.startedAt))
     .all();
-  const memberRows = sequences.length
-    ? db
+  const memberRows: Array<{
+    sequenceId: number;
+    photoId: number;
+    position: number;
+  }> = [];
+  for (let offset = 0; offset < sequences.length; offset += 1000) {
+    memberRows.push(
+      ...db
         .select({
           sequenceId: photoSequenceMembers.sequenceId,
           photoId: photoSequenceMembers.photoId,
@@ -304,7 +315,9 @@ export function querySequences(input: ListSequencesInput) {
           and(
             inArray(
               photoSequenceMembers.sequenceId,
-              sequences.map((sequence) => sequence.id)
+              sequences
+                .slice(offset, offset + 1000)
+                .map((sequence) => sequence.id)
             ),
             isNull(photos.deletedAt)
           )
@@ -314,31 +327,54 @@ export function querySequences(input: ListSequencesInput) {
           asc(photoSequenceMembers.position)
         )
         .all()
-    : [];
+    );
+  }
   const visiblePhotoIds = getVisiblePhotoIds(db, input, folderIds);
+  const membersBySequence = new Map<number, number[]>();
+  const matchedBySequence = new Map<number, number[]>();
+  for (const member of memberRows) {
+    const members = membersBySequence.get(member.sequenceId) ?? [];
+    members.push(member.photoId);
+    membersBySequence.set(member.sequenceId, members);
+    if (visiblePhotoIds.has(member.photoId)) {
+      const matched = matchedBySequence.get(member.sequenceId) ?? [];
+      matched.push(member.photoId);
+      matchedBySequence.set(member.sequenceId, matched);
+    }
+  }
   const activeMemberIds = [
-    ...new Set(memberRows.map((member) => member.photoId)),
+    ...new Set(
+      sequences
+        .flatMap((sequence) => [
+          sequence.representativePhotoId,
+          membersBySequence.get(sequence.id)?.[0],
+          matchedBySequence.get(sequence.id)?.[0],
+        ])
+        .filter((id): id is number => id != null)
+    ),
   ];
-  const activePhotos = activeMemberIds.length
-    ? db
+  const activePhotos: (typeof sequences)[number]["photo"][] = [];
+  for (let offset = 0; offset < activeMemberIds.length; offset += 1000) {
+    activePhotos.push(
+      ...db
         .select(photoFields)
         .from(photos)
         .where(
-          and(inArray(photos.id, activeMemberIds), isNull(photos.deletedAt))
+          and(
+            inArray(photos.id, activeMemberIds.slice(offset, offset + 1000)),
+            isNull(photos.deletedAt)
+          )
         )
         .all()
-    : [];
+    );
+  }
   const activePhotoById = new Map(
-    activePhotos.map((photo) => [photo.id, photo])
+    activePhotos.flatMap((photo) => (photo ? [[photo.id, photo] as const] : []))
   );
   return sequences
     .map((sequence) => {
-      const memberPhotoIds = memberRows
-        .filter((row) => row.sequenceId === sequence.id)
-        .map((row) => row.photoId);
-      const matchedPhotoIds = memberPhotoIds.filter((id) =>
-        visiblePhotoIds.has(id)
-      );
+      const memberPhotoIds = membersBySequence.get(sequence.id) ?? [];
+      const matchedPhotoIds = matchedBySequence.get(sequence.id) ?? [];
       const representative =
         activePhotoById.get(sequence.representativePhotoId ?? -1) ??
         activePhotoById.get(memberPhotoIds[0]);

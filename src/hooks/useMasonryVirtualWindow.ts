@@ -7,8 +7,8 @@ import {
 } from "@/utils/masonry-utils";
 
 export const HEADER_HEIGHT = 36;
-export const FAST_SCROLL_VELOCITY = 60;
-export const VERY_FAST_SCROLL_VELOCITY = 180;
+export const FAST_SCROLL_VELOCITY = 3.6;
+export const VERY_FAST_SCROLL_VELOCITY = 10.8;
 export const MAX_DYNAMIC_OVERSCAN_VIEWPORTS = 2;
 
 export interface VisibleMasonryItem {
@@ -112,9 +112,25 @@ export function getVisibleMasonryHeaders(
   }
   const top = scrollTop - overscanPx;
   const bottom = scrollTop + viewportHeight + overscanPx;
-  return headerPositions.filter(
-    (h) => h.top + HEADER_HEIGHT >= top && h.top <= bottom
-  );
+  let lo = 0;
+  let hi = headerPositions.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (headerPositions[mid].top + HEADER_HEIGHT < top) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  const result: HeaderPosition[] = [];
+  for (
+    let index = lo;
+    index < headerPositions.length && headerPositions[index].top <= bottom;
+    index++
+  ) {
+    result.push(headerPositions[index]);
+  }
+  return result;
 }
 
 interface UseMasonryVirtualWindowOptions {

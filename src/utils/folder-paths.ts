@@ -1,5 +1,6 @@
 import { getDatabase } from "@/db";
 import { folders } from "@/db/schema";
+import { registerGalleryCleanup } from "@/utils/gallery-lifecycle";
 
 // ── 文件夹列表缓存：避免每个请求都执行全量 folders 查询 ──────────
 // 缓存 TTL 10 秒；索引变更（新建/删除文件夹）通过 invalidateFoldersCache() 主动失效。
@@ -40,3 +41,4 @@ export function getFolderPaths(): string[] {
 export function invalidateFoldersCache(): void {
   foldersCache = null;
 }
+registerGalleryCleanup(invalidateFoldersCache);

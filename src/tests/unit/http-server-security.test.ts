@@ -45,6 +45,20 @@ describe("HTTP media server security", () => {
     expect(response.status).toBe(401);
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
   });
+  it("protects ID thumbnails and rejects unrestricted sizes before reading the database", async () => {
+    expect((await request(port, "/photo-thumbnail?id=1&edge=512")).status).toBe(
+      401
+    );
+    const token = encodeURIComponent(getHttpServerAuthToken());
+    expect(
+      (await request(port, `/photo-thumbnail?id=1&edge=513&token=${token}`))
+        .status
+    ).toBe(400);
+    expect(
+      (await request(port, `/photo-thumbnail?id=-1&edge=512&token=${token}`))
+        .status
+    ).toBe(400);
+  });
 
   it("does not grant wildcard CORS even with a valid token", async () => {
     const token = encodeURIComponent(getHttpServerAuthToken());

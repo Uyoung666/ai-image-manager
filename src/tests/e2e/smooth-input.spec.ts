@@ -105,34 +105,67 @@ async function expectInsideViewport(locator: Locator) {
 }
 
 async function expectCaretAligned(input: Locator) {
-  await expect(input).toHaveAttribute("data-smooth-caret-active", "true");
-  await expect
-    .poll(() =>
-      input.evaluate((element) => {
-        const field = element as HTMLInputElement;
-        const caret = field.parentElement?.querySelector<HTMLElement>(
-          ".smooth-input__caret"
-        );
-        if (!caret) {
-          return Number.POSITIVE_INFINITY;
-        }
-        const styles = getComputedStyle(field);
-        const context = document.createElement("canvas").getContext("2d");
-        if (!context) {
-          return Number.POSITIVE_INFINITY;
-        }
-        context.font = styles.font;
-        const prefix = field.value.slice(0, field.selectionStart ?? 0);
-        const expected =
-          field.getBoundingClientRect().left +
-          field.clientLeft +
-          Number.parseFloat(styles.paddingLeft) +
-          context.measureText(prefix).width -
-          field.scrollLeft;
-        return Math.abs(caret.getBoundingClientRect().left - expected);
-      })
-    )
-    .toBeLessThan(2);
+  try {
+    await expect(input).toHaveAttribute("data-smooth-caret-active", "true");
+    await expect
+      .poll(() =>
+        input.evaluate((element) => {
+          const field = element as HTMLInputElement;
+          const caret = field.parentElement?.querySelector<HTMLElement>(
+            ".smooth-input__caret"
+          );
+          if (!caret) {
+            return Number.POSITIVE_INFINITY;
+          }
+          const styles = getComputedStyle(field);
+          const context = document.createElement("canvas").getContext("2d");
+          if (!context) {
+            return Number.POSITIVE_INFINITY;
+          }
+          context.font = styles.font;
+          const prefix = field.value.slice(0, field.selectionStart ?? 0);
+          const expected =
+            field.getBoundingClientRect().left +
+            field.clientLeft +
+            Number.parseFloat(styles.paddingLeft) +
+            context.measureText(prefix).width -
+            field.scrollLeft;
+          return Math.abs(caret.getBoundingClientRect().left - expected);
+        })
+      )
+      .toBeLessThan(2);
+  } catch (error) {
+    await test.info().attach("caret-geometry", {
+      body: JSON.stringify(
+        await input.evaluate((element) => {
+          const field = element as HTMLInputElement;
+          const style = getComputedStyle(field);
+          const measure = field.parentElement?.querySelector<HTMLElement>(
+            ".smooth-input__measure"
+          );
+          const caret = field.parentElement?.querySelector<HTMLElement>(
+            ".smooth-input__caret"
+          );
+          return {
+            active: document.activeElement === field,
+            focused: document.hasFocus(),
+            selection: [field.selectionStart, field.selectionEnd],
+            scrollLeft: field.scrollLeft,
+            font: style.font,
+            letterSpacing: style.letterSpacing,
+            fonts: document.fonts.status,
+            value: field.value,
+            inputLeft: field.getBoundingClientRect().left,
+            measuredWidth: measure?.getBoundingClientRect().width,
+            measuredFont: measure ? getComputedStyle(measure).font : null,
+            caretLeft: caret?.getBoundingClientRect().left,
+          };
+        })
+      ),
+      contentType: "application/json",
+    });
+    throw error;
+  }
 }
 
 for (const size of WINDOW_SIZES) {

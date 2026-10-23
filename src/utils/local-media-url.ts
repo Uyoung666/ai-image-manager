@@ -1,8 +1,23 @@
+import type { GalleryThumbnailEdge } from "./gallery-config";
 import { getHttpPortSync } from "./http-port";
 import { preloadImagesWithConcurrency } from "./image-preloader";
+import { scheduleImage } from "./image-scheduler";
 
 const DISPLAY_PIPELINE_VERSION = 2;
 const MEDIA_PRELOAD_CONCURRENCY = 4;
+
+export function toGalleryThumbnailUrl(
+  id: number,
+  edge: GalleryThumbnailEdge,
+  version = "1",
+  sourceVersion?: string
+): string {
+  const port = getHttpPortSync();
+  if (port === null || id <= 0) {
+    return "";
+  }
+  return `http://127.0.0.1:${port}/photo-thumbnail?id=${id}&edge=${edge}&v=${encodeURIComponent(version)}&rv=${encodeURIComponent(sourceVersion ?? "")}&token=${encodeURIComponent(getHttpAuthToken())}`;
+}
 
 function getHttpAuthToken(): string {
   const api = window.electronAPI as typeof window.electronAPI & {
@@ -131,6 +146,12 @@ export async function preloadImageAsync(
 /**
  * 兼容旧调用方的 fire-and-forget 入口；实际加载由并发队列负责。
  */
-export function preloadImage(filePath: string | null | undefined): void {
-  preloadImageAsync(filePath);
+export function preloadImage(filePath: string | null | undefined): () => void {
+  if (!filePath) {
+    return () => undefined;
+  }
+  return scheduleImage(toLocalMediaUrl(filePath), {
+    priority: 2,
+    consumer: "preload",
+  }).release;
 }

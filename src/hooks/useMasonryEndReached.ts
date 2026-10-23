@@ -6,10 +6,11 @@ import {
   useRef,
 } from "react";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
+import { galleryPagePreloadMargin } from "@/utils/gallery-query-timing";
 
 export const END_REACHED_PRELOAD_MARGIN = 2000;
-export const FAST_SCROLL_VELOCITY = 60;
-const VERY_FAST_SCROLL_VELOCITY = 180;
+export const FAST_SCROLL_VELOCITY = 3.6;
+const VERY_FAST_SCROLL_VELOCITY = 10.8;
 const END_REACHED_DEBOUNCE_MS = 400;
 
 export function getEndReachedDebounceMs(velocity: number): number {
@@ -109,7 +110,9 @@ export function useMasonryEndReached({
         return;
       }
       const nearBottom =
-        el.scrollTop + el.clientHeight + END_REACHED_PRELOAD_MARGIN >=
+        el.scrollTop +
+          el.clientHeight +
+          galleryPagePreloadMargin(velocity, el.clientHeight) >=
         el.scrollHeight;
       if (nearBottom) {
         triggerEndReached(velocity);

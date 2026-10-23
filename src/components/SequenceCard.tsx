@@ -12,8 +12,12 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
 import type { PhotoSequence } from "@/types/photo-sequence";
-import { toLocalMediaUrl } from "@/utils/local-media-url";
+import {
+  toGalleryThumbnailUrl,
+  toLocalMediaUrl,
+} from "@/utils/local-media-url";
 import { type FaceOverlay, getFaceOverlayStyle } from "./PhotoCard";
 import { RecentlyViewedBadge } from "./RecentlyViewedBadge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -23,12 +27,14 @@ interface SequenceCardProps {
   expanding?: boolean;
   faceOverlays?: FaceOverlay[];
   faceOverlaysVisible?: boolean;
+  imagePriority?: 0 | 1 | 2;
   isSelected: boolean;
   loading?: "eager" | "lazy";
   onClick: (id: number, event: React.MouseEvent) => void;
   onOpen: (sequenceId: number) => void;
   onOpenDetails: (sequenceId: number, event?: React.MouseEvent) => void;
   onToggleExpand?: (sequenceId: number) => void;
+  queryGeneration?: string;
   recentlyViewed?: boolean;
   recentlyViewedFrame?: number;
   recentlyViewedPulseActive?: boolean;
@@ -38,6 +44,8 @@ interface SequenceCardProps {
 const SINGLE_CLICK_DELAY_MS = 250;
 
 export const SequenceCard = memo(function SequenceCard({
+  imagePriority = 0,
+  queryGeneration,
   sequence,
   isSelected,
   onClick,
@@ -55,9 +63,22 @@ export const SequenceCard = memo(function SequenceCard({
 }: SequenceCardProps) {
   const { t } = useTranslation();
   const { photo } = sequence;
-  const thumbnailUrl = photo.thumbnailPath
-    ? toLocalMediaUrl(photo.thumbnailPath)
-    : null;
+  const managed = Boolean(toGalleryThumbnailUrl(photo.id, 256));
+  const gallery = useGalleryThumbnail({
+    id: photo.id,
+    version: `${photo.id}:${photo.width}:${photo.height}`,
+    sourceVersion: photo.thumbnailVersion,
+    width: 220,
+    height: 220 / Math.max(0.6, Math.min(3, photo.width / (photo.height || 1))),
+    enabled: managed,
+    priority: imagePriority,
+    generation: queryGeneration,
+  });
+  const thumbnailUrl = managed
+    ? gallery.url
+    : photo.thumbnailPath
+      ? toLocalMediaUrl(photo.thumbnailPath)
+      : null;
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageState, setImageState] = useState<"loading" | "loaded" | "error">(
     thumbnailUrl ? "loading" : "error"
@@ -70,12 +91,24 @@ export const SequenceCard = memo(function SequenceCard({
     }
   }, []);
   useLayoutEffect(() => {
-    setImageState(thumbnailUrl ? "loading" : "error");
+    setImageState((current) =>
+      managed && current === "loaded"
+        ? current
+        : thumbnailUrl || managed
+          ? "loading"
+          : "error"
+    );
     const image = imageRef.current;
-    if (image?.complete) {
+    if (image?.complete && image.naturalWidth > 0) {
+      gallery.onDisplayed(thumbnailUrl ?? "");
       setImageState(image.naturalWidth > 0 ? "loaded" : "error");
     }
-  }, [thumbnailUrl]);
+  }, [thumbnailUrl, managed, gallery.onDisplayed]);
+  useEffect(() => {
+    if (gallery.failed) {
+      setImageState("error");
+    }
+  }, [gallery.failed]);
   useEffect(() => cancelPendingClick, [cancelPendingClick]);
   const duration = Math.max(0, sequence.endedAt - sequence.startedAt);
   /* const durationLabel =
@@ -134,6 +167,7 @@ export const SequenceCard = memo(function SequenceCard({
           onClick(photo.id, event as unknown as React.MouseEvent);
         }
       }}
+      ref={gallery.ref}
       role="button"
       style={{
         aspectRatio: Math.max(
@@ -149,12 +183,16 @@ export const SequenceCard = memo(function SequenceCard({
           <img
             alt={photo.filename}
             className={`h-full w-full object-cover transition-opacity duration-150 motion-reduce:transition-none ${imageState === "loaded" ? "opacity-100" : "opacity-0"}`}
+            data-load-state={imageState === "loaded" ? "loaded" : "loading"}
             decoding="async"
             fetchPriority={loading === "eager" ? "high" : "auto"}
             height={photo.height ?? 1}
             loading={loading}
             onError={() => setImageState("error")}
-            onLoad={() => setImageState("loaded")}
+            onLoad={() => {
+              gallery.onDisplayed(thumbnailUrl);
+              setImageState("loaded");
+            }}
             ref={imageRef}
             src={thumbnailUrl}
             width={photo.width ?? 1}

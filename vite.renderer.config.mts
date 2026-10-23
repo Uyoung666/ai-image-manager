@@ -26,6 +26,9 @@ export default defineConfig({
   resolve: {
     preserveSymlinks: true,
     alias: {
+      ...(process.env.AIM_GALLERY_PROFILE_BUILD === "1"
+        ? { "react-dom/client": "react-dom/profiling" }
+        : {}),
       "@": path.resolve(import.meta.dirname, "./src"),
     },
   },

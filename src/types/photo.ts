@@ -27,6 +27,7 @@ export interface Photo {
   score?: number;
   thumbnailPath: string | null;
   thumbnailSmallPath?: string | null;
+  thumbnailVersion?: string;
   width: number;
 }
 

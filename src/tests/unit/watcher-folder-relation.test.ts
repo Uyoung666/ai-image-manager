@@ -26,28 +26,26 @@ const state = vi.hoisted(() => ({
   thumbnail: vi.fn(),
 }));
 vi.mock("@/db", () => ({ getDatabase: () => state.db }));
-vi.mock("chokidar", () => ({
-  default: {
-    watch: (folderPath: string) => {
-      if (state.throwOnWatch.has(folderPath)) {
-        throw Object.assign(new Error("watch creation failed"), {
-          code: "UNKNOWN",
-          syscall: "watch",
-        });
-      }
-      const watcher = new EventEmitter() as (typeof state.watchers)[number];
-      const close = vi.fn(() => {
-        watcher.removeAllListeners();
-        const error = state.closeErrors.get(folderPath);
-        if (error) {
-          return Promise.reject(error);
-        }
-        return Promise.resolve();
+vi.mock("@/services/background-file-watcher", () => ({
+  createBackgroundWatcher: (folderPath: string) => {
+    if (state.throwOnWatch.has(folderPath)) {
+      throw Object.assign(new Error("watch creation failed"), {
+        code: "UNKNOWN",
+        syscall: "watch",
       });
-      Object.assign(watcher, { close, folderPath });
-      state.watchers.push(watcher);
-      return watcher;
-    },
+    }
+    const watcher = new EventEmitter() as (typeof state.watchers)[number];
+    const close = vi.fn(() => {
+      watcher.removeAllListeners();
+      const error = state.closeErrors.get(folderPath);
+      if (error) {
+        return Promise.reject(error);
+      }
+      return Promise.resolve();
+    });
+    Object.assign(watcher, { close, folderPath });
+    state.watchers.push(watcher);
+    return watcher;
   },
 }));
 vi.mock("@/services/ai-embedder", () => ({

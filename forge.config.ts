@@ -267,6 +267,9 @@ const config: ForgeConfig = {
             "better-sqlite3",
             "bindings",
             "file-uri-to-path",
+            // The shared filesystem Worker imports these at runtime.
+            "chokidar",
+            "readdirp",
             "sharp",
             "@lancedb",
             "@lancedb/lancedb-win32-x64-msvc",

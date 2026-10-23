@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { withPhotoFavorite } from "@/actions/photo-favorites";
 import { photoSequenceActions } from "@/actions/photo-sequences";
+import { useGalleryGeometryPhotos } from "@/hooks/useGalleryGeometryPhotos";
 import type { Photo } from "@/types/photo";
 import type {
   PhotoSequence,
   PhotoSequenceDetail,
 } from "@/types/photo-sequence";
+import { readGalleryPhotoRecords } from "@/utils/gallery-data-source";
 import { resolveSequenceSelection } from "@/utils/sequence-selection";
 
 const loadDetail = async (id: number) =>
@@ -15,15 +18,25 @@ export function useSequenceSelectionPhotos(
   photos: Photo[],
   sequences: PhotoSequence[]
 ) {
+  const geometryPhotos = useGalleryGeometryPhotos(photos);
   const [resolved, setResolved] = useState<Photo[]>([]);
-  const resolvePhotos = useCallback(
+  const resolveSelection = useCallback(
     () =>
-      resolveSequenceSelection([...selectedIds], photos, sequences, loadDetail),
-    [selectedIds, photos, sequences]
+      resolveSequenceSelection(
+        [...selectedIds],
+        geometryPhotos,
+        sequences,
+        loadDetail
+      ),
+    [selectedIds, geometryPhotos, sequences]
+  );
+  const resolvePhotos = useCallback(
+    async () => readGalleryPhotoRecords(await resolveSelection()),
+    [resolveSelection]
   );
   useEffect(() => {
     let cancelled = false;
-    resolvePhotos()
+    resolveSelection()
       .then((result) => {
         if (!cancelled) {
           setResolved(result);
@@ -37,11 +50,17 @@ export function useSequenceSelectionPhotos(
     return () => {
       cancelled = true;
     };
-  }, [resolvePhotos]);
-  const knownById = new Map(resolved.map((photo) => [photo.id, photo]));
-  for (const photo of photos) {
-    knownById.set(photo.id, photo);
-  }
+  }, [resolveSelection]);
+  const knownById = useMemo(() => {
+    if (selectedIds.size === 0) {
+      return new Map<number, Photo>();
+    }
+    const known = new Map(resolved.map((photo) => [photo.id, photo]));
+    for (const photo of geometryPhotos) {
+      known.set(photo.id, photo);
+    }
+    return known;
+  }, [resolved, geometryPhotos, selectedIds]);
   const allFavorite =
     selectedIds.size > 0 &&
     [...selectedIds].every((id) => knownById.get(id)?.isFavorite);
@@ -49,7 +68,7 @@ export function useSequenceSelectionPhotos(
     const targets = new Set(ids);
     setResolved((current) =>
       current.map((photo) =>
-        targets.has(photo.id) ? { ...photo, isFavorite: favorite } : photo
+        targets.has(photo.id) ? withPhotoFavorite(photo, favorite) : photo
       )
     );
   }, []);
