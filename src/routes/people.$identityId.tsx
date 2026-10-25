@@ -864,6 +864,18 @@ function PersonDetailPage() {
   useEffect(() => {
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keyboard shortcuts intentionally share one event boundary
     function handleKeyDown(e: KeyboardEvent) {
+      if (
+        e
+          .composedPath()
+          .some(
+            (target) =>
+              target instanceof HTMLElement &&
+              (target.dataset.overlayKind === "dialog" ||
+                target.dataset.overlayKind === "alert-dialog")
+          )
+      ) {
+        return;
+      }
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
         return;
@@ -1255,6 +1267,7 @@ function PersonDetailPage() {
             onDelete={handleDeleteSelected}
             onExport={handleExportSelected}
             onRename={() => setRenameDialogOpen(true)}
+            onSelectAll={selectAllVisible}
             onShare={handleShareSelected}
             onStartCull={() => {
               const ids = Array.from(selectedIds);
@@ -1315,6 +1328,14 @@ function PersonDetailPage() {
             }}
             onUploadToCloud={handleUploadSelectedToCloud}
             selectedCount={selectedIds.size}
+            selectedIds={Array.from(selectedIds)}
+            selectionScopeLabel={t(
+              sequenceView.mode === "sequences"
+                ? "selectAllSequenceFrames"
+                : "selectResultPhotos",
+              { count: visibleSelectionIds.length }
+            )}
+            selectionTotal={visibleSelectionIds.length}
           />
         </div>
         {(sequenceView.selectedSequence || detailPhoto) && (

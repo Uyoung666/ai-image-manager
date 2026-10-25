@@ -43,6 +43,27 @@ i18n.use(initReactI18next).init({
         deleteUndoPartial:
           "有 {{count}} 张照片无法恢复，可能已被后续操作修改或原文件缺失",
         deleteViewTrash: "查看最近删除",
+        batchTagsAction: "批量标签",
+        batchTagsTitle: "编辑 {{count}} 张照片的标签",
+        batchTagsDescription:
+          "仅修改已勾选的操作。部分拥有的标签可切换为全部添加、全部移除或保持原样；已有标签的来源不变。",
+        batchTagsSearch: "搜索已有标签",
+        batchTagsWillAdd: "全部添加",
+        batchTagsWillRemove: "全部移除",
+        batchTagsOwnership: "{{count}} / {{total}} 张拥有",
+        batchTagsDraft: "将修改 {{count}} 个标签",
+        batchTagsLimit: "单次最多修改 50 个标签，请减少标签数量后应用",
+        batchTagsApply: "应用标签修改",
+        batchTagsNoMatches: "没有匹配的标签",
+        batchTagsProgress: "正在处理 {{count}} / {{total}} 张照片",
+        batchTagsPartial: "有 {{count}} 张照片未完成标签修改，请重试",
+        batchTagsSuccess: "已完成 {{count}} 处标签修改",
+        batchTagsNoChanges: "所选照片的标签无需修改",
+        batchTagsFailed: "标签操作失败，请重试",
+        batchTagsUndoing: "正在撤销标签修改…",
+        batchTagsUndone: "已撤销 {{count}} 处标签修改",
+        batchTagsUndoConflict:
+          "部分修改无法撤销，后续编辑将保留；其余修改已撤销",
         searchSavePreset: "保存搜索条件",
         searchLoadPresets: "搜索预设 ({{count}})",
         searchPresetsEmpty:
@@ -162,6 +183,10 @@ i18n.use(initReactI18next).init({
         emptyClearExifFilters: "仅清除 EXIF 筛选",
         quickPreviewTitle: "快速预览",
         quickPreviewOpenLightbox: "进入灯箱 (Enter)",
+        selectedPhotosInScope: "已选 {{count}} / {{total}} 张",
+        selectLoadedPhotoCount: "选择当前已加载的 {{count}} 张照片",
+        selectResultPhotos: "选择当前结果全部 {{count}} 张照片",
+        selectAllSequenceFrames: "选择当前序列的全部 {{count}} 帧",
         galleryViewOptions: "视图选项",
         searchShortcut: "Ctrl+K",
 

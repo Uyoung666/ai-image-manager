@@ -18,6 +18,12 @@ import {
   stopAiIndexing,
 } from "./handlers/ai";
 import {
+  getBatchTags,
+  getTagOptions,
+  undoBatchTagChanges,
+  updateBatchTags,
+} from "./handlers/batch-tags";
+import {
   createDuplicateCleanupPlanHandler,
   executeDuplicateCleanupPlanHandler,
   listDuplicateCleanupBatchesHandler,
@@ -129,6 +135,10 @@ import {
 } from "./handlers/tags";
 
 export const photos = {
+  getTagOptions,
+  getBatchTags,
+  updateBatchTags,
+  undoBatchTagChanges,
   listPhotoPage,
   getPhotoLayoutPrefix,
   getPhotosByIds,

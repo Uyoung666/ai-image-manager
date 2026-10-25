@@ -1,5 +1,6 @@
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
 import {
+  CheckCheck,
   CloudUpload,
   Download,
   Ellipsis,
@@ -9,11 +10,13 @@ import {
   Pencil,
   Share2,
   Swords,
+  Tags,
   Trash2,
   X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { BatchTagDialog } from "@/components/BatchTagDialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   Popover,
@@ -38,15 +41,20 @@ interface SelectionActionBarProps {
   onDelete?: ActionHandler;
   onExport?: ActionHandler;
   onRename?: ActionHandler;
+  onSelectAll?: ActionHandler;
   onShare?: ActionHandler;
   onStartCull?: ActionHandler;
   onToggleFavorite?: ActionHandler;
   onUploadToCloud?: ActionHandler;
   selectedCount: number;
+  selectedIds?: number[];
+  selectionScopeLabel?: string;
+  selectionTotal?: number;
 }
 
 export function SelectionActionBar({
   selectedCount,
+  selectedIds,
   allFavorite = false,
   bottomOffset,
   onToggleFavorite,
@@ -59,6 +67,9 @@ export function SelectionActionBar({
   onUploadToCloud,
   onShare,
   onStartCull,
+  onSelectAll,
+  selectionTotal,
+  selectionScopeLabel,
 }: SelectionActionBarProps) {
   const { t } = useTranslation();
   const reduceMotion = useReducedMotion();
@@ -66,8 +77,42 @@ export function SelectionActionBar({
   const [visible, setVisible] = useState(false);
   const [executing, setExecuting] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [tagEditorIds, setTagEditorIds] = useState<number[] | null>(null);
   const executingRef = useRef<string | null>(null);
   const mountedRef = useRef(selectedCount > 0);
+  const layerRef = useRef<HTMLDivElement>(null);
+
+  // Toasts live in a portal. Reserve their space from the actual toolbar bounds,
+  // including compact layouts, page zoom, and the optional task status strip.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: bottomOffset can move the toolbar without resizing it.
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!(visible && layer)) {
+      return;
+    }
+    const update = () => {
+      const bounds = layer.getBoundingClientRect();
+      if (bounds.height > 0) {
+        document.documentElement.style.setProperty(
+          "--selection-notification-bottom",
+          `${Math.ceil(window.innerHeight - bounds.top + 12)}px`
+        );
+      }
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(layer);
+    layer.addEventListener("transitionend", update);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      layer.removeEventListener("transitionend", update);
+      window.removeEventListener("resize", update);
+      document.documentElement.style.removeProperty(
+        "--selection-notification-bottom"
+      );
+    };
+  }, [visible, bottomOffset]);
 
   useEffect(() => {
     if (selectedCount > 0) {
@@ -118,12 +163,14 @@ export function SelectionActionBar({
       className={`selection-action-layer pointer-events-none absolute right-0 left-0 z-40 flex min-w-0 items-center justify-center px-4 transition-all duration-200 ease-out ${
         visible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
       }`}
+      data-selection-visible={visible ? "true" : "false"}
       onTransitionEnd={() => {
         if (!visible) {
           setAnimating(false);
           mountedRef.current = false;
         }
       }}
+      ref={layerRef}
       style={
         bottomOffset === undefined
           ? undefined
@@ -136,9 +183,34 @@ export function SelectionActionBar({
       }
     >
       <div className="selection-menu pointer-events-auto min-w-0 max-w-full">
-        <span className="selection-menu-count">
-          {t("selectedPhotos", { count: selectedCount })}
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need the selection-scope Tooltip. */}
+            <span className="selection-menu-count" tabIndex={0}>
+              {selectionTotal === undefined
+                ? t("selectedPhotos", { count: selectedCount })
+                : t("selectedPhotosInScope", {
+                    count: selectedCount,
+                    total: selectionTotal,
+                  })}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {selectionScopeLabel ??
+              t("selectedPhotos", { count: selectedCount })}
+          </TooltipContent>
+        </Tooltip>
+        {onSelectAll &&
+          selectionTotal !== undefined &&
+          selectedCount < selectionTotal && (
+            <MenuAction
+              disabled={executing !== null}
+              icon={<CheckCheck size={18} />}
+              label={selectionScopeLabel ?? t("selectAll")}
+              onClick={wrapAction("select-all", onSelectAll)}
+              shortLabel={t("selectAll")}
+            />
+          )}
 
         {onToggleFavorite && (
           <>
@@ -166,6 +238,15 @@ export function SelectionActionBar({
             onClick={wrapAction("album", onAddToAlbum)}
           />
         )}
+        {selectedIds && selectedIds.length > 0 && (
+          <MenuAction
+            disabled={executing !== null}
+            executing={false}
+            icon={<Tags size={18} />}
+            label={t("batchTagsAction")}
+            onClick={() => setTagEditorIds([...selectedIds])}
+          />
+        )}
         {onExport && (
           <MenuAction
             disabled={executing !== null}
@@ -173,6 +254,13 @@ export function SelectionActionBar({
             icon={<Download size={18} />}
             label={t("export")}
             onClick={wrapAction("export", onExport)}
+          />
+        )}
+
+        {tagEditorIds && (
+          <BatchTagDialog
+            onClose={() => setTagEditorIds(null)}
+            photoIds={tagEditorIds}
           />
         )}
 
@@ -258,21 +346,14 @@ export function SelectionActionBar({
 
         <div className="selection-menu-divider" />
 
-        <button
-          className="selection-menu-link selection-menu-link-edge"
+        <MenuAction
           disabled={executing !== null}
+          edge
+          executing={executing === "clear"}
+          icon={<X size={18} />}
+          label={t("clearSelection")}
           onClick={wrapAction("clear", onClearSelection)}
-          type="button"
-        >
-          <span className="selection-menu-icon">
-            {executing === "clear" ? (
-              <LoadingSpinner size="sm" variant="inherit" />
-            ) : (
-              <X size={18} />
-            )}
-          </span>
-          <span className="selection-menu-title">{t("clearSelection")}</span>
-        </button>
+        />
       </div>
     </div>
   );
@@ -295,23 +376,31 @@ function MoreActions({
 }) {
   return (
     <Popover onOpenChange={onOpenChange} open={open}>
-      <PopoverTrigger asChild>
-        <button
-          aria-expanded={open}
-          className="selection-menu-link"
-          disabled={disabled}
-          type="button"
-        >
-          <span className="selection-menu-icon">
-            {executing && executing !== "delete" && executing !== "clear" ? (
-              <LoadingSpinner size="sm" variant="inherit" />
-            ) : (
-              <Ellipsis size={18} />
-            )}
-          </span>
-          <span className="selection-menu-title">{label}</span>
-        </button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              aria-expanded={open}
+              aria-label={label}
+              className="selection-menu-link"
+              disabled={disabled}
+              type="button"
+            >
+              <span className="selection-menu-icon">
+                {executing &&
+                executing !== "delete" &&
+                executing !== "clear" ? (
+                  <LoadingSpinner size="sm" variant="inherit" />
+                ) : (
+                  <Ellipsis size={18} />
+                )}
+              </span>
+              <span className="selection-menu-title">{label}</span>
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
       <PopoverContent
         align="center"
         className="selection-more-menu max-h-[min(20rem,var(--radix-popover-content-available-height))] w-48 max-w-[calc(100vw-1rem)] gap-0 overflow-y-auto overscroll-contain p-1.5"
@@ -377,6 +466,7 @@ function MoreAction({
 function MenuAction({
   icon,
   label,
+  shortLabel,
   onClick,
   destructive = false,
   disabled = false,
@@ -389,6 +479,7 @@ function MenuAction({
   executing?: boolean;
   icon: ReactNode;
   label: string;
+  shortLabel?: string;
   onClick: () => void;
 }) {
   const className = [
@@ -400,16 +491,22 @@ function MenuAction({
     .join(" ");
 
   return (
-    <button
-      className={className}
-      disabled={disabled}
-      onClick={onClick}
-      type="button"
-    >
-      <span className="selection-menu-icon">
-        {executing ? <LoadingSpinner size="sm" variant="inherit" /> : icon}
-      </span>
-      <span className="selection-menu-title">{label}</span>
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-label={label}
+          className={className}
+          disabled={disabled}
+          onClick={onClick}
+          type="button"
+        >
+          <span className="selection-menu-icon">
+            {executing ? <LoadingSpinner size="sm" variant="inherit" /> : icon}
+          </span>
+          <span className="selection-menu-title">{shortLabel ?? label}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

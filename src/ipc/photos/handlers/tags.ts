@@ -294,6 +294,8 @@ export const confirmPhotoTag = os
         sql`${photoTags.photoId} = ${input.photoId} AND ${photoTags.tagId} = ${input.tagId}`
       )
       .run();
+    invalidateTagSearch();
+    invalidateSmartAlbumCache();
     return { ok: true };
   });
 

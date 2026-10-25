@@ -79,9 +79,6 @@ export function usePhotoDetailPanel(
       return;
     }
 
-    if (selectedIds.size !== 0) {
-      return;
-    }
     if (detailPhotoIdRef.current !== null) {
       setDetailPhoto(null);
       detailPhotoIdRef.current = null;
