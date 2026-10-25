@@ -39,6 +39,7 @@ import { Switch } from "@/components/ui/switch";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
+import { usePhotoDeleteUndo } from "@/hooks/use-photo-delete-undo";
 import {
   getSequenceMemberIds,
   shouldShowSequenceEmptyState,
@@ -243,7 +244,9 @@ function PersonDetailPage() {
     setFaceNameTarget(null);
     setLoading(true);
     loadIdentity();
+    window.addEventListener("photos-restored", loadIdentity);
     return () => {
+      window.removeEventListener("photos-restored", loadIdentity);
       identityRequestRef.current += 1;
     };
   }, [loadIdentity]);
@@ -741,30 +744,30 @@ function PersonDetailPage() {
     setConfirmDeleteIds(Array.from(selectedIds));
   }
 
+  const notifyDeleted = usePhotoDeleteUndo();
+
+  async function deleteWithUndo(ids: number[]) {
+    const result = await photoOperationActions.deletePhotos({ ids });
+    const removed = new Set(result.succeededIds);
+    markRouteDirty(routeKey);
+    removeFromSelection(result.succeededIds);
+    setIdentity((prev) =>
+      prev
+        ? {
+            ...prev,
+            photos: prev.photos.filter((photo) => !removed.has(photo.id)),
+          }
+        : prev
+    );
+    for (const key of ["photos", "folders", "albums"]) {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    }
+    notifyDeleted(result);
+  }
+
   async function performDelete() {
     try {
-      await photoOperationActions.deletePhotos({ ids: confirmDeleteIds });
-      markRouteDirty(routeKey);
-      removeFromSelection(confirmDeleteIds);
-      toast.success(
-        t("deletedPhotosCount", { count: confirmDeleteIds.length })
-      );
-      setIdentity((prev) =>
-        prev
-          ? {
-              ...prev,
-              photos: prev.photos.filter(
-                (p) => !confirmDeleteIds.includes(p.id)
-              ),
-            }
-          : prev
-      );
-      clearSelection();
-      queryClient.invalidateQueries({
-        queryKey: ["photos"],
-        refetchType: "active",
-      });
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      await deleteWithUndo(confirmDeleteIds);
     } catch {
       toast.error(t("deleteFailed"));
     } finally {
@@ -778,20 +781,7 @@ function PersonDetailPage() {
     setPendingDeleteIds([]);
     setPendingDeleteSequenceGroup(false);
     try {
-      await photoOperationActions.deletePhotos({ ids });
-      markRouteDirty(routeKey);
-      removeFromSelection(ids);
-      setIdentity((prev) =>
-        prev
-          ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) }
-          : prev
-      );
-      queryClient.invalidateQueries({
-        queryKey: ["photos"],
-        refetchType: "active",
-      });
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
-      toast.success(t("toastDeletedCount", { count: ids.length }));
+      await deleteWithUndo(ids);
     } catch {
       toast.error(t("toastDeleteFailed"));
     }

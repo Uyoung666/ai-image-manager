@@ -407,6 +407,17 @@ function HomePage() {
     return () => window.removeEventListener("tags-changed", onTagsChanged);
   }, [handleSearchRetry, searchMode, lastSearchParamsRef]);
 
+  useEffect(() => {
+    const onPhotosRestored = () => {
+      if (isSearching) {
+        handleSearchRetry();
+      }
+    };
+    window.addEventListener("photos-restored", onPhotosRestored);
+    return () =>
+      window.removeEventListener("photos-restored", onPhotosRestored);
+  }, [isSearching, handleSearchRetry]);
+
   const handledSearchResetVersion = useRef(filter.searchResetVersion);
   useLayoutEffect(() => {
     if (handledSearchResetVersion.current === filter.searchResetVersion) {

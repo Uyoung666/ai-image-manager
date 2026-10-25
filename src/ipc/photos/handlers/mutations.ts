@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import nodeOs from "node:os";
@@ -281,9 +282,12 @@ export const deletePhoto = os.input(IdSchema).handler(({ input }) => {
 });
 
 export const deletePhotos = os
-  .input(BatchPhotoIdsSchema)
+  .input(
+    BatchPhotoIdsSchema.extend({ operationId: z.string().uuid().optional() })
+  )
   .handler(({ input }) => {
     const db = getDatabase();
+    const deletionBatchId = input.operationId ?? randomUUID();
     // Only target active (non-soft-deleted) photos for idempotency
     const targetPhotos = db
       .select({ id: photos.id, folderId: photos.folderId })
@@ -293,7 +297,7 @@ export const deletePhotos = os
       )
       .all();
     if (targetPhotos.length === 0) {
-      return { deleted: 0 };
+      return { deleted: 0, succeededIds: [] as number[], deletionBatchId };
     }
     const activeIds = targetPhotos.map((p) => p.id);
     const countsByFolder = new Map<number, number>();
@@ -307,7 +311,7 @@ export const deletePhotos = os
     }
     db.transaction(() => {
       db.update(photos)
-        .set({ deletionBatchId: null, deletedAt: Date.now() })
+        .set({ deletionBatchId, deletedAt: Date.now() })
         .where(inArray(photos.id, activeIds))
         .run();
       for (const [fid, count] of countsByFolder) {
@@ -322,7 +326,11 @@ export const deletePhotos = os
     invalidateCountCache();
     invalidateStatsCache();
     invalidateSmartAlbumCache();
-    return { deleted: activeIds.length };
+    return {
+      deleted: activeIds.length,
+      succeededIds: activeIds,
+      deletionBatchId,
+    };
   });
 
 export const cleanDuplicateGroups = os
@@ -962,7 +970,11 @@ export const listDeletedPhotos = os
   });
 
 export const restorePhotos = os
-  .input(BatchPhotoIdsSchema)
+  .input(
+    BatchPhotoIdsSchema.extend({
+      expectedDeletionBatchId: z.string().uuid().optional(),
+    })
+  )
   .handler(({ input }) => {
     const db = getDatabase();
     const targetPhotos = db
@@ -974,7 +986,13 @@ export const restorePhotos = os
       })
       .from(photos)
       .where(
-        and(inArray(photos.id, input.ids), sql`${photos.deletedAt} IS NOT NULL`)
+        and(
+          inArray(photos.id, input.ids),
+          sql`${photos.deletedAt} IS NOT NULL`,
+          input.expectedDeletionBatchId
+            ? eq(photos.deletionBatchId, input.expectedDeletionBatchId)
+            : undefined
+        )
       )
       .all();
 

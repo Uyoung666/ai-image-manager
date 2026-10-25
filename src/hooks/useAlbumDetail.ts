@@ -77,6 +77,7 @@ export function useAlbumDetail(
     setAlbum(null);
     setLoading(true);
     loadAlbum();
+    window.addEventListener("photos-restored", loadAlbum);
     const unsubscribe = subscribeAlbumRuleChanges(() => {
       const current = albumRef.current;
       if (current?.id === albumId && !current.isSmart) {
@@ -89,6 +90,7 @@ export function useAlbumDetail(
       activeAlbumIdRef.current = null;
       requestRef.current += 1;
       unsubscribe();
+      window.removeEventListener("photos-restored", loadAlbum);
     };
   }, [albumId, loadAlbum]);
 

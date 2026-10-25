@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { photoOperationActions } from "@/actions/photo-operations";
 import { openInExplorer } from "@/actions/shell";
+import { usePhotoDeleteUndo } from "@/hooks/use-photo-delete-undo";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
 
@@ -24,6 +25,7 @@ export function useHomePhotoActions({
   setSearchResults,
 }: Options) {
   const { t } = useTranslation();
+  const notifyDeleted = usePhotoDeleteUndo();
 
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
 
@@ -117,7 +119,6 @@ export function useHomePhotoActions({
 
   async function executeDelete() {
     const ids = pendingDeleteIds;
-    const count = ids.length;
     setDeleteConfirmOpen(false);
     setPendingDeleteIds([]);
     setPendingDeleteSequenceGroup(false);
@@ -126,28 +127,24 @@ export function useHomePhotoActions({
     await new Promise((r) => setTimeout(r, 180));
     setDeletingIds(new Set());
     try {
-      if (ids.length === 1) {
-        await photoOperationActions.deletePhoto({ id: ids[0] });
-      } else {
-        await photoOperationActions.deletePhotos({ ids });
-      }
+      const result = await photoOperationActions.deletePhotos({ ids });
+      const removed = new Set(result.succeededIds);
       // 标记滚动位置为脏：已删除照片的锚点已失效
       markRouteDirty(routeKey);
       // 从选中集合中移除已删除的照片
-      removeFromSelection(ids);
+      removeFromSelection(result.succeededIds);
       if (isSearching) {
         setSearchResults(
-          (prev) => prev?.filter((p) => !ids.includes(p.id)) ?? null
+          (prev) => prev?.filter((p) => !removed.has(p.id)) ?? null
         );
-      } else {
-        queryClient.invalidateQueries({
-          queryKey: ["photos"],
-          refetchType: "active",
-        });
       }
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["albums"] });
-      toast.success(t("toastDeletedCount", { count }));
+      notifyDeleted(result);
     } catch {
       toast.error(t("toastDeleteFailed"));
     }

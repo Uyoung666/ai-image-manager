@@ -38,6 +38,11 @@ vi.mock("react-i18next", () => ({
         exportOpenAfterExport: "导出后自动打开文件夹（记住选择）",
         exportOpenFolder: "打开所在文件夹",
         exportOpenFolderFailed: "导出已完成，但无法打开文件夹",
+        deletePartialFailure: "有 {{count}} 张照片未完成删除，请重试",
+        deleteUndoSuccess: "已恢复 {{count}} 张照片",
+        deleteUndoPartial:
+          "有 {{count}} 张照片无法恢复，可能已被后续操作修改或原文件缺失",
+        deleteViewTrash: "查看最近删除",
         searchSavePreset: "保存搜索条件",
         searchLoadPresets: "搜索预设 ({{count}})",
         searchPresetsEmpty:
