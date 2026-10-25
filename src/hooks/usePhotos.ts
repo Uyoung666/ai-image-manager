@@ -1,4 +1,5 @@
 import {
+  isServer,
   keepPreviousData,
   useInfiniteQuery,
   useQueryClient,
@@ -16,6 +17,13 @@ import { recordGalleryPerf } from "@/utils/gallery-perf";
 import { observeGalleryQuery } from "@/utils/gallery-query-timing";
 
 const PAGE_SIZE = 100;
+
+function isExpiredGalleryCursor(error: Error & { code?: unknown }): boolean {
+  return (
+    error.code === "GALLERY_CURSOR_EXPIRED" ||
+    error.message.includes("GALLERY_CURSOR_EXPIRED")
+  );
+}
 
 interface UsePhotosParams {
   enabled?: boolean;
@@ -55,10 +63,8 @@ export function usePhotos({
     subscribeGalleryData,
     getGalleryDataVersion
   );
-  const result = useInfiniteQuery<
-    PhotoListResponse & { nextCursor?: string | null; revision?: number }
-  >({
-    queryKey: [
+  const queryKey = useMemo(
+    () => [
       "photos",
       {
         folderId: folderId ?? null,
@@ -71,6 +77,26 @@ export function usePhotos({
         order,
       },
     ],
+    [folderId, ungroupedOnly, tagId, tagIds, tagMode, favoriteOnly, sort, order]
+  );
+  const defaultRetry = queryClient.defaultQueryOptions({ queryKey }).retry;
+  const result = useInfiniteQuery<
+    PhotoListResponse & { nextCursor?: string | null; revision?: number }
+  >({
+    queryKey,
+    retry: (failureCount, error) => {
+      if (isExpiredGalleryCursor(error)) {
+        return false;
+      }
+      if (typeof defaultRetry === "function") {
+        return defaultRetry(failureCount, error);
+      }
+      return (
+        defaultRetry === true ||
+        failureCount <
+          (defaultRetry === false ? 0 : (defaultRetry ?? (isServer ? 0 : 3)))
+      );
+    },
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: initial restoration can hydrate a deep anchor without retaining the complete prefix records.
     queryFn: async ({ pageParam = null, signal }) => {
       const params = {
@@ -173,35 +199,12 @@ export function usePhotos({
     [result.data, cacheVersion]
   );
   useEffect(() => {
-    if (result.error?.message.includes("GALLERY_CURSOR_EXPIRED")) {
+    if (result.error && isExpiredGalleryCursor(result.error)) {
       queryClient.resetQueries({
-        queryKey: [
-          "photos",
-          {
-            folderId: folderId ?? null,
-            ungroupedOnly,
-            tagId: tagId ?? null,
-            tagIds: tagIds ?? null,
-            tagMode: tagMode ?? "or",
-            favoriteOnly: favoriteOnly ?? false,
-            sort,
-            order,
-          },
-        ],
+        queryKey,
         exact: true,
       });
     }
-  }, [
-    result.error,
-    queryClient,
-    folderId,
-    ungroupedOnly,
-    tagId,
-    tagIds,
-    tagMode,
-    favoriteOnly,
-    sort,
-    order,
-  ]);
+  }, [result.error, queryClient, queryKey]);
   return { ...result, data };
 }

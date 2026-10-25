@@ -17,15 +17,33 @@ const schema = ListSchema.omit({ offset: true }).extend({
 });
 // Seed the leading cards without waiting for source-file stats for a whole
 // page. Other mounted cards use the shared on-demand descriptor endpoint.
-export const listPhotoPage = os.input(schema).handler(async ({ input }) => {
-  const page = listGalleryPhotos(input);
-  if (input.layoutOnly) {
-    return page;
-  }
-  const count = GALLERY_CONFIG.pageThumbnailDescriptors;
-  const leading = await describeGalleryThumbnails(page.items.slice(0, count));
-  return { ...page, items: [...leading, ...page.items.slice(count)] };
-});
+export const listPhotoPage = os
+  .input(schema)
+  .errors({
+    GALLERY_CURSOR_EXPIRED: { status: 409, message: "GALLERY_CURSOR_EXPIRED" },
+  })
+  .handler(async ({ input, errors }) => {
+    let page: ReturnType<typeof listGalleryPhotos>;
+    try {
+      page = listGalleryPhotos(input);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "GALLERY_CURSOR_EXPIRED"
+      ) {
+        // Plain Error messages are hidden by the message-port RPC transport.
+        // Keep cursor recovery distinguishable from an unexpected server fault.
+        throw errors.GALLERY_CURSOR_EXPIRED();
+      }
+      throw error;
+    }
+    if (input.layoutOnly) {
+      return page;
+    }
+    const count = GALLERY_CONFIG.pageThumbnailDescriptors;
+    const leading = await describeGalleryThumbnails(page.items.slice(0, count));
+    return { ...page, items: [...leading, ...page.items.slice(count)] };
+  });
 export const getPhotoLayoutPrefix = os
   .input(
     schema.extend({

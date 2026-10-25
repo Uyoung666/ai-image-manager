@@ -1,4 +1,8 @@
-import { call } from "@orpc/server";
+import { MessageChannel } from "node:worker_threads";
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/message-port";
+import { call, type RouterClient } from "@orpc/server";
+import { RPCHandler } from "@orpc/server/message-port";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listing = vi.hoisted(() => ({
@@ -21,6 +25,26 @@ import {
   getPhotoThumbnailVersions,
   listPhotoPage,
 } from "@/ipc/photos/handlers/gallery-listing";
+
+async function withListingClient(
+  run: (
+    client: RouterClient<{ listPhotoPage: typeof listPhotoPage }>
+  ) => Promise<void>
+) {
+  const { port1, port2 } = new MessageChannel();
+  new RPCHandler({ listPhotoPage }).upgrade(port1);
+  const client = createORPCClient<
+    RouterClient<{ listPhotoPage: typeof listPhotoPage }>
+  >(new RPCLink({ port: port2 }));
+  port1.start();
+  port2.start();
+  try {
+    await run(client);
+  } finally {
+    port1.close();
+    port2.close();
+  }
+}
 
 describe("gallery listing IPC", () => {
   beforeEach(() => vi.resetAllMocks());
@@ -59,5 +83,36 @@ describe("gallery listing IPC", () => {
     expect(listing.describe).toHaveBeenCalledWith([
       { id: 2, path: "visible.webp" },
     ]);
+  });
+
+  it("preserves the expired-cursor error across the message-port transport", async () => {
+    listing.page.mockImplementation(() => {
+      throw new Error("GALLERY_CURSOR_EXPIRED");
+    });
+    await withListingClient(async (client) => {
+      await expect(
+        client.listPhotoPage({ cursor: "previous-page", layoutOnly: true })
+      ).rejects.toMatchObject({
+        code: "GALLERY_CURSOR_EXPIRED",
+        status: 409,
+        message: "GALLERY_CURSOR_EXPIRED",
+      });
+    });
+    expect(listing.describe).not.toHaveBeenCalled();
+  });
+
+  it("keeps unexpected server failures separate from cursor expiry", async () => {
+    listing.page.mockImplementation(() => {
+      throw new Error("Private database failure");
+    });
+    await withListingClient(async (client) => {
+      await expect(
+        client.listPhotoPage({ cursor: "previous-page" })
+      ).rejects.toMatchObject({
+        code: "INTERNAL_SERVER_ERROR",
+        status: 500,
+        message: "Internal server error",
+      });
+    });
   });
 });

@@ -50,6 +50,10 @@ export function useMasonryEndReached({
   const endReachedUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  const recheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checkNearBottomRef = useRef<((velocity?: number) => void) | null>(null);
+  const needsLayoutCheckRef = useRef(true);
+  const checkedLayoutRef = useRef({ containerWidth, hasMore, totalHeight });
   const onEndReachedRef = useRef(onEndReached);
   onEndReachedRef.current = onEndReached;
   const hasMoreRef = useRef(hasMore);
@@ -78,14 +82,26 @@ export function useMasonryEndReached({
     if (
       !(onEndReachedRef.current && hasMoreRef.current) ||
       isLoadingMoreRef.current ||
-      endReachedLockedRef.current ||
-      Date.now() < suspendUntilRef.current
+      endReachedLockedRef.current
     ) {
       return;
     }
 
     const now = Date.now();
-    if (now - lastEndReachedRef.current <= getEndReachedDebounceMs(velocity)) {
+    const remaining = Math.max(
+      suspendUntilRef.current - now,
+      lastEndReachedRef.current + getEndReachedDebounceMs(velocity) + 1 - now
+    );
+    if (remaining > 0) {
+      // An intersecting sentinel may stay intersecting after a short page or
+      // a resize. Recheck when the guard ends instead of waiting for a scroll.
+      if (recheckTimerRef.current) {
+        clearTimeout(recheckTimerRef.current);
+      }
+      recheckTimerRef.current = setTimeout(() => {
+        recheckTimerRef.current = null;
+        checkNearBottomRef.current?.(velocity);
+      }, remaining);
       return;
     }
 
@@ -106,7 +122,7 @@ export function useMasonryEndReached({
   const checkNearBottom = useCallback(
     (velocity = 0) => {
       const el = scrollRef.current;
-      if (!el) {
+      if (!el || el.clientHeight <= 0) {
         return;
       }
       const nearBottom =
@@ -120,6 +136,7 @@ export function useMasonryEndReached({
     },
     [scrollRef, triggerEndReached]
   );
+  checkNearBottomRef.current = checkNearBottom;
 
   useEffect(() => {
     if (!isLoadingMore) {
@@ -128,17 +145,48 @@ export function useMasonryEndReached({
   }, [isLoadingMore]);
 
   useEffect(() => {
+    const previous = checkedLayoutRef.current;
+    if (
+      previous.containerWidth !== containerWidth ||
+      previous.hasMore !== hasMore ||
+      previous.totalHeight !== totalHeight
+    ) {
+      needsLayoutCheckRef.current = true;
+    }
+    checkedLayoutRef.current = { containerWidth, hasMore, totalHeight };
+    if (
+      hasMore &&
+      totalHeight > 0 &&
+      !isLoadingMore &&
+      needsLayoutCheckRef.current
+    ) {
+      needsLayoutCheckRef.current = false;
+      // A cached page can commit without an intermediate loading render.
+      // New geometry also releases that request's lock; debounce still applies.
+      if (previous.totalHeight !== totalHeight) {
+        endReachedLockedRef.current = false;
+      }
+      checkNearBottom();
+    }
+  }, [containerWidth, hasMore, isLoadingMore, totalHeight, checkNearBottom]);
+
+  useEffect(() => {
     return () => {
       if (endReachedUnlockTimerRef.current) {
         clearTimeout(endReachedUnlockTimerRef.current);
         endReachedUnlockTimerRef.current = null;
       }
+      if (recheckTimerRef.current) {
+        clearTimeout(recheckTimerRef.current);
+        recheckTimerRef.current = null;
+      }
     };
   }, []);
 
+  const endReachedEnabled = Boolean(onEndReached);
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!(sentinel && onEndReached && totalHeight > 0)) {
+    if (!(sentinel && endReachedEnabled && totalHeight > 0)) {
       return;
     }
 
@@ -152,7 +200,13 @@ export function useMasonryEndReached({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [onEndReached, scrollRef, sentinelRef, totalHeight, triggerEndReached]);
+  }, [
+    endReachedEnabled,
+    scrollRef,
+    sentinelRef,
+    totalHeight,
+    triggerEndReached,
+  ]);
 
   return { checkNearBottom, triggerEndReached };
 }
