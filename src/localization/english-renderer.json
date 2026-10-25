@@ -2151,8 +2151,11 @@
   "updateViewSettings": "Open update settings",
   "updateViewDetails": "View update",
   "updatePreferenceSaveFailed": "Update settings could not be saved. Unsaved changes were restored; please retry.",
+  "albumRecentTargets": "Recent albums",
+  "albumRepeatLast": "Add again to “{{album}}”",
   "searchSavePreset": "Save search",
   "searchLoadPresets": "Search presets ({{count}})",
   "searchPresetsEmpty": "No presets yet. Enter a query or filters to save this search.",
-  "searchPresetSaveFailed": "Could not save the search preset. Check local storage."
+  "searchPresetSaveFailed": "Could not save the search preset. Check local storage.",
+  "albumAlreadyContainsPhotos": "Selected photos are already in “{{album}}”. No duplicates were added."
 }

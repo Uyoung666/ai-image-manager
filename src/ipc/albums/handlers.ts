@@ -4,6 +4,10 @@ import { z } from "zod";
 import { getDatabase } from "@/db";
 import { albumPhotos, albums, photos } from "@/db/schema";
 import {
+  getRecentAlbums as readRecentAlbums,
+  rememberAlbum,
+} from "@/services/album-recents";
+import {
   getGalleryAlbumInfo,
   getGalleryAlbumLayout,
   getGalleryAlbumPage,
@@ -14,6 +18,7 @@ import {
 } from "@/services/smart-album-engine";
 
 const IdSchema = z.object({ id: z.number() });
+export const getRecentAlbums = os.handler(() => readRecentAlbums());
 export const getAlbumInfo = os
   .input(IdSchema)
   .handler(({ input }) => getGalleryAlbumInfo(input.id));
@@ -402,6 +407,7 @@ export const addPhotosToAlbum = os
       }
     }
 
+    rememberAlbum(albumId, db);
     return { success: true, addedCount };
   });
 

@@ -2151,8 +2151,11 @@
   "updateViewSettings": "更新設定を開く",
   "updateViewDetails": "更新を確認",
   "updatePreferenceSaveFailed": "更新設定を保存できませんでした。未保存の変更を元に戻しました。再試行してください。",
+  "albumRecentTargets": "最近使ったアルバム",
+  "albumRepeatLast": "「{{album}}」に再び追加",
   "searchSavePreset": "検索条件を保存",
   "searchLoadPresets": "検索プリセット ({{count}})",
   "searchPresetsEmpty": "プリセットはありません。キーワードや条件を入力して検索を保存できます。",
-  "searchPresetSaveFailed": "検索プリセットを保存できませんでした。ローカルストレージを確認してください。"
+  "searchPresetSaveFailed": "検索プリセットを保存できませんでした。ローカルストレージを確認してください。",
+  "albumAlreadyContainsPhotos": "選択した写真はすでに「{{album}}」にあります。重複して追加しませんでした。"
 }

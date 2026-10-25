@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   addPhotosToAlbum: vi.fn(),
   createAlbum: vi.fn(),
   listAlbums: vi.fn(),
+  getRecentAlbums: vi.fn(),
 }));
 
 const toast = vi.hoisted(() => ({
@@ -50,7 +51,8 @@ describe("AddToAlbumDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listAlbums.mockResolvedValue([]);
-    mocks.addPhotosToAlbum.mockResolvedValue(undefined);
+    mocks.getRecentAlbums.mockResolvedValue([]);
+    mocks.addPhotosToAlbum.mockResolvedValue({ success: true, addedCount: 2 });
     mocks.createAlbum.mockResolvedValue({
       description: null,
       id: 2,
@@ -185,7 +187,7 @@ describe("AddToAlbumDialog", () => {
     ]);
     mocks.addPhotosToAlbum
       .mockRejectedValueOnce(new Error("add failed"))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ success: true, addedCount: 2 });
     const onClose = renderDialog();
     const albumButton = await screen.findByRole("button", { name: "旅行" });
 
@@ -266,7 +268,7 @@ describe("AddToAlbumDialog", () => {
     });
     mocks.addPhotosToAlbum
       .mockRejectedValueOnce(new Error("add failed"))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ success: true, addedCount: 2 });
     const onClose = renderDialog();
 
     fireEvent.click(await screen.findByRole("button", { name: "新建相册" }));
@@ -294,5 +296,42 @@ describe("AddToAlbumDialog", () => {
       );
       expect(onClose).toHaveBeenCalledTimes(1);
     });
+  });
+  it("shows recent valid targets and repeats the last target by name", async () => {
+    mocks.listAlbums.mockResolvedValue([
+      { id: 1, name: "Travel", description: null },
+      { id: 2, name: "Smart", isSmart: true, description: null },
+    ]);
+    mocks.getRecentAlbums.mockResolvedValue([
+      { id: 1, name: "Travel", description: null },
+      { id: 2, name: "Smart", description: null },
+      { id: 999, name: "Deleted", description: null },
+    ]);
+    renderDialog();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "再次添加到「Travel」" })
+    );
+    await waitFor(() =>
+      expect(mocks.addPhotosToAlbum).toHaveBeenCalledWith({
+        albumId: 1,
+        photoIds: [1, 2],
+      })
+    );
+    expect(
+      screen.queryByRole("button", { name: "Deleted" })
+    ).not.toBeInTheDocument();
+  });
+  it("reports an unchanged target instead of claiming duplicate photos were added", async () => {
+    mocks.listAlbums.mockResolvedValue([
+      { id: 1, name: "Travel", description: null },
+    ]);
+    mocks.addPhotosToAlbum.mockResolvedValue({ success: true, addedCount: 0 });
+    renderDialog();
+    fireEvent.click(await screen.findByRole("button", { name: "Travel" }));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "所选照片已在「Travel」中，无需重复添加"
+      )
+    );
   });
 });

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { albumPickerActions } from "@/actions/album-picker";
 import {
   Dialog,
   DialogContent,
@@ -23,7 +24,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 
 interface AlbumInfo {
@@ -49,6 +49,7 @@ export function AddToAlbumDialog({
 }: AddToAlbumDialogProps) {
   const { t } = useTranslation();
   const [albums, setAlbums] = useState<AlbumInfo[]>([]);
+  const [recentAlbums, setRecentAlbums] = useState<AlbumInfo[]>([]);
   const [albumsLoading, setAlbumsLoading] = useState(false);
   const [albumsLoadError, setAlbumsLoadError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -67,11 +68,19 @@ export function AddToAlbumDialog({
     setAlbumsLoading(true);
     setAlbumsLoadError(false);
     try {
-      const result = await ipc.client.albums.listAlbums({});
+      const [result, recent] = await Promise.all([
+        albumPickerActions.list(),
+        albumPickerActions.recent().catch(() => []),
+      ]);
       if (requestId !== albumsRequestRef.current) {
         return;
       }
       setAlbums((result as AlbumInfo[]).filter((a) => !a.isSmart));
+      setRecentAlbums(
+        recent.filter((item) =>
+          result.some((album) => album.id === item.id && !album.isSmart)
+        )
+      );
     } catch (err) {
       if (requestId !== albumsRequestRef.current) {
         return;
@@ -115,17 +124,20 @@ export function AddToAlbumDialog({
     const album = albums.find((a) => a.id === albumId);
     setAdding((prev) => new Set(prev).add(albumId));
     try {
-      await ipc.client.albums.addPhotosToAlbum({ albumId, photoIds });
+      const result = await albumPickerActions.add({ albumId, photoIds });
       queryClient.invalidateQueries({ queryKey: ["albums"] });
       toast.success(
-        t("toastAddToAlbumSuccess", {
-          count: photoIds.length,
-          album: album?.name || "",
-        })
+        result.addedCount === 0
+          ? t("albumAlreadyContainsPhotos", { album: album?.name || "" })
+          : t("toastAddToAlbumSuccess", {
+              count: result.addedCount,
+              album: album?.name || "",
+            })
       );
       onClose();
     } catch {
       toast.error(t("toastAddFailed"));
+      await loadAlbums();
     } finally {
       setAdding((prev) => {
         const next = new Set(prev);
@@ -142,13 +154,15 @@ export function AddToAlbumDialog({
     }
     setCreating(true);
     try {
-      const created = await ipc.client.albums.createAlbum({ name });
+      const created = await albumPickerActions.create({ name });
       const album = created as AlbumInfo;
+      let addedCount = 0;
       try {
-        await ipc.client.albums.addPhotosToAlbum({
+        const result = await albumPickerActions.add({
           albumId: album.id,
           photoIds,
         });
+        addedCount = result.addedCount;
       } catch {
         toast.error(t("toastAddFailed"));
         setShowCreate(false);
@@ -159,7 +173,7 @@ export function AddToAlbumDialog({
       queryClient.invalidateQueries({ queryKey: ["albums"] });
       toast.success(
         t("toastAddToAlbumSuccess", {
-          count: photoIds.length,
+          count: addedCount,
           album: album.name || name,
         })
       );
@@ -268,6 +282,7 @@ export function AddToAlbumDialog({
           elevated ? "z-[1101]" : ""
         }`}
         onEscapeKeyDown={(event) => {
+          event.stopPropagation();
           if (busy) {
             event.preventDefault();
             return;
@@ -298,6 +313,41 @@ export function AddToAlbumDialog({
           <DialogTitle>{t("albumAddTitle")}</DialogTitle>
           <DialogDescription>{t("albumAddDescription")}</DialogDescription>
         </DialogHeader>
+
+        {!(albumsLoading || albumsLoadError) &&
+          recentAlbums.length > 0 &&
+          !albumFilter && (
+            <div className="min-w-0 space-y-2">
+              <p className="text-[11px] text-muted-foreground">
+                {t("albumRecentTargets")}
+              </p>
+              <div className="flex min-w-0 flex-wrap gap-1.5">
+                {recentAlbums.map((album, index) => {
+                  const label =
+                    index === 0
+                      ? t("albumRepeatLast", { album: album.name })
+                      : album.name;
+                  return (
+                    <Tooltip key={album.id}>
+                      <TooltipTrigger asChild>
+                        <button
+                          className="max-w-full truncate rounded-md border border-border px-2 py-1.5 text-left text-[12px] hover:bg-muted disabled:opacity-50"
+                          disabled={busy}
+                          onClick={() => handleAdd(album.id)}
+                          type="button"
+                        >
+                          {label}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[min(28rem,calc(100dvw-1rem))] break-all">
+                        {label}
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
         <div className="min-w-0">
           <SmoothInput

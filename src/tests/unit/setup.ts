@@ -32,6 +32,9 @@ vi.mock("react-i18next", () => ({
     t: (key: string, options?: Record<string, unknown>) => {
       const translations: Record<string, string> = {
         appName: "AI 图片管理器",
+        albumAlreadyContainsPhotos: "所选照片已在「{{album}}」中，无需重复添加",
+        albumRecentTargets: "最近使用的相册",
+        albumRepeatLast: "再次添加到「{{album}}」",
         searchSavePreset: "保存搜索条件",
         searchLoadPresets: "搜索预设 ({{count}})",
         searchPresetsEmpty:
