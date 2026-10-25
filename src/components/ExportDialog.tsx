@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import {
+  readExportPreferences,
+  saveExportPreferences,
+} from "@/actions/export-preferences";
+import { photoExportActions } from "@/actions/photo-export";
 import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
@@ -9,12 +15,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
 
 interface ExportDialogProps {
@@ -28,6 +34,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
   const [format, setFormat] = useState<"original" | "compressed">("original");
   const [quality, setQuality] = useState(85);
   const [maxWidth, setMaxWidth] = useState(1920);
+  const [openAfterExport, setOpenAfterExport] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<{
     path?: string;
@@ -39,16 +46,29 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
 
   useEffect(() => {
     if (open) {
+      const preferences = readExportPreferences();
+      setFormat(preferences.format);
+      setQuality(preferences.quality);
+      setMaxWidth(preferences.maxWidth);
+      setOpenAfterExport(preferences.openAfterExport);
       setResult(null);
       setExporting(false);
     }
   }, [open]);
 
+  async function openFolder(path: string) {
+    try {
+      await photoExportActions.openFolder(path);
+    } catch {
+      toast.error(t("exportOpenFolderFailed"));
+    }
+  }
+
   async function handleExport() {
     setExporting(true);
     try {
       const defaultName = `gallery-${new Date().toISOString().slice(0, 10)}.zip`;
-      const dialogResult = await ipc.client.shell.saveFileDialog({
+      const dialogResult = await photoExportActions.choosePath({
         defaultName,
         title: t("exportGalleryTitle"),
       });
@@ -57,7 +77,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         setExporting(false);
         return;
       }
-      const res = await ipc.client.photos.exportPhotos({
+      const res = await photoExportActions.export({
         ids: photoIds,
         format,
         maxWidth: format === "compressed" ? maxWidth : undefined,
@@ -74,14 +94,15 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         error?: string;
       };
       if (data.success) {
+        saveExportPreferences({ format, quality, maxWidth, openAfterExport });
         setResult({
           path: data.path ?? "",
           filename: data.filename ?? "",
           photoCount: data.photoCount ?? 0,
           sizeMB: data.sizeMB ?? 0,
         });
-        if (data.path) {
-          await ipc.client.shell.openInExplorer({ path: data.path });
+        if (data.path && openAfterExport) {
+          await openFolder(data.path);
         }
       } else {
         setResult({ error: data.error || t("exportFailed") });
@@ -104,6 +125,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
       <DialogContent
         className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
         onEscapeKeyDown={(e) => {
+          e.stopPropagation();
           if (exporting) {
             e.preventDefault();
           }
@@ -137,6 +159,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
                     ? "border-primary/50 bg-primary/10 text-primary"
                     : "border-input text-muted-foreground hover:border-muted-foreground"
                 }`}
+                disabled={exporting}
                 key={f}
                 onClick={() => setFormat(f)}
                 type="button"
@@ -158,6 +181,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
               </label>
               <input
                 className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                disabled={exporting}
                 id="export-quality"
                 max={100}
                 min={10}
@@ -176,6 +200,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
               </label>
               <input
                 className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                disabled={exporting}
                 id="export-max-width"
                 max={3840}
                 min={640}
@@ -187,6 +212,16 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
             </div>
           </>
         )}
+
+        <div className="flex min-w-0 items-center justify-between gap-3 text-[12px]">
+          <span className="min-w-0">{t("exportOpenAfterExport")}</span>
+          <Switch
+            ariaLabel={t("exportOpenAfterExport")}
+            checked={openAfterExport}
+            disabled={exporting}
+            onCheckedChange={setOpenAfterExport}
+          />
+        </div>
 
         {result && (
           <div
@@ -203,7 +238,11 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
             ) : (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="block truncate">
+                  <span
+                    className="block truncate"
+                    // biome-ignore lint/a11y/noNoninteractiveTabindex: allow keyboard users to read the truncated export summary through Tooltip.
+                    tabIndex={0}
+                  >
                     {t("exportComplete", {
                       filename: result.filename,
                       count: result.photoCount,
@@ -235,6 +274,20 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         )}
 
         <DialogFooter className="flex-wrap">
+          {result?.path && !result.error && (
+            <button
+              className="rounded-md border border-border px-4 py-1.5 text-[13px] hover:bg-muted"
+              disabled={exporting}
+              onClick={() => {
+                if (result.path) {
+                  openFolder(result.path);
+                }
+              }}
+              type="button"
+            >
+              {t("exportOpenFolder")}
+            </button>
+          )}
           <button
             className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
             disabled={exporting}

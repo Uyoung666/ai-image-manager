@@ -35,6 +35,9 @@ i18n.use(initReactI18next).init({
         albumAlreadyContainsPhotos: "所选照片已在「{{album}}」中，无需重复添加",
         albumRecentTargets: "最近使用的相册",
         albumRepeatLast: "再次添加到「{{album}}」",
+        exportOpenAfterExport: "导出后自动打开文件夹（记住选择）",
+        exportOpenFolder: "打开所在文件夹",
+        exportOpenFolderFailed: "导出已完成，但无法打开文件夹",
         searchSavePreset: "保存搜索条件",
         searchLoadPresets: "搜索预设 ({{count}})",
         searchPresetsEmpty:
