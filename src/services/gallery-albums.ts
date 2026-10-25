@@ -21,6 +21,37 @@ interface Snapshot {
   key: string;
   touched: number;
 }
+
+interface AlbumSortPhoto {
+  fileDate: number | null;
+  filename: string;
+  fileSize: number | null;
+  id: number;
+}
+
+// Keep this function self-contained: the same comparator runs in the worker.
+function compareAlbumPhotos(
+  a: AlbumSortPhoto,
+  b: AlbumSortPhoto,
+  field: "date" | "name" | "size",
+  order: "asc" | "desc",
+  locale?: string
+): number {
+  let comparison = 0;
+  if (field === "name") {
+    comparison = a.filename.localeCompare(b.filename, locale);
+  } else if (field === "size") {
+    comparison = (a.fileSize ?? 0) - (b.fileSize ?? 0);
+  } else if (a.fileDate === null && b.fileDate !== null) {
+    comparison = -1;
+  } else if (a.fileDate !== null && b.fileDate === null) {
+    comparison = 1;
+  } else {
+    comparison = (a.fileDate ?? 0) - (b.fileDate ?? 0);
+  }
+  return (order === "asc" ? 1 : -1) * (comparison || a.id - b.id);
+}
+
 const snapshots = new Map<string, Snapshot>();
 const pending = new Map<string, Promise<Snapshot>>();
 let epoch = 0;
@@ -121,7 +152,7 @@ export async function getGalleryAlbumLayout(input: {
   }
   let job = pending.get(key);
   if (!job) {
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: snapshots share ordinary and smart membership collection while preserving the legacy comparator.
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: snapshots share ordinary and smart membership collection and bounded caching.
     job = (async () => {
       const fields = {
         id: photos.id,
@@ -175,13 +206,11 @@ export async function getGalleryAlbumLayout(input: {
           rows.push(member);
         }
       }
-      // This is the existing album comparator, including its ID-based date order.
-      const sortCode = `(rows,field,order,locale)=>rows.sort((a,b)=>{let cmp=field==='name'?a.filename.localeCompare(b.filename,locale):field==='size'?(a.fileSize??0)-(b.fileSize??0):0;if(cmp===0)cmp=a.id-b.id;return order==='asc'?cmp:-cmp;})`;
       const sorted =
         rows.length > GALLERY_CONFIG.layoutWorkerThreshold
           ? await new Promise<typeof rows>((resolve, reject) => {
               const worker = new Worker(
-                `const {parentPort,workerData}=require('node:worker_threads');const sort=${sortCode};parentPort.postMessage(sort(workerData.rows,workerData.sort,workerData.order,workerData.locale));`,
+                `const {parentPort,workerData}=require('node:worker_threads');const compare=${compareAlbumPhotos.toString()};parentPort.postMessage(workerData.rows.sort((a,b)=>compare(a,b,workerData.sort,workerData.order,workerData.locale)));`,
                 { eval: true, workerData: { rows, ...input } }
               );
               worker.once("message", resolve);
@@ -192,18 +221,9 @@ export async function getGalleryAlbumLayout(input: {
                 }
               });
             })
-          : rows.sort((a, b) => {
-              let comparison = 0;
-              if (input.sort === "name") {
-                comparison = a.filename.localeCompare(b.filename, input.locale);
-              } else if (input.sort === "size") {
-                comparison = (a.fileSize ?? 0) - (b.fileSize ?? 0);
-              }
-              if (comparison === 0) {
-                comparison = a.id - b.id;
-              }
-              return input.order === "asc" ? comparison : -comparison;
-            });
+          : rows.sort((a, b) =>
+              compareAlbumPhotos(a, b, input.sort, input.order, input.locale)
+            );
       const snapshot = {
         favoriteRevision: getGalleryRevision(),
         key,

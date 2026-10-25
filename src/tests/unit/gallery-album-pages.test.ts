@@ -53,10 +53,17 @@ afterEach(() => {
   sqlite.close();
 });
 describe("windowed album snapshots", () => {
-  it("preserves localized legacy ordering in the sorting worker, with geometry only", async () => {
+  it("preserves localized name and size ordering and uses file dates in the worker", async () => {
     const rows = sqlite
-      .prepare("SELECT id,filename,file_size AS fileSize FROM photos")
-      .all() as Array<{ id: number; filename: string; fileSize: number }>;
+      .prepare(
+        "SELECT id,filename,file_size AS fileSize,file_date AS fileDate FROM photos"
+      )
+      .all() as Array<{
+      id: number;
+      filename: string;
+      fileSize: number;
+      fileDate: number;
+    }>;
     for (const sort of ["date", "name", "size"] as const) {
       const snapshot = await getGalleryAlbumLayout({
         id: 1,
@@ -72,6 +79,9 @@ describe("windowed album snapshots", () => {
         if (sort === "size") {
           difference = a.fileSize - b.fileSize;
         }
+        if (sort === "date") {
+          difference = a.fileDate - b.fileDate;
+        }
         return -(difference || a.id - b.id);
       });
       expect(snapshot.items.map((item) => item.id)).toEqual(
@@ -86,6 +96,31 @@ describe("windowed album snapshots", () => {
       expect(page.items.map((item) => item.id)).toEqual(
         snapshot.items.slice(5100).map((item) => item.id)
       );
+    }
+  });
+  it.each([
+    1, 2,
+  ])("matches SQLite date ordering for album %i below and above the worker threshold", async (id) => {
+    sqlite.exec(
+      "UPDATE photos SET file_date=NULL WHERE id IN (1,2); UPDATE photos SET file_date=-10 WHERE id=3; UPDATE photos SET file_date=0 WHERE id IN (4,5)"
+    );
+    for (const size of [5, 5200]) {
+      state.ids = Array.from({ length: size }, (_, index) => index + 1);
+      sqlite.exec(
+        `DELETE FROM album_photos WHERE album_id=1; INSERT INTO album_photos(album_id,photo_id) SELECT 1,id FROM photos WHERE id<=${size}`
+      );
+      clearGalleryAlbumSnapshots();
+      for (const order of ["asc", "desc"] as const) {
+        const layout = await getGalleryAlbumLayout({ id, sort: "date", order });
+        const expected = sqlite
+          .prepare(
+            `SELECT id FROM photos WHERE id<=? ORDER BY file_date ${order}, id ${order}`
+          )
+          .all(size) as Array<{ id: number }>;
+        expect(layout.items.map((photo) => photo.id)).toEqual(
+          expected.map((photo) => photo.id)
+        );
+      }
     }
   });
   it("chunks smart membership and rebuilds after membership changes", async () => {
