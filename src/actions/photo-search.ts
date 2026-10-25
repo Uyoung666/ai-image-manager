@@ -1,6 +1,6 @@
 import { ipc } from "@/ipc/manager";
 
-/** Both initial searches and EXIF continuation use the same typed IPC contract. */
+/** Preserve the typed response, including time-filter metadata on empty pages. */
 export async function searchPhotos(
   params: Parameters<typeof ipc.client.photos.searchCompound>[0]
 ) {

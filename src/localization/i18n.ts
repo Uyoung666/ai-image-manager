@@ -32,6 +32,11 @@ i18n.use(initReactI18next).init({
     zh: {
       translation: {
         appName: "AI 图片管理器",
+        searchSavePreset: "保存搜索条件",
+        searchLoadPresets: "搜索预设 ({{count}})",
+        searchPresetsEmpty:
+          "暂无预设。输入关键词或筛选条件后，可保存当前搜索。",
+        searchPresetSaveFailed: "无法保存搜索预设，请检查本地存储空间",
 
         // Progress bar fun phrases — rotated every few seconds during long waits
         progressPhrases: {
@@ -142,9 +147,11 @@ i18n.use(initReactI18next).init({
         rightClickFolderActions: "右键管理文件夹",
 
         // Search
-        searchPlaceholder: "试试搜索“去年秋天的红叶”",
+        searchPlaceholder: "搜索文件名、标签或人物",
+        emptyClearExifFilters: "仅清除 EXIF 筛选",
         quickPreviewTitle: "快速预览",
         quickPreviewOpenLightbox: "进入灯箱 (Enter)",
+        galleryViewOptions: "视图选项",
         searchShortcut: "Ctrl+K",
 
         // PhotoGrid
@@ -1301,7 +1308,7 @@ i18n.use(initReactI18next).init({
         emptyTimeFilterDesc:
           "系统已识别时间范围：{{from}} – {{to}}。试试扩大时间范围或修改关键词。",
         emptyTimeRangeFallback: "该时间范围",
-        emptyClearTimeFilter: "清除搜索条件",
+        emptyClearTimeFilter: "仅清除时间条件",
         emptyExpandTimeRange: "扩大日期范围",
         emptyFilterAndQueryTitle: "当前过滤条件下无匹配结果",
         emptyFilterAndQueryDesc:

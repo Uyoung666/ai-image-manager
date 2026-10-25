@@ -58,11 +58,14 @@ describe("gallery empty states", () => {
   });
 
   it("explains an empty time range even when the AI index is unavailable", () => {
+    const clearTime = vi.fn();
+    const clearAll = vi.fn();
     render(
       <SearchEmptyState
         hasActiveFilters={false}
         hasAiVectors={false}
-        onClearSearch={vi.fn()}
+        onClearSearch={clearAll}
+        onClearTimeFilter={clearTime}
         parsedTimeFilter={{
           dateFrom: "2025-01-01",
           dateTo: "2025-12-31",
@@ -78,6 +81,11 @@ describe("gallery empty states", () => {
       screen.getByRole("button", { name: "emptyClearTimeFilter" })
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "前往 AI 设置" })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "emptyClearTimeFilter" })
+    );
+    expect(clearTime).toHaveBeenCalledOnce();
+    expect(clearAll).not.toHaveBeenCalled();
   });
 
   it("does not declare no matches or offer looser filters for incomplete search", () => {

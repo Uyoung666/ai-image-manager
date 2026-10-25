@@ -719,7 +719,15 @@ async function performCompoundSearch(
       // are supplementary and must obey the same hard-filter scope.
       const colorScope = getPhotoSearchScope(db, filters, metadataRevision);
       if (colorScope.rows.length === 0) {
-        return { results: [], total: 0, totalExact: true, hasMore: false };
+        return {
+          results: [],
+          total: 0,
+          totalExact: true,
+          hasMore: false,
+          ...(rewrittenTimeFilter
+            ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+            : {}),
+        };
       }
       const candidates = db
         .select({
@@ -798,6 +806,9 @@ async function performCompoundSearch(
           total: ranks.length,
           totalExact: !colorIncomplete,
           searchMode: "color" as const,
+          ...(rewrittenTimeFilter
+            ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+            : {}),
           ...(colorIncomplete
             ? {
                 completion: "partial" as const,
@@ -860,6 +871,9 @@ async function performCompoundSearch(
             total: scope.length,
             totalExact: !changed,
             semanticRequired: false,
+            ...(rewrittenTimeFilter
+              ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+              : {}),
             ...(changed
               ? {
                   completion: "partial" as const,

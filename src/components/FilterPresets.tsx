@@ -1,7 +1,15 @@
 import { Save, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  type SearchPreset as FilterPreset,
+  readSearchPresets as loadPresets,
+  markSearchPresetUsed,
+  SEARCH_PRESETS_CHANGED,
+  type SearchPresetContext,
+  writeSearchPresets as savePresets,
+} from "@/actions/search-presets";
 import {
   Popover,
   PopoverContent,
@@ -11,15 +19,11 @@ import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
   TooltipContent,
+  TooltipPortalProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { ExifFilters } from "@/types/search";
-
-interface FilterPreset {
-  createdAt: number;
-  filters: ExifFilters;
-  name: string;
-}
+import { cn } from "@/utils/tailwind";
 
 interface DeletedPresetSnapshot {
   index: number;
@@ -29,26 +33,10 @@ interface DeletedPresetSnapshot {
 
 interface FilterPresetsProps {
   currentFilters: ExifFilters;
+  currentSearch?: SearchPresetContext;
   onLoadPreset: (filters: ExifFilters) => void;
-}
-
-const STORAGE_KEY = "exif-filter-presets";
-
-function loadPresets(): FilterPreset[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function savePresets(presets: FilterPreset[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
-  } catch {
-    /* ignore */
-  }
+  onLoadSearchPreset?: (preset: FilterPreset) => void;
+  presentation?: "inline" | "popover";
 }
 
 function insertByOrder(
@@ -122,21 +110,62 @@ function restorePreset(
 
 export function FilterPresets({
   currentFilters,
+  currentSearch,
+  onLoadSearchPreset,
   onLoadPreset,
+  presentation = "popover",
 }: FilterPresetsProps) {
   const { t } = useTranslation();
   const [presets, setPresets] = useState<FilterPreset[]>([]);
   const [presetName, setPresetName] = useState("");
   const [showSave, setShowSave] = useState(false);
   const [showLoad, setShowLoad] = useState(false);
+  const inlineTooltipRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLElement>(null);
+  const [stripFade, setStripFade] = useState({ left: false, right: false });
   const presetNameComposingRef = useRef(false);
   const deletedSnapshotsRef = useRef<Map<string, DeletedPresetSnapshot>>(
     new Map()
   );
 
   useEffect(() => {
-    setPresets(loadPresets());
+    const refresh = () => setPresets(loadPresets());
+    refresh();
+    window.addEventListener(SEARCH_PRESETS_CHANGED, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(SEARCH_PRESETS_CHANGED, refresh);
+      window.removeEventListener("storage", refresh);
+    };
   }, []);
+
+  const updateStripFade = useCallback(() => {
+    const strip = stripRef.current;
+    if (!strip) {
+      return;
+    }
+    const left = strip.scrollLeft > 2;
+    const right = strip.scrollWidth - strip.scrollLeft - strip.clientWidth > 2;
+    setStripFade((previous) =>
+      previous.left === left && previous.right === right
+        ? previous
+        : { left, right }
+    );
+  }, []);
+
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (presentation !== "inline" || presets.length === 0 || !strip) {
+      return;
+    }
+    updateStripFade();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateStripFade);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [presentation, presets, updateStripFade]);
 
   function handleSave() {
     if (!presetName.trim()) {
@@ -146,13 +175,17 @@ export function FilterPresets({
       name: presetName.trim(),
       filters: { ...currentFilters },
       createdAt: Date.now(),
+      ...(currentSearch ? { search: { ...currentSearch } } : {}),
     };
     const updated = [
       newPreset,
-      ...presets.filter((p) => p.name !== presetName.trim()),
+      ...loadPresets().filter((p) => p.name !== presetName.trim()),
     ];
+    if (!savePresets(updated)) {
+      toast.error(t("searchPresetSaveFailed"));
+      return;
+    }
     setPresets(updated);
-    savePresets(updated);
     setPresetName("");
     setShowSave(false);
   }
@@ -214,90 +247,186 @@ export function FilterPresets({
     });
   }
 
-  const hasActiveFilters = Object.values(currentFilters).some(
-    (v) => v && v.length > 0
+  const hasActiveFilters =
+    !!(currentSearch?.query.trim() || currentSearch?.colorHex) ||
+    Object.values(currentFilters).some((v) => v && v.length > 0);
+  const inline = presentation === "inline";
+  const sortedPresets = [...presets].sort(
+    (a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)
   );
+  const presetItems = sortedPresets.map((preset) => (
+    <div
+      className={cn(
+        "flex min-w-0 items-center justify-between rounded-[4px] hover:bg-foreground/5",
+        inline
+          ? "max-w-[min(14rem,70vw)] shrink-0 border border-border bg-secondary/40 pr-1"
+          : "px-2 py-1"
+      )}
+      key={preset.name}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={cn(
+              "min-w-0 flex-1 truncate text-left text-[12px] text-foreground",
+              inline && "px-2.5 py-1.5"
+            )}
+            data-search-preset={preset.name}
+            onClick={() => {
+              if (onLoadSearchPreset) {
+                onLoadSearchPreset(preset);
+              } else {
+                onLoadPreset(preset.filters);
+              }
+              markSearchPresetUsed(preset.name);
+              setShowLoad(false);
+            }}
+            type="button"
+          >
+            {preset.name}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+          {preset.name}
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label={inline ? `${t("delete")} ${preset.name}` : t("delete")}
+            className={cn(
+              "ml-1 shrink-0 text-muted-foreground/70 hover:text-destructive",
+              inline && "rounded-[3px] p-1.5"
+            )}
+            onClick={() => handleDelete(preset.name)}
+            type="button"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {inline ? `${t("delete")} ${preset.name}` : t("delete")}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  ));
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      {/* Save preset button */}
-      {hasActiveFilters && (
-        <Popover
-          onOpenChange={(nextOpen) => {
-            setShowSave(nextOpen);
-            if (nextOpen) {
-              setShowLoad(false);
-            }
-          }}
-          open={showSave}
-        >
-          <PopoverTrigger asChild>
-            <button
-              className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
-              type="button"
-            >
-              <Save className="h-3 w-3" />
-              {t("filterSavePreset")}
-            </button>
-          </PopoverTrigger>
-          {showSave && (
-            <PopoverContent
-              align="start"
-              className="max-h-[min(12rem,var(--radix-popover-content-available-height))] w-[min(20rem,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain rounded-[6px] border border-border bg-popover p-2 shadow-lg ring-1 ring-foreground/5"
-              collisionPadding={8}
-              data-overlay-kind="filter-presets"
-              data-surface="overlay"
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.stopPropagation();
-                }
-              }}
-              side="top"
-              sideOffset={4}
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <SmoothInput
-                  className="h-7 rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40"
-                  onChange={(e) => setPresetName(e.target.value)}
-                  onCompositionEnd={() => {
-                    presetNameComposingRef.current = false;
-                  }}
-                  onCompositionStart={() => {
-                    presetNameComposingRef.current = true;
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.stopPropagation();
-                      if (
-                        e.nativeEvent.isComposing ||
-                        e.nativeEvent.keyCode === 229 ||
-                        presetNameComposingRef.current
-                      ) {
-                        return;
-                      }
-                      e.preventDefault();
-                      handleSave();
-                    }
-                  }}
-                  placeholder={t("filterPresetNamePlaceholder")}
-                  value={presetName}
-                  wrapperClassName="min-w-0 flex-[1_1_9rem]"
-                />
-                <button
-                  className="rounded-[4px] bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20"
-                  onClick={handleSave}
-                  type="button"
-                >
-                  {t("save")}
-                </button>
-              </div>
-            </PopoverContent>
-          )}
-        </Popover>
+    <div
+      className={cn(
+        "flex min-w-0 gap-2",
+        inline ? "w-full max-w-full flex-col" : "flex-wrap items-center"
       )}
+      ref={inlineTooltipRef}
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {inline && (
+          <div className="mr-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-[11px] text-muted-foreground">
+              {t("searchLoadPresets", { count: presets.length })}
+            </span>
+          </div>
+        )}
+        {/* Save preset button */}
+        {hasActiveFilters && (
+          <Popover
+            onOpenChange={(nextOpen) => {
+              setShowSave(nextOpen);
+              if (nextOpen) {
+                setShowLoad(false);
+              }
+            }}
+            open={showSave}
+          >
+            <PopoverTrigger asChild>
+              <button
+                className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
+                type="button"
+              >
+                <Save className="h-3 w-3" />
+                {t(currentSearch ? "searchSavePreset" : "filterSavePreset")}
+              </button>
+            </PopoverTrigger>
+            {showSave && (
+              <PopoverContent
+                align="start"
+                className="max-h-[min(12rem,var(--radix-popover-content-available-height))] w-[min(20rem,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain rounded-[6px] border border-border bg-popover p-2 shadow-lg ring-1 ring-foreground/5"
+                collisionPadding={8}
+                data-overlay-kind="filter-presets"
+                data-surface="overlay"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.stopPropagation();
+                  }
+                }}
+                side="top"
+                sideOffset={4}
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <SmoothInput
+                    className="h-7 rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40"
+                    onChange={(e) => setPresetName(e.target.value)}
+                    onCompositionEnd={() => {
+                      presetNameComposingRef.current = false;
+                    }}
+                    onCompositionStart={() => {
+                      presetNameComposingRef.current = true;
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.stopPropagation();
+                        if (
+                          e.nativeEvent.isComposing ||
+                          e.nativeEvent.keyCode === 229 ||
+                          presetNameComposingRef.current
+                        ) {
+                          return;
+                        }
+                        e.preventDefault();
+                        handleSave();
+                      }
+                    }}
+                    placeholder={t("filterPresetNamePlaceholder")}
+                    value={presetName}
+                    wrapperClassName="min-w-0 flex-[1_1_9rem]"
+                  />
+                  <button
+                    className="rounded-[4px] bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20"
+                    onClick={handleSave}
+                    type="button"
+                  >
+                    {t("save")}
+                  </button>
+                </div>
+              </PopoverContent>
+            )}
+          </Popover>
+        )}
+      </div>
+
+      {inline &&
+        (presets.length ? (
+          <section
+            aria-label={t("searchLoadPresets", { count: presets.length })}
+            className="search-preset-strip flex w-full min-w-0 items-center gap-1.5 overflow-x-auto overscroll-x-contain py-1"
+            data-left-fade={stripFade.left}
+            data-right-fade={stripFade.right}
+            data-search-preset-strip
+            onScroll={updateStripFade}
+            ref={stripRef}
+          >
+            <TooltipPortalProvider containerRef={inlineTooltipRef}>
+              {presetItems}
+            </TooltipPortalProvider>
+          </section>
+        ) : (
+          <p className="text-[12px] text-muted-foreground">
+            {t("searchPresetsEmpty")}
+          </p>
+        ))}
 
       {/* Load preset button */}
-      {presets.length > 0 && (
+      {!inline && (presets.length > 0 || currentSearch) && (
         <Popover
           onOpenChange={(nextOpen) => {
             setShowLoad(nextOpen);
@@ -312,7 +441,9 @@ export function FilterPresets({
               className="rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
               type="button"
             >
-              {t("filterLoadPresets", { count: presets.length })}
+              {t(currentSearch ? "searchLoadPresets" : "filterLoadPresets", {
+                count: presets.length,
+              })}
             </button>
           </PopoverTrigger>
           {showLoad && (
@@ -330,43 +461,12 @@ export function FilterPresets({
               side="top"
               sideOffset={4}
             >
-              {presets.map((preset) => (
-                <div
-                  className="flex min-w-0 items-center justify-between rounded-[4px] px-2 py-1 hover:bg-foreground/5"
-                  key={preset.name}
-                >
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        className="min-w-0 flex-1 truncate text-left text-[12px] text-foreground"
-                        onClick={() => {
-                          onLoadPreset(preset.filters);
-                          setShowLoad(false);
-                        }}
-                        type="button"
-                      >
-                        {preset.name}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
-                      {preset.name}
-                    </TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        aria-label={t("delete")}
-                        className="ml-1 shrink-0 text-muted-foreground/70 hover:text-destructive"
-                        onClick={() => handleDelete(preset.name)}
-                        type="button"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("delete")}</TooltipContent>
-                  </Tooltip>
-                </div>
-              ))}
+              {presets.length === 0 && (
+                <p className="p-2 text-[12px] text-muted-foreground">
+                  {t("searchPresetsEmpty")}
+                </p>
+              )}
+              {presetItems}
             </PopoverContent>
           )}
         </Popover>

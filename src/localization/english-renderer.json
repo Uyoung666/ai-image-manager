@@ -102,9 +102,11 @@
   "folderAppearanceSaved": "Folder appearance saved",
   "folderAppearanceSaveFailed": "Failed to save folder appearance",
   "rightClickFolderActions": "Right-click to manage folder",
-  "searchPlaceholder": "Try “sunset by the sea”",
+  "searchPlaceholder": "Search filenames, tags or people",
+  "emptyClearExifFilters": "Clear EXIF filters only",
   "quickPreviewTitle": "Quick preview",
   "quickPreviewOpenLightbox": "Open lightbox (Enter)",
+  "galleryViewOptions": "View options",
   "searchShortcut": "Ctrl+K",
   "photosCount": "{{count}} photos",
   "photosSelected": " · {{count}} selected",
@@ -1105,7 +1107,7 @@
   "emptyTimeFilterTitle": "No photos found in \"{{keyword}}\"",
   "emptyTimeFilterDesc": "System detected time range: {{from}} – {{to}}. Try expanding the range or changing keywords.",
   "emptyTimeRangeFallback": "this time range",
-  "emptyClearTimeFilter": "Clear Search",
+  "emptyClearTimeFilter": "Remove time filter only",
   "emptyExpandTimeRange": "Expand Date Range",
   "emptyFilterAndQueryTitle": "No results under current filters",
   "emptyFilterAndQueryDesc": "Keyword \"{{query}}\" has no matches under active EXIF filters.",
@@ -2148,5 +2150,9 @@
   "updateRequestPending": "Requesting update…",
   "updateViewSettings": "Open update settings",
   "updateViewDetails": "View update",
-  "updatePreferenceSaveFailed": "Update settings could not be saved. Unsaved changes were restored; please retry."
+  "updatePreferenceSaveFailed": "Update settings could not be saved. Unsaved changes were restored; please retry.",
+  "searchSavePreset": "Save search",
+  "searchLoadPresets": "Search presets ({{count}})",
+  "searchPresetsEmpty": "No presets yet. Enter a query or filters to save this search.",
+  "searchPresetSaveFailed": "Could not save the search preset. Check local storage."
 }

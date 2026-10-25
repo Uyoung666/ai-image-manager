@@ -88,7 +88,10 @@ import {
   cancelGalleryViewTransition,
   startGalleryViewTransition,
 } from "@/utils/gallery-view-transition";
-import { shouldRestoreSavedSearch } from "@/utils/search-state";
+import {
+  getSearchWithoutTime,
+  shouldRestoreSavedSearch,
+} from "@/utils/search-state";
 import { notifyStartupHomeReady } from "@/utils/startup-readiness";
 import { shouldShowHomeGallery } from "./-home-gallery-state";
 import {
@@ -1761,7 +1764,24 @@ function HomePage() {
     filter.setTotalPhotos(totalPhotos);
   }, [totalPhotos, filter.setTotalPhotos]);
 
-  const hasActiveExifFilters = searchMode === "exif";
+  const hasActiveExifFilters = Object.values(searchFilters).some(Boolean);
+  const hasActiveSearchFilters = hasActiveExifFilters || Boolean(colorHex);
+  const clearExifSearchFilters = useCallback(() => {
+    setDrillDownFilters(undefined);
+    handleSearch(searchQuery, {}, colorHex ?? "");
+  }, [handleSearch, searchQuery, colorHex]);
+  const clearExifSearchAction = hasActiveExifFilters
+    ? clearExifSearchFilters
+    : undefined;
+  const keepSearchQueryOnly = useCallback(() => {
+    setDrillDownFilters(undefined);
+    handleSearch(searchQuery, {}, "");
+  }, [handleSearch, searchQuery]);
+  const clearSearchTimeFilter = useCallback(() => {
+    const next = getSearchWithoutTime(searchQuery, searchFilters);
+    setDrillDownFilters(undefined);
+    handleSearch(next.query, next.filters, colorHex ?? "");
+  }, [handleSearch, searchQuery, searchFilters, colorHex]);
   const photosModeSequenceOnlyEmpty =
     displayedSequenceMode === "photos" &&
     selectionPhotos.length === 0 &&
@@ -1775,19 +1795,13 @@ function HomePage() {
     if (isSearching) {
       return (
         <SearchEmptyState
-          hasActiveFilters={hasActiveExifFilters}
+          hasActiveFilters={hasActiveSearchFilters}
           hasAiVectors={aiStatus?.hasVectors ?? false}
           indexedPhotos={searchSemantic?.indexedPhotos ?? 0}
-          onClearFilters={() => {
-            filter.setSearchDraftFilters({});
-            setDrillDownFilters(undefined);
-            if (filter.searchDraft.query.trim()) {
-              handleSearch(filter.searchDraft.query, undefined);
-            } else {
-              filter.clearSearch();
-            }
-          }}
+          onClearExifFilters={clearExifSearchAction}
+          onClearFilters={keepSearchQueryOnly}
           onClearSearch={filter.clearSearch}
+          onClearTimeFilter={clearSearchTimeFilter}
           onGoToAiSettings={() => navigate({ to: "/settings/ai-index" })}
           onRetry={
             searchMode === "image" ? handleImageSearchRetry : handleSearchRetry
@@ -1898,7 +1912,10 @@ function HomePage() {
     searchError,
     searchIncomplete,
     parsedTimeFilter,
-    hasActiveExifFilters,
+    hasActiveSearchFilters,
+    clearExifSearchAction,
+    keepSearchQueryOnly,
+    clearSearchTimeFilter,
     aiStatus?.hasVectors,
     aiStatus?.rebuildRequired,
     searchSemantic?.indexedPhotos,
@@ -1906,9 +1923,6 @@ function HomePage() {
     searchSemantic?.state,
     searchSemantic?.totalPhotos,
     navigate,
-    filter.searchDraft.query,
-    filter.setSearchDraftFilters,
-    handleSearch,
     handleSearchRetry,
     handleImageSearchRetry,
     initialHomeQueryError,
@@ -2363,6 +2377,24 @@ function HomePage() {
               : 0
           }
           search={{
+            searchPresetContext: {
+              query: filter.searchDraft.query,
+              colorHex: colorHex || undefined,
+              sort: sortField,
+              order: sortOrder,
+            },
+            onLoadSearchPreset: (preset) => {
+              if (preset.search) {
+                handleSortChange(preset.search.sort, preset.search.order);
+                handleSearch(
+                  preset.search.query,
+                  preset.filters,
+                  preset.search.colorHex ?? ""
+                );
+              } else {
+                handleSearch(filter.searchDraft.query, preset.filters);
+              }
+            },
             activeTagIds: filter.activeTagIds,
             aiStatus: aiStatus ?? null,
             colorHex: colorHex ?? undefined,

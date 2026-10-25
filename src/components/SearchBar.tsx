@@ -17,7 +17,12 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import type {
+  SearchPreset,
+  SearchPresetContext,
+} from "@/actions/search-presets";
 import { AiIndexRebuildNotice } from "@/components/AiIndexRebuildNotice";
+import { FilterPresets } from "@/components/FilterPresets";
 import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
@@ -81,6 +86,7 @@ interface SearchBarProps {
   onClear: () => void;
   onFiltersChange: Dispatch<SetStateAction<ExifFilters>>;
   onImageSearch?: (imagePath: string) => void;
+  onLoadSearchPreset?: (preset: SearchPreset) => void;
   onQueryChange: (query: string) => void;
   onSearch: (query: string, filters?: ExifFilters) => void;
   onTagRemove?: (tagId: number) => void;
@@ -89,6 +95,7 @@ interface SearchBarProps {
   resetVersion?: number;
   resultCount?: number;
   searchMode?: SearchMode | null;
+  searchPresetContext?: SearchPresetContext;
   searchTime?: number;
   semanticDiagnostics?: SemanticSearchDiagnosticsProps;
   trailingContent?: ReactNode;
@@ -101,6 +108,8 @@ export const SearchBar = memo(
         activeTagIds,
         aiStatus,
         colorHex,
+        searchPresetContext,
+        onLoadSearchPreset,
         drillDownFilters,
         filterBarLeadingContent,
         filterBarTrailingContent,
@@ -254,7 +263,7 @@ export const SearchBar = memo(
       } = useSearchOverlayInteraction({
         query,
         imageSearchActive,
-        hasSuggestions: suggestions.length > 0,
+        hasSuggestions: suggestions.length > 0 || Boolean(searchPresetContext),
       });
       const fileInputRef = useRef<HTMLInputElement>(null);
       const [_locallyDragging, _setLocallyDragging] = useState(false);
@@ -372,6 +381,18 @@ export const SearchBar = memo(
       }
 
       function handleSuggestionKeyDown(e: React.KeyboardEvent) {
+        if (
+          e.target instanceof Element &&
+          e.target.closest(
+            '[data-search-presets], [data-overlay-kind="filter-presets"]'
+          )
+        ) {
+          return;
+        }
+        if (searchPresetContext && e.key === "Tab") {
+          setSuggestionIndex(-1);
+          return;
+        }
         const len = displayedSuggestions.length;
         if (len === 0) {
           return;
@@ -574,33 +595,8 @@ export const SearchBar = memo(
 
       // Determine search placeholder based on AI status
       function getPlaceholder(): string {
-        if (aiStatus?.rebuildRequired) {
-          return t("aiIndexRebuildSearchPlaceholder");
-        }
         if (imageSearchActive) {
           return t("imageSearchMode");
-        }
-        if (!aiStatus) {
-          return t("searchPlaceholder");
-        }
-        if (aiStatus.isEmbedding) {
-          const p = aiStatus.embeddingProgress;
-          return t("aiEmbeddingSearchReady", {
-            processed: p.processed,
-            total: p.total,
-          });
-        }
-        if (aiStatus.model === "loading") {
-          return t("aiModelLoading");
-        }
-        if (aiStatus.model === "error") {
-          return t("aiModelError");
-        }
-        if (aiStatus.vectorDB !== "ready") {
-          return t("vectorDbNotReady");
-        }
-        if (!aiStatus.hasVectors) {
-          return t("aiNoIndexHint");
         }
         return t("searchPlaceholder");
       }
@@ -868,6 +864,8 @@ export const SearchBar = memo(
                         })}
                         className="flex h-9 w-5 items-center justify-center text-amber-500"
                         role="status"
+                        // biome-ignore lint/a11y/noNoninteractiveTabindex: expose the AI-status Tooltip to keyboard users.
+                        tabIndex={0}
                       >
                         <span className="h-1.5 w-1.5 rounded-full bg-current" />
                       </span>
@@ -964,6 +962,9 @@ export const SearchBar = memo(
                   lensSuggestions,
                 }}
                 clearFilters={clearFilters}
+                currentSearch={
+                  imageSearchActive ? undefined : searchPresetContext
+                }
                 drillOriginFilters={drillOriginFilters}
                 filters={filters}
                 floatingPanelMaxHeight={floatingPanelMaxHeight}
@@ -976,6 +977,9 @@ export const SearchBar = memo(
                 onClose={() => setShowFilters(false)}
                 onKeyDown={handleFilterKeyDown}
                 onLoadPreset={setFilters}
+                onLoadSearchPreset={
+                  imageSearchActive ? undefined : onLoadSearchPreset
+                }
                 rangePresets={{
                   iso: applyIsoPreset,
                   aperture: applyAperturePreset,
@@ -1001,6 +1005,10 @@ export const SearchBar = memo(
                 if (
                   related &&
                   (suggestionListRef.current?.contains(related) ||
+                    (related instanceof Element &&
+                      related.closest(
+                        '[data-overlay-kind="filter-presets"]'
+                      )) ||
                     related === inputRef.current)
                 ) {
                   return;
@@ -1027,6 +1035,25 @@ export const SearchBar = memo(
                   suggestionListRef as React.MutableRefObject<HTMLDivElement | null>
                 ).current = node;
               }}
+              presetsContent={
+                searchPresetContext && (
+                  <FilterPresets
+                    currentFilters={filters}
+                    currentSearch={searchPresetContext}
+                    onLoadPreset={setFilters}
+                    onLoadSearchPreset={(preset) => {
+                      if (onLoadSearchPreset) {
+                        onLoadSearchPreset(preset);
+                      } else {
+                        setFilters(preset.filters);
+                      }
+                      setShowSuggestions(false);
+                      setSuggestionIndex(-1);
+                    }}
+                    presentation="inline"
+                  />
+                )
+              }
               query={query}
               recentSuggestions={recentSuggestions}
               searchExamples={searchExamples}
@@ -1041,6 +1068,12 @@ export const SearchBar = memo(
     }
   ),
   (prevProps, nextProps) => {
+    if (
+      prevProps.searchPresetContext !== nextProps.searchPresetContext ||
+      prevProps.onLoadSearchPreset !== nextProps.onLoadSearchPreset
+    ) {
+      return false;
+    }
     if (prevProps.aiStatus !== nextProps.aiStatus) {
       return false;
     }

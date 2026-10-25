@@ -3,8 +3,42 @@ import type { SearchResponse } from "@/types/photo";
 import {
   EMPTY_SEARCH_RESULT_METADATA,
   getSearchResultMetadata,
+  getSearchWithoutTime,
   shouldRestoreSavedSearch,
 } from "@/utils/search-state";
+
+describe("relaxing search time constraints", () => {
+  it("keeps the keyword and non-time filters, including midnight", () => {
+    expect(
+      getSearchWithoutTime("去年海边", {
+        dateFrom: "2025-01-01",
+        dateTo: "2025-12-31",
+        dateMonth: "7",
+        dateHour: "0",
+        cameraModel: "Camera",
+        isoMin: "100",
+      })
+    ).toEqual({
+      query: "海边",
+      filters: { cameraModel: "Camera", isoMin: "100" },
+    });
+  });
+  it("removes dynamic time expressions while preserving quoted names", () => {
+    expect(
+      getSearchWithoutTime('"去年" 2024年3月 海边', { creator: "Jane" })
+    ).toEqual({ query: '"去年"  海边', filters: { creator: "Jane" } });
+    expect(getSearchWithoutTime("去年夏天的海边", {})).toEqual({
+      query: "海边",
+      filters: {},
+    });
+  });
+  it("allows a pure time search to return to browsing", () => {
+    expect(getSearchWithoutTime("去年", {})).toEqual({
+      query: "",
+      filters: {},
+    });
+  });
+});
 
 describe("search response metadata", () => {
   const semantic: NonNullable<SearchResponse["semantic"]> = {

@@ -32,6 +32,11 @@ vi.mock("react-i18next", () => ({
     t: (key: string, options?: Record<string, unknown>) => {
       const translations: Record<string, string> = {
         appName: "AI 图片管理器",
+        searchSavePreset: "保存搜索条件",
+        searchLoadPresets: "搜索预设 ({{count}})",
+        searchPresetsEmpty:
+          "暂无预设。输入关键词或筛选条件后，可保存当前搜索。",
+        searchPresetSaveFailed: "无法保存搜索预设，请检查本地存储空间",
         sidebarAllPhotos: "全部照片",
         sidebarAddFolder: "添加文件夹",
         sidebarFolders: "文件夹",
@@ -63,9 +68,11 @@ vi.mock("react-i18next", () => ({
         rightClickFolderActions: "右键管理文件夹",
         sidebarDashboard: "仪表盘",
         sidebarSettings: "设置",
-        searchPlaceholder: "试试搜索“去年秋天的红叶”",
+        searchPlaceholder: "搜索文件名、标签或人物",
+        emptyClearExifFilters: "仅清除 EXIF 筛选",
         quickPreviewTitle: "快速预览",
         quickPreviewOpenLightbox: "进入灯箱 (Enter)",
+        galleryViewOptions: "视图选项",
         searchModeImage: "以图搜图",
         searchMatchColor: "色彩接近度 {{value}}%",
         searchMatchSemantic: "语义匹配",

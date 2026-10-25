@@ -1,4 +1,42 @@
+import { rewriteQuery } from "@/services/query-rewrite";
 import type { SearchResponse } from "@/types/photo";
+import type { ExifFilters } from "@/types/search";
+
+const QUOTED_QUERY_PARTS = /(["“][^"”]+["”])/g;
+const TIME_CONNECTOR = /^(?:拍的|的)\s*/;
+
+/** Remove the parsed time clause without changing quoted names or other filters. */
+export function getSearchWithoutTime(query: string, filters: ExifFilters) {
+  const { timeMatchedText } = rewriteQuery(query);
+  let removed = false;
+  const nextQuery = query
+    .split(QUOTED_QUERY_PARTS)
+    .map((part, index) => {
+      if (index % 2 || removed || !timeMatchedText) {
+        return part;
+      }
+      const start = part.indexOf(timeMatchedText);
+      if (start < 0) {
+        return part;
+      }
+      removed = true;
+      const after = part.slice(start + timeMatchedText.length);
+      return (
+        part.slice(0, start) +
+        (start === 0 ? after.replace(TIME_CONNECTOR, "") : after)
+      );
+    })
+    .join("")
+    .trim();
+  const nextFilters = {
+    ...filters,
+    dateFrom: undefined,
+    dateTo: undefined,
+    dateMonth: undefined,
+    dateHour: undefined,
+  };
+  return { query: nextQuery, filters: nextFilters };
+}
 
 export interface SearchResultMetadata {
   exactTotal: number | null;

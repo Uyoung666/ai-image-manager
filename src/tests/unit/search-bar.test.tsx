@@ -108,6 +108,91 @@ describe("SearchBar", () => {
       ] as never);
   });
 
+  it("keeps saved search controls inside the search dropdown without a persistent extra row", async () => {
+    const user = userEvent.setup();
+    const apply = vi.fn();
+    const context = { query: "Travel", sort: "name", order: "asc" } as const;
+    render(
+      <ControlledSearchBar
+        initialFilters={{ creator: "Jane" }}
+        initialQuery="Travel"
+        onLoadSearchPreset={apply}
+        searchPresetContext={context}
+      />
+    );
+    expect(screen.queryByText("搜索预设 (0)")).not.toBeInTheDocument();
+    const input = screen.getByPlaceholderText("搜索文件名、标签或人物");
+    await user.click(input);
+    const heading = await screen.findByText("搜索预设 (0)");
+    expect(
+      heading.closest('[data-overlay-kind="search-suggestions"]')
+    ).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "保存搜索条件" }));
+    const name = await screen.findByPlaceholderText(
+      "filterPresetNamePlaceholder"
+    );
+    await user.type(name, "Travel preset");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(readFilterPresets()).toMatchObject([
+      { name: "Travel preset", filters: { creator: "Jane" }, search: context },
+    ]);
+    await user.click(screen.getByRole("button", { name: "Travel preset" }));
+    expect(apply).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Travel preset", search: context })
+    );
+    expect(screen.queryByText("搜索预设 (1)")).not.toBeInTheDocument();
+  });
+
+  it("keeps reopened suggestions after a pending blur close and closes when focus leaves", async () => {
+    render(
+      <>
+        <ControlledSearchBar
+          initialQuery="Travel"
+          searchPresetContext={{ query: "Travel", sort: "name", order: "asc" }}
+        />
+        <button type="button">outside</button>
+      </>
+    );
+    const input = screen.getByPlaceholderText("搜索文件名、标签或人物");
+    const outside = screen.getByRole("button", { name: "outside" });
+    act(() => input.focus());
+    act(() => outside.focus());
+    act(() => input.focus());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("搜索预设 (0)")).toBeInTheDocument();
+
+    act(() => outside.focus());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+    expect(input).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps the EXIF panel above the gallery status bar so its actions remain clickable", async () => {
+    const { container } = render(
+      <div className="home-gallery-canvas">
+        <ControlledSearchBar />
+        <div className="home-gallery-status-bar" />
+      </div>
+    );
+    const toolbar = container.querySelector("search");
+    const statusBar = container.querySelector(".home-gallery-status-bar");
+    if (!(toolbar && statusBar)) {
+      throw new Error("Gallery toolbar fixture is missing");
+    }
+    vi.spyOn(toolbar, "getBoundingClientRect").mockReturnValue({
+      bottom: 100,
+    } as DOMRect);
+    vi.spyOn(statusBar, "getBoundingClientRect").mockReturnValue({
+      top: window.innerHeight - 28,
+      height: 28,
+    } as DOMRect);
+    await openExifFilterPanel();
+    expect(
+      container.querySelector('[data-overlay-kind="search-filter"]')
+    ).toHaveStyle({ maxHeight: `${window.innerHeight - 148}px` });
+  });
+
   it("explains an incompatible index before searching and opens its exact settings page", async () => {
     const status = {
       coverageState: "error" as const,
@@ -123,7 +208,7 @@ describe("SearchBar", () => {
     const { rerender } = render(<ControlledSearchBar aiStatus={status} />);
     expect(screen.getByRole("combobox")).toHaveAttribute(
       "placeholder",
-      "aiIndexRebuildSearchPlaceholder"
+      "搜索文件名、标签或人物"
     );
     expect(
       screen.getByRole("alert", { name: "aiIndexRebuildRequired" })
@@ -156,7 +241,7 @@ describe("SearchBar", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("combobox")).toHaveAttribute(
       "placeholder",
-      "试试搜索“去年秋天的红叶”"
+      "搜索文件名、标签或人物"
     );
   });
 
@@ -207,7 +292,7 @@ describe("SearchBar", () => {
     render(<ControlledSearchBar {...baseProps} />);
 
     expect(
-      screen.getByPlaceholderText("试试搜索“去年秋天的红叶”")
+      screen.getByPlaceholderText("搜索文件名、标签或人物")
     ).toBeInTheDocument();
   });
 

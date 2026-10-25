@@ -1,6 +1,10 @@
 import { X } from "lucide-react";
 import type { Dispatch, KeyboardEventHandler, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
+import type {
+  SearchPreset,
+  SearchPresetContext,
+} from "@/actions/search-presets";
 import { FilterBreadcrumb } from "@/components/FilterBreadcrumb";
 import { FilterPresets } from "@/components/FilterPresets";
 import { FilterDropdown } from "@/components/filter-dropdown";
@@ -31,6 +35,7 @@ interface SearchExifPanelProps {
     lensSuggestions: string[];
   };
   clearFilters: () => void;
+  currentSearch?: SearchPresetContext;
   drillOriginFilters: Set<keyof ExifFilters>;
   filters: ExifFilters;
   floatingPanelMaxHeight: number;
@@ -38,6 +43,7 @@ interface SearchExifPanelProps {
   onClose: () => void;
   onKeyDown: KeyboardEventHandler<HTMLDivElement>;
   onLoadPreset: (filters: ExifFilters) => void;
+  onLoadSearchPreset?: (preset: SearchPreset) => void;
   rangePresets: Record<
     "iso" | "aperture" | "focal" | "shutter",
     (preset: string) => void
@@ -53,6 +59,8 @@ interface SearchExifPanelProps {
 /** Controlled EXIF view; draft updates and search timing belong to SearchBar. */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: existing controlled EXIF form is moved without changing its branches
 export function SearchExifPanel({
+  currentSearch,
+  onLoadSearchPreset,
   candidates: {
     advancedCategories,
     cameraSuggestions,
@@ -653,8 +661,17 @@ export function SearchExifPanel({
 
       <FilterPresets
         currentFilters={filters}
+        currentSearch={currentSearch}
         onLoadPreset={(loadedFilters) => {
           onLoadPreset(loadedFilters);
+        }}
+        onLoadSearchPreset={(preset) => {
+          if (onLoadSearchPreset) {
+            onLoadSearchPreset(preset);
+            onClose();
+          } else {
+            onLoadPreset(preset.filters);
+          }
         }}
       />
       <div className="mt-3 flex items-center justify-between border-border border-t pt-2">

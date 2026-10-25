@@ -1,6 +1,11 @@
 // biome-ignore-all lint/style/noNestedTernary: preserve existing suggestion styling
 import { Clock, Search } from "lucide-react";
-import type { FocusEventHandler, KeyboardEventHandler, Ref } from "react";
+import type {
+  FocusEventHandler,
+  KeyboardEventHandler,
+  ReactNode,
+  Ref,
+} from "react";
 import { useTranslation } from "react-i18next";
 import type {
   getTimePresets,
@@ -20,6 +25,7 @@ interface SearchSuggestionsPanelProps {
     preset: ReturnType<typeof getTimePresets>[number]
   ) => void;
   panelRef: Ref<HTMLDivElement>;
+  presetsContent?: ReactNode;
   query: string;
   recentSuggestions: SearchSuggestion[];
   searchExamples: SearchSuggestion[];
@@ -37,6 +43,7 @@ export function SearchSuggestionsPanel({
   onBlur,
   onTimePresetSelect,
   panelRef,
+  presetsContent,
   query,
   recentSuggestions,
   searchExamples,
@@ -59,6 +66,14 @@ export function SearchSuggestionsPanel({
       style={{ maxHeight: Math.min(440, floatingPanelMaxHeight) }}
       tabIndex={0}
     >
+      {presetsContent && (
+        <div
+          className="min-w-0 border-border border-b px-3 py-2"
+          data-search-presets
+        >
+          {presetsContent}
+        </div>
+      )}
       {query.trim() ? (
         <>
           <div className="flex items-center justify-between px-3 py-1.5">

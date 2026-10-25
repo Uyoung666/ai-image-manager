@@ -680,6 +680,24 @@ describe("search correctness", () => {
     expect(state.search).not.toHaveBeenCalled();
   });
 
+  it.each([
+    undefined,
+    "ff0000",
+  ])("preserves parsed time metadata when the hard-filter scope is empty (color=%s)", async (colorHex) => {
+    const { searchCompound } = await import("@/ipc/photos/handlers/search");
+    const result = await call(searchCompound, {
+      query: '"missing.jpg" 2024年3月',
+      colorHex,
+    });
+    expect(result).toMatchObject({
+      results: [],
+      total: 0,
+      totalExact: true,
+      timeFilter: { dateFrom: "2024-03-01", dateTo: "2024-03-31" },
+    });
+    expect(state.search).not.toHaveBeenCalled();
+  });
+
   it("applies hard filters to color supplements and paginates the complete set", async () => {
     sqlite.function("closest_color_dist", { varargs: true }, () => 0);
     sqlite

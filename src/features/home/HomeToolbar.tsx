@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, SlidersHorizontal } from "lucide-react";
 import type { ComponentProps, Ref } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -10,6 +10,11 @@ import {
 import { SearchBar } from "@/components/SearchBar";
 import { SearchCompletionNotice } from "@/components/SearchCompletionNotice";
 import { SortDropdown } from "@/components/SortDropdown";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Tooltip,
   TooltipContent,
@@ -90,6 +95,12 @@ export function HomeToolbar({
         right,
       }}
     >
+      <div className="home-toolbar-compact-context min-w-0 items-center gap-2 px-3 pt-1 text-[11px] text-muted-foreground">
+        <GalleryContextLabel label={galleryContextLabel} />
+        <span className="shrink-0 tabular-nums">
+          {t("photosCount", { count: totalPhotos.toLocaleString() })}
+        </span>
+      </div>
       <SearchBar
         {...search}
         filterBarLeadingContent={
@@ -137,9 +148,7 @@ export function HomeToolbar({
         leadingContent={
           <div className="flex w-full min-w-0 max-w-[220px] items-center gap-2 pr-1">
             <div className="min-w-0">
-              <div className="truncate font-medium text-[13px] text-foreground">
-                {galleryContextLabel}
-              </div>
+              <GalleryContextLabel label={galleryContextLabel} />
               <div className="text-[10px] text-muted-foreground/70 tabular-nums">
                 {t("photosCount", { count: totalPhotos.toLocaleString() })}
               </div>
@@ -209,6 +218,46 @@ export function HomeToolbar({
                 value={gridColumnWidth}
               />
             </label>
+            <Popover>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button
+                      aria-label={t("galleryViewOptions")}
+                      className="home-grid-size-trigger h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                      type="button"
+                    >
+                      <SlidersHorizontal
+                        aria-hidden="true"
+                        className="h-4 w-4"
+                      />
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>{t("galleryViewOptions")}</TooltipContent>
+              </Tooltip>
+              <PopoverContent
+                align="end"
+                className="max-h-[calc(100dvh-1rem)] w-60 max-w-[calc(100dvw-1rem)] overflow-y-auto p-3"
+                data-overlay-kind="gallery-view"
+              >
+                <label className="flex min-w-0 flex-col gap-3 text-[12px]">
+                  <span>{t("gridSize")}</span>
+                  <input
+                    aria-label={t("gridSize")}
+                    className="h-6 w-full cursor-pointer accent-primary"
+                    max={GRID_COLUMN_WIDTH_MAX}
+                    min={GRID_COLUMN_WIDTH_MIN}
+                    onChange={(event) =>
+                      handleGridColumnWidthChange(Number(event.target.value))
+                    }
+                    step={10}
+                    type="range"
+                    value={gridColumnWidth}
+                  />
+                </label>
+              </PopoverContent>
+            </Popover>
           </>
         }
       />
@@ -228,5 +277,24 @@ export function HomeToolbar({
           </div>
         )}
     </div>
+  );
+}
+
+function GalleryContextLabel({ label }: { label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="block min-w-0 truncate font-medium text-foreground"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: expose the full truncated location to keyboard users.
+          tabIndex={0}
+        >
+          {label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[min(28rem,calc(100dvw-1rem))] break-all">
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
 }

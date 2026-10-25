@@ -33,10 +33,18 @@ export function useSearchOverlayInteraction({
     }
 
     const updateAvailableHeight = () => {
-      const toolbarBottom =
-        toolbarRef.current?.getBoundingClientRect().bottom ?? 0;
+      const toolbar = toolbarRef.current;
+      const toolbarBottom = toolbar?.getBoundingClientRect().bottom ?? 0;
+      const statusBar = toolbar
+        ?.closest(".home-gallery-canvas")
+        ?.querySelector(".home-gallery-status-bar");
+      const statusBounds = statusBar?.getBoundingClientRect();
+      const availableBottom =
+        statusBounds && statusBounds.height > 0
+          ? Math.min(window.innerHeight, statusBounds.top)
+          : window.innerHeight;
       setFloatingPanelMaxHeight(
-        Math.max(120, Math.floor(window.innerHeight - toolbarBottom - 12))
+        Math.max(0, Math.floor(availableBottom - toolbarBottom - 20))
       );
     };
 
@@ -163,6 +171,13 @@ export function useSearchOverlayInteraction({
       return;
     }
     setTimeout(() => {
+      if (
+        document.activeElement === inputRef.current ||
+        suggestionListRef.current?.contains(document.activeElement) ||
+        document.activeElement?.closest('[data-overlay-kind="filter-presets"]')
+      ) {
+        return;
+      }
       setShowSuggestions(false);
       setSuggestionIndex(-1);
     }, 150);

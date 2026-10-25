@@ -102,9 +102,11 @@
   "folderAppearanceSaved": "フォルダーの外観を保存しました",
   "folderAppearanceSaveFailed": "フォルダーの外観を保存できませんでした",
   "rightClickFolderActions": "右クリックしてフォルダーを管理",
-  "searchPlaceholder": "「海辺の夕焼け」のように検索",
+  "searchPlaceholder": "ファイル名・タグ・人物を検索",
+  "emptyClearExifFilters": "EXIF フィルターのみ解除",
   "quickPreviewTitle": "クイックプレビュー",
   "quickPreviewOpenLightbox": "ライトボックスを開く (Enter)",
+  "galleryViewOptions": "表示オプション",
   "searchPartialResults": "一部の結果です。完全な結果を取得するには再試行してください。",
   "searchIncompleteTitle": "検索はまだ完了していません",
   "searchShortcut": "Ctrl+K",
@@ -1087,7 +1089,7 @@
   "emptyTimeFilterTitle": "「{{keyword}}」に該当する写真はありません",
   "emptyTimeFilterDesc": "システムが検出した期間：{{from}} – {{to}}。期間を広げるか、キーワードを変更してください。",
   "emptyTimeRangeFallback": "この期間",
-  "emptyClearTimeFilter": "検索をクリア",
+  "emptyClearTimeFilter": "時間条件のみ解除",
   "emptyExpandTimeRange": "日付範囲を広げる",
   "emptyFilterAndQueryTitle": "現在のフィルターでは結果がありません",
   "emptyFilterAndQueryDesc": "キーワード「{{query}}」は、適用中の EXIF フィルターでは一致しません。",
@@ -2148,5 +2150,9 @@
   "updateRequestPending": "更新を要求中…",
   "updateViewSettings": "更新設定を開く",
   "updateViewDetails": "更新を確認",
-  "updatePreferenceSaveFailed": "更新設定を保存できませんでした。未保存の変更を元に戻しました。再試行してください。"
+  "updatePreferenceSaveFailed": "更新設定を保存できませんでした。未保存の変更を元に戻しました。再試行してください。",
+  "searchSavePreset": "検索条件を保存",
+  "searchLoadPresets": "検索プリセット ({{count}})",
+  "searchPresetsEmpty": "プリセットはありません。キーワードや条件を入力して検索を保存できます。",
+  "searchPresetSaveFailed": "検索プリセットを保存できませんでした。ローカルストレージを確認してください。"
 }

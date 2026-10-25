@@ -23,8 +23,10 @@ interface SearchEmptyStateProps {
   hasActiveFilters: boolean;
   hasAiVectors: boolean;
   indexedPhotos?: number;
+  onClearExifFilters?: () => void;
   onClearFilters?: () => void;
   onClearSearch: () => void;
+  onClearTimeFilter?: () => void;
   onGoToAiSettings?: () => void;
   onRetry?: () => void;
   parsedTimeFilter?: ParsedTimeFilter | null;
@@ -46,6 +48,8 @@ export function SearchEmptyState({
   parsedTimeFilter,
   onClearSearch,
   onClearFilters,
+  onClearExifFilters,
+  onClearTimeFilter,
   onGoToAiSettings,
   onRetry,
   semanticState,
@@ -58,6 +62,14 @@ export function SearchEmptyState({
 }: SearchEmptyStateProps) {
   const { t } = useTranslation();
   const aiState = semanticState ?? (hasAiVectors ? "ready" : "unavailable");
+  const relaxActions = [
+    ...(onClearExifFilters
+      ? [{ label: t("emptyClearExifFilters"), onClick: onClearExifFilters }]
+      : []),
+    ...(hasActiveFilters && query.trim() && onClearFilters
+      ? [{ label: t("emptyKeepQueryOnly"), onClick: onClearFilters }]
+      : []),
+  ];
 
   if (
     rebuildRequired &&
@@ -75,6 +87,7 @@ export function SearchEmptyState({
                 },
               ]
             : []),
+          ...relaxActions,
           { label: t("emptyBrowseAll"), onClick: onClearSearch },
         ]}
         description={t("aiIndexRebuildNoticeDescription")}
@@ -92,6 +105,7 @@ export function SearchEmptyState({
           ...(onRetry
             ? [{ label: t("retry"), onClick: onRetry, primary: true }]
             : []),
+          ...relaxActions,
           { label: t("emptyBrowseAll"), onClick: onClearSearch },
         ]}
         description={t("loadFailedRetry")}
@@ -145,6 +159,7 @@ export function SearchEmptyState({
                 },
               ]
             : []),
+          ...relaxActions,
           { label: t("emptyBrowseAll"), onClick: onClearSearch },
         ]}
         description={
@@ -176,11 +191,17 @@ export function SearchEmptyState({
     return (
       <EmptyStateCard
         actions={[
-          {
-            label: t("emptyClearTimeFilter"),
-            onClick: onClearSearch,
-            primary: true,
-          },
+          ...(onClearTimeFilter
+            ? [
+                {
+                  label: t("emptyClearTimeFilter"),
+                  onClick: onClearTimeFilter,
+                  primary: true,
+                },
+              ]
+            : []),
+          ...relaxActions,
+          { label: t("emptyBrowseAll"), onClick: onClearSearch },
         ]}
         description={t("emptyTimeFilterDesc", {
           from: parsedTimeFilter.dateFrom,
@@ -198,11 +219,8 @@ export function SearchEmptyState({
     return (
       <EmptyStateCard
         actions={[
-          {
-            label: t("emptyKeepQueryOnly"),
-            onClick: onClearFilters ?? onClearSearch,
-            primary: true,
-          },
+          ...relaxActions,
+          { label: t("emptyBrowseAll"), onClick: onClearSearch },
         ]}
         description={t("emptyFilterAndQueryDesc", {
           query: truncate(query, 40),
