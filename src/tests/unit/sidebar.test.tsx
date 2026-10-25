@@ -1,11 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/Sidebar";
 
 const PHOTOS_TITLE_PATTERN = /Photos/;
 const TRAVEL_TITLE_PATTERN = /Travel/;
+const RENDER_TAG_PATTERN = /三维渲染/;
 const {
   batchGenerateTagsMock,
+  getTagsMock,
   toastErrorMock,
   toastInfoMock,
   toastSuccessMock,
@@ -13,6 +16,7 @@ const {
   useAiStatusMock,
 } = vi.hoisted(() => ({
   batchGenerateTagsMock: vi.fn(),
+  getTagsMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toastInfoMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -28,7 +32,7 @@ vi.mock("@/ipc/manager", () => ({
       },
       photos: {
         batchGenerateTags: batchGenerateTagsMock,
-        getTags: vi.fn(() => new Promise(() => undefined)),
+        getTags: getTagsMock,
         updateFolderAppearance: updateFolderAppearanceMock,
       },
       settings: {
@@ -68,6 +72,9 @@ describe("Sidebar", () => {
     localStorage.clear();
     vi.clearAllMocks();
     batchGenerateTagsMock.mockReset();
+    getTagsMock
+      .mockReset()
+      .mockImplementation(() => new Promise(() => undefined));
     toastErrorMock.mockReset();
     toastInfoMock.mockReset();
     toastSuccessMock.mockReset();
@@ -99,6 +106,70 @@ describe("Sidebar", () => {
     onToggleCollapse: vi.fn(),
     totalPhotos: 1250,
   };
+
+  it("settles child-tag search expansion and keeps selection usable across tag refreshes", async () => {
+    getTagsMock.mockResolvedValue([
+      {
+        id: 149,
+        parentId: null,
+        name: "图像风格",
+        color: null,
+        photoCount: 19,
+      },
+      { id: 154, parentId: 149, name: "三维渲染", color: null, photoCount: 19 },
+    ]);
+    const error = vi.spyOn(console, "error").mockImplementation((...args) => {
+      if (
+        args.some((value) => String(value).includes("Maximum update depth"))
+      ) {
+        throw new Error("Child-tag search caused an update loop");
+      }
+    });
+    try {
+      const toggle = vi.fn();
+      const { rerender } = render(
+        <StrictMode>
+          <Sidebar {...baseProps} onToggleTag={toggle} />
+        </StrictMode>
+      );
+      fireEvent.click(screen.getByRole("button", { name: "标签" }));
+      await screen.findByText("图像风格");
+      const input = screen.getByRole("searchbox", { name: "搜索标签..." });
+      fireEvent.change(input, { target: { value: "三维渲染" } });
+      const child = await screen.findByText("三维渲染");
+      fireEvent.click(child.closest("button") as HTMLButtonElement);
+      expect(toggle).toHaveBeenCalledExactlyOnceWith(154);
+      rerender(
+        <StrictMode>
+          <Sidebar
+            {...baseProps}
+            activeTagIds={[154]}
+            onToggleTag={toggle}
+            totalPhotos={19}
+          />
+        </StrictMode>
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("treeitem", { name: RENDER_TAG_PATTERN })
+        ).toHaveAttribute("aria-selected", "true")
+      );
+      fireEvent.change(input, { target: { value: "" } });
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("treeitem", { name: RENDER_TAG_PATTERN })
+        ).not.toBeInTheDocument()
+      );
+      fireEvent.change(input, { target: { value: "渲染" } });
+      await waitFor(() =>
+        expect(
+          screen.getByRole("treeitem", { name: RENDER_TAG_PATTERN })
+        ).toBeVisible()
+      );
+    } finally {
+      error.mockRestore();
+    }
+  });
 
   it("uses the app name as the primary navigation label", () => {
     render(<Sidebar {...baseProps} />);

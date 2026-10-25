@@ -533,6 +533,9 @@ export function Sidebar({
       }
       if (ancestorsToExpand.size > 0) {
         setExpandedTagIds((prev) => {
+          if ([...ancestorsToExpand].every((id) => prev.has(id))) {
+            return prev;
+          }
           const next = new Set(prev);
           for (const id of ancestorsToExpand) {
             next.add(id);
