@@ -64,6 +64,8 @@ vi.mock("react-i18next", () => ({
         sidebarDashboard: "仪表盘",
         sidebarSettings: "设置",
         searchPlaceholder: "试试搜索“去年秋天的红叶”",
+        quickPreviewTitle: "快速预览",
+        quickPreviewOpenLightbox: "进入灯箱 (Enter)",
         searchModeImage: "以图搜图",
         searchMatchColor: "色彩接近度 {{value}}%",
         searchMatchSemantic: "语义匹配",

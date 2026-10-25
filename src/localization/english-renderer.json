@@ -103,6 +103,8 @@
   "folderAppearanceSaveFailed": "Failed to save folder appearance",
   "rightClickFolderActions": "Right-click to manage folder",
   "searchPlaceholder": "Try “sunset by the sea”",
+  "quickPreviewTitle": "Quick preview",
+  "quickPreviewOpenLightbox": "Open lightbox (Enter)",
   "searchShortcut": "Ctrl+K",
   "photosCount": "{{count}} photos",
   "photosSelected": " · {{count}} selected",

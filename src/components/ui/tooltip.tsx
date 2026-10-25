@@ -6,6 +6,25 @@ import { cn } from "@/utils/tailwind";
 const TOOLTIP_CONTENT_CLASS_NAME =
   "z-50 max-w-[260px] rounded-[6px] border border-border bg-popover px-2.5 py-1.5 text-[12px] text-popover-foreground leading-snug shadow-md ring-1 ring-foreground/10 surface-elevated duration-100 data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95";
 
+const TooltipPortalContext = React.createContext<HTMLElement | null>(null);
+
+function TooltipPortalProvider({
+  containerRef,
+  children,
+}: React.PropsWithChildren<{
+  containerRef: React.RefObject<HTMLElement | null>;
+}>) {
+  const [container, setContainer] = React.useState<HTMLElement | null>(null);
+  React.useEffect(() => {
+    setContainer(containerRef.current);
+  }, [containerRef]);
+  return (
+    <TooltipPortalContext.Provider value={container}>
+      {children}
+    </TooltipPortalContext.Provider>
+  );
+}
+
 function TooltipProvider({
   delayDuration = 400,
   skipDelayDuration = 100,
@@ -88,13 +107,11 @@ function TooltipContent({
   sideOffset = 8,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+  const container = React.useContext(TooltipPortalContext);
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal container={container ?? undefined}>
       <TooltipPrimitive.Content
-        className={cn(
-          TOOLTIP_CONTENT_CLASS_NAME,
-          className
-        )}
+        className={cn(TOOLTIP_CONTENT_CLASS_NAME, className)}
         data-overlay-kind="tooltip"
         data-slot="tooltip-content"
         data-surface="overlay"
@@ -111,5 +128,6 @@ export {
   Tooltip,
   TooltipContent,
   TooltipProvider,
+  TooltipPortalProvider,
   TooltipTrigger,
 };

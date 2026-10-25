@@ -971,7 +971,7 @@ function AlbumDetailPage() {
     sequenceView.selectedSequence || detailPhoto
   );
   useModalFocusTrap({
-    active: compactDetailOverlay && detailOverlayOpen,
+    active: compactDetailOverlay && detailOverlayOpen && quickPreviewIndex < 0,
     containerRef: detailOverlayRef,
     onEscape: () => {
       if (detailPhoto) {
@@ -1424,6 +1424,7 @@ function AlbumDetailPage() {
       )}
       {quickPreviewIndex >= 0 && selectionPhotos[quickPreviewIndex] && (
         <QuickPreview
+          index={quickPreviewIndex}
           onClose={() => setQuickPreviewIndex(-1)}
           onNavigate={(dir) => {
             setQuickPreviewIndex((prev) => {
@@ -1440,6 +1441,7 @@ function AlbumDetailPage() {
             setQuickPreviewIndex(-1);
           }}
           photo={selectionPhotos[quickPreviewIndex]}
+          total={selectionPhotos.length}
         />
       )}
 

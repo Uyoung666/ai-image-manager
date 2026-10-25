@@ -2303,7 +2303,7 @@ function HomePage() {
     detailPhoto || selectedSequence || sequenceDetailsLoading
   );
   useModalFocusTrap({
-    active: compactDetailOverlay && detailOverlayOpen,
+    active: compactDetailOverlay && detailOverlayOpen && quickPreviewIndex < 0,
     containerRef: detailOverlayRef,
     onEscape: () => {
       if (selectedSequence || sequenceDetailsLoading) {
@@ -2750,6 +2750,7 @@ function HomePage() {
       )}
       {quickPreviewIndex >= 0 && previewPhotos[quickPreviewIndex] && (
         <QuickPreview
+          index={quickPreviewIndex}
           onClose={() => setQuickPreviewIndex(-1)}
           onNavigate={(dir) => {
             setQuickPreviewIndex((prev) => {
@@ -2766,6 +2767,7 @@ function HomePage() {
             setQuickPreviewIndex(-1);
           }}
           photo={previewPhotos[quickPreviewIndex]}
+          total={previewPhotos.length}
         />
       )}
       <PhotoContextMenu

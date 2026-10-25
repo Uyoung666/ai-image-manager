@@ -12,10 +12,12 @@ const FOCUSABLE_SELECTOR = [
 export function useModalFocusTrap({
   active,
   containerRef,
+  initialFocus = "first",
   onEscape,
 }: {
   active: boolean;
   containerRef: RefObject<HTMLElement | null>;
+  initialFocus?: "first" | "container";
   onEscape: () => void;
 }) {
   const onEscapeRef = useRef(onEscape);
@@ -45,7 +47,9 @@ export function useModalFocusTrap({
     const focusFrame = requestAnimationFrame(() => {
       const container = containerRef.current;
       if (!container?.contains(document.activeElement)) {
-        getFocusableElements()[0]?.focus();
+        const target =
+          initialFocus === "container" ? container : getFocusableElements()[0];
+        target?.focus({ preventScroll: true });
       }
     });
 
@@ -71,6 +75,7 @@ export function useModalFocusTrap({
       if (
         event.shiftKey &&
         (activeElement === first ||
+          activeElement === containerRef.current ||
           !containerRef.current?.contains(activeElement))
       ) {
         event.preventDefault();
@@ -78,6 +83,7 @@ export function useModalFocusTrap({
       } else if (
         !event.shiftKey &&
         (activeElement === last ||
+          activeElement === containerRef.current ||
           !containerRef.current?.contains(activeElement))
       ) {
         event.preventDefault();
@@ -93,5 +99,5 @@ export function useModalFocusTrap({
         previouslyFocused.focus();
       }
     };
-  }, [active, containerRef]);
+  }, [active, containerRef, initialFocus]);
 }

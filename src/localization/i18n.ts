@@ -143,6 +143,8 @@ i18n.use(initReactI18next).init({
 
         // Search
         searchPlaceholder: "试试搜索“去年秋天的红叶”",
+        quickPreviewTitle: "快速预览",
+        quickPreviewOpenLightbox: "进入灯箱 (Enter)",
         searchShortcut: "Ctrl+K",
 
         // PhotoGrid

@@ -103,6 +103,8 @@
   "folderAppearanceSaveFailed": "フォルダーの外観を保存できませんでした",
   "rightClickFolderActions": "右クリックしてフォルダーを管理",
   "searchPlaceholder": "「海辺の夕焼け」のように検索",
+  "quickPreviewTitle": "クイックプレビュー",
+  "quickPreviewOpenLightbox": "ライトボックスを開く (Enter)",
   "searchPartialResults": "一部の結果です。完全な結果を取得するには再試行してください。",
   "searchIncompleteTitle": "検索はまだ完了していません",
   "searchShortcut": "Ctrl+K",
