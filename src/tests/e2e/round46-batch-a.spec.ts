@@ -158,7 +158,9 @@ test("mixed media summary, restart, and cleanup session exclusions", async () =>
     await requireApp().close();
     app = undefined;
     page = await launch();
-    await expect(page.getByText("14 张照片", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("14 张照片", { exact: true }).filter({ visible: true })
+    ).toBeVisible();
     expect(query("select count(*) n from photos")[0].n).toBe(14);
     await page
       .getByRole("button", { name: "重复照片检测", exact: true })

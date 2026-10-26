@@ -656,7 +656,7 @@ async function expectExifPresetInteractions(
   await camera.fill(CAMERA_MODEL);
   await expect(camera).toHaveValue(CAMERA_MODEL);
 
-  await panel.getByRole("button", { name: "Save Preset", exact: true }).click();
+  await panel.getByRole("button", { name: "Save search", exact: true }).click();
   let presetPopover = currentPage.locator(
     '[data-overlay-kind="filter-presets"]'
   );
@@ -673,10 +673,10 @@ async function expectExifPresetInteractions(
   await expect(panel).toBeVisible();
   await expect(camera).toHaveValue(CAMERA_MODEL);
   await expect(
-    panel.getByRole("button", { name: "Load presets (1)", exact: true })
+    panel.getByRole("button", { name: "Search presets (1)", exact: true })
   ).toBeVisible();
 
-  await panel.getByRole("button", { name: "Save Preset", exact: true }).click();
+  await panel.getByRole("button", { name: "Save search", exact: true }).click();
   presetPopover = currentPage.locator('[data-overlay-kind="filter-presets"]');
   await expect(presetPopover).toBeVisible();
   await expectInsideViewport(presetPopover);
@@ -688,7 +688,7 @@ async function expectExifPresetInteractions(
   await expect(panel).toBeVisible();
   await expect(camera).toHaveValue(CAMERA_MODEL);
   await expect(
-    panel.getByRole("button", { name: "Load presets (2)", exact: true })
+    panel.getByRole("button", { name: "Search presets (2)", exact: true })
   ).toBeVisible();
   await currentPage.waitForTimeout(400);
   await expect(currentPage.locator(".home-search-result-summary")).toHaveCount(
@@ -699,7 +699,7 @@ async function expectExifPresetInteractions(
     .toBe(photoCountBeforePresets);
 
   await panel
-    .getByRole("button", { name: "Load presets (2)", exact: true })
+    .getByRole("button", { name: "Search presets (2)", exact: true })
     .click();
   presetPopover = currentPage.locator('[data-overlay-kind="filter-presets"]');
   await expect(presetPopover).toBeVisible();
@@ -758,7 +758,7 @@ async function expectExifPresetInteractions(
   presetPopover = currentPage.locator('[data-overlay-kind="filter-presets"]');
   if (!(await presetPopover.isVisible())) {
     await panel
-      .getByRole("button", { name: "Load presets (2)", exact: true })
+      .getByRole("button", { name: "Search presets (2)", exact: true })
       .click();
   }
   await expect(presetPopover).toBeVisible();

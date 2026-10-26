@@ -309,7 +309,7 @@ test("incompatible AI index exposes an explicit rebuild action in every window s
       await expect(search).toHaveValue("");
       await expect(search).toHaveAttribute(
         "placeholder",
-        "AI index needs rebuilding. Open AI Index Settings."
+        "Search filenames, tags or people"
       );
       const homeAction = await expectRebuildNotice(page);
       await page.screenshot({

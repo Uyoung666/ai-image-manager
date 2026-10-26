@@ -355,3 +355,84 @@ for (const [sizeIndex, size] of SIZES.entries()) {
     });
   }
 }
+
+test("retains decoded covers through grid changes and live fractional DPI changes", async () => {
+  errors = [];
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.setSize(1280, 800);
+    window.webContents.setZoomFactor(1);
+  });
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    localStorage.setItem("grid_column_width", "320");
+    localStorage.setItem("grid_sort_field", "name");
+    localStorage.setItem("grid_sort_order", "asc");
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const card = page.locator('[data-photo-id="1"][role="option"]');
+  const image = card.locator('img[data-load-state="loaded"]');
+  await expect(image).toBeVisible();
+  const largeUrl = await image.getAttribute("src");
+  const resize = async (value: number) => {
+    await page
+      .getByRole("slider", { name: "Grid", exact: true })
+      .evaluate((element, value) => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value"
+        )?.set;
+        setter?.call(element, String(value));
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+      }, value);
+  };
+  await resize(140);
+  await expect
+    .poll(() =>
+      card.evaluate((element) => element.getBoundingClientRect().width)
+    )
+    .toBeLessThan(180);
+  await expect(image).toHaveAttribute("src", largeUrl ?? "");
+  await resize(320);
+  await expect
+    .poll(() =>
+      card.evaluate((element) => element.getBoundingClientRect().width)
+    )
+    .toBeGreaterThan(300);
+  await expect(image).toHaveAttribute("src", largeUrl ?? "");
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    for (const dpr of [2, 1.25, 1.5, 3]) {
+      await cdp.send("Emulation.setDeviceMetricsOverride", {
+        width: 1280,
+        height: 768,
+        deviceScaleFactor: dpr,
+        mobile: false,
+      });
+      await expect.poll(() => page.evaluate(() => devicePixelRatio)).toBe(dpr);
+      await expect
+        .poll(() =>
+          card.evaluate((element) => {
+            const image = element.querySelector("img");
+            const rect = element.getBoundingClientRect();
+            const required = Math.min(
+              2048,
+              Math.max(rect.width, rect.height) * devicePixelRatio
+            );
+            const edge = Number(
+              new URL(image?.src ?? location.href).searchParams.get("edge")
+            );
+            return Boolean(
+              image?.complete && image.naturalWidth > 0 && edge >= required
+            );
+          })
+        )
+        .toBe(true);
+      await assertBounds();
+    }
+  } finally {
+    await cdp.send("Emulation.clearDeviceMetricsOverride");
+    await cdp.detach();
+  }
+  expect(errors).toEqual([]);
+});

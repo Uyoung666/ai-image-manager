@@ -139,7 +139,9 @@ test("mixed media import explains skipped files and survives restart", async () 
     await requireApp().close();
     app = undefined;
     page = await launch();
-    await expect(page.getByText("10 张照片", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("10 张照片", { exact: true }).filter({ visible: true })
+    ).toBeVisible();
     expect(query("select count(*) n from photos")[0].n).toBe(10);
     expect(query("pragma foreign_key_check")).toEqual([]);
   } finally {

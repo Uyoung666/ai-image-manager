@@ -215,12 +215,22 @@ test("tag removal refreshes active results and rejects a delayed old response ac
       visible: before,
       relations: query("select photo_id from photo_tags where tag_id=9001"),
     });
+    if (
+      await page.locator('[data-overlay-kind="search-suggestions"]').isVisible()
+    ) {
+      await input.press("Escape");
+    }
     await cards.first().click();
     await page.evaluate(() => {
       window.f07Gate.armed = true;
     });
     await input.press("Enter");
     await expect.poll(() => page.evaluate(() => window.f07Gate.held)).toBe(1);
+    if (
+      await page.locator('[data-overlay-kind="search-suggestions"]').isVisible()
+    ) {
+      await input.press("Escape");
+    }
     const remove = page
       .getByRole("button", { name: "点击移除", exact: true })
       .filter({ hasText: TAG });
@@ -268,6 +278,11 @@ test("tag removal refreshes active results and rejects a delayed old response ac
     });
     await page.getByRole("button", { name: "清除搜索", exact: true }).click();
     await expect(page.locator("[data-photo-id]")).toHaveCount(4);
+    if (
+      await page.locator('[data-overlay-kind="search-suggestions"]').isVisible()
+    ) {
+      await page.keyboard.press("Escape");
+    }
     await page.locator(`[data-photo-id="${after[0].photo_id}"]`).click();
     const requestsBefore = await page.evaluate(() => ({
       search: window.f07Gate.requests,

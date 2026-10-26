@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 
+const resizeObserved = vi.fn();
 const { translate } = vi.hoisted(() => ({
   translate: vi.fn((key: string, options?: Record<string, unknown>) => {
     const values: Record<string, string> = {
@@ -42,11 +43,12 @@ function renderSelectionActionBar(
 
 describe("SelectionActionBar", () => {
   beforeEach(() => {
+    resizeObserved.mockClear();
     vi.stubGlobal(
       "ResizeObserver",
       class {
         observe() {
-          /* Resize is dispatched explicitly by the test. */
+          resizeObserved();
         }
         disconnect() {
           /* No native observation exists in jsdom. */
@@ -68,6 +70,7 @@ describe("SelectionActionBar", () => {
     await waitFor(() =>
       expect(layer).toHaveAttribute("data-selection-visible", "true")
     );
+    await waitFor(() => expect(resizeObserved).toHaveBeenCalled());
     vi.spyOn(layer, "getBoundingClientRect").mockReturnValue({
       top: 500,
       height: 50,

@@ -875,7 +875,9 @@ for (const size of SIZES) {
       .click();
     await expect(photo).toBeVisible();
     await expect(
-      page.getByText(`Restored ${changedTags + 1} photos`, { exact: true })
+      page
+        .locator('[data-sonner-toast][data-front="true"]')
+        .getByText(`Restored ${changedTags + 1} photos`, { exact: true })
     ).toBeVisible();
     await page.keyboard.press("Escape");
     await assertBounds();

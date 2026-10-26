@@ -126,7 +126,9 @@ test("an interrupted committed batch resumes across two launches", async () => {
         timeout: 60_000,
       })
       .toBe(60);
-    await expect(page.getByText("60 张照片", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("60 张照片", { exact: true }).filter({ visible: true })
+    ).toBeVisible();
     await expect
       .poll(() =>
         JSON.parse(
@@ -142,7 +144,9 @@ test("an interrupted committed batch resumes across two launches", async () => {
     await requireApp().close();
     app = undefined;
     page = await launch();
-    await expect(page.getByText("60 张照片", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("60 张照片", { exact: true }).filter({ visible: true })
+    ).toBeVisible();
     expect(query("select count(*) n from photos")[0].n).toBe(60);
     expect(
       query("select path from photos group by lower(path) having count(*) > 1")
