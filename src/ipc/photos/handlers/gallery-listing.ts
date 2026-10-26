@@ -6,7 +6,7 @@ import {
   listGalleryPhotos,
 } from "@/services/gallery-listing";
 import { describeGalleryThumbnails } from "@/services/thumbnail-identity";
-import { GALLERY_CONFIG } from "@/utils/gallery-config";
+import { getGalleryThumbnailHint } from "@/services/thumbnailer";
 import { BatchPhotoIdsSchema, ListSchema } from "./shared";
 
 const schema = ListSchema.omit({ offset: true }).extend({
@@ -15,14 +15,14 @@ const schema = ListSchema.omit({ offset: true }).extend({
   layoutOnly: z.boolean().optional(),
   limit: z.number().int().min(1).max(200).default(100),
 });
-// Seed the leading cards without waiting for source-file stats for a whole
-// page. Other mounted cards use the shared on-demand descriptor endpoint.
+// Listing never waits for filesystem metadata. Visible cards share the bounded
+// on-demand descriptor queue, including the first dense viewport.
 export const listPhotoPage = os
   .input(schema)
   .errors({
     GALLERY_CURSOR_EXPIRED: { status: 409, message: "GALLERY_CURSOR_EXPIRED" },
   })
-  .handler(async ({ input, errors }) => {
+  .handler(({ input, errors }) => {
     let page: ReturnType<typeof listGalleryPhotos>;
     try {
       page = listGalleryPhotos(input);
@@ -37,12 +37,7 @@ export const listPhotoPage = os
       }
       throw error;
     }
-    if (input.layoutOnly) {
-      return page;
-    }
-    const count = GALLERY_CONFIG.pageThumbnailDescriptors;
-    const leading = await describeGalleryThumbnails(page.items.slice(0, count));
-    return { ...page, items: [...leading, ...page.items.slice(count)] };
+    return page;
   });
 export const getPhotoLayoutPrefix = os
   .input(
@@ -65,13 +60,51 @@ export const getPhotosByIds = os
   .handler(({ input }) => getGalleryPhotosByIds(input.ids));
 
 export const getPhotoThumbnailVersions = os
-  .input(BatchPhotoIdsSchema)
+  .input(
+    BatchPhotoIdsSchema.extend({
+      priority: z.number().int().min(0).max(2).default(2),
+      edge: z
+        .union([
+          z.literal(256),
+          z.literal(512),
+          z.literal(1024),
+          z.literal(2048),
+        ])
+        .optional(),
+      edges: z
+        .array(
+          z.object({
+            id: z.number().int().positive(),
+            edge: z.union([
+              z.literal(256),
+              z.literal(512),
+              z.literal(1024),
+              z.literal(2048),
+            ]),
+          })
+        )
+        .max(1000)
+        .optional(),
+    })
+  )
   .handler(async ({ input }) => {
+    const edges = new Map(input.edges?.map((item) => [item.id, item.edge]));
     const records = await describeGalleryThumbnails(
-      getGalleryPhotosByIds(input.ids)
+      getGalleryPhotosByIds(input.ids),
+      input.priority,
+      input.edge || edges.size > 0
+        ? (photo, stat, readStat) =>
+            getGalleryThumbnailHint(
+              photo,
+              edges.get(photo.id) ?? input.edge ?? 512,
+              stat,
+              readStat
+            )
+        : undefined
     );
-    return records.map(({ id, thumbnailVersion }) => ({
+    return records.map(({ id, thumbnailVersion, availableEdge }) => ({
       id,
       thumbnailVersion,
+      availableEdge,
     }));
   });

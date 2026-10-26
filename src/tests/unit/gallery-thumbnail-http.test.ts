@@ -15,6 +15,8 @@ import {
 } from "@/services/http-server";
 import { thumbnailSourceIdentity } from "@/services/thumbnail-identity";
 import {
+  generateGalleryThumbnail,
+  generateThumbnail,
   getThumbnailDir,
   initThumbnailer,
   stopThumbnailer,
@@ -32,7 +34,11 @@ let original: string;
 const previousSharpCache = sharp.cache();
 function request(
   id: number,
-  version?: string
+  version?: string,
+  etag?: string,
+  edge = 512,
+  selectAvailable = false,
+  repair = false
 ): Promise<{
   status: number;
   headers: http.IncomingHttpHeaders;
@@ -40,15 +46,26 @@ function request(
 }> {
   const query = new URLSearchParams({
     id: String(id),
-    edge: "512",
+    edge: String(edge),
     token: getHttpServerAuthToken(),
   });
   if (version) {
     query.set("rv", version);
   }
+  if (selectAvailable) {
+    query.set("select", "1");
+  }
+  if (repair) {
+    query.set("repair", "1");
+  }
   return new Promise((resolve, reject) => {
     const req = http.get(
-      { host: "127.0.0.1", port, path: `/photo-thumbnail?${query}` },
+      {
+        host: "127.0.0.1",
+        port,
+        path: `/photo-thumbnail?${query}`,
+        headers: etag ? { "if-none-match": etag } : {},
+      },
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (chunk) => chunks.push(chunk));
@@ -63,6 +80,15 @@ function request(
     );
     req.on("error", reject);
   });
+}
+async function damagePixels(file: string): Promise<void> {
+  const bytes = await fs.promises.readFile(file);
+  const chunk = bytes.indexOf(Buffer.from("VP8 "));
+  expect(chunk).toBeGreaterThanOrEqual(0);
+  bytes.fill(255, chunk + 18, chunk + 8 + bytes.readUInt32LE(chunk + 4));
+  await fs.promises.writeFile(file, bytes);
+  expect((await sharp(file).metadata()).width).toBeGreaterThan(0);
+  await expect(sharp(file).raw().toBuffer()).rejects.toThrow();
 }
 beforeAll(async () => {
   sharp.cache(false);
@@ -130,6 +156,46 @@ afterAll(async () => {
   });
 });
 describe("ID thumbnail HTTP lifecycle", () => {
+  it("selects an adequate preview without a second HTTP request, then prefers a prepared exact tier", async () => {
+    await generateThumbnail(original, "md");
+    const selected = await request(1, undefined, undefined, 256, true);
+    expect(selected.status).toBe(200);
+    expect((await sharp(selected.body).metadata()).width).toBe(1024);
+    expect(selected.headers["cache-control"]).toBe(
+      "private, max-age=1, must-revalidate"
+    );
+    expect((await request(2, undefined, undefined, 256, true)).status).toBe(
+      404
+    );
+    expect((await request(3, undefined, undefined, 256, true)).status).toBe(
+      403
+    );
+    await request(1, undefined, undefined, 256);
+    const exact = await request(1, undefined, undefined, 256, true);
+    expect((await sharp(exact.body).metadata()).width).toBe(256);
+    const identity = thumbnailSourceIdentity(fs.statSync(original));
+    expect(
+      (await request(1, identity, undefined, 256, true)).headers[
+        "cache-control"
+      ]
+    ).toBe("private, max-age=1, must-revalidate");
+  });
+  it("serves the physical small edge and validates an unchanged response", async () => {
+    const preview = await generateThumbnail(original, "md");
+    const first = await request(
+      1,
+      thumbnailSourceIdentity(fs.statSync(original)),
+      undefined,
+      256
+    );
+    expect((await sharp(first.body).metadata()).width).toBe(256);
+    expect(first.headers.etag).not.toContain(
+      path.basename(preview.thumbnailPath)
+    );
+    expect((await request(1, undefined, first.headers.etag, 256)).status).toBe(
+      304
+    );
+  });
   it("generates a missing thumbnail and authorizes the photo scope", async () => {
     const result = await request(1);
     expect(result.status).toBe(200);
@@ -152,7 +218,7 @@ describe("ID thumbnail HTTP lifecycle", () => {
   it("recovers a corrupt cached variant", async () => {
     const file = fs
       .readdirSync(getThumbnailDir())
-      .find((name) => name.startsWith("g-"));
+      .find((name) => name.startsWith("g-") && name.endsWith("-512.webp"));
     if (!file) {
       throw new Error("No generated variant to corrupt");
     }
@@ -160,6 +226,71 @@ describe("ID thumbnail HTTP lifecycle", () => {
     const result = await request(1);
     expect(result.status).toBe(200);
     expect((await sharp(result.body).metadata()).width).toBe(512);
+  });
+  it("repairs pixel-damaged exact variants without immutable caching and keeps authorization checks", async () => {
+    const variant = await generateGalleryThumbnail(original, 256);
+    await damagePixels(variant.thumbnailPath);
+    const identity = thumbnailSourceIdentity(fs.statSync(original));
+    const damaged = await request(1, identity, undefined, 256);
+    await expect(sharp(damaged.body).raw().toBuffer()).rejects.toThrow();
+    const repaired = await request(
+      1,
+      identity,
+      damaged.headers.etag,
+      256,
+      false,
+      true
+    );
+    expect(repaired.status).toBe(200);
+    expect(repaired.headers["cache-control"]).toBe("private, no-cache");
+    expect(repaired.headers.etag).not.toBe(damaged.headers.etag);
+    await expect(sharp(repaired.body).raw().toBuffer()).resolves.toBeInstanceOf(
+      Buffer
+    );
+    expect(
+      (await request(2, undefined, undefined, 256, false, true)).status
+    ).toBe(404);
+    expect(
+      (await request(3, undefined, undefined, 256, false, true)).status
+    ).toBe(403);
+  });
+  it("repairs a pixel-damaged legacy preview even when it exactly matches the requested edge", async () => {
+    const file = path.join(path.dirname(original), "repair-exact.jpg");
+    await sharp({
+      create: { width: 512, height: 256, channels: 3, background: "#2179ac" },
+    })
+      .jpeg()
+      .toFile(file);
+    drizzle(sqlite)
+      .insert(photos)
+      .values({
+        id: 6,
+        path: file,
+        filename: "repair-exact.jpg",
+        folderId: 1,
+        width: 512,
+        height: 256,
+      })
+      .run();
+    const preview = await generateThumbnail(file, "md");
+    await damagePixels(preview.thumbnailPath);
+    const selected = await request(6, undefined, undefined, 512, true);
+    await expect(sharp(selected.body).raw().toBuffer()).rejects.toThrow();
+    const repaired = await request(
+      6,
+      undefined,
+      selected.headers.etag,
+      512,
+      false,
+      true
+    );
+    expect(repaired.status).toBe(200);
+    expect((await sharp(repaired.body).metadata()).width).toBe(512);
+    await expect(sharp(repaired.body).raw().toBuffer()).resolves.toBeInstanceOf(
+      Buffer
+    );
+    const next = await request(6, undefined, undefined, 512, true);
+    expect(next.body.equals(repaired.body)).toBe(true);
   });
   it("serves changed sources under a new ETag without freezing the old URL", async () => {
     const identity = thumbnailSourceIdentity(fs.statSync(original));
@@ -174,5 +305,35 @@ describe("ID thumbnail HTTP lifecycle", () => {
     expect(changed.headers.etag).not.toBe(previous.headers.etag);
     expect(changed.headers["cache-control"]).toBe("private, no-cache");
     expect(changed.body.equals(previous.body)).toBe(false);
+  });
+  it("changes ETag when an exact legacy preview is rebuilt at the same path", async () => {
+    const file = path.join(path.dirname(original), "exact.jpg");
+    const writeSource = async (background: string) =>
+      sharp({ create: { width: 512, height: 256, channels: 3, background } })
+        .jpeg()
+        .toFile(file);
+    await writeSource("#2179ac");
+    drizzle(sqlite)
+      .insert(photos)
+      .values({
+        id: 5,
+        path: file,
+        filename: "exact.jpg",
+        folderId: 1,
+        width: 512,
+        height: 256,
+      })
+      .run();
+    const identity = thumbnailSourceIdentity(fs.statSync(file));
+    const preview = await generateThumbnail(file, "md");
+    const first = await request(5, identity);
+    expect(first.headers.etag).toContain(path.basename(preview.thumbnailPath));
+    expect((await request(5, identity, first.headers.etag)).status).toBe(304);
+    await writeSource("#b68229");
+    await generateThumbnail(file, "md");
+    const next = await request(5, identity, first.headers.etag);
+    expect(next.status).toBe(200);
+    expect(next.headers.etag).not.toBe(first.headers.etag);
+    expect(next.body.equals(first.body)).toBe(false);
   });
 });

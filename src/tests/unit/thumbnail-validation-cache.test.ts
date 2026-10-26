@@ -1,8 +1,9 @@
 /** @vitest-environment node */
-import type fs from "node:fs";
+import fs from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearThumbnailValidation,
+  readValidatedThumbnail,
   validateThumbnail,
 } from "@/services/thumbnail-validation";
 
@@ -15,6 +16,39 @@ beforeEach(() => {
   state.metadata.mockReset().mockResolvedValue({ width: 256, height: 128 });
 });
 describe("thumbnail validation LRU", () => {
+  it("shares a cold small file's bytes without keeping buffers in the validation LRU", async () => {
+    const bytes = Buffer.alloc(80);
+    const read = vi.spyOn(fs.promises, "readFile").mockResolvedValue(bytes);
+    try {
+      const [first, shared] = await Promise.all([
+        readValidatedThumbnail("fixture.webp", stat()),
+        readValidatedThumbnail("fixture.webp", stat()),
+      ]);
+      expect(first.buffer).toBe(bytes);
+      expect(shared).toBe(first);
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(state.metadata).toHaveBeenCalledTimes(1);
+      expect(
+        (await readValidatedThumbnail("fixture.webp", stat())).buffer
+      ).toBeUndefined();
+      expect(read).toHaveBeenCalledTimes(1);
+    } finally {
+      read.mockRestore();
+    }
+  });
+  it("keeps larger validation resources on the streaming path", async () => {
+    const read = vi.spyOn(fs.promises, "readFile");
+    try {
+      const result = await readValidatedThumbnail("large.webp", {
+        ...stat(),
+        size: 300 * 1024,
+      } as fs.Stats);
+      expect(result.buffer).toBeUndefined();
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+    }
+  });
   it("shares concurrent validation and skips unchanged resident identities", async () => {
     await Promise.all([
       validateThumbnail("fixture.webp", stat()),

@@ -10,6 +10,7 @@ import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
 import {
   GALLERY_CONFIG,
+  GALLERY_THUMBNAIL_EDGES,
   type GalleryThumbnailEdge,
 } from "@/utils/gallery-config";
 import { registerGalleryCleanup } from "@/utils/gallery-lifecycle";
@@ -25,7 +26,7 @@ import { extractRawPreview, isRawFile } from "./raw-preview";
 import { thumbnailSourceIdentity } from "./thumbnail-identity";
 import {
   clearThumbnailValidation,
-  validateThumbnail,
+  readValidatedThumbnail,
 } from "./thumbnail-validation";
 
 const log = createLogger("thumbnailer");
@@ -795,7 +796,8 @@ async function readGalleryVariant(
 ): Promise<ThumbnailResult | null> {
   try {
     const stats = await fs.promises.stat(target);
-    const metadata = await validateThumbnail(target, stats);
+    const { metadata, buffer } = await readValidatedThumbnail(target, stats);
+    signal?.throwIfAborted();
     diskAccessLog.set(path.basename(target), Date.now());
     recordGalleryMediaStat("thumbnailHit");
     return {
@@ -804,16 +806,106 @@ async function readGalleryVariant(
       height: metadata.height ?? 0,
       stat: stats,
       sourceIdentity: identity,
+      buffer,
     };
   } catch (error) {
-    if (signal?.aborted) {
-      throw error;
-    }
+    signal?.throwIfAborted();
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       await removeCachedThumbnail(target).catch(() => undefined);
     }
     return null;
   }
+}
+
+async function encodeGalleryVariant(
+  imagePath: string,
+  resource: string | Buffer,
+  edge: GalleryThumbnailEdge,
+  knownOrientation?: ExifOrientation
+) {
+  let preview =
+    resource === imagePath && isRawFile(imagePath)
+      ? ((await extractRawPreview(imagePath)) ?? imagePath)
+      : resource;
+  // The managed preview was already validated and has corrected orientation.
+  // Read it once; repeated sharp(path).metadata()/encode opens contend with IO.
+  let orientation = knownOrientation;
+  if (orientation && typeof preview === "string") {
+    preview = await fs.promises.readFile(preview);
+  }
+  if (!orientation) {
+    const metadata = await sharp(preview, { failOn: "none" }).metadata();
+    orientation = await resolveImageOrientation(imagePath, metadata);
+  }
+  return applyExifOrientation(sharp(preview, { failOn: "none" }), orientation)
+    .resize(edge, edge, { fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 85, effort: 1 })
+    .toBuffer({ resolveWithObject: true });
+}
+
+async function galleryLegacyPreview(
+  imagePath: string,
+  sourceChangedAt: number,
+  requiredEdge: number
+): Promise<ThumbnailResult | undefined> {
+  try {
+    const existing = getThumbnailPath(imagePath, "md");
+    const stats = await fs.promises.stat(existing);
+    const { metadata: meta, buffer } = await readValidatedThumbnail(
+      existing,
+      stats
+    );
+    if (
+      stats.mtimeMs >= sourceChangedAt &&
+      (meta.orientation ?? 1) === 1 &&
+      Math.max(meta.width ?? 0, meta.height ?? 0) >= requiredEdge
+    ) {
+      return {
+        thumbnailPath: existing,
+        width: meta.width ?? 0,
+        height: meta.height ?? 0,
+        stat: stats,
+        buffer,
+      };
+    }
+  } catch {
+    // Missing or stale previews are regenerated from the source.
+  }
+  return undefined;
+}
+
+/** Cheap availability hint; HTTP still validates dimensions, orientation and pixels. */
+export async function getGalleryThumbnailHint(
+  photo: { path: string; width: number | null; height: number | null },
+  edge: GalleryThumbnailEdge,
+  source: fs.Stats,
+  readStat: (file: string) => Promise<fs.Stats | undefined>
+): Promise<GalleryThumbnailEdge | undefined> {
+  const identity = thumbnailSourceIdentity(source);
+  const target = path.join(
+    thumbnailDir,
+    `${gallerySourcePrefix(photo.path)}${identity}-${edge}.webp`
+  );
+  const targetStat = await readStat(target);
+  if (targetStat) {
+    return edge;
+  }
+  const legacy = getThumbnailPath(photo.path, "md");
+  const legacyStat = await readStat(legacy);
+  if (
+    !legacyStat ||
+    legacyStat.mtimeMs <
+      Math.max(source.mtimeMs, source.ctimeMs, source.birthtimeMs)
+  ) {
+    return undefined;
+  }
+  // The managed v4 filename encodes this physical preview size. Do not read
+  // every offscreen preview's sharp metadata ahead of the six image slots.
+  // A damaged/mismatched file is repaired by the chosen exact-edge endpoint.
+  const nominalEdge = THUMBNAIL_BASE_SIZES.md * dprScale;
+  return GALLERY_THUMBNAIL_EDGES.find(
+    (candidate) => candidate >= edge && candidate >= nominalEdge
+  );
 }
 
 /** The source's filesystem identity is part of every new physical-pixel variant. */
@@ -822,7 +914,9 @@ export async function generateGalleryThumbnail(
   edge: GalleryThumbnailEdge,
   signal?: AbortSignal,
   priority = 0,
-  sourceSize?: { width: number | null; height: number | null }
+  sourceSize?: { width: number | null; height: number | null },
+  selectExisting = false,
+  repair = false
 ): Promise<ThumbnailResult> {
   if (stopping) {
     throw new DOMException("Cancelled", "AbortError");
@@ -830,6 +924,7 @@ export async function generateGalleryThumbnail(
   await waitForCacheClear();
   signal?.throwIfAborted();
   const source = await fs.promises.stat(imagePath);
+  signal?.throwIfAborted();
   const identity = thumbnailSourceIdentity(source);
   const sourceChangedAt = Math.max(
     source.mtimeMs,
@@ -840,47 +935,37 @@ export async function generateGalleryThumbnail(
     thumbnailDir,
     `${gallerySourcePrefix(imagePath)}${identity}-${edge}.webp`
   );
-  const knownVariant = knownDiskFiles.has(path.basename(target));
-  if (knownVariant) {
-    const cached = await readGalleryVariant(target, identity, signal);
-    if (cached) {
-      return cached;
-    }
+  // A browser decode failure can leave readable container metadata. Repair
+  // bypasses both cached representations and atomically replaces this tier.
+  const cached = repair
+    ? null
+    : await readGalleryVariant(target, identity, signal);
+  if (cached) {
+    return cached;
   }
-  // The v4 legacy preview already has corrected orientation. Reuse an adequate
-  // unchanged preview directly instead of decoding and encoding a duplicate.
+  // An orientation-safe preview can be returned directly only at the requested
+  // physical size. Larger previews are cheap generation inputs, not small URLs.
   const sourceLongEdge = Math.max(
     sourceSize?.width ?? 0,
     sourceSize?.height ?? 0
   );
   const requiredEdge =
     sourceLongEdge > 0 ? Math.min(edge, sourceLongEdge) : edge;
-  try {
-    const existing = getThumbnailPath(imagePath, "md");
-    const stat = await fs.promises.stat(existing);
-    const metadata = await validateThumbnail(existing, stat);
-    if (
-      stat.mtimeMs >= sourceChangedAt &&
-      Math.max(metadata.width ?? 0, metadata.height ?? 0) >= requiredEdge
-    ) {
-      diskAccessLog.set(path.basename(existing), Date.now());
-      recordGalleryMediaStat("thumbnailHit");
-      return {
-        thumbnailPath: existing,
-        width: metadata.width ?? 0,
-        height: metadata.height ?? 0,
-        stat,
-        sourceIdentity: identity,
-      };
-    }
-  } catch {
-    /* Missing or undersized legacy previews use the shared generation queue. */
-  }
-  if (!knownVariant) {
-    const cached = await readGalleryVariant(target, identity, signal);
-    if (cached) {
-      return cached;
-    }
+  const legacy = repair
+    ? undefined
+    : await galleryLegacyPreview(
+        imagePath,
+        sourceChangedAt,
+        selectExisting ? Math.max(1, requiredEdge - 1) : requiredEdge
+      );
+  signal?.throwIfAborted();
+  if (
+    legacy &&
+    (selectExisting || Math.max(legacy.width, legacy.height) === requiredEdge)
+  ) {
+    diskAccessLog.set(path.basename(legacy.thumbnailPath), Date.now());
+    recordGalleryMediaStat("thumbnailHit");
+    return { ...legacy, sourceIdentity: identity };
   }
   let job = galleryJobs.get(target);
   if (stopping) {
@@ -897,46 +982,55 @@ export async function generateGalleryThumbnail(
       );
       const started = performance.now();
       try {
+        controller.signal.throwIfAborted();
         recordGalleryMediaStat("thumbnailRegenerate");
-        let input: string | Buffer = imagePath;
-        // Existing orientation-safe medium previews avoid re-decoding RAWs.
-        let orientation: ExifOrientation | undefined;
+        const input = legacy?.buffer ?? legacy?.thumbnailPath ?? imagePath;
+        const orientation = legacy ? 1 : undefined;
+        const encodeStarted = performance.now();
+        let generated: Awaited<ReturnType<typeof encodeGalleryVariant>>;
         try {
-          const existing = getThumbnailPath(imagePath, "md");
-          const stats = await fs.promises.stat(existing);
-          const meta = await validateThumbnail(existing, stats);
-          if (
-            stats.mtimeMs >= sourceChangedAt &&
-            Math.max(meta.width ?? 0, meta.height ?? 0) >= requiredEdge
-          ) {
-            input = existing;
-            orientation = 1;
+          generated = await encodeGalleryVariant(
+            imagePath,
+            input,
+            edge,
+            orientation
+          );
+        } catch (error) {
+          if (input === imagePath) {
+            throw error;
           }
-        } catch {
-          /* Generate from source when no suitable preview exists. */
+          // Metadata can remain readable in an otherwise undecodable preview.
+          // Retry once from the source in the same shared generation slot.
+          if (legacy) {
+            await removeCachedThumbnail(legacy.thumbnailPath).catch(
+              () => undefined
+            );
+          }
+          generated = await encodeGalleryVariant(imagePath, imagePath, edge);
         }
-        if (input === imagePath && isRawFile(imagePath)) {
-          input = (await extractRawPreview(imagePath)) ?? imagePath;
-        }
-        const metadata = await sharp(input, { failOn: "none" }).metadata();
-        orientation ??= await resolveImageOrientation(imagePath, metadata);
-        const { data, info } = await applyExifOrientation(
-          sharp(input, { failOn: "none" }),
-          orientation
-        )
-          .resize(edge, edge, { fit: "inside", withoutEnlargement: true })
-          .webp({ quality: 85, effort: 1 })
-          .toBuffer({ resolveWithObject: true });
+        const { data, info } = generated;
+        recordGalleryMediaStat(
+          "thumbnailEncodeMs",
+          performance.now() - encodeStarted
+        );
         if (!(info.width && info.height)) {
           throw new Error("Invalid generated thumbnail");
         }
+        const writeStarted = performance.now();
         await writeFileAtomic(target, data);
+        const stat = await fs.promises.stat(target);
+        recordGalleryMediaStat(
+          "thumbnailWriteMs",
+          performance.now() - writeStarted
+        );
         scheduleThumbnailMaintenance();
         return {
           thumbnailPath: target,
           width: info.width,
           height: info.height,
           sourceIdentity: identity,
+          stat,
+          buffer: data,
         };
       } finally {
         recordGalleryMediaStat(

@@ -5,8 +5,15 @@ export const GALLERY_CONFIG = {
   imageTimeoutMs: 8000,
   scrollIdleMs: 150,
   validationCacheEntries: 4096,
-  thumbnailDescriptorBatchSize: 200,
-  pageThumbnailDescriptors: 24,
+  validationReadBufferBytes: 256 * 1024,
+  thumbnailDescriptorBatchSize: 8,
+  thumbnailDescriptorRequests: 2,
+  thumbnailDescriptorPrefetchRequests: 1,
+  thumbnailDescriptorConcurrency: 4,
+  imagePrefetchCandidates: 12,
+  thumbnailUrlVersion: 2,
+  thumbnailVariantWarmIdleMs: 500,
+  imageTransferCacheSeconds: 1,
   maintenanceFileConcurrency: 2,
   generationConcurrency: 4,
   diskCheckIntervalMs: 5 * 60_000,
@@ -27,8 +34,27 @@ export type GalleryThumbnailEdge = (typeof GALLERY_THUMBNAIL_EDGES)[number];
 export function chooseGalleryThumbnailEdge(
   width: number,
   height: number,
-  dpr: number
+  dpr: number,
+  sourceAspect?: number
 ): GalleryThumbnailEdge {
-  const pixels = Math.max(width, height, 1) * Math.max(1, dpr || 1);
+  // Missing intrinsic dimensions cannot establish a safe object-cover crop.
+  // Use the bounded maximum rather than lowering the existing preview quality.
+  if (sourceAspect === 0) {
+    return 2048;
+  }
+  const aspect =
+    sourceAspect && Number.isFinite(sourceAspect) && sourceAspect > 0
+      ? sourceAspect
+      : width / Math.max(1, height);
+  // object-cover can crop an extreme source ratio into the clamped card box.
+  // Its complete resource must still contain enough pixels for that crop.
+  const pixels =
+    Math.max(
+      width,
+      height,
+      width / Math.max(0.001, aspect),
+      height * aspect,
+      1
+    ) * Math.max(1, dpr || 1);
   return GALLERY_THUMBNAIL_EDGES.find((edge) => edge >= pixels) ?? 2048;
 }

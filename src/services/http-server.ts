@@ -22,6 +22,7 @@ import {
 import { getDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
 import {
+  GALLERY_CONFIG,
   GALLERY_THUMBNAIL_EDGES,
   type GalleryThumbnailEdge,
 } from "@/utils/gallery-config";
@@ -794,6 +795,53 @@ function handleImage(
 
 // ── 请求分发 ──────────────────────────────────────────────────────────
 
+async function serveGalleryThumbnailResult(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  params: URLSearchParams,
+  thumbnail: Awaited<ReturnType<typeof generateGalleryThumbnail>>
+): Promise<void> {
+  const stats =
+    thumbnail.stat ?? (await fs.promises.stat(thumbnail.thumbnailPath));
+  if (res.destroyed || res.writableEnded) {
+    return;
+  }
+  const etag = `"${thumbnail.sourceIdentity}-${path.basename(thumbnail.thumbnailPath)}-${stats.size}-${stats.mtimeMs}-${stats.ctimeMs}"`;
+  res.setHeader("etag", etag);
+  res.setHeader(
+    "cache-control",
+    galleryThumbnailCachePolicy(params, thumbnail.sourceIdentity)
+  );
+  if (req.headers["if-none-match"] === etag) {
+    res.writeHead(304);
+    res.end();
+    return;
+  }
+  if (thumbnail.buffer) {
+    res.setHeader("content-type", "image/webp");
+    res.setHeader("content-length", thumbnail.buffer.length);
+    res.writeHead(200);
+    res.end(thumbnail.buffer);
+  } else {
+    serveStaticFile(thumbnail.thumbnailPath, res, "image/webp", false, stats);
+  }
+}
+
+function galleryThumbnailCachePolicy(
+  params: URLSearchParams,
+  identity: string | undefined
+): string {
+  if (params.get("repair") === "1") {
+    return "private, no-cache";
+  }
+  if (params.get("select") === "1") {
+    return `private, max-age=${GALLERY_CONFIG.imageTransferCacheSeconds}, must-revalidate`;
+  }
+  return params.get("rv") === identity
+    ? "private, max-age=31536000, immutable"
+    : "private, no-cache";
+}
+
 async function handlePhotoThumbnail(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -827,33 +875,24 @@ async function handlePhotoThumbnail(
       safeEndError(res, 403, "Forbidden");
       return;
     }
+    const selectExisting = params.get("select") === "1";
+    if (selectExisting) {
+      recordGalleryMediaStat("thumbnailSelectionRequest");
+    }
     recordGalleryMediaStat("thumbnailRequest");
     const thumbnail = await generateGalleryThumbnail(
       safePath,
       edge as GalleryThumbnailEdge,
       controller.signal,
       0,
-      photo
+      photo,
+      selectExisting,
+      params.get("repair") === "1"
     );
     if (controller.signal.aborted) {
       return;
     }
-    const stats =
-      thumbnail.stat ?? (await fs.promises.stat(thumbnail.thumbnailPath));
-    const etag = `"${path.basename(thumbnail.thumbnailPath)}"`;
-    res.setHeader("etag", etag);
-    res.setHeader(
-      "cache-control",
-      params.get("rv") === thumbnail.sourceIdentity
-        ? "private, max-age=31536000, immutable"
-        : "private, no-cache"
-    );
-    if (req.headers["if-none-match"] === etag) {
-      res.writeHead(304);
-      res.end();
-      return;
-    }
-    serveStaticFile(thumbnail.thumbnailPath, res, "image/webp", false, stats);
+    await serveGalleryThumbnailResult(req, res, params, thumbnail);
   } catch (error) {
     if (!(controller.signal.aborted || res.destroyed)) {
       recordGalleryMediaStat("thumbnailFailed");

@@ -65,12 +65,11 @@ describe("gallery listing IPC", () => {
         : Promise.resolve(records)
     );
     expect(await call(listPhotoPage, {})).toEqual(page);
-    expect(listing.describe).toHaveBeenCalledTimes(1);
-    expect(listing.describe).toHaveBeenCalledWith(items.slice(0, 24));
+    expect(listing.describe).not.toHaveBeenCalled();
     expect(await call(getPhotosByIds, { ids: [1] })).toEqual(items);
-    expect(listing.describe).toHaveBeenCalledTimes(1);
+    expect(listing.describe).not.toHaveBeenCalled();
     expect(await call(listPhotoPage, { layoutOnly: true })).toEqual(page);
-    expect(listing.describe).toHaveBeenCalledTimes(1);
+    expect(listing.describe).not.toHaveBeenCalled();
   });
 
   it("reads current file identities only for the requested thumbnail IDs", async () => {
@@ -80,9 +79,17 @@ describe("gallery listing IPC", () => {
       { id: 2, thumbnailVersion: "fresh" },
     ]);
     expect(listing.byIds).toHaveBeenCalledWith([2]);
-    expect(listing.describe).toHaveBeenCalledWith([
-      { id: 2, path: "visible.webp" },
-    ]);
+    expect(listing.describe).toHaveBeenCalledWith(
+      [{ id: 2, path: "visible.webp" }],
+      2,
+      undefined
+    );
+    await call(getPhotoThumbnailVersions, { ids: [2], priority: 0 });
+    expect(listing.describe).toHaveBeenLastCalledWith(
+      [{ id: 2, path: "visible.webp" }],
+      0,
+      undefined
+    );
   });
 
   it("preserves the expired-cursor error across the message-port transport", async () => {
