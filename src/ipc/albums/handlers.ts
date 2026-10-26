@@ -30,7 +30,22 @@ export const getAlbumLayout = os
       locale: z.string().max(40).optional(),
     })
   )
-  .handler(({ input }) => getGalleryAlbumLayout(input));
+  .errors({
+    ALBUM_SNAPSHOT_EXPIRED: { status: 409, message: "ALBUM_SNAPSHOT_EXPIRED" },
+  })
+  .handler(async ({ input, errors }) => {
+    try {
+      return await getGalleryAlbumLayout(input);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "ALBUM_SNAPSHOT_EXPIRED"
+      ) {
+        throw errors.ALBUM_SNAPSHOT_EXPIRED();
+      }
+      throw error;
+    }
+  });
 export const getAlbumPhotoPage = os
   .input(
     z.object({

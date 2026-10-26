@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/client";
 import { ipc } from "@/ipc/manager";
 import type { Photo } from "@/types/photo";
 import { galleryContext } from "@/utils/gallery-data-source";
@@ -25,12 +26,25 @@ export async function getWindowedAlbum(
   locale?: string
 ): Promise<AlbumDetail> {
   const info = await ipc.client.albums.getAlbumInfo({ id });
-  const layout = await ipc.client.albums.getAlbumLayout({
-    id,
-    sort,
-    order,
-    locale,
-  });
+  let layout: Awaited<ReturnType<typeof ipc.client.albums.getAlbumLayout>>;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      layout = await ipc.client.albums.getAlbumLayout({
+        id,
+        sort,
+        order,
+        locale,
+      });
+      break;
+    } catch (error) {
+      if (
+        attempt >= 3 ||
+        !(error instanceof ORPCError && error.code === "ALBUM_SNAPSHOT_EXPIRED")
+      ) {
+        throw error;
+      }
+    }
+  }
   const source = galleryContext(
     `album:${layout.id}`,
     photoListingActions.byIds
