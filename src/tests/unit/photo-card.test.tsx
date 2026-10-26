@@ -1,6 +1,22 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotoCard } from "@/components/PhotoCard";
+import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
+import { toGalleryThumbnailUrl } from "@/utils/local-media-url";
+
+vi.mock("@/hooks/useGalleryThumbnail", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/useGalleryThumbnail")>();
+  return { ...actual, useGalleryThumbnail: vi.fn(actual.useGalleryThumbnail) };
+});
+vi.mock("@/utils/local-media-url", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/utils/local-media-url")>();
+  return {
+    ...actual,
+    toGalleryThumbnailUrl: vi.fn(actual.toGalleryThumbnailUrl),
+  };
+});
 
 const PERCENTAGE_PATTERN = /%/;
 
@@ -26,12 +42,49 @@ describe("PhotoCard", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.mocked(useGalleryThumbnail).mockReset();
+    vi.mocked(toGalleryThumbnailUrl).mockReset();
   });
 
   it("does not render image element without thumbnailPath", () => {
     const { container } = render(<PhotoCard {...baseProps} />);
     const img = container.querySelector("img");
     expect(img).not.toBeInTheDocument();
+  });
+
+  it("clears a failed placeholder only after a rebound managed resource succeeds", () => {
+    vi.mocked(toGalleryThumbnailUrl).mockReturnValue("http://gallery/1/256");
+    const thumbnail = {
+      ref: { current: null },
+      url: "",
+      failed: true,
+      onDisplayed: vi.fn(),
+    };
+    const hook = vi.mocked(useGalleryThumbnail).mockReturnValue(thumbnail);
+    const { rerender } = render(<PhotoCard {...baseProps} />);
+    expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument();
+
+    hook.mockReturnValue({ ...thumbnail, failed: false });
+    rerender(<PhotoCard {...baseProps} path="C:/Photos/rebound.jpg" />);
+    expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument();
+
+    hook.mockReturnValue({
+      ...thumbnail,
+      url: "http://gallery/1/256?v=source-1",
+      failed: false,
+    });
+    rerender(
+      <PhotoCard
+        {...baseProps}
+        path="C:/Photos/rebound.jpg"
+        thumbnailVersion="new-source"
+      />
+    );
+    expect(screen.queryByRole("button", { name: "retry" })).toBeNull();
+    expect(screen.getByRole("img", { name: "test-photo.jpg" })).toHaveAttribute(
+      "src",
+      "http://gallery/1/256?v=source-1"
+    );
   });
 
   it("can disable photo dragging for collection views", () => {

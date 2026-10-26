@@ -1,4 +1,4 @@
-import type { GalleryThumbnailEdge } from "./gallery-config";
+import { GALLERY_CONFIG, type GalleryThumbnailEdge } from "./gallery-config";
 import { getHttpPortSync } from "./http-port";
 import { preloadImagesWithConcurrency } from "./image-preloader";
 import { scheduleImage } from "./image-scheduler";
@@ -10,13 +10,15 @@ export function toGalleryThumbnailUrl(
   id: number,
   edge: GalleryThumbnailEdge,
   version = "1",
-  sourceVersion?: string
+  sourceVersion?: string,
+  selectAvailable = false,
+  repair = false
 ): string {
   const port = getHttpPortSync();
   if (port === null || id <= 0) {
     return "";
   }
-  return `http://127.0.0.1:${port}/photo-thumbnail?id=${id}&edge=${edge}&v=${encodeURIComponent(version)}&rv=${encodeURIComponent(sourceVersion ?? "")}&token=${encodeURIComponent(getHttpAuthToken())}`;
+  return `http://127.0.0.1:${port}/photo-thumbnail?id=${id}&edge=${edge}&gv=${GALLERY_CONFIG.thumbnailUrlVersion}&v=${encodeURIComponent(version)}&rv=${encodeURIComponent(sourceVersion ?? "")}${selectAvailable ? "&select=1" : ""}${repair ? "&repair=1" : ""}&token=${encodeURIComponent(getHttpAuthToken())}`;
 }
 
 function getHttpAuthToken(): string {

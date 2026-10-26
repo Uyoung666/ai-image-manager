@@ -27,7 +27,11 @@ interface SequenceCardProps {
   expanding?: boolean;
   faceOverlays?: FaceOverlay[];
   faceOverlaysVisible?: boolean;
+  imageHeight?: number;
+  imageIdle?: boolean;
   imagePriority?: 0 | 1 | 2;
+  imageVisible?: boolean;
+  imageWidth?: number;
   isSelected: boolean;
   loading?: "eager" | "lazy";
   onClick: (id: number, event: React.MouseEvent) => void;
@@ -38,6 +42,7 @@ interface SequenceCardProps {
   recentlyViewed?: boolean;
   recentlyViewedFrame?: number;
   recentlyViewedPulseActive?: boolean;
+  requestImage?: boolean;
   sequence: PhotoSequence;
 }
 
@@ -45,6 +50,11 @@ const SINGLE_CLICK_DELAY_MS = 250;
 
 export const SequenceCard = memo(function SequenceCard({
   imagePriority = 0,
+  requestImage = true,
+  imageWidth,
+  imageHeight,
+  imageVisible,
+  imageIdle,
   queryGeneration,
   sequence,
   isSelected,
@@ -68,6 +78,14 @@ export const SequenceCard = memo(function SequenceCard({
     id: photo.id,
     version: `${photo.id}:${photo.width}:${photo.height}`,
     sourceVersion: photo.thumbnailVersion,
+    sourceKey: photo.path,
+    sourceAspect:
+      photo.width > 0 && photo.height > 0 ? photo.width / photo.height : 0,
+    requestImage,
+    layoutWidth: imageWidth,
+    layoutHeight: imageHeight,
+    visible: imageVisible,
+    idle: imageIdle,
     width: 220,
     height: 220 / Math.max(0.6, Math.min(3, photo.width / (photo.height || 1))),
     enabled: managed,

@@ -1863,7 +1863,15 @@ export const PhotoGrid = memo(
         photo: DisplayPhoto,
         index: number,
         _style: React.CSSProperties,
-        options: { renderImage: boolean; imagePriority?: 0 | 1 | 2 }
+        options: {
+          renderImage: boolean;
+          requestImage?: boolean;
+          imagePriority?: 0 | 1 | 2;
+          imageWidth?: number;
+          imageHeight?: number;
+          imageVisible?: boolean;
+          imageIdle?: boolean;
+        }
       ) => {
         if ("sequenceTray" in photo) {
           return (
@@ -1935,7 +1943,11 @@ export const PhotoGrid = memo(
               expanding={expandingSequenceId === sequence.id}
               faceOverlays={faceOverlayByPhotoId?.get(photo.id)}
               faceOverlaysVisible={faceOverlaysVisible}
+              imageHeight={options.imageHeight}
+              imageIdle={options.imageIdle}
               imagePriority={options.imagePriority}
+              imageVisible={options.imageVisible}
+              imageWidth={options.imageWidth}
               isSelected={
                 memberIds.length > 0 &&
                 memberIds.every((id) => selectedIdsRef.current.has(id))
@@ -1964,6 +1976,7 @@ export const PhotoGrid = memo(
                 returnPresentation.itemId === photo.id &&
                 recentlyViewedPulseActive
               }
+              requestImage={options.requestImage}
               sequence={sequence}
             />
           );
@@ -1979,7 +1992,11 @@ export const PhotoGrid = memo(
             getDragIds={getDragIds}
             height={photo.height}
             id={photo.id}
+            imageHeight={options.imageHeight}
+            imageIdle={options.imageIdle}
             imagePriority={options.imagePriority}
+            imageVisible={options.imageVisible}
+            imageWidth={options.imageWidth}
             isFavorite={photo.isFavorite}
             isSelected={selectedIdsRef.current.has(photo.id)}
             // The masonry image window already limits requests. Native lazy
@@ -1997,6 +2014,7 @@ export const PhotoGrid = memo(
               recentlyViewedPulseActive && recentlyViewedPhotoId === photo.id
             }
             recentlyViewedPulseKey={recentlyViewedPulseKey}
+            requestImage={options.requestImage}
             searchQuery={searchQuery}
             semanticTopSimilarity={semanticTopSimilarity}
             thumbnailPath={photo.thumbnailPath}

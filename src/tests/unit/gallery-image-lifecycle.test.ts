@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chooseGalleryThumbnailEdge } from "@/utils/gallery-config";
-import { scheduleImage } from "@/utils/image-scheduler";
+import { isImageReady, scheduleImage } from "@/utils/image-scheduler";
 import { PrioritySemaphore } from "@/utils/priority-semaphore";
 
 class ImageFixture {
@@ -22,11 +22,60 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("gallery request lifecycle", () => {
+  it("waits until visible decoded images are displayed before preparing idle variants", async () => {
+    const foreground = scheduleImage("visible-idle-barrier", {
+      priority: 0,
+      holdUntilDisplayed: true,
+    });
+    const warm = scheduleImage("idle-resource", {
+      priority: 2,
+      idleOnly: true,
+      retainDecoded: false,
+    });
+    expect(ImageFixture.created).toHaveLength(1);
+    ImageFixture.created[0].onload?.();
+    await expect(foreground.promise).resolves.toBe("loaded");
+    expect(ImageFixture.created).toHaveLength(1);
+    foreground.release();
+    expect(ImageFixture.created).toHaveLength(2);
+    warm.release();
+  });
+  it("releases a React cleanup batch before starting any of its obsolete queued images", async () => {
+    const handles = Array.from({ length: 30 }, (_, index) =>
+      scheduleImage(`obsolete-${index}`, { priority: 0 })
+    );
+    expect(ImageFixture.created).toHaveLength(6);
+    for (const handle of handles) {
+      handle.release();
+    }
+    await Promise.all(handles.map((handle) => handle.promise));
+    expect(ImageFixture.created).toHaveLength(6);
+    const next = scheduleImage("next-visible", { priority: 0 });
+    expect(ImageFixture.created).toHaveLength(7);
+    next.release();
+  });
+  it("does not evict visible decoded transfers when warming an undisplayed variant", async () => {
+    const warm = scheduleImage("warm-variant", {
+      priority: 2,
+      retainDecoded: false,
+    });
+    Object.assign(ImageFixture.created[0], {
+      complete: true,
+      naturalWidth: 256,
+    });
+    ImageFixture.created[0].onload?.();
+    await expect(warm.promise).resolves.toBe("loaded");
+    expect(isImageReady("warm-variant")).toBe(false);
+  });
   it("chooses physical edges for aspect and fractional DPI changes", () => {
+    expect(chooseGalleryThumbnailEdge(140, 105, 1, 0)).toBe(2048);
+    expect(chooseGalleryThumbnailEdge(140, 105, 2, 0)).toBe(2048);
     expect(chooseGalleryThumbnailEdge(220, 350, 1)).toBe(512);
     expect(chooseGalleryThumbnailEdge(220, 350, 2)).toBe(1024);
     expect(chooseGalleryThumbnailEdge(220, 350, 1.25)).toBe(512);
     expect(chooseGalleryThumbnailEdge(900, 1200, 3)).toBe(2048);
+    expect(chooseGalleryThumbnailEdge(140, 47, 1, 6)).toBe(512);
+    expect(chooseGalleryThumbnailEdge(140, 233, 1, 0.2)).toBe(1024);
   });
   it("retries a visible timeout once and never retries background or cancelled work", async () => {
     const visible = scheduleImage("visible-timeout", { priority: 0 });

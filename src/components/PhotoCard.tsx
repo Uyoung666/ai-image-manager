@@ -70,7 +70,11 @@ interface PhotoCardProps {
   getDragIds?: (id: number) => number[];
   height: number;
   id: number;
+  imageHeight?: number;
+  imageIdle?: boolean;
   imagePriority?: ImagePriority;
+  imageVisible?: boolean;
+  imageWidth?: number;
   isFavorite?: boolean;
   isSelected: boolean;
   loading?: "eager" | "lazy";
@@ -85,6 +89,7 @@ interface PhotoCardProps {
   recentlyViewedPulseActive?: boolean;
   recentlyViewedPulseKey?: number;
   renderImage?: boolean;
+  requestImage?: boolean;
   searchQuery?: string;
   selectionInset?: boolean;
   /** 本次语义搜索最佳匹配的原始余弦相似度，用于把 score 归一化为相对百分比（最佳=100%） */
@@ -264,6 +269,11 @@ function PhotoCardImage({
 export const PhotoCard = memo(function PhotoCard({
   id,
   imagePriority = 0,
+  requestImage = true,
+  imageWidth,
+  imageHeight,
+  imageVisible,
+  imageIdle,
   path,
   disableDrag = false,
   thumbnailPath,
@@ -302,6 +312,13 @@ export const PhotoCard = memo(function PhotoCard({
     id,
     version: `${id}:${width}:${height}:${retryCount}`,
     sourceVersion: thumbnailVersion,
+    sourceKey: path,
+    sourceAspect: width > 0 && height > 0 ? width / height : 0,
+    requestImage,
+    layoutWidth: imageWidth,
+    layoutHeight: imageHeight,
+    visible: imageVisible,
+    idle: imageIdle,
     width: 220,
     height: 220 / Math.max(0.6, Math.min(3, width / (height || 1))),
     enabled: managed && renderImage,
@@ -335,8 +352,10 @@ export const PhotoCard = memo(function PhotoCard({
   useEffect(() => {
     if (gallery.failed) {
       setImgError(true);
+    } else if (gallery.url) {
+      setImgError(false);
     }
-  }, [gallery.failed]);
+  }, [gallery.failed, gallery.url]);
   const [isRecentlyViewedPulseActive, setIsRecentlyViewedPulseActive] =
     useState(false);
 

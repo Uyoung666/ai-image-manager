@@ -15,9 +15,11 @@ interface Task {
   cancel?: () => void;
   consumers: Set<Consumer>;
   element?: HTMLImageElement;
+  idleOnly: boolean;
   priority: ImagePriority;
   queuedAt: number;
   result?: ImageLoadResult;
+  retainDecoded: boolean;
   started: boolean;
   url: string;
 }
@@ -25,6 +27,17 @@ const tasks = new Map<string, Task>();
 let running = 0;
 let prefetch = 0;
 let releasingGeneration = false;
+let pumpScheduled = false;
+function queuePump(): void {
+  if (pumpScheduled) {
+    return;
+  }
+  pumpScheduled = true;
+  queueMicrotask(() => {
+    pumpScheduled = false;
+    pump();
+  });
+}
 // Short transfer window for a freshly decoded native image across mode remounts.
 // Every reuse checks the actual element; this is not a remembered-success URL set.
 const decoded = new Map<string, { image: HTMLImageElement; at: number }>();
@@ -42,6 +55,14 @@ export function isImageReady(url: string): boolean {
     return false;
   }
   return true;
+}
+
+export function getDecodedImageEdge(url: string): number | undefined {
+  if (!isImageReady(url)) {
+    return undefined;
+  }
+  const image = decoded.get(url)?.image;
+  return image ? Math.max(image.naturalWidth, image.naturalHeight) : undefined;
 }
 
 function start(task: Task): void {
@@ -71,7 +92,11 @@ function start(task: Task): void {
     if (task.activePriority > 0) {
       prefetch--;
     }
-    pump();
+    if (task.result === "cancelled") {
+      queuePump();
+    } else {
+      pump();
+    }
   };
   const finish = (result: ImageLoadResult) => {
     if (done) {
@@ -79,7 +104,7 @@ function start(task: Task): void {
     }
     done = true;
     task.result = result;
-    if (result === "loaded") {
+    if (result === "loaded" && task.retainDecoded) {
       decoded.delete(task.url);
       while (decoded.size >= 64) {
         decoded.delete(decoded.keys().next().value as string);
@@ -171,10 +196,12 @@ function pump(): void {
     return;
   }
   while (running < GALLERY_CONFIG.imageConcurrency) {
+    const foreground = [...tasks.values()].some((task) => task.priority === 0);
     const next = [...tasks.values()]
       .filter(
         (task) =>
           !task.started &&
+          (!task.idleOnly || task.priority === 0 || !foreground) &&
           (task.priority === 0 || prefetch < GALLERY_CONFIG.prefetchConcurrency)
       )
       .sort((a, b) => a.priority - b.priority || a.queuedAt - b.queuedAt)[0];
@@ -195,6 +222,8 @@ export function scheduleImage(
     generation?: string | number;
     holdUntilDisplayed?: boolean;
     element?: HTMLImageElement;
+    retainDecoded?: boolean;
+    idleOnly?: boolean;
   } = {}
 ): {
   promise: Promise<ImageLoadResult>;
@@ -222,10 +251,14 @@ export function scheduleImage(
       started: false,
       queuedAt: performance.now(),
       element: options.element,
+      retainDecoded: options.retainDecoded ?? true,
+      idleOnly: options.idleOnly ?? false,
     };
     tasks.set(url, task);
   }
   const active = task;
+  active.retainDecoded ||= options.retainDecoded ?? true;
+  active.idleOnly &&= options.idleOnly ?? false;
   active.consumers.add(consumer);
   if (active.result) {
     resolve(active.result);
@@ -248,7 +281,7 @@ export function scheduleImage(
         ...[...active.consumers].map((entry) => entry.priority)
       ) as ImagePriority;
     }
-    pump();
+    queuePump();
   };
   consumer.release = release;
   options.signal?.addEventListener("abort", release, { once: true });

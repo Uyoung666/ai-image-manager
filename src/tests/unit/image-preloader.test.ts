@@ -43,6 +43,7 @@ describe("shared image scheduler", () => {
     for (const handle of blockers) {
       handle.release();
     }
+    await flush();
     expect(TestImage.instances.some((image) => image.src === "old-only")).toBe(
       false
     );
