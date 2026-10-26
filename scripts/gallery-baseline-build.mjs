@@ -39,29 +39,34 @@ const replace = (file, before, after) => {
   }
   fs.writeFileSync(destination, source.replace(before, after));
 };
-for (const file of ["src/utils/gallery-perf.ts", "src/renderer.ts"]) {
-  fs.copyFileSync(path.join(root, file), path.join(target, file));
+const nativeProbe = fs
+  .readFileSync(path.join(target, "src/preload.ts"), "utf8")
+  .includes("galleryPerfEnabled");
+if (!nativeProbe) {
+  for (const file of ["src/utils/gallery-perf.ts", "src/renderer.ts"]) {
+    fs.copyFileSync(path.join(root, file), path.join(target, file));
+  }
+  replace(
+    "src/main.ts",
+    "additionalArguments: [",
+    "additionalArguments: [...(process.env.AIM_GALLERY_PERF === '1' ? ['--gallery-perf'] : []),"
+  );
+  replace(
+    "src/preload.ts",
+    "preloadReady: true,",
+    "preloadReady: true, galleryPerfEnabled: process.argv.includes('--gallery-perf'),"
+  );
+  replace(
+    "src/components/MasonryGrid.tsx",
+    'import { recordGalleryPerf } from "@/utils/gallery-perf";',
+    'import { recordGalleryPerf,startGalleryPerfProbe } from "@/utils/gallery-perf";'
+  );
+  replace(
+    "src/components/MasonryGrid.tsx",
+    "const scrollRef = useRef<HTMLDivElement>(null);",
+    "const scrollRef = useRef<HTMLDivElement>(null); useEffect(()=>scrollRef.current ? startGalleryPerfProbe(scrollRef.current) : undefined,[]);"
+  );
 }
-replace(
-  "src/main.ts",
-  "additionalArguments: [",
-  "additionalArguments: [...(process.env.AIM_GALLERY_PERF === '1' ? ['--gallery-perf'] : []),"
-);
-replace(
-  "src/preload.ts",
-  "preloadReady: true,",
-  "preloadReady: true, galleryPerfEnabled: process.argv.includes('--gallery-perf'),"
-);
-replace(
-  "src/components/MasonryGrid.tsx",
-  'import { recordGalleryPerf } from "@/utils/gallery-perf";',
-  'import { recordGalleryPerf,startGalleryPerfProbe } from "@/utils/gallery-perf";'
-);
-replace(
-  "src/components/MasonryGrid.tsx",
-  "const scrollRef = useRef<HTMLDivElement>(null);",
-  "const scrollRef = useRef<HTMLDivElement>(null); useEffect(()=>scrollRef.current ? startGalleryPerfProbe(scrollRef.current) : undefined,[]);"
-);
 process.chdir(target);
 await build({
   root: target,

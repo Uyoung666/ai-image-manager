@@ -29,6 +29,9 @@ const seconds = Number(option("seconds", "15"));
 const width = Number(option("width", "1280"));
 const height = Number(option("height", "800"));
 const dpr = Number(option("dpr", "1"));
+const gridColumnWidth = Number(option("grid-column-width", "220"));
+const fixtureEdge = Number(option("fixture-long-edge", "0"));
+const variantCache = option("variant-cache", "retain");
 const cache = option("cache", "browser-cold");
 const label = option("scenario", "gallery");
 const appPath = path.resolve(option("app", "."));
@@ -42,12 +45,18 @@ const trace = option("trace", "0") === "1";
 const anchor = Number(option("anchor", "0"));
 const gate = option("gate", "");
 const measureEntry = option("entry-metric", "0") === "1";
+const controlledScroll = option("controlled-scroll", "0") === "1";
 const albumKind = option("album-kind", "ordinary");
 if (
   ![count, runs, seconds, width, height, dpr].every(
     (value) => Number.isFinite(value) && value > 0
   ) ||
   count > 100_000 ||
+  ![0, 512, 1024, 2048].includes(fixtureEdge) ||
+  !["retain", "legacy", "exact"].includes(variantCache) ||
+  !Number.isFinite(gridColumnWidth) ||
+  gridColumnWidth < 140 ||
+  gridColumnWidth > 320 ||
   !Number.isInteger(anchor) ||
   anchor < 0 ||
   anchor > count ||
@@ -62,19 +71,27 @@ const reportDir = path.resolve("reports/gallery", `${label}-${Date.now()}`);
 fs.mkdirSync(reportDir, { recursive: true });
 const runtime = new TestRuntime("gallery-benchmark");
 const root = runtime.root;
-const profile = path.join(root, "profile");
+const borrowed =
+  option("reuse-profile", "0") === "1"
+    ? reserveClosedProfile(option("reuse-fixture", ""))
+    : undefined;
+const profile = path.join(borrowed?.root ?? root, "profile");
+const scratch = path.join(root, "scratch");
+fs.mkdirSync(scratch, { recursive: true });
 const env = {
   ...process.env,
   CI: "e2e",
   AIM_GALLERY_PERF: "1",
   AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: profile,
   AI_IMAGE_MANAGER_USER_DATA_DIR: profile,
+  TEMP: scratch,
+  TMP: scratch,
 };
 env.ELECTRON_RUN_AS_NODE = undefined;
 const isolation = path.join(root, "isolation.cjs");
 fs.writeFileSync(
   isolation,
-  "const {app}=require('electron');const fs=require('node:fs');const path=require('node:path');for(const [key,part] of Object.entries({appData:'appdata',cache:'cache',userData:'profile',sessionData:'profile',temp:'scratch',logs:'logs',crashDumps:'crashes'})){const p=path.join(__dirname,part);fs.mkdirSync(p,{recursive:true});app.setPath(key,p);}"
+  `const {app}=require('electron');const fs=require('node:fs');const path=require('node:path');for(const [key,part] of Object.entries({appData:'appdata',cache:'cache',userData:'profile',sessionData:'profile',temp:'scratch',logs:'logs',crashDumps:'crashes'})){const p=['userData','sessionData'].includes(key)?${JSON.stringify(profile)}:path.join(__dirname,part);fs.mkdirSync(p,{recursive:true});app.setPath(key,p);}const marker=${JSON.stringify(borrowed?.markerPath ?? "")};if(marker&&process.type==='browser'){const record=exited=>{const m=JSON.parse(fs.readFileSync(marker,'utf8'));m.launchPending=false;m.childPids=exited?m.childPids.filter(pid=>pid!==process.pid):[...new Set([...m.childPids,process.pid])];fs.writeFileSync(marker,JSON.stringify(m));};record(false);process.once('exit',()=>record(true));}`
 );
 let active;
 let bundleHash;
@@ -83,11 +100,177 @@ let sourceDiffHash;
 let sourceTreeHash;
 let packagedInstrumentation;
 let fixtureSource;
+let fixtureRows;
+
+function reserveClosedProfile(requested) {
+  if (!requested || option("subset-fixture", "0") === "1") {
+    throw new Error(
+      "In-place reuse requires a complete closed fixture of the matching size"
+    );
+  }
+  const fixtureRoot = path.resolve(requested);
+  if (
+    path.dirname(fixtureRoot) !== path.resolve(".test-runtime") ||
+    !path.basename(fixtureRoot).startsWith("gallery-benchmark-") ||
+    fs.lstatSync(fixtureRoot).isSymbolicLink()
+  ) {
+    throw new Error("Profile must stay in a managed benchmark fixture");
+  }
+  const markerPath = path.join(fixtureRoot, ".aim-test-runtime.json");
+  const marker = JSON.parse(fs.readFileSync(markerPath, "utf8"));
+  if (
+    marker.owner !== "gallery-benchmark" ||
+    marker.directory !== path.basename(fixtureRoot) ||
+    marker.launchPending ||
+    marker.childPids.length ||
+    processAlive(marker.ownerPid)
+  ) {
+    throw new Error("The benchmark fixture is not closed");
+  }
+  const fixtureProfile = path.join(fixtureRoot, "profile");
+  if (
+    !fs
+      .realpathSync(fixtureProfile)
+      .toLowerCase()
+      .startsWith(`${fs.realpathSync(fixtureRoot).toLowerCase()}${path.sep}`)
+  ) {
+    throw new Error("Borrowed profile escapes fixture");
+  }
+  const wal = path.join(fixtureProfile, "data/ai-image-manager.db-wal");
+  if (fs.existsSync(wal) && fs.statSync(wal).size) {
+    throw new Error("Borrowed profile has an uncheckpointed WAL");
+  }
+  marker.ownerPid = process.pid;
+  marker.keep = true;
+  fs.writeFileSync(markerPath, JSON.stringify(marker));
+  return { root: fixtureRoot, markerPath };
+}
+function processAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return true;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== "ESRCH";
+  }
+}
+function borrowLaunch(pending, childPid) {
+  if (!borrowed) {
+    return;
+  }
+  const marker = JSON.parse(fs.readFileSync(borrowed.markerPath, "utf8"));
+  marker.launchPending = pending;
+  if (childPid) {
+    marker.childPids = marker.childPids.filter((pid) => pid !== childPid);
+  }
+  fs.writeFileSync(borrowed.markerPath, JSON.stringify(marker));
+}
+
+function readFixtureRows() {
+  fixtureRows ??= JSON.parse(
+    execFileSync(
+      electronPath,
+      [
+        "-e",
+        `const D=require(${JSON.stringify(path.resolve("node_modules/better-sqlite3"))});const d=new D(process.argv[1],{readonly:true});try{console.log(JSON.stringify(d.prepare('select id,path from photos where deleted_at is null order by id').all()))}finally{d.close()}`,
+        path.join(profile, "data/ai-image-manager.db"),
+      ],
+      {
+        env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+      }
+    )
+  );
+  return fixtureRows;
+}
+async function prepareExactVariants() {
+  const rows = readFixtureRows();
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: 4 }, async () => {
+      while (next < rows.length) {
+        const photo = rows[next++];
+        const stat = await fs.promises.stat(photo.path);
+        const identity = crypto
+          .createHash("md5")
+          .update(`${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:v1`)
+          .digest("hex");
+        const sourceHash = crypto
+          .createHash("md5")
+          .update(photo.path)
+          .digest("hex");
+        for (const edge of [256, 512, 1024, 2048]) {
+          const target = path.join(
+            profile,
+            "thumbnails",
+            `g-${sourceHash}-${identity}-${edge}.webp`
+          );
+          const cached = fs.statSync(target, { throwIfNoEntry: false });
+          // Repair the deliberately broken six-byte fixtures between scenarios.
+          if (!cached || cached.size < 12) {
+            await sharp(photo.path)
+              .resize(edge, edge, { fit: "inside", withoutEnlargement: true })
+              .webp({ quality: 85, effort: 1 })
+              .toFile(target);
+          }
+        }
+        if (photo.id % 1000 === 0) {
+          console.log(`Prepared exact variants ${photo.id}/${rows.length}`);
+        }
+      }
+    })
+  );
+}
+function applyMissingOrCorruptCache() {
+  if (!["missing", "corrupt"].includes(cache)) {
+    return;
+  }
+  const divisor = cache === "missing" ? 20 : 100;
+  const names = new Set();
+  const prefixes = new Set();
+  for (const photo of readFixtureRows().filter(
+    (item) => item.id % divisor === 0
+  )) {
+    for (const scale of new Set([1, 2, Math.ceil(dpr)])) {
+      names.add(
+        `${crypto.createHash("md5").update(`${photo.path}_md_v4_${scale}`).digest("hex")}.webp`
+      );
+    }
+    prefixes.add(
+      `g-${crypto.createHash("md5").update(photo.path).digest("hex")}-`
+    );
+  }
+  const directory = path.join(profile, "thumbnails");
+  for (const name of fs.readdirSync(directory)) {
+    if (
+      !(
+        MANAGED_PREVIEW.test(name) &&
+        (names.has(name) || prefixes.has(name.slice(0, 35)))
+      )
+    ) {
+      continue;
+    }
+    const file = path.join(directory, name);
+    if (cache === "missing") {
+      fs.unlinkSync(file);
+    } else {
+      fs.writeFileSync(file, "broken");
+    }
+  }
+}
 
 function cloneClosedFixture() {
   const requested = option("reuse-fixture", "");
   if (!requested) {
     return false;
+  }
+  if (borrowed) {
+    fixtureSource = borrowed.root;
+    console.log(`Reused closed profile in place: ${fixtureSource}`);
+    return true;
   }
   const source = path.resolve(requested);
   if (
@@ -114,6 +297,18 @@ function cloneClosedFixture() {
     throw new Error("Fixture database has an uncheckpointed WAL");
   }
   fs.copyFileSync(database, path.join(profile, "data/ai-image-manager.db"));
+  if (option("subset-fixture", "0") === "1") {
+    execFileSync(
+      electronPath,
+      [
+        "-e",
+        `const D=require(${JSON.stringify(path.resolve("node_modules/better-sqlite3"))});const d=new D(process.argv[1]);try{d.pragma('foreign_keys=ON');d.prepare('delete from photos where id > ?').run(Number(process.argv[2]));d.prepare('update folders set photo_count=(select count(*) from photos where folder_id=folders.id)').run()}finally{d.close()}`,
+        path.join(profile, "data/ai-image-manager.db"),
+        String(count),
+      ],
+      { env: { ...env, ELECTRON_RUN_AS_NODE: "1" } }
+    );
+  }
   const thumbnails = path.join(source, "profile/thumbnails");
   fs.cpSync(thumbnails, path.join(profile, "thumbnails"), {
     recursive: true,
@@ -220,6 +415,7 @@ function fingerprintBuild() {
 }
 async function launch() {
   runtime.setLaunchPending();
+  borrowLaunch(true);
   active = await electron.launch({
     executablePath: executable,
     args: [
@@ -232,6 +428,8 @@ async function launch() {
     env,
   });
   runtime.trackProcess(active.process());
+  const childPid = active.process().pid;
+  active.process().once("exit", () => borrowLaunch(false, childPid));
   active
     .process()
     .stderr?.on("data", (data) =>
@@ -252,6 +450,35 @@ async function close() {
     await exited;
   }
 }
+async function seedPreviews(source, data, id, thumbs) {
+  const hash = crypto
+    .createHash("md5")
+    .update(`${source}_md_v4_${Math.ceil(dpr)}`)
+    .digest("hex");
+  const thumbnail = path.join(thumbs, `${hash}.webp`);
+  if (!(cache === "missing" && id % 20 === 0)) {
+    for (const scale of new Set([1, 2, Math.ceil(dpr)])) {
+      const name = crypto
+        .createHash("md5")
+        .update(`${source}_md_v4_${scale}`)
+        .digest("hex");
+      const preview = fixtureEdge
+        ? await sharp(data)
+            .resize(512 * scale, 512 * scale, {
+              fit: "inside",
+              withoutEnlargement: true,
+            })
+            .webp({ quality: 85, effort: 1 })
+            .toBuffer()
+        : data;
+      await fs.promises.writeFile(
+        path.join(thumbs, `${name}.webp`),
+        cache === "corrupt" && id % 100 === 0 ? "broken" : preview
+      );
+    }
+  }
+  return thumbnail;
+}
 async function seed() {
   const fixture = path.join(root, "images");
   const thumbs = path.join(profile, "thumbnails");
@@ -263,8 +490,11 @@ async function seed() {
     Array.from({ length: 4 }, async () => {
       while (next <= count) {
         const id = next++;
-        const w = [256, 384, 512][id % 3];
-        const h = Math.round(w / [0.2, 0.6, 0.8, 1, 1.5, 2.5, 6][id % 7]);
+        const aspect = [0.2, 0.6, 0.8, 1, 1.5, 2.5, 6][id % 7];
+        const w = fixtureEdge
+          ? Math.round(fixtureEdge * Math.min(1, aspect))
+          : [256, 384, 512][id % 3];
+        const h = Math.round(w / aspect);
         const color = ((id * 2_654_435_761) % 4_294_967_296)
           .toString(16)
           .padStart(8, "0")
@@ -274,18 +504,8 @@ async function seed() {
           .webp({ quality: 85, effort: 1 })
           .toBuffer();
         const source = path.join(fixture, `photo-${id}.webp`);
-        const hash = crypto
-          .createHash("md5")
-          .update(`${source}_md_v4_${Math.ceil(dpr)}`)
-          .digest("hex");
-        const thumbnail = path.join(thumbs, `${hash}.webp`);
         await fs.promises.writeFile(source, data);
-        if (!(cache === "missing" && id % 20 === 0)) {
-          await fs.promises.writeFile(
-            thumbnail,
-            cache === "corrupt" && id % 100 === 0 ? "broken" : data
-          );
-        }
+        const thumbnail = await seedPreviews(source, data, id, thumbs);
         rows.push([
           id,
           source,
@@ -314,7 +534,158 @@ async function seed() {
     }
   );
 }
+function resetVariantCache() {
+  if (variantCache === "legacy") {
+    const directory = path.join(profile, "thumbnails");
+    for (const name of fs.readdirSync(directory)) {
+      if (name.startsWith("g-") && MANAGED_PREVIEW.test(name)) {
+        fs.unlinkSync(path.join(directory, name));
+      }
+    }
+  }
+}
+function fixtureCacheDescription() {
+  return {
+    fixtureReuse: borrowed ? "closed-profile-in-place" : "copied-profile",
+    chromiumCacheDefinition:
+      cache === "warm"
+        ? "HTTP cache primed in the same process before navigation"
+        : "HTTP cache cleared before measured navigation; application process restarted; profile preferences and Code Cache may persist",
+  };
+}
+function controlledScrollStep(step, steps) {
+  const position = Math.min(step + 1, 2 * Math.ceil(steps * 0.8) - step - 1);
+  return count <= 1000 && step === steps - 1 ? Math.min(4, position) : position;
+}
+
+async function scrollAndWait(page) {
+  const started = Date.now();
+  const steps = Math.max(2, Math.ceil((seconds * 1000) / 120));
+  let step = 0;
+  while (
+    controlledScroll ? step < steps : Date.now() - started < seconds * 1000
+  ) {
+    await page.locator("[data-masonry-scroll]").evaluate(
+      (element, { progress, pattern, absoluteStep }) => {
+        if (pattern === "deep") {
+          const fraction =
+            progress < 0.8 ? progress / 0.8 : 1 - (progress - 0.8) / 0.2;
+          element.scrollTop =
+            Math.max(0, element.scrollHeight - element.clientHeight) * fraction;
+        } else {
+          const distance = Math.max(600, element.clientHeight * 1.4);
+          if (absoluteStep === null) {
+            element.scrollTop += (progress > 0.8 ? -1 : 1) * distance;
+          } else {
+            window.__galleryFinalScrollTarget = absoluteStep * distance;
+            element.scrollTop = window.__galleryFinalScrollTarget;
+          }
+        }
+        window.__galleryLastScriptedScrollAt = performance.now();
+      },
+      {
+        progress: controlledScroll
+          ? step / (steps - 1)
+          : (Date.now() - started) / (seconds * 1000),
+        pattern,
+        absoluteStep:
+          controlledScroll && pattern === "scroll"
+            ? controlledScrollStep(step, steps)
+            : null,
+      }
+    );
+    step++;
+    await page.waitForTimeout(120);
+  }
+  if (!controlledScroll) {
+    await page.waitForTimeout(180);
+  }
+  await page.waitForFunction(
+    (controlled) => {
+      const surface = document.querySelector("[data-masonry-scroll]");
+      if (
+        !(
+          surface &&
+          window.__galleryPerf &&
+          (controlled || window.__galleryPerf.scrollStop95Ms?.count > 0)
+        )
+      ) {
+        return false;
+      }
+      const bounds = surface.getBoundingClientRect();
+      if (
+        controlled &&
+        Number.isFinite(window.__galleryFinalScrollTarget) &&
+        Math.abs(surface.scrollTop - window.__galleryFinalScrollTarget) > 2
+      ) {
+        surface.scrollTop = window.__galleryFinalScrollTarget;
+        return false;
+      }
+      const cards = [...surface.querySelectorAll("[data-photo-id]")].filter(
+        (card) => {
+          const rect = card.getBoundingClientRect();
+          return (
+            !card.querySelector("[data-photo-id]") &&
+            rect.width > 0 &&
+            rect.bottom > bounds.top &&
+            rect.top < bounds.bottom
+          );
+        }
+      );
+      const ready =
+        cards.length > 0 &&
+        cards.filter((card) => {
+          const image = card.querySelector("img");
+          return (
+            image?.complete &&
+            image.naturalWidth > 0 &&
+            image.dataset.loadState !== "loading"
+          );
+        }).length /
+          cards.length >=
+          0.95;
+      if (!(ready && controlled)) {
+        return ready;
+      }
+      const elapsed = performance.now() - window.__galleryLastScriptedScrollAt;
+      if (!(elapsed >= 150)) {
+        return false;
+      }
+      window.__galleryPerf.scriptedScrollStop95Ms = {
+        count: 1,
+        max: elapsed,
+        total: elapsed,
+        samples: [elapsed],
+      };
+      return true;
+    },
+    controlledScroll,
+    { timeout: 15_000 }
+  );
+  return controlledScroll
+    ? `fixed-${steps}-steps-absolute-final-stop-v2`
+    : "time-budget-v1";
+}
+
+function assertGallerySample(snapshot) {
+  if (
+    !(
+      snapshot.loaded &&
+      snapshot.galleryPerf.frameIntervalMs?.count &&
+      snapshot.galleryPerf[
+        controlledScroll ? "scriptedScrollStop95Ms" : "scrollStop95Ms"
+      ]?.count
+    )
+  ) {
+    throw new Error(
+      "Invalid gallery sample: missing images, frames, or stopped-scroll readiness"
+    );
+  }
+}
+
 async function sample(run) {
+  resetVariantCache();
+  applyMissingOrCorruptCache();
   const diskCacheFilesBefore = fs.readdirSync(
     path.join(profile, "thumbnails")
   ).length;
@@ -326,9 +697,13 @@ async function sample(run) {
     { width, height }
   );
   await page.addInitScript(
-    (anchorId) => {
+    ({ anchorId, gridColumnWidth }) => {
+      sessionStorage.clear();
       localStorage.setItem("lang", "en");
       localStorage.setItem("sidebar_collapsed", "true");
+      localStorage.setItem("grid_column_width", String(gridColumnWidth));
+      localStorage.setItem("grid_sort_field", "date");
+      localStorage.setItem("grid_sort_order", "desc");
       if (anchorId > 0) {
         const timestamp = Date.now();
         sessionStorage.setItem(
@@ -347,7 +722,7 @@ async function sample(run) {
         );
       }
     },
-    view === "home" ? anchor : 0
+    { anchorId: view === "home" ? anchor : 0, gridColumnWidth }
   );
   if (measureEntry) {
     await page.addInitScript((currentView) => {
@@ -386,6 +761,29 @@ async function sample(run) {
   }
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Network.enable");
+  const imageRequests = new Map();
+  const imageTransfers = [];
+  const imageHttpRequests = [];
+  cdp.on("Network.requestWillBeSent", ({ requestId, request }) => {
+    const resource = new URL(request.url);
+    if (resource.pathname === "/photo-thumbnail") {
+      imageHttpRequests.push({
+        id: Number(resource.searchParams.get("id")),
+        edge: Number(resource.searchParams.get("edge")),
+        selection: resource.searchParams.get("select") === "1",
+      });
+      imageRequests.set(requestId, {
+        id: Number(resource.searchParams.get("id")),
+        edge: Number(resource.searchParams.get("edge")),
+      });
+    }
+  });
+  cdp.on("Network.loadingFinished", ({ requestId, encodedDataLength }) => {
+    const item = imageRequests.get(requestId);
+    if (item) {
+      imageTransfers.push({ ...item, bytes: encodedDataLength });
+    }
+  });
   if (cache !== "warm") {
     await cdp.send("Network.clearBrowserCache");
   }
@@ -430,61 +828,7 @@ async function sample(run) {
             BrowserWindow.getAllWindows()[0].webContents.getOSProcessId()
         )?.memory ?? null
   );
-  const started = Date.now();
-  while (Date.now() - started < seconds * 1000) {
-    await page.locator("[data-masonry-scroll]").evaluate(
-      (element, { progress, pattern }) => {
-        if (pattern === "deep") {
-          const fraction =
-            progress < 0.8 ? progress / 0.8 : 1 - (progress - 0.8) / 0.2;
-          element.scrollTop =
-            Math.max(0, element.scrollHeight - element.clientHeight) * fraction;
-        } else {
-          element.scrollTop +=
-            (progress > 0.8 ? -1 : 1) *
-            Math.max(600, element.clientHeight * 1.4);
-        }
-      },
-      { progress: (Date.now() - started) / (seconds * 1000), pattern }
-    );
-    await page.waitForTimeout(120);
-  }
-  await page.waitForTimeout(180);
-  await page.waitForFunction(
-    () => {
-      const surface = document.querySelector("[data-masonry-scroll]");
-      if (!(surface && window.__galleryPerf?.scrollStop95Ms?.count > 0)) {
-        return false;
-      }
-      const bounds = surface.getBoundingClientRect();
-      const cards = [...surface.querySelectorAll("[data-photo-id]")].filter(
-        (card) => {
-          const rect = card.getBoundingClientRect();
-          return (
-            !card.querySelector("[data-photo-id]") &&
-            rect.width > 0 &&
-            rect.bottom > bounds.top &&
-            rect.top < bounds.bottom
-          );
-        }
-      );
-      return (
-        cards.length > 0 &&
-        cards.filter((card) => {
-          const image = card.querySelector("img");
-          return (
-            image?.complete &&
-            image.naturalWidth > 0 &&
-            image.dataset.loadState !== "loading"
-          );
-        }).length /
-          cards.length >=
-          0.95
-      );
-    },
-    undefined,
-    { timeout: 15_000 }
-  );
+  const scrollProtocol = await scrollAndWait(page);
   const memoryAfter = await cdp.send("Runtime.getHeapUsage");
   const processMemoryAfter = await app.evaluate(
     ({ app: host, BrowserWindow }) =>
@@ -497,11 +841,36 @@ async function sample(run) {
         )?.memory ?? null
   );
   const snapshot = await page.evaluate(() => ({
+    scrollPosition: {
+      top: document.querySelector("[data-masonry-scroll]")?.scrollTop,
+      target: window.__galleryFinalScrollTarget,
+    },
     galleryPerf: window.__galleryPerf ?? {},
     viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
     loaded: document.querySelectorAll(
       '[data-photo-id] img[data-load-state="loaded"]'
     ).length,
+    density: [
+      ...document.querySelectorAll("[data-masonry-scroll] [data-photo-id]"),
+    ]
+      .filter((card) => !card.querySelector("[data-photo-id]"))
+      .map((card) => {
+        const rect = card.getBoundingClientRect();
+        const root = card
+          .closest("[data-masonry-scroll]")
+          .getBoundingClientRect();
+        const image = card.querySelector("img");
+        return {
+          id: Number(card.getAttribute("data-photo-id")),
+          width: rect.width,
+          height: rect.height,
+          left: rect.left,
+          visible: rect.bottom > root.top && rect.top < root.bottom,
+          edge: image?.src ? new URL(image.src).searchParams.get("edge") : null,
+          naturalWidth: image?.naturalWidth ?? 0,
+          naturalHeight: image?.naturalHeight ?? 0,
+        };
+      }),
   }));
   const workerUrls = page.workers().map((worker) => worker.url());
   if (
@@ -523,17 +892,7 @@ async function sample(run) {
     JSON.stringify(snapshot, null, 2)
   );
   await page.screenshot({ path: path.join(reportDir, `probe-${run}.png`) });
-  if (
-    !(
-      snapshot.loaded &&
-      snapshot.galleryPerf.frameIntervalMs?.count &&
-      snapshot.galleryPerf.scrollStop95Ms?.count
-    )
-  ) {
-    throw new Error(
-      "Invalid gallery sample: missing images, frames, or stopped-scroll readiness"
-    );
-  }
+  assertGallerySample(snapshot);
   const media = await app.evaluate(() => globalThis.__galleryMediaStats ?? {});
   const actual = JSON.parse(
     execFileSync(
@@ -551,10 +910,27 @@ async function sample(run) {
   }
   const result = {
     ...snapshot,
+    actualColumnCount: new Set(
+      snapshot.density.map((card) => Math.round(card.left * 10) / 10)
+    ).size,
+    visibleCardCount: snapshot.density.filter((card) => card.visible).length,
+    mountedCardCount: snapshot.density.length,
+    visibleDecodedPixels: snapshot.density
+      .filter((card) => card.visible)
+      .reduce(
+        (total, card) => total + card.naturalWidth * card.naturalHeight,
+        0
+      ),
     galleryMediaStats: media,
     scenario: `${label}-${count}-${cache}`,
     run,
     datasetCount: count,
+    gridColumnWidth,
+    fixtureEdge,
+    variantCache,
+    imageTransfers,
+    imageHttpRequests,
+    fixtureRoot: borrowed?.root ?? root,
     sourceCommit,
     sourceDiffHash,
     build: appPath,
@@ -568,6 +944,7 @@ async function sample(run) {
     albumKind,
     pattern,
     durationSeconds: seconds,
+    scrollProtocol,
     anchor: view === "home" ? anchor : 0,
     diskCacheFilesBefore,
     memory: { before: memoryBefore, after: memoryAfter },
@@ -581,6 +958,7 @@ async function sample(run) {
     cachePrime,
     entryDefinition: getEntryDefinition(),
     fixtureSource,
+    ...fixtureCacheDescription(),
     generatedAt: new Date().toISOString(),
     buildKind: getBuildKind(),
     packagedInstrumentation,
@@ -708,6 +1086,9 @@ async function primeBrowserCache(page) {
     return { images: 0, elapsedMs: 0 };
   }
   const started = Date.now();
+  // Apply the requested density and clear the saved anchor before priming;
+  // a reused profile may have been closed at another grid size.
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => typeof window.__e2eNavigate === "function");
   if (view === "album") {
     await page.evaluate(() => window.__e2eNavigate("/albums/1"));
@@ -966,17 +1347,22 @@ async function maybeValidateWindowedNavigation(page, run) {
 }
 try {
   await preparePackagedInspection();
-  await launch();
-  await active.firstWindow();
-  await close();
+  if (!borrowed) {
+    await launch();
+    await active.firstWindow();
+    await close();
+  }
   if (!cloneClosedFixture()) {
     await seed();
+  }
+  if (variantCache === "exact") {
+    await prepareExactVariants();
   }
   execFileSync(
     electronPath,
     [
       "-e",
-      `const D=require(${JSON.stringify(path.resolve("node_modules/better-sqlite3"))});const d=new D(process.argv[1]);try{d.prepare('INSERT OR REPLACE INTO app_settings(key,value,updated_at) VALUES(?,?,?)').run('colors_migrated','true',Date.now());if(process.argv[2]==='smart'){d.prepare('UPDATE albums SET is_smart=1,smart_rules=? WHERE id=1').run(JSON.stringify({rules:[{type:'fileFormat',value:'webp'}]}))}}finally{d.close()}`,
+      `const D=require(${JSON.stringify(path.resolve("node_modules/better-sqlite3"))});const d=new D(process.argv[1]);try{d.prepare('INSERT OR REPLACE INTO app_settings(key,value,updated_at) VALUES(?,?,?)').run('colors_migrated','true',Date.now());const smart=process.argv[2]==='smart';d.prepare('UPDATE albums SET is_smart=?,smart_rules=? WHERE id=1').run(Number(smart),smart?JSON.stringify({rules:[{type:'fileFormat',value:'webp'}]}):null)}finally{d.close()}`,
       path.join(profile, "data/ai-image-manager.db"),
       albumKind,
     ],
@@ -1061,10 +1447,23 @@ try {
     .createHash("sha256")
     .update(JSON.stringify(sourceFiles))
     .digest("hex");
-  fs.writeFileSync(
-    path.join(reportDir, "source-files.json"),
-    JSON.stringify({ sourceRoot, sourceTreeHash, files: sourceFiles }, null, 2)
-  );
+  const frozenManifest = path.join(appPath, "source-files.json");
+  if (fs.existsSync(frozenManifest)) {
+    const frozen = JSON.parse(fs.readFileSync(frozenManifest, "utf8"));
+    sourceTreeHash = frozen.sourceTreeHash;
+    sourceCommit = frozen.sourceCommit;
+    sourceDiffHash = frozen.sourceDiffHash;
+    fs.copyFileSync(frozenManifest, path.join(reportDir, "source-files.json"));
+  } else {
+    fs.writeFileSync(
+      path.join(reportDir, "source-files.json"),
+      JSON.stringify(
+        { sourceRoot, sourceTreeHash, files: sourceFiles },
+        null,
+        2
+      )
+    );
+  }
   for (const currentView of view === "both" ? ["home", "album"] : [view]) {
     view = currentView;
     const viewResults = [];
@@ -1084,6 +1483,9 @@ try {
     JSON.stringify({ count, cache, results }, null, 2)
   );
   runtime.saveDiagnostics(path.join(reportDir, "diagnostics"));
+  if (option("keep-fixture", "0") === "1") {
+    runtime.retain();
+  }
   fs.writeFileSync(
     path.join(reportDir, "cleanup.json"),
     JSON.stringify(runtime.cleanup())

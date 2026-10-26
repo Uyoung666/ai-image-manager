@@ -133,6 +133,7 @@ docs/*
 !docs/plugin-development.en.md
 !docs/gallery-loading.md
 !docs/gallery-validation.md
+!docs/gallery-density-validation.md
 
 # Scripts (test utilities / one-off tools)
 convert-formats.mjs
