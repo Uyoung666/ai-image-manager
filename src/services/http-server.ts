@@ -236,10 +236,12 @@ function setCorsHeaders(res: http.ServerResponse, origin?: string): void {
 }
 
 function isValidAuthToken(candidate: string | undefined): boolean {
-  if (!candidate || candidate.length !== authToken.length) {
+  if (!candidate) {
     return false;
   }
-  return timingSafeEqual(Buffer.from(candidate), Buffer.from(authToken));
+  const actual = Buffer.from(candidate);
+  const expected = Buffer.from(authToken);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 function isAuthorized(
