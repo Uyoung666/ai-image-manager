@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { createElement, StrictMode, useEffect, useRef } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SearchResponse } from "@/types/photo";
 import {
   EMPTY_SEARCH_RESULT_METADATA,
   getSearchResultMetadata,
   getSearchWithoutTime,
+  scheduleSavedSearchRestore,
   shouldRestoreSavedSearch,
 } from "@/utils/search-state";
 
@@ -37,6 +40,141 @@ describe("relaxing search time constraints", () => {
       query: "",
       filters: {},
     });
+  });
+});
+
+describe("saved search restoration scheduling", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("restores a ready session after the initial delay and only once", () => {
+    const restore = vi.fn();
+    scheduleSavedSearchRestore(
+      { completed: false, generation: 0 },
+      { getGeneration: () => 0, isReady: () => true, restore }
+    );
+    vi.advanceTimersByTime(299);
+    expect(restore).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(restore).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(20_000);
+    expect(restore).toHaveBeenCalledOnce();
+  });
+
+  it("waits for AI status and restores at the next polling interval", () => {
+    let ready = false;
+    const restore = vi.fn();
+    scheduleSavedSearchRestore(
+      { completed: false, generation: 0 },
+      { getGeneration: () => 0, isReady: () => ready, restore }
+    );
+    vi.advanceTimersByTime(550);
+    expect(restore).not.toHaveBeenCalled();
+    ready = true;
+    vi.advanceTimersByTime(49);
+    expect(restore).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(restore).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the existing bounded wait when AI status never arrives", () => {
+    const restore = vi.fn();
+    scheduleSavedSearchRestore(
+      { completed: false, generation: 0 },
+      { getGeneration: () => 0, isReady: () => false, restore }
+    );
+    vi.advanceTimersByTime(10_299);
+    expect(restore).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(restore).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    "a new search",
+    "a search preset",
+    "clearing search",
+  ])("discards the saved session after %s advances its generation", () => {
+    let generation = 0;
+    let ready = false;
+    const plan = { completed: false, generation };
+    const restore = vi.fn();
+    const options = {
+      getGeneration: () => generation,
+      isReady: () => ready,
+      restore,
+    };
+    scheduleSavedSearchRestore(plan, options);
+    vi.advanceTimersByTime(300);
+    generation++;
+    ready = true;
+    vi.advanceTimersByTime(100);
+    expect(restore).not.toHaveBeenCalled();
+    expect(plan.completed).toBe(true);
+    scheduleSavedSearchRestore(plan, options);
+    vi.advanceTimersByTime(20_000);
+    expect(restore).not.toHaveBeenCalled();
+  });
+
+  it("does not start a stale session superseded before the initial delay", () => {
+    let generation = 0;
+    const restore = vi.fn();
+    scheduleSavedSearchRestore(
+      { completed: false, generation },
+      { getGeneration: () => generation, isReady: () => true, restore }
+    );
+    generation++;
+    vi.advanceTimersByTime(300);
+    expect(restore).not.toHaveBeenCalled();
+  });
+
+  it("cancels the active polling timer when its component unmounts", () => {
+    let ready = false;
+    const restore = vi.fn();
+    const { unmount } = renderHook(() => {
+      useEffect(
+        () =>
+          scheduleSavedSearchRestore(
+            { completed: false, generation: 0 },
+            { getGeneration: () => 0, isReady: () => ready, restore }
+          ),
+        []
+      );
+    });
+    act(() => vi.advanceTimersByTime(300));
+    unmount();
+    ready = true;
+    vi.advanceTimersByTime(20_000);
+    expect(restore).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("restores the original plan once after StrictMode effect cleanup and replay", () => {
+    const restore = vi.fn();
+    const { result } = renderHook(
+      () => {
+        const plan = useRef({ completed: false, generation: 0 });
+        useEffect(
+          () =>
+            scheduleSavedSearchRestore(plan.current, {
+              getGeneration: () => 0,
+              isReady: () => true,
+              restore,
+            }),
+          []
+        );
+        return plan;
+      },
+      { wrapper: ({ children }) => createElement(StrictMode, null, children) }
+    );
+    expect(result.current.current.completed).toBe(false);
+    act(() => vi.advanceTimersByTime(300));
+    expect(restore).toHaveBeenCalledOnce();
+    expect(result.current.current.completed).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

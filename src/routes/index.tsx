@@ -90,6 +90,8 @@ import {
 } from "@/utils/gallery-view-transition";
 import {
   getSearchWithoutTime,
+  type SavedSearchRestorePlan,
+  scheduleSavedSearchRestore,
   shouldRestoreSavedSearch,
 } from "@/utils/search-state";
 import { notifyStartupHomeReady } from "@/utils/startup-readiness";
@@ -162,8 +164,15 @@ function GalleryRestoreOverlay({
   );
 }
 
-function isSearchMode(value: string | null): value is SearchMode {
-  return SEARCH_MODES.includes(value as SearchMode);
+function resolveSavedSearchMode(
+  value: string | null,
+  query: string,
+  colorHex: string | null
+): SearchMode {
+  return (
+    SEARCH_MODES.find((mode) => mode === value) ??
+    resolveSearchMode(query, colorHex)
+  );
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this route coordinates the existing gallery interactions
@@ -1000,86 +1009,92 @@ function HomePage() {
   // 挂载时如果有保存的搜索，等 AI 模型就绪后自动重新搜索
   const aiStatusRef = useRef(aiStatus);
   aiStatusRef.current = aiStatus;
-  const restoredSearchRef = useRef(false);
+  const savedSearchRestoreRef = useRef<
+    | (SavedSearchRestorePlan & {
+        saved: ReturnType<typeof getBrowseSession>;
+      })
+    | null
+  >(null);
+  const hasSearchDrillParams = Object.values(drillParams).some(
+    (value) => value !== undefined
+  );
   useEffect(() => {
     // 如果 URL 已有钻取参数（如从仪表盘色块点击），跳过恢复：
     // 钻取参数优先于 sessionStorage，否则旧颜色会 setTimeout 覆盖新钻取结果。
-    const hasDrillParams = Object.values(drillParams).some(
-      (v) => v !== undefined
-    );
     if (
       !shouldRestoreSavedSearch({
         drillConsumed: drillConsumed.current,
-        hasDrillParams,
-        restored: restoredSearchRef.current,
+        hasDrillParams: hasSearchDrillParams,
+        restored: savedSearchRestoreRef.current?.completed ?? false,
       })
     ) {
       return;
     }
-    const saved = getBrowseSession("home-search");
-    if (saved.searchMode === "image") {
-      restoredSearchRef.current = true;
-      if (!saved.imageSearchPath) {
-        resetHomeSearchState();
+    if (!savedSearchRestoreRef.current) {
+      const saved = getBrowseSession("home-search");
+      const plan = {
+        completed: false,
+        generation: searchGenerationRef.current,
+        saved,
+      };
+      savedSearchRestoreRef.current = plan;
+      if (saved.searchMode === "image") {
+        if (!saved.imageSearchPath) {
+          plan.completed = true;
+          resetHomeSearchState();
+          return;
+        }
+      } else if (
+        [
+          saved.searchQuery,
+          saved.searchMode === "color",
+          saved.colorHex,
+          ...Object.values(saved.filters),
+        ].some(Boolean)
+      ) {
+        filter.applySearch({
+          colorHex: saved.colorHex ?? undefined,
+          filters: saved.filters,
+          mode: resolveSavedSearchMode(
+            saved.searchMode,
+            saved.searchQuery,
+            saved.colorHex
+          ),
+          query: saved.searchQuery,
+        });
+      } else {
+        plan.completed = true;
         return;
       }
-      const restoredImagePath = saved.imageSearchPath;
-      let attempts = 0;
-      const tryImageSearch = () => {
-        attempts++;
-        if (aiStatusRef.current?.hasVectors !== undefined || attempts > 100) {
-          imageSearchRef.current(restoredImagePath);
-        } else {
-          setTimeout(tryImageSearch, 100);
-        }
-      };
-      setTimeout(tryImageSearch, 300);
-      return;
     }
-    const hasSavedFilters = Object.values(saved.filters).some((value) =>
-      Boolean(value)
-    );
-    if (
-      saved.searchQuery ||
-      saved.searchMode === "color" ||
-      saved.colorHex ||
-      hasSavedFilters
-    ) {
-      restoredSearchRef.current = true;
-      const q = saved.searchQuery;
-      const restoredMode = isSearchMode(saved.searchMode)
-        ? saved.searchMode
-        : resolveSearchMode(q, saved.colorHex);
-      filter.applySearch({
-        colorHex: saved.colorHex ?? undefined,
-        filters: saved.filters,
-        mode: restoredMode,
-        query: q,
-      });
-      // 等 AI 模型就绪后自动触发搜索（轮询检测，最多等 10s）
-      let attempts = 0;
-      const trySearch = () => {
-        attempts++;
-        if (aiStatusRef.current?.hasVectors !== undefined || attempts > 100) {
+    // Keep the original snapshot through StrictMode cleanup/replay. A newer
+    // search or clear advances the generation and permanently discards it.
+    const plan = savedSearchRestoreRef.current;
+    const { saved } = plan;
+    return scheduleSavedSearchRestore(plan, {
+      getGeneration: () => searchGenerationRef.current,
+      isReady: () => aiStatusRef.current?.hasVectors !== undefined,
+      restore: () => {
+        if (saved.searchMode === "image" && saved.imageSearchPath) {
+          imageSearchRef.current(saved.imageSearchPath);
+        } else {
           handleSearch(
-            q,
+            saved.searchQuery,
             saved.filters,
             saved.colorHex ?? undefined,
             saved.dashboardReturn !== null
           );
-        } else {
-          setTimeout(trySearch, 100);
         }
-      };
-      setTimeout(trySearch, 300);
-    }
+      },
+    });
   }, [
     getBrowseSession,
     handleSearch,
-    drillParams,
+    hasSearchDrillParams,
     filter.applySearch,
     resetHomeSearchState,
-  ]); // 仅首次挂载
+    searchGenerationRef,
+  ]);
 
   // 动态 routeKey：区分搜索/筛选/排序状态
   // ⚠️ 所有 filter 字段必须做 ?? fallback，防止卸载期 SidebarFilterContext

@@ -111,3 +111,47 @@ export function shouldRestoreSavedSearch({
 }: SavedSearchRestoreState): boolean {
   return !(drillConsumed || hasDrillParams || restored);
 }
+
+export interface SavedSearchRestorePlan {
+  completed: boolean;
+  generation: number;
+}
+
+/** A newer user search invalidates restoration; effect cleanup only pauses it. */
+export function scheduleSavedSearchRestore(
+  plan: SavedSearchRestorePlan,
+  {
+    getGeneration,
+    isReady,
+    restore,
+  }: {
+    getGeneration: () => number;
+    isReady: () => boolean;
+    restore: () => void;
+  }
+): () => void {
+  let cancelled = false;
+  let attempts = 0;
+  let timer: ReturnType<typeof setTimeout>;
+  const tryRestore = () => {
+    if (cancelled || plan.completed) {
+      return;
+    }
+    if (getGeneration() !== plan.generation) {
+      plan.completed = true;
+      return;
+    }
+    attempts++;
+    if (isReady() || attempts > 100) {
+      plan.completed = true;
+      restore();
+    } else {
+      timer = setTimeout(tryRestore, 100);
+    }
+  };
+  timer = setTimeout(tryRestore, 300);
+  return () => {
+    cancelled = true;
+    clearTimeout(timer);
+  };
+}
