@@ -907,11 +907,14 @@ export const MasonryGrid = memo(
       return reflowScrollTop;
     })();
     // Select the final virtual window before React can unmount retained cards.
-    const effectiveScrollTop =
+    // The old DOM height can still expose a deep offset while React commits a
+    // shorter list. Select its valid window before Chromium clamps scrolling.
+    const effectiveScrollTop = clampScrollTop(
       plannedScrollTop ??
-      (hasInitialPositionedRef.current
-        ? (scrollElement?.scrollTop ?? scrollTop)
-        : initialScrollTop);
+        (hasInitialPositionedRef.current
+          ? (scrollElement?.scrollTop ?? scrollTop)
+          : initialScrollTop)
+    );
 
     useLayoutEffect(() => {
       const prevReturnToPhotoRequest = prevReturnToPhotoRequestRef.current;

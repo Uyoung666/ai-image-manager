@@ -1134,4 +1134,12 @@ describe("masonry reflow continuity", () => {
     ).toBe(true);
     expect(located).toHaveBeenCalledWith(1);
   });
+  it("keeps short replacement items mounted before the browser clamps an old deep scroll offset", () => {
+    const view = render(<MasonryGrid {...props} />);
+    const scroll = requireElement(view.container, "[data-masonry-scroll]");
+    scrollTo(scroll, 30_000);
+    view.rerender(<MasonryGrid {...props} items={photos.slice(0, 3)} />);
+    // React renders before Chromium clamps the now-shorter scroll surface.
+    expect(scroll.querySelectorAll("[data-photo-id]")).toHaveLength(3);
+  });
 });
