@@ -340,6 +340,42 @@ describe("managed test runtime cleanup", () => {
     ).toBe(false);
   });
 
+  it("scans a large flat image directory without spreading all entries into one call", () => {
+    const runtime = createRuntime();
+    const destination = createRuntime();
+    const images = path.join(runtime.root, "images");
+    fs.mkdirSync(images);
+    const originalRead = fs.readdirSync.bind(fs);
+    const originalStat = fs.lstatSync.bind(fs);
+    const names = Array.from(
+      { length: 150_000 },
+      (_, index) => `${index}.webp`
+    );
+    const read = vi
+      .spyOn(fs, "readdirSync")
+      .mockImplementation(((directory: PathLike, options?: never) =>
+        directory === images
+          ? names
+          : originalRead(directory, options)) as typeof fs.readdirSync);
+    const stat = vi.spyOn(fs, "lstatSync").mockImplementation(((
+      file: PathLike
+    ) => {
+      if (String(file).startsWith(`${images}${path.sep}`)) {
+        return { isSymbolicLink: () => false, isDirectory: () => false };
+      }
+      return originalStat(file);
+    }) as typeof fs.lstatSync);
+    const output = path.join(destination.root, "evidence");
+    try {
+      expect(runtime.saveDiagnostics(output)).toEqual([
+        path.join(output, RUNTIME_MARKER),
+      ]);
+    } finally {
+      read.mockRestore();
+      stat.mockRestore();
+    }
+  });
+
   it("keeps the source when saving diagnostics fails", () => {
     const runtime = createRuntime();
     const destination = createRuntime();

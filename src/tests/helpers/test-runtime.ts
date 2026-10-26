@@ -68,9 +68,9 @@ function scanRuntime(root: string, base: string): string[] {
       if (path.basename(entry).toLowerCase() === "temp") {
         throw new Error(`Protected Temp directory: ${entry}`);
       }
-      pending.push(
-        ...fs.readdirSync(entry).map((name) => path.join(entry, name))
-      );
+      for (const name of fs.readdirSync(entry)) {
+        pending.push(path.join(entry, name));
+      }
     } else {
       if (PROTECTED_EXTENSION.test(entry)) {
         throw new Error(`Protected spreadsheet: ${entry}`);
