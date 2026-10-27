@@ -10,6 +10,7 @@ import {
   photoViewStats,
   tags,
 } from "@/db/schema";
+import { invalidateStarterPreferences } from "@/services/search-background";
 import type {
   WanderContentMode,
   WanderPhoto,
@@ -367,6 +368,7 @@ export function recordExposure(
   const db = getDatabase();
   const now = Date.now();
   if (source === "lightbox") {
+    invalidateStarterPreferences();
     db.insert(photoViewStats)
       .values({ photoId, viewCount: 1, lastViewedAt: now })
       .onConflictDoUpdate({

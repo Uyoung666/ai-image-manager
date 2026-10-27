@@ -43,6 +43,10 @@ import {
   type HybridSearchResult,
 } from "@/services/rerank";
 import {
+  beginForegroundSearch,
+  runForegroundSearch,
+} from "@/services/search-background";
+import {
   beginSearchRequest,
   cancelSearchRequest,
   checkSearch,
@@ -259,7 +263,9 @@ export const searchByText = os
   .input(SearchSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
-    const results = await aiSearchByText(input.query, input.limit);
+    const results = await runForegroundSearch(() =>
+      aiSearchByText(input.query, input.limit)
+    );
 
     const photoIds = results.map((r) => r.photoId);
     if (photoIds.length === 0) {
@@ -318,7 +324,9 @@ export const searchByImage = os
 
     let results: Array<{ photoId: number; similarity: number }> = [];
     try {
-      results = await aiSearchByImage(input.imagePath, input.limit);
+      results = await runForegroundSearch(() =>
+        aiSearchByImage(input.imagePath, input.limit)
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[searchByImage] AI search failed:", message);
@@ -1512,6 +1520,7 @@ export const searchCompound = os
     const includeVectors = needsVectorRevision(input);
     const sourceRevision = getSearchDatabaseRevision(db, includeVectors);
     diagnostics.timings.preparationMs = performance.now() - started;
+    const finishForeground = beginForegroundSearch();
     try {
       const response = (await performCompoundSearch(
         input,
@@ -1573,6 +1582,7 @@ export const searchCompound = os
         diagnostics,
       };
     } finally {
+      finishForeground();
       execution.finished = true;
       diagnostics.timings.serviceMs = performance.now() - started;
       request.finish();
