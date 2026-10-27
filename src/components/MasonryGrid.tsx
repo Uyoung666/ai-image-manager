@@ -243,6 +243,7 @@ interface MasonryGridProps {
   onScrollTopChange?: (scrollTop: number) => void;
   overscan?: number;
   photoFocusRequest?: MasonryPhotoFocusRequest | null;
+  preserveAnchorOnItemsChange?: boolean;
   renderItem: (
     item: any,
     index: number,
@@ -293,6 +294,7 @@ export const MasonryGrid = memo(
       returnToPhotoRequest = 0,
       routeKey,
       scrollRestoreRequest,
+      preserveAnchorOnItemsChange = false,
       restoreGateReady = true,
       isPlaceholderData = false,
       topInset = 0,
@@ -771,9 +773,14 @@ export const MasonryGrid = memo(
         columnCount !== prevColumnCountRef.current ||
         gap !== prevGapRef.current ||
         topInset !== prevTopInsetRef.current;
+      const contentChanged =
+        preserveAnchorOnItemsChange &&
+        !isPlaceholderData &&
+        items !== prevItemsRef.current &&
+        positions !== prevPositionsRef.current;
       let reflowScrollTop: number | null = null;
       if (
-        geometryChanged &&
+        (geometryChanged || contentChanged) &&
         containerWidth > 0 &&
         prevContainerWidthRef.current > 0 &&
         (positions !== prevPositionsRef.current ||
@@ -1649,6 +1656,8 @@ export const MasonryGrid = memo(
     prevProps.isLoadingMore === nextProps.isLoadingMore &&
     prevProps.hasMore === nextProps.hasMore &&
     prevProps.isPlaceholderData === nextProps.isPlaceholderData &&
+    prevProps.preserveAnchorOnItemsChange ===
+      nextProps.preserveAnchorOnItemsChange &&
     prevProps.itemStateVersion === nextProps.itemStateVersion &&
     prevProps.selectionActive === nextProps.selectionActive &&
     prevProps.onBackToTop === nextProps.onBackToTop &&

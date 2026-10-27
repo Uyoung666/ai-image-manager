@@ -162,6 +162,7 @@ interface PhotoGridProps {
   onToggleFavorite?: (id: number) => void;
   onToggleSequenceExpand?: (sequenceId: number) => void;
   photos: Photo[];
+  preserveAnchorOnItemsChange?: boolean;
   /** A failed refresh can retain only a previously confirmed gallery. */
   preserveOnSequenceError?: boolean;
   recentlyViewedPhotoId?: number | null;
@@ -1048,6 +1049,7 @@ export const PhotoGrid = memo(
     gridRef,
     routeKey,
     scrollRestoreRequest,
+    preserveAnchorOnItemsChange,
     searchQuery,
     semanticTopSimilarity,
     sort = "date",
@@ -2404,6 +2406,7 @@ export const PhotoGrid = memo(
             onScrollRestored={onScrollRestored}
             onScrollTopChange={handleGridScrollTopChange}
             photoFocusRequest={activePhotoFocusRequest}
+            preserveAnchorOnItemsChange={preserveAnchorOnItemsChange}
             ref={gridRef}
             renderItem={renderItem}
             restoreGateReady={restoreGateReady}
@@ -2605,6 +2608,12 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.scrollRestoreRequest !== nextProps.scrollRestoreRequest) {
+      return false;
+    }
+    if (
+      prevProps.preserveAnchorOnItemsChange !==
+      nextProps.preserveAnchorOnItemsChange
+    ) {
       return false;
     }
     if (prevProps.topInset !== nextProps.topInset) {

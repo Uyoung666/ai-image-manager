@@ -80,5 +80,16 @@ export function getMasonryReflowScrollTop({
       return next.top + nextPaddingTop - viewportOffset;
     }
   }
+  for (let index = previousPositions.length - 1; index >= 0; index--) {
+    const next =
+      positions[idToIndexMap.get(previousItems[index]?.id ?? Number.NaN) ?? -1];
+    if (next) {
+      return (
+        next.top +
+        nextPaddingTop -
+        (previousPositions[index].top + previousPaddingTop - scrollTop)
+      );
+    }
+  }
   return scrollTop;
 }

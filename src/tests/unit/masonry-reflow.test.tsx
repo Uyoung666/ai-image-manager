@@ -244,6 +244,31 @@ afterEach(() => {
 });
 
 describe("masonry reflow continuity", () => {
+  for (const removeAnchor of [false, true]) {
+    it(`preserves a surviving viewport anchor and decoded cards after a tag result changes (remove anchor: ${removeAnchor})`, () => {
+      const { container, rerender } = render(
+        <MasonryGrid {...props} preserveAnchorOnItemsChange />
+      );
+      const scroll = requireElement(container, "[data-masonry-scroll]");
+      scrollTo(scroll, 12_000);
+      const before = capture(scroll);
+      const anchor = before[removeAnchor ? 1 : 0];
+      expect(anchor).toBeDefined();
+      const next = photos.filter(
+        (photo, index) =>
+          index >= 30 && (!removeAnchor || photo.id !== before[0].id)
+      );
+      rerender(
+        <MasonryGrid {...props} items={next} preserveAnchorOnItemsChange />
+      );
+      const retained = requireElement(scroll, `[data-photo-id="${anchor.id}"]`);
+      expect(
+        Math.abs(position(retained).top - scroll.scrollTop - anchor.offset)
+      ).toBeLessThanOrEqual(2);
+      expectRetained(scroll, before);
+    });
+  }
+
   it("mounts an offscreen member tray without scrolling until the joint plan is ready", () => {
     const items = [...photos];
     items.splice(1000, 0, {
