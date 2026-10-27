@@ -10,6 +10,11 @@ import type {
   getTimePresets,
   SearchSuggestion,
 } from "@/components/search-bar-utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { SearchStarterResponse } from "@/types/search-starters";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 import { cn } from "@/utils/tailwind";
@@ -159,24 +164,31 @@ export function SearchSuggestionsPanel({
                 <span className="font-medium text-[12px] text-foreground">
                   {t("searchStarterTitle")}
                 </span>
-                <button
-                  aria-label={t("searchStarterUi.refresh")}
-                  className="flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
-                  data-search-action
-                  disabled={starterStatus === "color" || starterLoading}
-                  onClick={onRefreshStarters}
-                  onMouseDown={(event) => event.preventDefault()}
-                  type="button"
-                >
-                  <RefreshCw
-                    aria-hidden="true"
-                    className={cn(
-                      "h-3 w-3",
-                      starterLoading && "motion-safe:animate-spin"
-                    )}
-                  />
-                  {t("searchStarterUi.refresh")}
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("searchStarterUi.refresh")}
+                      className="flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+                      data-search-action
+                      disabled={starterStatus === "color" || starterLoading}
+                      onClick={onRefreshStarters}
+                      onMouseDown={(event) => event.preventDefault()}
+                      type="button"
+                    >
+                      <RefreshCw
+                        aria-hidden="true"
+                        className={cn(
+                          "h-3 w-3",
+                          starterLoading && "motion-safe:animate-spin"
+                        )}
+                      />
+                      {t("searchStarterUi.refresh")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {t("searchStarterUi.refreshHint")}
+                  </TooltipContent>
+                </Tooltip>
               </div>
               <div className="relative mt-2">
                 <SearchStarterGallery

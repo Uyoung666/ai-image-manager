@@ -845,21 +845,37 @@ describe("SearchBar", () => {
     expect(onSearch).toHaveBeenCalledWith("最后一条历史", undefined);
   });
 
-  it("does not attach redundant tooltips to search history or the labeled refresh action", async () => {
+  it("keeps search history free of redundant tooltips", async () => {
     localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["我的搜索记录"]));
     const user = userEvent.setup();
     render(<ControlledSearchBar />);
     await user.click(screen.getByRole("combobox"));
     const history = screen.getByRole("option", { name: "我的搜索记录" });
-    const refresh = screen.getByRole("button", { name: "换一批" });
-    for (const button of [history, refresh]) {
-      expect(button).not.toHaveAttribute("data-slot", "tooltip-trigger");
-      expect(button).not.toHaveAttribute("title");
-    }
+    expect(history).not.toHaveAttribute("data-slot", "tooltip-trigger");
+    expect(history).not.toHaveAttribute("title");
     act(() => history.focus());
     await user.hover(history);
     await act(() => new Promise((resolve) => setTimeout(resolve, 500)));
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    "hover",
+    "focus",
+  ] as const)("explains refreshing themes on %s", async (interaction) => {
+    const user = userEvent.setup();
+    render(<ControlledSearchBar />);
+    await user.click(screen.getByRole("combobox"));
+    const refresh = screen.getByRole("button", { name: "换一批" });
+    if (interaction === "hover") {
+      await user.hover(refresh);
+    } else {
+      act(() => refresh.focus());
+    }
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "更换推荐主题，内容每天更新"
+    );
+    expect(refresh).not.toHaveAttribute("title");
   });
 
   it("reserves four skeleton slots until personalized recommendations arrive", async () => {

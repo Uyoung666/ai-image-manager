@@ -366,8 +366,14 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
         name: "More ideas",
         exact: true,
       });
-      expect(await refresh.getAttribute("data-slot")).not.toBe(
-        "tooltip-trigger"
+      expect(await refresh.getAttribute("data-slot")).toBe("tooltip-trigger");
+      await refresh.hover();
+      await expect(page.getByRole("tooltip")).toHaveText(
+        "Explore other themes; ideas refresh daily"
+      );
+      await cards.first().hover();
+      await expect(page.getByRole("tooltip")).not.toHaveText(
+        "Explore other themes; ideas refresh daily"
       );
       const seen = new Set(first);
       for (let round = 0; round < 2; round++) {
