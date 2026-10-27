@@ -1,6 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useHomeSequenceQuery } from "@/features/home/use-home-sequence-query";
+import {
+  type PreparedSearchSequences,
+  useHomeSequenceQuery,
+} from "@/features/home/use-home-sequence-query";
 import type { PhotoSequence } from "@/types/photo-sequence";
 
 const mocks = vi.hoisted(() => ({
@@ -50,6 +53,62 @@ function options(folderId = 7) {
 beforeEach(() => mocks.list.mockReset());
 
 describe("home sequence query", () => {
+  it("keeps confirmed ownership on a same-scope refresh failure but clears it on a failed folder change", async () => {
+    mocks.list
+      .mockResolvedValueOnce([sequence([1])])
+      .mockRejectedValueOnce(new Error("same-scope refresh failed"))
+      .mockRejectedValueOnce(new Error("new folder failed"));
+    const { result, rerender } = renderHook(
+      (props) => useHomeSequenceQuery(props),
+      { initialProps: options(7) }
+    );
+    await waitFor(() => expect(result.current.sequenceViewReady).toBe(true));
+    act(() => result.current.setSequenceRefresh((value) => value + 1));
+    await waitFor(() => expect(result.current.sequenceError).toBeTruthy());
+    expect(result.current.sequences[0].matchedPhotoIds).toEqual([1]);
+    expect(result.current.sequenceViewReady).toBe(false);
+    rerender(options(8));
+    await waitFor(() => expect(result.current.sequenceError).toBeTruthy());
+    expect(result.current.sequences).toEqual([]);
+  });
+  it("adopts prepared tag-refresh ownership immediately without another loading phase or request", async () => {
+    mocks.list
+      .mockResolvedValueOnce([sequence([1, 2])])
+      .mockResolvedValueOnce([sequence([3])]);
+    const initial = {
+      ...options(),
+      isSearching: true,
+      searchResultGeneration: 1,
+      searchResultSourceKey: "stable",
+      sequencePhotoIds: [1, 2],
+      preparedSearchSequences: null as PreparedSearchSequences | null,
+    };
+    const { result, rerender } = renderHook(
+      (props) => useHomeSequenceQuery(props),
+      { initialProps: initial }
+    );
+    await waitFor(() => expect(result.current.sequenceViewReady).toBe(true));
+    const refreshed = {
+      ...initial,
+      searchResultGeneration: 2,
+      sequencePhotoIds: [2],
+      preparedSearchSequences: {
+        generation: 2,
+        photoIds: [2],
+        sequences: [sequence([2])],
+      },
+    };
+    rerender(refreshed);
+    expect(result.current.sequenceViewReady).toBe(true);
+    expect(result.current.sequences[0].matchedPhotoIds).toEqual([2]);
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    rerender({ ...refreshed, sequencePhotoIds: [2, 3] });
+    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+    expect(mocks.list).toHaveBeenLastCalledWith({
+      scope: "members",
+      photoIds: [3],
+    });
+  });
   it("discovers sequences across the complete filtered gallery", async () => {
     mocks.list.mockResolvedValue([sequence([1, 2, 3])]);
     const initial = options();

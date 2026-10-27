@@ -215,11 +215,13 @@ function HomePage() {
     searchError,
     searchResultSourceKey,
     searchResultGeneration,
+    preparedSearchSequences,
+    searchRefreshing,
+    refreshSearchAfterTags,
     pendingSemanticRefreshRef,
     searchHasMore,
     searchLoadingMoreRef,
     isFetchingSearchNextPage,
-    lastSearchParamsRef,
     searchLoading,
     imageSearchPreviewDataUrl,
     searchGenerationRef,
@@ -294,6 +296,7 @@ function HomePage() {
     searchResultGeneration,
     searchResultSourceKey,
     sequencePhotoIds,
+    preparedSearchSequences,
   });
   const {
     openSequence,
@@ -385,36 +388,6 @@ function HomePage() {
     filter.clearSearch,
     filter.setSearchDraftFilters,
   ]);
-
-  useEffect(() => {
-    const onTagsChanged = () => {
-      // Text search includes tag evidence. Restart at page one; performSearch
-      // advances the existing generation guard before its first async request.
-      if (
-        searchMode !== null &&
-        searchMode !== "image" &&
-        lastSearchParamsRef.current?.query.trim()
-      ) {
-        handleSearchRetry();
-      }
-      // Only tag-filtered browse queries depend on this mutation. Cancel any
-      // in-flight fetch before refetching so its old membership cannot win.
-      const taggedQueries = {
-        queryKey: ["photos"],
-        predicate: (query: { queryKey: readonly unknown[] }) => {
-          const scope = query.queryKey[1] as
-            | { tagId?: number | null; tagIds?: number[] | null }
-            | undefined;
-          return Boolean(scope?.tagId || scope?.tagIds?.length);
-        },
-      };
-      queryClient.cancelQueries(taggedQueries).then(() => {
-        queryClient.invalidateQueries(taggedQueries);
-      });
-    };
-    window.addEventListener("tags-changed", onTagsChanged);
-    return () => window.removeEventListener("tags-changed", onTagsChanged);
-  }, [handleSearchRetry, searchMode, lastSearchParamsRef]);
 
   useEffect(() => {
     const onPhotosRestored = () => {
@@ -667,6 +640,105 @@ function HomePage() {
     order: sortOrder,
     enabled: !isSearching,
   });
+  const tagBrowseScope = JSON.stringify([
+    isSearching,
+    filter.activeFolderId,
+    filter.activeTagIds,
+    filter.tagMode,
+    filter.favoriteOnly,
+    sortField,
+    sortOrder,
+    sequenceMode,
+  ]);
+  const [tagBrowseRefresh, setTagBrowseRefresh] = useState<{
+    scope: string;
+    pending: boolean;
+  } | null>(null);
+  const tagBrowseChanged = tagBrowseRefresh?.scope === tagBrowseScope;
+  const tagBrowseRefreshing = tagBrowseChanged && tagBrowseRefresh.pending;
+  useEffect(() => {
+    setTagBrowseRefresh((current) =>
+      current?.scope === tagBrowseScope ? current : null
+    );
+  }, [tagBrowseScope]);
+  useEffect(() => {
+    let active = true;
+    let request = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const taggedQueries = {
+      queryKey: ["photos"],
+      predicate: (query: { queryKey: readonly unknown[] }) => {
+        const scope = query.queryKey[1] as
+          | { tagId?: number | null; tagIds?: number[] | null }
+          | undefined;
+        return Boolean(scope?.tagId || scope?.tagIds?.length);
+      },
+    };
+    const refreshBrowse = () => {
+      const generation = ++request;
+      clearTimeout(timer);
+      setTagBrowseRefresh({ scope: tagBrowseScope, pending: true });
+      const cancelled = queryClient.cancelQueries(taggedQueries).then(() =>
+        queryClient.invalidateQueries({
+          ...taggedQueries,
+          refetchType: "none",
+        })
+      );
+      timer = setTimeout(async () => {
+        await cancelled;
+        if (!active || generation !== request) {
+          return;
+        }
+        setSequenceRefresh((value) => value + 1);
+        try {
+          await queryClient.invalidateQueries(taggedQueries, {
+            throwOnError: true,
+          });
+          if (active && generation === request) {
+            setTagBrowseRefresh({ scope: tagBrowseScope, pending: false });
+          }
+        } catch {
+          if (active && generation === request) {
+            toast.error(t("loadFailedRetry"), {
+              action: {
+                label: t("retry"),
+                onClick: () => active && refreshBrowse(),
+              },
+            });
+          }
+        }
+      }, 150);
+    };
+    const onTagsChanged = () => {
+      if (!isSearching && filter.activeTagIds.length > 0) {
+        refreshBrowse();
+      } else {
+        queryClient.cancelQueries(taggedQueries).then(() => {
+          queryClient.invalidateQueries({
+            ...taggedQueries,
+            refetchType: "none",
+          });
+        });
+      }
+      if (isSearching && searchMode !== "image") {
+        refreshSearchAfterTags();
+      }
+    };
+    window.addEventListener("tags-changed", onTagsChanged);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      window.removeEventListener("tags-changed", onTagsChanged);
+    };
+  }, [
+    filter.activeTagIds.length,
+    isSearching,
+    refreshSearchAfterTags,
+    searchMode,
+    setSequenceRefresh,
+    t,
+    tagBrowseScope,
+  ]);
   const {
     data: foldersData,
     error: foldersError,
@@ -1180,8 +1252,10 @@ function HomePage() {
   );
   const gallerySnapshot = useGallerySnapshot({
     contextKey: JSON.stringify([routeKey, sequenceMode, filter.tagMode]),
-    enabled: !(isSearching || photosError || sequenceError),
+    enabled:
+      !isSearching && (tagBrowseChanged || !(photosError || sequenceError)),
     ready:
+      !(tagBrowseRefreshing || photosError || sequenceError) &&
       sequenceViewReady &&
       !photosIsPlaceholder &&
       !photosLoading &&
@@ -1248,7 +1322,8 @@ function HomePage() {
     actionPhotos,
     sequences,
     displayedSequenceMode,
-    sequenceViewReady,
+    sequenceViewReady:
+      sequenceViewReady && !tagBrowseRefreshing && !gallerySnapshot.retaining,
     photosIsPlaceholder,
   });
   const {
@@ -1542,7 +1617,9 @@ function HomePage() {
     selectedIds,
     previewPhotos,
     routeKey,
-    handleKeyboardPhotoSelect
+    handleKeyboardPhotoSelect,
+    true,
+    JSON.stringify([routeKey, filter.tagMode, sequenceMode])
   );
   const dismissPhotoDetail = useCallback(() => {
     if (detailPhoto) {
@@ -1959,6 +2036,9 @@ function HomePage() {
   ]);
 
   const handleEndReached = useCallback(() => {
+    if (tagBrowseRefreshing || searchRefreshing || gallerySnapshot.retaining) {
+      return;
+    }
     if (!isSearching && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
     } else if (
@@ -1972,6 +2052,9 @@ function HomePage() {
       loadMoreSearchResults();
     }
   }, [
+    tagBrowseRefreshing,
+    searchRefreshing,
+    gallerySnapshot.retaining,
     isSearching,
     hasNextPage,
     isFetchingNextPage,
@@ -2502,7 +2585,10 @@ function HomePage() {
                   }
                   gridRef={gridRef}
                   hasMore={
-                    isPhotoPaginationActive && !gallerySnapshot.retaining
+                    isPhotoPaginationActive &&
+                    !gallerySnapshot.retaining &&
+                    !tagBrowseRefreshing &&
+                    !searchRefreshing
                   }
                   inlineDetailPhotoId={
                     compactDetailOverlay ? undefined : (detailPhoto?.id ?? null)
@@ -2553,10 +2639,12 @@ function HomePage() {
                   onToggleFavorite={handleToggleFavorite}
                   onToggleSequenceExpand={handleScopedSequenceExpand}
                   photos={gallerySnapshot.value.photos}
+                  preserveAnchorOnItemsChange
                   preserveOnSequenceError={
-                    isSearching &&
-                    sequenceDataSource?.key !== sequenceQuerySourceKey &&
-                    sequenceViewReady
+                    tagBrowseChanged ||
+                    (isSearching &&
+                      sequenceDataSource?.key !== sequenceQuerySourceKey &&
+                      sequenceViewReady)
                   }
                   recentlyViewedPhotoId={recentlyViewedPhotoId}
                   recentlyViewedPulseActive={recentlyViewedPulseActive}

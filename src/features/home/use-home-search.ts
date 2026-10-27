@@ -3,10 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { imageSearchActions } from "@/actions/image-search";
+import { photoSequenceActions } from "@/actions/photo-sequences";
 import type { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import type { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { usePhotoSearch } from "@/hooks/use-photo-search";
 import type { Photo, SearchResponse } from "@/types/photo";
+import type { PhotoSequence } from "@/types/photo-sequence";
 import type { ExifFilters, SearchMode } from "@/types/search";
 import { createSearchResultSourceKey } from "@/utils/gallery-view-state";
 import {
@@ -14,6 +16,7 @@ import {
   getSearchResultMetadata,
 } from "@/utils/search-state";
 import { buildHomeSearchParams } from "./build-home-search-params";
+import type { PreparedSearchSequences } from "./use-home-sequence-query";
 
 type SearchHandler = (
   query: string,
@@ -21,6 +24,53 @@ type SearchHandler = (
   paramColorHex?: string,
   preserveDashboardReturn?: boolean
 ) => Promise<void>;
+async function reloadSearchPrefix(
+  params: { query: string; filters?: ExifFilters; colorHex?: string },
+  targetCount: number,
+  runSearch: ReturnType<typeof usePhotoSearch>["runSearch"],
+  isCurrent: () => boolean
+) {
+  const results: Photo[] = [];
+  const seen = new Set<number>();
+  let cursor: string | undefined;
+  let offset = 0;
+  let page: SearchResponse;
+  do {
+    page = (await runSearch(
+      buildHomeSearchParams(
+        params.query,
+        params.filters,
+        params.colorHex,
+        cursor ? { cursor } : { offset }
+      )
+    )) as SearchResponse;
+    if (!isCurrent()) {
+      return null;
+    }
+    const previousCount = results.length;
+    for (const photo of page.results ?? []) {
+      if (!seen.has(photo.id)) {
+        seen.add(photo.id);
+        results.push(photo);
+      }
+    }
+    validateRefreshedPage(page, results.length - previousCount);
+    cursor = page.nextCursor ?? undefined;
+    offset = page.nextOffset ?? offset + (page.results?.length ?? 0);
+  } while (page.hasMore && results.length < targetCount);
+  return { results, page, cursor, offset };
+}
+
+function validateRefreshedPage(page: SearchResponse, added: number) {
+  if (page.cursorExpired || page.incompleteReason === "changed") {
+    throw new Error("Tag refresh snapshot changed");
+  }
+  // Frozen search sessions intentionally advance behind one stable cursor.
+  if (page.hasMore && added === 0) {
+    throw new Error("Tag refresh made no progress");
+  }
+}
+
 export function resolveSearchMode(
   query: string,
   color?: string | null
@@ -83,6 +133,23 @@ export function useHomeSearch({
   >(null);
 
   const [searchResultGeneration, setSearchResultGeneration] = useState(0);
+  const [preparedSearchSequences, setPreparedSearchSequences] =
+    useState<PreparedSearchSequences | null>(null);
+  const [searchRefreshing, setSearchRefreshing] = useState(false);
+  const tagRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshAfterTagsRef = useRef<() => void>(() => undefined);
+  const searchResultsRef = useRef(searchResults);
+  searchResultsRef.current = searchResults;
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (tagRefreshTimerRef.current !== null) {
+        clearTimeout(tagRefreshTimerRef.current);
+      }
+    };
+  }, []);
 
   const pendingSemanticRefreshRef = useRef<{
     colorHex?: string;
@@ -146,6 +213,8 @@ export function useHomeSearch({
   const lastImageSearchPathRef = useRef<string | null>(null);
 
   const [searchLoading, setSearchLoading] = useState(false);
+  const searchLoadingRef = useRef(searchLoading);
+  searchLoadingRef.current = searchLoading;
 
   const [imageSearchPreviewDataUrl, setImageSearchPreviewDataUrl] = useState<
     string | null
@@ -156,7 +225,17 @@ export function useHomeSearch({
   const { runSearch: searchPhotos, cancelPending: cancelPendingPhotoSearch } =
     usePhotoSearch();
 
+  const cancelTagRefresh = useCallback(() => {
+    if (tagRefreshTimerRef.current !== null) {
+      clearTimeout(tagRefreshTimerRef.current);
+      tagRefreshTimerRef.current = null;
+    }
+    setSearchRefreshing(false);
+    setPreparedSearchSequences(null);
+  }, []);
+
   const resetHomeSearchState = useCallback(() => {
+    cancelTagRefresh();
     cancelPendingPhotoSearch();
     searchGenerationRef.current += 1;
     pendingSemanticRefreshRef.current = null;
@@ -188,6 +267,7 @@ export function useHomeSearch({
     });
     navigate({ to: "/", search: {}, replace: true });
   }, [
+    cancelTagRefresh,
     cancelPendingPhotoSearch,
     clearDashboardReturnTarget,
     navigate,
@@ -213,6 +293,95 @@ export function useHomeSearch({
     );
   }, [handleSearch]);
 
+  const refreshSearchAfterTags = useCallback(() => {
+    const params = lastSearchParamsRef.current;
+    if (!params?.query.trim()) {
+      return;
+    }
+    if (searchResultsRef.current === null || searchLoadingRef.current) {
+      handleSearchRetry();
+      return;
+    }
+    cancelPendingPhotoSearch();
+    const generation = ++searchGenerationRef.current;
+    if (tagRefreshTimerRef.current !== null) {
+      clearTimeout(tagRefreshTimerRef.current);
+    }
+    const targetCount = searchResultsRef.current.length;
+    searchLoadingMoreRef.current = true;
+    searchNextCursorRef.current = null;
+    pendingSemanticRefreshRef.current = null;
+    setSearchHasMore(false);
+    setIsFetchingSearchNextPage(false);
+    setSearchLoading(false);
+    setSearchRefreshing(true);
+    const isCurrent = () =>
+      mountedRef.current && generation === searchGenerationRef.current;
+    // Rebuild only the loaded prefix, keeping both the old view and its identity
+    // until the new photos and sequence ownership can be committed together.
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: bounded refresh, ownership and retry share one generation guard.
+    tagRefreshTimerRef.current = setTimeout(async () => {
+      tagRefreshTimerRef.current = null;
+      try {
+        const refreshed = await reloadSearchPrefix(
+          params,
+          targetCount,
+          searchPhotos,
+          isCurrent
+        );
+        if (!refreshed) {
+          return;
+        }
+        const { results, page, cursor, offset } = refreshed;
+        const photoIds = results.map((photo) => photo.id);
+        const sequences = photoIds.length
+          ? ((await photoSequenceActions.list({
+              scope: "members",
+              photoIds,
+            })) as PhotoSequence[])
+          : [];
+        if (!isCurrent()) {
+          return;
+        }
+        setPreparedSearchSequences({ generation, photoIds, sequences });
+        setSearchResults(results);
+        setSearchResultGeneration(generation);
+        setSearchMetadata(getSearchResultMetadata(page, params.query));
+        setSearchError(null);
+        searchNextCursorRef.current = cursor ?? null;
+        searchNextOffsetRef.current = offset;
+        setSearchHasMore(Boolean(page.hasMore));
+        const semantic = page.semantic;
+        if (
+          semantic &&
+          semantic.required !== false &&
+          (semantic.state === "partial" || semantic.state === "unavailable")
+        ) {
+          pendingSemanticRefreshRef.current = { ...params, generation };
+        }
+      } catch {
+        if (isCurrent()) {
+          toast.error(t("loadFailedRetry"), {
+            action: {
+              label: t("retry"),
+              onClick: () => {
+                if (lastSearchParamsRef.current === params) {
+                  refreshAfterTagsRef.current();
+                }
+              },
+            },
+          });
+        }
+      } finally {
+        if (isCurrent()) {
+          searchLoadingMoreRef.current = false;
+          setSearchRefreshing(false);
+        }
+      }
+    }, 150);
+  }, [cancelPendingPhotoSearch, handleSearchRetry, searchPhotos, t]);
+  refreshAfterTagsRef.current = refreshSearchAfterTags;
+
   const handleImageSearchRetry = useCallback(() => {
     const imagePath = lastImageSearchPathRef.current;
     if (imagePath) {
@@ -227,6 +396,7 @@ export function useHomeSearch({
     paramColorHex?: string,
     preserveDashboardReturn = false
   ) {
+    cancelTagRefresh();
     if (!preserveDashboardReturn) {
       clearDashboardReturnTarget();
       setDrillDownFilters(undefined);
@@ -371,6 +541,7 @@ export function useHomeSearch({
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: image search coordinates preview, source validation, and generation-safe result states
   async function handleImageSearch(imagePath: string) {
+    cancelTagRefresh();
     cancelPendingPhotoSearch();
     const gen = ++searchGenerationRef.current;
     setSearchMetadata(EMPTY_SEARCH_RESULT_METADATA);
@@ -474,7 +645,7 @@ export function useHomeSearch({
     // Search pages are relevance-bounded, not capped by the UI. Continue
     // until the backend reports that the semantic tail is exhausted.
     const p = lastSearchParamsRef.current;
-    if (!p) {
+    if (!p || searchLoadingMoreRef.current) {
       return;
     }
     searchLoadingMoreRef.current = true;
@@ -562,6 +733,9 @@ export function useHomeSearch({
     searchError,
     searchResultSourceKey,
     searchResultGeneration,
+    preparedSearchSequences,
+    searchRefreshing,
+    refreshSearchAfterTags,
     pendingSemanticRefreshRef,
     searchHasMore,
     searchLoadingMoreRef,

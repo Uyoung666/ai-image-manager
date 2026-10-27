@@ -9,9 +9,15 @@ const mocks = vi.hoisted(() => ({
   getPreview: vi.fn(),
   imageSearch: vi.fn(),
   runSearch: vi.fn(),
+  listSequences: vi.fn(),
+  error: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-photo-search", () => ({ usePhotoSearch: () => mocks }));
+vi.mock("@/actions/photo-sequences", () => ({
+  photoSequenceActions: { list: mocks.listSequences },
+}));
+vi.mock("sonner", () => ({ toast: { info: vi.fn(), error: mocks.error } }));
 vi.mock("@/actions/image-search", () => ({
   imageSearchActions: {
     getPreview: mocks.getPreview,
@@ -63,6 +69,7 @@ function setup() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.runSearch.mockReset();
+  mocks.listSequences.mockReset().mockResolvedValue([]);
   mocks.imageSearch.mockReset();
   mocks.getPreview.mockReset().mockResolvedValue({
     dataUrl: "data:image/png;base64,preview",
@@ -71,6 +78,163 @@ beforeEach(() => {
 });
 
 describe("home search orchestration", () => {
+  it("refreshes multiple loaded pages using the frozen session's stable cursor", async () => {
+    mocks.runSearch
+      .mockResolvedValueOnce(response(1, { hasMore: true, nextCursor: "old" }))
+      .mockResolvedValueOnce(response(2, { hasMore: true, nextCursor: "old" }))
+      .mockResolvedValueOnce(response(3, { hasMore: true, nextCursor: "old" }));
+    const { result } = setup();
+    await act(() => result.current.handleSearch("photo"));
+    act(() => result.current.loadMoreSearchResults());
+    await waitFor(() => expect(result.current.searchResults).toHaveLength(2));
+    act(() => result.current.loadMoreSearchResults());
+    await waitFor(() => expect(result.current.searchResults).toHaveLength(3));
+    mocks.runSearch
+      .mockResolvedValueOnce(
+        response(1, { hasMore: true, nextCursor: "fresh" })
+      )
+      .mockResolvedValueOnce(
+        response(4, { hasMore: true, nextCursor: "fresh" })
+      )
+      .mockResolvedValueOnce(
+        response(5, { hasMore: true, nextCursor: "fresh" })
+      );
+    act(() => result.current.refreshSearchAfterTags());
+    await waitFor(() =>
+      expect(result.current.searchResults?.map((photo) => photo.id)).toEqual([
+        1, 4, 5,
+      ])
+    );
+    expect(mocks.error).not.toHaveBeenCalled();
+    expect(
+      mocks.runSearch.mock.calls.slice(3).map(([input]) => input.cursor ?? null)
+    ).toEqual([null, "fresh", "fresh"]);
+  });
+
+  it("coalesces tag edits, rebuilds the loaded prefix and commits only after sequence ownership is ready", async () => {
+    mocks.runSearch
+      .mockResolvedValueOnce(
+        response(1, { hasMore: true, nextCursor: "old-2" })
+      )
+      .mockResolvedValueOnce(
+        response(2, { hasMore: true, nextCursor: "old-3" })
+      )
+      .mockResolvedValueOnce(
+        response(3, { hasMore: true, nextCursor: "old-4" })
+      );
+    const { result, options } = setup();
+    await act(() => result.current.handleSearch("photo"));
+    act(() => result.current.loadMoreSearchResults());
+    await waitFor(() => expect(result.current.searchResults).toHaveLength(2));
+    act(() => result.current.loadMoreSearchResults());
+    await waitFor(() => expect(result.current.searchResults).toHaveLength(3));
+    const key = result.current.searchResultSourceKey;
+    const sequences = deferred<never[]>();
+    mocks.listSequences.mockReturnValueOnce(sequences.promise);
+    mocks.runSearch
+      .mockResolvedValueOnce(
+        response(1, { hasMore: true, nextCursor: "fresh-2" })
+      )
+      .mockResolvedValueOnce(
+        response(3, { hasMore: true, nextCursor: "fresh-3" })
+      )
+      .mockResolvedValueOnce(
+        response(4, { hasMore: true, nextCursor: "fresh-4" })
+      );
+    act(() => {
+      result.current.refreshSearchAfterTags();
+      result.current.refreshSearchAfterTags();
+      result.current.loadMoreSearchResults();
+    });
+    expect(mocks.runSearch).toHaveBeenCalledTimes(3);
+    expect(result.current.searchLoading).toBe(false);
+    expect(result.current.searchRefreshing).toBe(true);
+    await waitFor(() =>
+      expect(mocks.listSequences).toHaveBeenCalledWith({
+        scope: "members",
+        photoIds: [1, 3, 4],
+      })
+    );
+    expect(result.current.searchResults?.map((photo) => photo.id)).toEqual([
+      1, 2, 3,
+    ]);
+    expect(result.current.searchResultSourceKey).toBe(key);
+    await act(async () => {
+      sequences.resolve([]);
+      await sequences.promise;
+    });
+    expect(result.current.searchResults?.map((photo) => photo.id)).toEqual([
+      1, 3, 4,
+    ]);
+    expect(result.current.searchResultSourceKey).toBe(key);
+    expect(result.current.searchRefreshing).toBe(false);
+    expect(options.filter.applySearch).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.runSearch.mock.calls.slice(3).map(([input]) => input.cursor ?? null)
+    ).toEqual([null, "fresh-2", "fresh-3"]);
+    mocks.runSearch.mockResolvedValueOnce(response(5));
+    act(() => result.current.loadMoreSearchResults());
+    await waitFor(() => expect(result.current.searchResults).toHaveLength(4));
+    expect(mocks.runSearch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cursor: "fresh-4" })
+    );
+  });
+
+  it("discards a delayed tag refresh when the user starts another search", async () => {
+    const old = deferred<SearchResponse>();
+    mocks.runSearch
+      .mockResolvedValueOnce(response(1))
+      .mockReturnValueOnce(old.promise);
+    const { result } = setup();
+    await act(() => result.current.handleSearch("old"));
+    act(() => result.current.refreshSearchAfterTags());
+    await waitFor(() => expect(mocks.runSearch).toHaveBeenCalledTimes(2));
+    mocks.runSearch.mockResolvedValueOnce(response(9));
+    await act(() => result.current.handleSearch("new"));
+    const key = result.current.searchResultSourceKey;
+    await act(async () => {
+      old.resolve(response(2));
+      await old.promise;
+    });
+    expect(result.current.searchResults?.map((photo) => photo.id)).toEqual([9]);
+    expect(result.current.searchResultSourceKey).toBe(key);
+    expect(mocks.listSequences).not.toHaveBeenCalled();
+  });
+
+  it("keeps committed results and blocks stale pagination after a failed refresh, then retries", async () => {
+    mocks.runSearch
+      .mockResolvedValueOnce(
+        response(1, { hasMore: true, nextCursor: "stale" })
+      )
+      .mockRejectedValueOnce(new Error("offline"));
+    const { result } = setup();
+    await act(() => result.current.handleSearch("photo"));
+    const key = result.current.searchResultSourceKey;
+    act(() => result.current.refreshSearchAfterTags());
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledOnce());
+    expect(result.current.searchResults?.map((photo) => photo.id)).toEqual([1]);
+    expect(result.current.searchResultSourceKey).toBe(key);
+    expect(result.current.searchHasMore).toBe(false);
+    mocks.runSearch.mockResolvedValueOnce(response(2));
+    act(() => mocks.error.mock.calls[0][1].action.onClick());
+    await waitFor(() => expect(result.current.searchResults?.[0]?.id).toBe(2));
+    expect(result.current.searchResultSourceKey).toBe(key);
+  });
+
+  it("commits an empty refreshed result without changing its display identity", async () => {
+    mocks.runSearch
+      .mockResolvedValueOnce(response(1))
+      .mockResolvedValueOnce(response(0, { results: [], total: 0 }));
+    const { result } = setup();
+    await act(() => result.current.handleSearch("photo"));
+    const key = result.current.searchResultSourceKey;
+    act(() => result.current.refreshSearchAfterTags());
+    await waitFor(() => expect(result.current.searchResults).toEqual([]));
+    expect(result.current.searchResultSourceKey).toBe(key);
+    expect(result.current.searchExactTotal).toBe(0);
+    expect(result.current.preparedSearchSequences?.sequences).toEqual([]);
+  });
+
   it("keeps the latest generation when an older identical query finishes last", async () => {
     const first = deferred<SearchResponse>();
     const second = deferred<SearchResponse>();

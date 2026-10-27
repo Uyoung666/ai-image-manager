@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { photoSequenceActions } from "@/actions/photo-sequences";
 import type { useSidebarFilter } from "@/contexts/SidebarFilterContext";
@@ -14,12 +14,18 @@ interface SequenceDataSource {
   refresh: number;
   searchGeneration: number | null;
 }
+export interface PreparedSearchSequences {
+  generation: number;
+  photoIds: number[];
+  sequences: PhotoSequence[];
+}
 interface Options {
   filter: Pick<
     ReturnType<typeof useSidebarFilter>,
     "activeFolderId" | "activeTagIds" | "favoriteOnly" | "tagMode"
   >;
   isSearching: boolean;
+  preparedSearchSequences?: PreparedSearchSequences | null;
   searchResultGeneration: number;
   searchResultSourceKey: string | null;
   sequencePhotoIds: number[];
@@ -31,19 +37,23 @@ export function useHomeSequenceQuery({
   searchResultGeneration,
   searchResultSourceKey,
   sequencePhotoIds,
+  preparedSearchSequences,
 }: Options) {
   const { t } = useTranslation();
 
-  const [sequenceDataSource, setSequenceDataSource] =
+  const [storedDataSource, setSequenceDataSource] =
     useState<SequenceDataSource | null>(null);
 
-  const sequenceDataSourceRef = useRef(sequenceDataSource);
-
-  sequenceDataSourceRef.current = sequenceDataSource;
+  const sequenceDataSourceRef = useRef(storedDataSource);
+  const appliedPreparedRef = useRef<{
+    prepared: PreparedSearchSequences;
+    key: string;
+    retry: number;
+  } | null>(null);
 
   const [sequenceRetry, setSequenceRetry] = useState(0);
 
-  const [sequences, setSequences] = useState<PhotoSequence[]>([]);
+  const [storedSequences, setSequences] = useState<PhotoSequence[]>([]);
 
   const [sequenceError, setSequenceError] = useState<string | null>(null);
 
@@ -58,6 +68,41 @@ export function useHomeSequenceQuery({
   const sequenceQuerySourceKey = isSearching
     ? `${sequenceScopeKey}:sequence:${sequenceRefresh}:${sequencePhotoIds.join(",")}`
     : `${sequenceScopeKey}:sequence:${sequenceRefresh}`;
+
+  const prepared =
+    isSearching &&
+    preparedSearchSequences &&
+    preparedSearchSequences.generation === searchResultGeneration &&
+    appliedPreparedRef.current?.prepared !== preparedSearchSequences &&
+    preparedSearchSequences.photoIds.length === sequencePhotoIds.length &&
+    preparedSearchSequences.photoIds.every(
+      (id, index) => sequencePhotoIds[index] === id
+    )
+      ? preparedSearchSequences
+      : null;
+  const sequenceDataSource = prepared
+    ? {
+        key: sequenceQuerySourceKey,
+        photoIds: sequencePhotoIds,
+        refresh: sequenceRefresh,
+        searchGeneration: searchResultGeneration,
+      }
+    : storedDataSource;
+  const sequences = prepared?.sequences ?? storedSequences;
+  sequenceDataSourceRef.current = sequenceDataSource;
+
+  useLayoutEffect(() => {
+    if (prepared && sequenceDataSource) {
+      appliedPreparedRef.current = {
+        prepared,
+        key: sequenceQuerySourceKey,
+        retry: sequenceRetry,
+      };
+      setSequences(prepared.sequences);
+      setSequenceDataSource(sequenceDataSource);
+      setSequenceError(null);
+    }
+  }, [prepared, sequenceDataSource, sequenceQuerySourceKey, sequenceRetry]);
 
   const sequenceViewReady = useMemo(() => {
     if (!sequenceDataSource) {
@@ -82,9 +127,18 @@ export function useHomeSequenceQuery({
     sequenceRefresh,
   ]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sequenceRetry intentionally reissues a failed request without discarding confirmed data.
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: initial resolution, prepared refreshes and incremental appends share one cancellation boundary.
   useEffect(() => {
     let cancelled = false;
+    const applied = appliedPreparedRef.current;
+    if (
+      preparedSearchSequences &&
+      applied?.prepared === preparedSearchSequences &&
+      applied.key === sequenceQuerySourceKey &&
+      applied.retry === sequenceRetry
+    ) {
+      return;
+    }
     setSequenceError(null);
     // In browse mode, sequence cards must be resolved against the full filtered
     // gallery rather than just the loaded photo page. Otherwise a page made up
@@ -93,6 +147,9 @@ export function useHomeSequenceQuery({
     const useGalleryScope = !isSearching;
     const searchKey = isSearching ? String(searchResultGeneration) : "";
     const completedSource = sequenceDataSourceRef.current;
+    const preserveCommitted = completedSource?.key.startsWith(
+      `${sequenceScopeKey}:sequence:`
+    );
     const previousIds = completedSource?.photoIds ?? [];
     const refreshUnchanged = completedSource?.refresh === sequenceRefresh;
     const appendedPhotoIds = getStableSearchAppendIds({
@@ -182,14 +239,14 @@ export function useHomeSequenceQuery({
         if (cancelled) {
           return;
         }
-        if (!isSearchAppend) {
+        if (!(isSearchAppend || preserveCommitted)) {
           setSequences([]);
           if (useGalleryScope) {
             setGallerySequenceCount(0);
           }
         }
         setSequenceError(t("loadFailedRetry"));
-        if (!isSearchAppend) {
+        if (!(isSearchAppend || preserveCommitted)) {
           setSequenceDataSource({
             key: sequenceQuerySourceKey,
             photoIds: [],
@@ -207,9 +264,11 @@ export function useHomeSequenceQuery({
     filter.favoriteOnly,
     filter.tagMode,
     isSearching,
+    preparedSearchSequences,
     searchResultGeneration,
     sequencePhotoIds,
     sequenceQuerySourceKey,
+    sequenceScopeKey,
     sequenceRefresh,
     sequenceRetry,
     t,
