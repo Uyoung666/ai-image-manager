@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { expect } from "@playwright/test";
 import sharp from "sharp";
+import { waitForHomeWindow } from "./helpers/home-window";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
 const electron = createRequire(import.meta.url)("electron") as string;
@@ -54,7 +55,7 @@ test("search partial results, request timing, stale queries and responsive windo
       env,
     });
   let app = await launch();
-  await (await app.firstWindow()).locator("input.home-search-input").waitFor();
+  await waitForHomeWindow(app);
   await app.close();
   const fixture = path.join(root, "fixture");
   fs.mkdirSync(fixture);
@@ -97,7 +98,7 @@ test("search partial results, request timing, stale queries and responsive windo
   );
   app = await launch();
   try {
-    const page = await app.firstWindow();
+    const page = await waitForHomeWindow(app);
     await page.locator("input.home-search-input").waitFor();
     await page.addInitScript(() => {
       localStorage.setItem("lang", "en");

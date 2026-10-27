@@ -1372,14 +1372,9 @@
   "applyFilters": "フィルターを適用",
   "searchSuggestions": "検索候補",
   "recentSearches": "最近の検索",
-  "searchStarterTitle": "このように検索してみてください",
-  "searchStarterDescription": "被写体、シーン、または撮影時期を説明してください",
+  "searchStarterTitle": "ライブラリを探索",
   "searchStarterWildcardHint": "ファイル名とワイルドカードも使用できます（例：*.jpg、DSC_*）",
   "searchStarterAiUnavailable": "セマンティック検索の例を使う前に AI インデックス作成を完了してください",
-  "searchExampleAutumnLeaves": "秋の紅葉",
-  "searchExampleSeasideSunset": "海辺の夕焼け",
-  "searchExampleCuteCat": "かわいい猫",
-  "searchExampleNightCity": "夜の街路",
   "selectedPhotos": "{{count}} 枚を選択中",
   "moreActions": "その他",
   "favorite": "お気に入り",
@@ -2187,5 +2182,28 @@
   "searchLoadPresets": "検索プリセット ({{count}})",
   "searchPresetsEmpty": "プリセットはありません。キーワードや条件を入力して検索を保存できます。",
   "searchPresetSaveFailed": "検索プリセットを保存できませんでした。ローカルストレージを確認してください。",
-  "albumAlreadyContainsPhotos": "選択した写真はすでに「{{album}}」にあります。重複して追加しませんでした。"
+  "albumAlreadyContainsPhotos": "選択した写真はすでに「{{album}}」にあります。重複して追加しませんでした。",
+  "searchStarterUi": {
+    "month": "撮影月から探索",
+    "byTag": "タグから探索",
+    "emptyLibrary": "ライブラリに写真がありません。写真フォルダーを追加すると探索できます。",
+    "emptyScope": "現在の検索条件に一致する写真がありません。絞り込み条件を解除してみてください。",
+    "unavailable": "現在、候補を表示できません。後で別の候補を試すか、検索語を入力してください。",
+    "clearFilters": "絞り込み条件を解除",
+    "quickTime": "日付で絞り込み",
+    "personalized": "ライブラリと利用傾向に基づく検索のヒント",
+    "refresh": "別の候補",
+    "refreshHint": "別のテーマを表示します。候補は毎日更新されます",
+    "empty": "現在の範囲には確かな候補がありません。探したい写真の内容を入力してください。",
+    "failed": "候補を読み込めませんでした。「別の候補」から再試行できます。",
+    "busy": "検索またはインデックス作成を優先しています。しばらくしてから「別の候補」をお試しください。",
+    "colorMode": "色検索では現在の色の条件を使用します。色を解除すると意味に基づく候補を表示できます。",
+    "source": {
+      "library": "ライブラリから",
+      "interest": "興味に合いそうなテーマ",
+      "rediscovery": "昔の写真を再発見"
+    },
+    "person": "人物",
+    "tag": "タグ"
+  }
 }

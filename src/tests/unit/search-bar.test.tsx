@@ -9,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { type ComponentProps, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchBar } from "@/components/SearchBar";
+import { clearSearchStarterCache } from "@/features/search-bar/use-search-starters";
 import { ipc } from "@/ipc/manager";
 import type { ExifFilters } from "@/types/search";
 
@@ -27,6 +28,8 @@ vi.mock("@/ipc/manager", () => ({
     client: {
       faces: { listFaceIdentities: vi.fn().mockResolvedValue([]) },
       photos: {
+        getSearchStarters: vi.fn(),
+        getSearchStarterFallbacks: vi.fn(),
         getExifCandidates: vi.fn().mockResolvedValue({}),
         getTags: vi
           .fn()
@@ -100,7 +103,36 @@ describe("SearchBar", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    clearSearchStarterCache();
     vi.clearAllMocks();
+    vi.mocked(ipc.client.photos.getSearchStarterFallbacks)
+      .mockReset()
+      .mockResolvedValue({
+        candidates: [],
+        day: "2026-10-27",
+        revision: "fixture",
+        validity: "fixture",
+        status: "empty",
+      });
+    vi.mocked(ipc.client.photos.getSearchStarters)
+      .mockReset()
+      .mockResolvedValue({
+        status: "ready",
+        revision: "fixture",
+        validity: "fixture",
+        day: "2026-10-27",
+        candidates: [
+          "去年秋天的红叶",
+          "海边的日落",
+          "可爱的猫咪",
+          "夜晚的城市街道",
+        ].map((text) => ({
+          key: text,
+          text,
+          topics: [text],
+          source: "library",
+        })),
+      });
     vi.mocked(ipc.client.photos.getTags)
       .mockReset()
       .mockResolvedValue([
@@ -628,10 +660,87 @@ describe("SearchBar", () => {
     await user.click(screen.getByRole("combobox"));
 
     expect(screen.getByRole("button", { name: "today" })).toBeInTheDocument();
-    expect(screen.getByText("试试这样搜索")).toBeInTheDocument();
+    expect(screen.getByText("探索你的图库")).toBeInTheDocument();
     expect(screen.getByText("去年秋天的红叶")).toBeInTheDocument();
     expect(screen.getByText("海边的日落")).toBeInTheDocument();
     expect(screen.queryByText("最近搜索")).not.toBeInTheDocument();
+  });
+
+  it("executes a trusted tag card without a model and preserves the current filters", async () => {
+    vi.mocked(ipc.client.photos.getSearchStarterFallbacks).mockResolvedValue({
+      status: "ready",
+      revision: "metadata",
+      validity: "fixture",
+      day: "2026-10-27",
+      candidates: [
+        {
+          kind: "tag",
+          key: "tag:1",
+          text: "海滩",
+          query: '"海滩"',
+          topics: ["海滩"],
+          source: "library",
+          previewPhotoIds: [1],
+        },
+      ],
+    });
+    const onSearch = vi.fn();
+    const onTagSelect = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ControlledSearchBar
+        aiStatus={null}
+        initialFilters={{ cameraModel: "Canon" }}
+        onSearch={onSearch}
+        onTagSelect={onTagSelect}
+      />
+    );
+    await user.click(screen.getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: "海滩" }));
+    expect(onSearch).toHaveBeenCalledWith('"海滩"', { cameraModel: "Canon" });
+    expect(onTagSelect).not.toHaveBeenCalled();
+    expect(ipc.client.photos.getSearchStarters).not.toHaveBeenCalled();
+  });
+
+  it("executes a month card as a date-filter search instead of searching its display title", async () => {
+    vi.mocked(ipc.client.photos.getSearchStarterFallbacks).mockResolvedValue({
+      status: "ready",
+      revision: "metadata",
+      validity: "fixture",
+      day: "2026-10-27",
+      candidates: [
+        {
+          kind: "month",
+          key: "month:2023-02",
+          text: "2023年2月",
+          query: "",
+          filters: { dateFrom: "2023-02-10", dateTo: "2023-02-20" },
+          topics: ["month:2023-02"],
+          source: "library",
+        },
+      ],
+    });
+    const onSearch = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ControlledSearchBar
+        aiStatus={null}
+        initialFilters={{
+          cameraModel: "Canon",
+          dateFrom: "2023-02-10",
+          dateTo: "2023-02-20",
+        }}
+        onSearch={onSearch}
+      />
+    );
+    await user.click(screen.getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: "2023年2月" }));
+    expect(onSearch).toHaveBeenCalledWith("", {
+      cameraModel: "Canon",
+      dateFrom: "2023-02-10",
+      dateTo: "2023-02-20",
+    });
+    expect(localStorage.getItem(SEARCH_HISTORY_KEY)).toBeNull();
   });
 
   it("runs an example search and stores it in recent history", async () => {
@@ -646,7 +755,7 @@ describe("SearchBar", () => {
     expect(
       JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || "[]")
     ).toContain("海边的日落");
-    expect(screen.queryByText("试试这样搜索")).not.toBeInTheDocument();
+    expect(screen.queryByText("探索你的图库")).not.toBeInTheDocument();
   });
 
   it("shows recent history below examples and clearing it keeps examples open", async () => {
@@ -664,7 +773,7 @@ describe("SearchBar", () => {
     await user.click(screen.getByRole("button", { name: "清除全部" }));
 
     expect(screen.queryByText("最近搜索")).not.toBeInTheDocument();
-    expect(screen.getByText("试试这样搜索")).toBeInTheDocument();
+    expect(screen.getByText("探索你的图库")).toBeInTheDocument();
     expect(screen.getByText("去年秋天的红叶")).toBeInTheDocument();
   });
 
@@ -677,12 +786,12 @@ describe("SearchBar", () => {
     await user.click(input);
     await user.type(input, "海边旅");
 
-    expect(screen.queryByText("试试这样搜索")).not.toBeInTheDocument();
+    expect(screen.queryByText("探索你的图库")).not.toBeInTheDocument();
     expect(screen.getByText("搜索建议")).toBeInTheDocument();
     expect(screen.getByText("海边旅行")).toBeInTheDocument();
 
     await user.clear(input);
-    expect(screen.getByText("试试这样搜索")).toBeInTheDocument();
+    expect(screen.getByText("探索你的图库")).toBeInTheDocument();
   });
 
   it("supports keyboard selection for starter examples", async () => {
@@ -691,9 +800,210 @@ describe("SearchBar", () => {
     render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);
 
     await user.click(screen.getByRole("combobox"));
-    await user.keyboard("{ArrowDown}{Enter}");
+    await user.keyboard("{ArrowDown}");
+    expect(
+      screen.getByRole("option", { name: "去年秋天的红叶" })
+    ).toHaveFocus();
+    await user.keyboard("{Enter}");
 
     expect(onSearch).toHaveBeenCalledWith("去年秋天的红叶", undefined);
+  });
+
+  it("keeps suggestion navigation from reaching the background gallery shortcuts", async () => {
+    const user = userEvent.setup();
+    render(<ControlledSearchBar />);
+    await user.click(screen.getByRole("combobox"));
+    await user.keyboard("{ArrowDown}");
+    const background = vi.fn();
+    document.addEventListener("keydown", background);
+    try {
+      await user.keyboard("{ArrowRight}{ArrowLeft}{ArrowUp}{ArrowDown}");
+      expect(background).not.toHaveBeenCalled();
+      expect(screen.getByRole("listbox")).toBeVisible();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(screen.getByRole("combobox")).toHaveFocus();
+      expect(background).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", background);
+    }
+  });
+
+  it("navigates from keyboard focus even if another card has been highlighted by the pointer", async () => {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["最后一条历史"]));
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(<ControlledSearchBar onSearch={onSearch} />);
+    await user.click(screen.getByRole("combobox"));
+    await user.keyboard("{ArrowDown}");
+    const first = screen.getByRole("option", { name: "去年秋天的红叶" });
+    expect(first).toHaveFocus();
+    fireEvent.pointerMove(screen.getByRole("option", { name: "可爱的猫咪" }));
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("option", { name: "最后一条历史" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onSearch).toHaveBeenCalledWith("最后一条历史", undefined);
+  });
+
+  it("does not attach redundant tooltips to search history or the labeled refresh action", async () => {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["我的搜索记录"]));
+    const user = userEvent.setup();
+    render(<ControlledSearchBar />);
+    await user.click(screen.getByRole("combobox"));
+    const history = screen.getByRole("option", { name: "我的搜索记录" });
+    const refresh = screen.getByRole("button", { name: "换一批" });
+    for (const button of [history, refresh]) {
+      expect(button).not.toHaveAttribute("data-slot", "tooltip-trigger");
+      expect(button).not.toHaveAttribute("title");
+    }
+    act(() => history.focus());
+    await user.hover(history);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 500)));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("reserves four skeleton slots until personalized recommendations arrive", async () => {
+    let resolve:
+      | ((
+          value: Awaited<ReturnType<typeof ipc.client.photos.getSearchStarters>>
+        ) => void)
+      | undefined;
+    vi.mocked(ipc.client.photos.getSearchStarters).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    const user = userEvent.setup();
+    const { container } = render(<ControlledSearchBar {...baseProps} />);
+    await user.click(screen.getByRole("combobox"));
+    await waitFor(() => expect(resolve).toBeDefined());
+    const grid = container.querySelector("[data-starter-grid]");
+    expect(grid).toHaveAttribute("aria-busy", "true");
+    expect(grid?.querySelectorAll('[aria-hidden="true"]')).toHaveLength(4);
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    await act(async () => {
+      resolve?.({
+        status: "ready",
+        revision: "loaded",
+        validity: "fixture",
+        day: "2026-10-27",
+        candidates: [
+          {
+            key: "beach",
+            text: "海边的日落",
+            source: "library",
+            topics: ["海滩", "日落"],
+          },
+        ],
+      });
+      await Promise.resolve();
+    });
+    expect(grid).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByRole("option", { name: "海边的日落" })).toBeVisible();
+  });
+
+  it("keeps a keyboard-selected history entry selected when delayed ideas arrive above it", async () => {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["海边旅行"]));
+    let resolve:
+      | ((
+          value: Awaited<ReturnType<typeof ipc.client.photos.getSearchStarters>>
+        ) => void)
+      | undefined;
+    vi.mocked(ipc.client.photos.getSearchStarters).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    const onSearch = vi.fn();
+    const user = userEvent.setup();
+    render(<ControlledSearchBar onSearch={onSearch} />);
+    await user.click(screen.getByRole("combobox"));
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: "海边旅行" })).toHaveFocus();
+    await act(async () => {
+      resolve?.({
+        status: "ready",
+        revision: "delayed",
+        validity: "fixture",
+        day: "2026-10-27",
+        candidates: [
+          {
+            key: "new",
+            text: "城市的日落",
+            topics: ["城市"],
+            source: "library",
+          },
+        ],
+      });
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("option", { name: "海边旅行" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    expect(screen.getByRole("option", { name: "海边旅行" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onSearch).toHaveBeenCalledWith("海边旅行", undefined);
+  });
+
+  it("executes a localized dated idea using its semantic query and explicit date filters", async () => {
+    vi.mocked(ipc.client.photos.getSearchStarters).mockResolvedValue({
+      status: "ready",
+      revision: "dated",
+      validity: "fixture",
+      day: "2026-10-27",
+      candidates: [
+        {
+          key: "beach:2023-02",
+          text: "beach in February 2023",
+          query: "beach",
+          filters: { dateFrom: "2023-02-01", dateTo: "2023-02-28" },
+          source: "rediscovery",
+          topics: ["海滩"],
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        initialFilters={{ cameraModel: "Canon" }}
+        onSearch={onSearch}
+      />
+    );
+    await user.click(screen.getByRole("combobox"));
+    await user.click(
+      await screen.findByRole("option", { name: "beach in February 2023" })
+    );
+    expect(onSearch).toHaveBeenCalledWith("beach", {
+      cameraModel: "Canon",
+      dateFrom: "2023-02-01",
+      dateTo: "2023-02-28",
+    });
+    expect(
+      JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) ?? "[]")
+    ).toContain("beach");
+  });
+
+  it("explains why semantic recommendations are unavailable in color search", async () => {
+    const user = userEvent.setup();
+    render(<ControlledSearchBar {...baseProps} colorHex="ff0000" />);
+    vi.mocked(ipc.client.photos.getSearchStarters).mockResolvedValue({
+      status: "color",
+      revision: "color",
+      validity: "fixture",
+      day: "2026-10-27",
+      candidates: [],
+    });
+    await user.click(screen.getByRole("combobox"));
+    expect(
+      await screen.findByText(
+        "颜色搜索使用当前色彩条件，清除颜色后可查看语义推荐。"
+      )
+    ).toBeVisible();
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
   });
 
   it("closes suggestions with Escape without clearing typed text", async () => {
@@ -730,11 +1040,13 @@ describe("SearchBar", () => {
     await user.click(screen.getByRole("combobox"));
 
     expect(
-      screen.getByText("请先完成 AI 索引，再使用语义搜索示例")
+      await screen.findByText(
+        "暂时没有可用的图库入口，可以稍后换一批或直接输入搜索。"
+      )
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "去年秋天的红叶" })
-    ).toBeDisabled();
+      screen.queryByRole("option", { name: "去年秋天的红叶" })
+    ).not.toBeInTheDocument();
   });
 
   it("shows indexed coverage while semantic indexing is partial", () => {
@@ -783,7 +1095,7 @@ describe("SearchBar", () => {
       })
     );
 
-    expect(screen.queryByText("试试这样搜索")).not.toBeInTheDocument();
+    expect(screen.queryByText("探索你的图库")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue("[以图搜图]")).not.toBeInTheDocument();
   });

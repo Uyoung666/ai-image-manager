@@ -19,8 +19,15 @@ export interface SearchSuggestion {
   color?: string;
   coverPhotoPath?: string | null;
   coverThumbnailPath?: string | null;
+  filters?: ExifFilters;
   /** 人物身份元数据（仅 type === "person" 时携带，用于头像渲染与精准导航） */
   id?: number;
+  key?: string;
+  kind?: "semantic" | "month" | "tag";
+  previewPhotoIds?: number[];
+  previewVersion?: string;
+  query?: string;
+  source?: "library" | "interest" | "rediscovery";
   tagId?: number;
   text: string;
   type: "example" | "person" | "dictionary" | "tag" | "history";

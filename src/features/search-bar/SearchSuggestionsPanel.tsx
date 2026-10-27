@@ -1,5 +1,4 @@
-// biome-ignore-all lint/style/noNestedTernary: preserve existing suggestion styling
-import { Clock, Search } from "lucide-react";
+import { Clock, RefreshCw, Search } from "lucide-react";
 import type {
   FocusEventHandler,
   KeyboardEventHandler,
@@ -11,16 +10,20 @@ import type {
   getTimePresets,
   SearchSuggestion,
 } from "@/components/search-bar-utils";
+import type { SearchStarterResponse } from "@/types/search-starters";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 import { cn } from "@/utils/tailwind";
+import { SearchStarterGallery } from "./SearchStarterGallery";
+import { SearchTextButton } from "./SearchTextButton";
 
 interface SearchSuggestionsPanelProps {
   clearHistory: () => void;
-  examplesDisabled: boolean;
   floatingPanelMaxHeight: number;
   handleSuggestionClick: (suggestion: SearchSuggestion) => void;
   handleSuggestionKeyDown: KeyboardEventHandler<HTMLDivElement>;
   onBlur: FocusEventHandler<HTMLDivElement>;
+  onRefreshStarters: () => void;
+  onResetStarterFilters: () => void;
   onTimePresetSelect: (
     preset: ReturnType<typeof getTimePresets>[number]
   ) => void;
@@ -30,17 +33,22 @@ interface SearchSuggestionsPanelProps {
   recentSuggestions: SearchSuggestion[];
   searchExamples: SearchSuggestion[];
   setSuggestionIndex: (index: number) => void;
+  starterEmptyReason?: SearchStarterResponse["emptyReason"];
+  starterLoading: boolean;
+  starterStatus: SearchStarterResponse["status"];
   suggestionIndex: number;
   suggestions: SearchSuggestion[];
   timePresets: ReturnType<typeof getTimePresets>;
 }
+
 export function SearchSuggestionsPanel({
   clearHistory,
-  examplesDisabled,
   floatingPanelMaxHeight,
   handleSuggestionClick,
   handleSuggestionKeyDown,
   onBlur,
+  onRefreshStarters,
+  onResetStarterFilters,
   onTimePresetSelect,
   panelRef,
   presetsContent,
@@ -48,14 +56,35 @@ export function SearchSuggestionsPanel({
   recentSuggestions,
   searchExamples,
   setSuggestionIndex,
+  starterLoading,
+  starterStatus,
+  starterEmptyReason,
   suggestionIndex,
   suggestions,
   timePresets,
 }: SearchSuggestionsPanelProps) {
   const { t } = useTranslation();
+  const disabled = starterStatus === "color";
+  let emptyKey = "searchStarterUi.empty";
+  if (disabled) {
+    emptyKey =
+      starterStatus === "color"
+        ? "searchStarterUi.colorMode"
+        : "searchStarterAiUnavailable";
+  } else if (starterEmptyReason === "library") {
+    emptyKey = "searchStarterUi.emptyLibrary";
+  } else if (starterEmptyReason === "scope") {
+    emptyKey = "searchStarterUi.emptyScope";
+  } else if (starterStatus === "unavailable") {
+    emptyKey = "searchStarterUi.unavailable";
+  } else if (starterStatus === "error") {
+    emptyKey = "searchStarterUi.failed";
+  } else if (starterStatus === "busy") {
+    emptyKey = "searchStarterUi.busy";
+  }
   return (
     <div
-      className="absolute top-full left-4 z-[60] mt-1 w-[min(960px,calc(100%-32px))] overflow-y-auto overscroll-contain rounded-[10px] border border-border bg-popover shadow-xl outline-none ring-1 ring-foreground/5"
+      className="@container/search-panel absolute top-full left-4 z-[60] mt-1 w-[min(960px,calc(100%-32px))] overflow-y-auto overscroll-contain rounded-[10px] border border-border bg-popover shadow-xl outline-none ring-1 ring-foreground/5"
       data-overlay-kind="search-suggestions"
       data-surface="overlay"
       id="search-suggestions-listbox"
@@ -75,90 +104,35 @@ export function SearchSuggestionsPanel({
         </div>
       )}
       {query.trim() ? (
-        <>
-          <div className="flex items-center justify-between px-3 py-1.5">
-            <span className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
-              {t("searchSuggestions")}
-            </span>
+        <div className="py-1.5">
+          <div className="px-3 pb-1.5 font-medium text-[11px] text-muted-foreground">
+            {t("searchSuggestions")}
           </div>
-          {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: preserve the existing suggestion variants */}
-          {suggestions.map((s, i) => (
-            <button
-              aria-selected={i === suggestionIndex}
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors ${
-                i === suggestionIndex
-                  ? "bg-foreground/8 text-foreground"
-                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              }`}
-              data-suggestion-index={i}
-              id={`search-suggestion-${i}`}
-              key={`${s.type}-${s.text}`}
-              onClick={() => handleSuggestionClick(s)}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setSuggestionIndex(i)}
-              role="option"
-              tabIndex={-1}
-              type="button"
-            >
-              {s.type === "person" ? (
-                <>
-                  {s.coverThumbnailPath || s.coverPhotoPath ? (
-                    <img
-                      alt=""
-                      className="h-6 w-6 flex-shrink-0 rounded-full object-cover"
-                      height={24}
-                      src={toLocalMediaUrl(
-                        s.coverThumbnailPath || s.coverPhotoPath || ""
-                      )}
-                      width={24}
-                    />
-                  ) : (
-                    <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center text-[10px]">
-                      👤
-                    </span>
-                  )}
-                  <span className="truncate">{s.text}</span>
-                  <span className="ml-auto flex-shrink-0 rounded-[3px] bg-blue-500/10 px-1 text-[10px] text-blue-500">
-                    人物
-                  </span>
-                </>
-              ) : s.type === "dictionary" ? (
-                <>
-                  <Search className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
-                  <span className="truncate">{s.text}</span>
-                  {s.category && (
-                    <span className="ml-auto flex-shrink-0 rounded-[3px] bg-primary/10 px-1 text-[10px] text-primary/70">
-                      {s.category}
-                    </span>
-                  )}
-                </>
-              ) : s.type === "tag" ? (
-                <>
-                  <span
-                    className="h-2 w-2 flex-shrink-0 rounded-full"
-                    style={{ background: s.color }}
-                  />
-                  <span className="truncate">{s.text}</span>
-                  <span className="ml-auto flex-shrink-0 rounded-[3px] bg-green-500/10 px-1 text-[10px] text-green-500">
-                    标签
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Clock className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
-                  <span className="truncate">{s.text}</span>
-                </>
-              )}
-            </button>
+          {suggestions.map((suggestion, index) => (
+            <SuggestionButton
+              index={index}
+              isActive={index === suggestionIndex}
+              key={`${suggestion.type}-${suggestion.text}`}
+              onClick={() => handleSuggestionClick(suggestion)}
+              onMouseEnter={() => setSuggestionIndex(index)}
+              suggestion={suggestion}
+            />
           ))}
-        </>
+        </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-1.5 border-border border-b px-3 py-2">
-            <Clock className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60" />
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-border border-b px-3 py-2">
+            <Clock
+              aria-hidden="true"
+              className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
+            />
+            <span className="mr-1 text-[11px] text-muted-foreground">
+              {t("searchStarterUi.quickTime")}
+            </span>
             {timePresets.map((preset) => (
               <button
                 className="rounded-[4px] border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+                data-search-action
                 key={preset.label}
                 onClick={() => onTimePresetSelect(preset)}
                 onMouseDown={(event) => event.preventDefault()}
@@ -168,90 +142,116 @@ export function SearchSuggestionsPanel({
               </button>
             ))}
           </div>
-          <div className="px-3 pt-2.5 pb-1.5">
-            <div className="font-medium text-[12px] text-foreground">
-              {t("searchStarterTitle")}
-            </div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground/70">
-              {t("searchStarterDescription")}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-1.5 px-3 pb-2.5">
-            {searchExamples.map((example, i) => (
-              <button
-                aria-selected={!examplesDisabled && i === suggestionIndex}
-                className={cn(
-                  "flex min-w-0 items-center gap-2 rounded-[6px] border border-border px-2.5 py-2 text-left text-[12px] transition-colors",
-                  examplesDisabled
-                    ? "cursor-not-allowed text-muted-foreground/50"
-                    : i === suggestionIndex
-                      ? "border-primary/30 bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:border-primary/20 hover:bg-primary/5 hover:text-foreground"
-                )}
-                data-suggestion-index={examplesDisabled ? undefined : i}
-                disabled={examplesDisabled}
-                id={examplesDisabled ? undefined : `search-suggestion-${i}`}
-                key={example.text}
-                onClick={() => handleSuggestionClick(example)}
-                onMouseDown={(e) => e.preventDefault()}
-                onMouseEnter={() => {
-                  if (!examplesDisabled) {
-                    setSuggestionIndex(i);
-                  }
-                }}
-                role="option"
-                tabIndex={-1}
-                type="button"
-              >
-                <Search className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="truncate">{example.text}</span>
-              </button>
-            ))}
-          </div>
-          {examplesDisabled && (
-            <div className="mx-3 mb-2 rounded-[5px] bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-              {t("searchStarterAiUnavailable")}
-            </div>
-          )}
-          <div className="border-border border-t px-3 py-2 text-[10px] text-muted-foreground/70">
-            {t("searchStarterWildcardHint")}
-          </div>
-          {recentSuggestions.length > 0 && (
-            <>
-              <div className="flex items-center justify-between border-border border-t px-3 py-1.5">
-                <span className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
-                  {t("recentSearches")}
+          <div
+            className={cn(
+              "grid min-w-0 grid-cols-1",
+              recentSuggestions.length > 0 &&
+                "@min-[720px]/search-panel:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]"
+            )}
+            data-search-discovery-layout
+          >
+            <section
+              aria-label={t("searchStarterTitle")}
+              className="min-w-0 px-3 py-3"
+              data-search-starters
+            >
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <span className="font-medium text-[12px] text-foreground">
+                  {t("searchStarterTitle")}
                 </span>
                 <button
-                  className="text-[10px] text-muted-foreground/70 hover:text-foreground"
-                  onClick={clearHistory}
-                  tabIndex={-1}
+                  aria-label={t("searchStarterUi.refresh")}
+                  className="flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+                  data-search-action
+                  disabled={starterStatus === "color" || starterLoading}
+                  onClick={onRefreshStarters}
+                  onMouseDown={(event) => event.preventDefault()}
                   type="button"
                 >
-                  {t("clearAll")}
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={cn(
+                      "h-3 w-3",
+                      starterLoading && "motion-safe:animate-spin"
+                    )}
+                  />
+                  {t("searchStarterUi.refresh")}
                 </button>
               </div>
-              {recentSuggestions.map((s, historyIndex) => {
-                const i =
-                  (examplesDisabled ? 0 : searchExamples.length) + historyIndex;
-                return (
-                  <SuggestionButton
-                    index={i}
-                    isActive={i === suggestionIndex}
-                    key={`${s.type}-${s.text}`}
-                    onClick={() => handleSuggestionClick(s)}
-                    onMouseEnter={() => setSuggestionIndex(i)}
-                    suggestion={s}
-                  />
-                );
-              })}
-            </>
-          )}
+              <div className="relative mt-2">
+                <SearchStarterGallery
+                  examples={disabled ? [] : searchExamples}
+                  loading={starterLoading}
+                  onHighlight={setSuggestionIndex}
+                  onSelect={handleSuggestionClick}
+                  status={starterStatus}
+                  suggestionIndex={suggestionIndex}
+                />
+                {(disabled || searchExamples.length === 0) &&
+                  !starterLoading && (
+                    <div
+                      className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center text-[12px] text-muted-foreground"
+                      role="status"
+                    >
+                      <span>{t(emptyKey)}</span>
+                      {starterEmptyReason === "scope" && (
+                        <button
+                          className="rounded px-2 py-1 text-primary hover:bg-primary/10"
+                          data-search-action
+                          onClick={onResetStarterFilters}
+                          type="button"
+                        >
+                          {t("searchStarterUi.clearFilters")}
+                        </button>
+                      )}
+                    </div>
+                  )}
+              </div>
+            </section>
+            {recentSuggestions.length > 0 && (
+              <section
+                aria-label={t("recentSearches")}
+                className="min-w-0 border-border border-t @min-[720px]/search-panel:border-t-0 @min-[720px]/search-panel:border-l py-3"
+                data-search-history
+              >
+                <div className="mb-2 flex min-w-0 items-center justify-between gap-2 px-3">
+                  <span className="font-medium text-[12px] text-foreground">
+                    {t("recentSearches")}
+                  </span>
+                  <button
+                    className="shrink-0 rounded-[4px] px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    data-search-action
+                    onClick={clearHistory}
+                    type="button"
+                  >
+                    {t("clearAll")}
+                  </button>
+                </div>
+                {recentSuggestions.map((suggestion, index) => {
+                  const itemIndex = searchExamples.length + index;
+                  return (
+                    <SuggestionButton
+                      index={itemIndex}
+                      isActive={itemIndex === suggestionIndex}
+                      key={`${suggestion.type}-${suggestion.text}`}
+                      onClick={() => handleSuggestionClick(suggestion)}
+                      onMouseEnter={() => setSuggestionIndex(itemIndex)}
+                      suggestion={suggestion}
+                    />
+                  );
+                })}
+              </section>
+            )}
+          </div>
+          <div className="border-border border-t px-3 py-2 text-[11px] text-muted-foreground">
+            {t("searchStarterWildcardHint")}
+          </div>
         </>
       )}
     </div>
   );
 }
+
 function SuggestionButton({
   suggestion,
   index,
@@ -265,11 +265,21 @@ function SuggestionButton({
   onClick: () => void;
   onMouseEnter: () => void;
 }) {
+  const { t } = useTranslation();
+  const isPerson = suggestion.type === "person";
+  const cover = suggestion.coverThumbnailPath || suggestion.coverPhotoPath;
+  let categoryLabel = suggestion.category;
+  if (isPerson) {
+    categoryLabel = t("searchStarterUi.person");
+  } else if (suggestion.type === "tag") {
+    categoryLabel = t("searchStarterUi.tag");
+  }
   return (
-    <button
+    <SearchTextButton
+      aria-label={suggestion.text}
       aria-selected={isActive}
       className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors",
+        "flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors",
         isActive
           ? "bg-foreground/8 text-foreground"
           : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -278,13 +288,47 @@ function SuggestionButton({
       id={`search-suggestion-${index}`}
       onClick={onClick}
       onMouseDown={(event) => event.preventDefault()}
-      onMouseEnter={onMouseEnter}
+      onPointerMove={onMouseEnter}
       role="option"
       tabIndex={-1}
+      tooltipText={suggestion.type === "history" ? undefined : suggestion.text}
       type="button"
     >
-      <Clock className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
-      <span className="truncate">{suggestion.text}</span>
-    </button>
+      {isPerson && cover ? (
+        <img
+          alt=""
+          className="h-6 w-6 shrink-0 rounded-full object-cover"
+          height={24}
+          src={toLocalMediaUrl(cover)}
+          width={24}
+        />
+      ) : null}
+      {suggestion.type === "tag" ? (
+        <span
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: suggestion.color }}
+        />
+      ) : null}
+      {suggestion.type === "history" ? (
+        <Clock
+          aria-hidden="true"
+          className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+        />
+      ) : null}
+      {suggestion.type === "dictionary" || (isPerson && !cover) ? (
+        <Search
+          aria-hidden="true"
+          className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+        />
+      ) : null}
+      <span className="min-w-0 flex-1 truncate" data-search-tooltip-text>
+        {suggestion.text}
+      </span>
+      {suggestion.category || suggestion.type === "tag" ? (
+        <span className="max-w-[35%] shrink-0 truncate text-[11px] text-muted-foreground">
+          {categoryLabel}
+        </span>
+      ) : null}
+    </SearchTextButton>
   );
 }

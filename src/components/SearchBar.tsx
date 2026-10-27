@@ -12,6 +12,7 @@ import {
   type ReactNode,
   type SetStateAction,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -35,6 +36,7 @@ import { SearchSuggestionsPanel } from "@/features/search-bar/SearchSuggestionsP
 import { useSearchCandidates } from "@/features/search-bar/use-search-candidates";
 import { useSearchHistory } from "@/features/search-bar/use-search-history";
 import { useSearchOverlayInteraction } from "@/features/search-bar/use-search-overlay-interaction";
+import { useSearchStarters } from "@/features/search-bar/use-search-starters";
 import type { ExifFilters, SearchMode } from "@/types/search";
 import { getSearchSuggestions } from "@/utils/search-suggestions";
 import {
@@ -134,7 +136,7 @@ export const SearchBar = memo(
       }: SearchBarProps,
       ref
     ) => {
-      const { t } = useTranslation();
+      const { t, i18n } = useTranslation();
       const timePresets = useMemo(() => getTimePresets(t), [t]);
       const {
         history,
@@ -151,16 +153,6 @@ export const SearchBar = memo(
         dictSuggestionsEnabled,
       } = useSearchCandidates();
       const navigate = useNavigate();
-
-      const searchExamples = useMemo<SearchSuggestion[]>(
-        () => [
-          { type: "example", text: t("searchExampleAutumnLeaves") },
-          { type: "example", text: t("searchExampleSeasideSunset") },
-          { type: "example", text: t("searchExampleCuteCat") },
-          { type: "example", text: t("searchExampleNightCity") },
-        ],
-        [t]
-      );
 
       // Filter suggestions: person names + dictionary + tags + recent searches
       const suggestions = useMemo(() => {
@@ -226,24 +218,22 @@ export const SearchBar = memo(
         return all;
       }, [query, tags, history, personOptions, dictSuggestionsEnabled]);
 
-      const examplesDisabled = Boolean(
-        aiStatus &&
-          (aiStatus.rebuildRequired ||
-            aiStatus.isEmbedding ||
-            aiStatus.model === "loading" ||
-            aiStatus.model === "error" ||
-            aiStatus.vectorDB !== "ready" ||
-            !aiStatus.hasVectors ||
-            !aiStatus.indexReady)
-      );
+      const examplesDisabled =
+        aiStatus === null ||
+        Boolean(
+          aiStatus &&
+            (aiStatus.rebuildRequired ||
+              aiStatus.isEmbedding ||
+              aiStatus.model === "loading" ||
+              aiStatus.model === "error" ||
+              aiStatus.vectorDB !== "ready" ||
+              !aiStatus.hasVectors ||
+              !aiStatus.indexReady)
+        );
       const recentSuggestions = useMemo<SearchSuggestion[]>(
         () => history.slice(0, 5).map((text) => ({ type: "history", text })),
         [history]
       );
-      const displayedSuggestions = query.trim()
-        ? suggestions
-        : [...(examplesDisabled ? [] : searchExamples), ...recentSuggestions];
-
       const {
         inputRef,
         dropdownRef,
@@ -265,6 +255,49 @@ export const SearchBar = memo(
         imageSearchActive,
         hasSuggestions: suggestions.length > 0 || Boolean(searchPresetContext),
       });
+      const starters = useSearchStarters({
+        open: showSuggestionPanel && !query.trim(),
+        enabled: !imageSearchActive,
+        semanticEnabled: !examplesDisabled,
+        language: i18n?.resolvedLanguage ?? i18n?.language ?? "zh",
+        history,
+        filters,
+        colorHex,
+      });
+      const searchExamples = useMemo<SearchSuggestion[]>(
+        () =>
+          starters.batch.map((starter) => ({
+            ...starter,
+            previewVersion: starters.validity,
+            type: "example",
+          })),
+        [starters.batch, starters.validity]
+      );
+      const displayedSuggestions = useMemo(
+        () =>
+          query.trim()
+            ? suggestions
+            : [...searchExamples, ...recentSuggestions],
+        [query, suggestions, searchExamples, recentSuggestions]
+      );
+      const previousSuggestions = useRef(displayedSuggestions);
+      useLayoutEffect(() => {
+        const active = previousSuggestions.current[suggestionIndex];
+        previousSuggestions.current = displayedSuggestions;
+        if (!active || suggestionIndex < 0) {
+          return;
+        }
+        const nextIndex = displayedSuggestions.findIndex(
+          (item) =>
+            item.type === active.type &&
+            item.text === active.text &&
+            item.id === active.id &&
+            item.tagId === active.tagId
+        );
+        if (nextIndex !== suggestionIndex) {
+          setSuggestionIndex(nextIndex);
+        }
+      }, [displayedSuggestions, suggestionIndex, setSuggestionIndex]);
       const fileInputRef = useRef<HTMLInputElement>(null);
       const [_locallyDragging, _setLocallyDragging] = useState(false);
       const [failedImagePreviewUrl, setFailedImagePreviewUrl] = useState<
@@ -362,8 +395,7 @@ export const SearchBar = memo(
           displayedSuggestions.length > 0
         ) {
           e.preventDefault();
-          setSuggestionIndex(0);
-          suggestionListRef.current?.focus();
+          focusKeyboardSuggestion(0);
           return;
         }
         if (e.key === "Escape") {
@@ -380,11 +412,21 @@ export const SearchBar = memo(
         }
       }
 
+      function focusKeyboardSuggestion(index: number) {
+        setSuggestionIndex(index);
+        const button =
+          suggestionListRef.current?.querySelector<HTMLButtonElement>(
+            `[data-suggestion-index="${index}"]`
+          );
+        (button ?? suggestionListRef.current)?.focus({ preventScroll: true });
+        button?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      }
+
       function handleSuggestionKeyDown(e: React.KeyboardEvent) {
         if (
           e.target instanceof Element &&
           e.target.closest(
-            '[data-search-presets], [data-overlay-kind="filter-presets"]'
+            '[data-search-presets], [data-search-action], [data-overlay-kind="filter-presets"]'
           )
         ) {
           return;
@@ -397,31 +439,67 @@ export const SearchBar = memo(
         if (len === 0) {
           return;
         }
+        const focusedSuggestion =
+          e.target instanceof Element
+            ? e.target.closest("[data-suggestion-index]")
+            : null;
+        const navigationIndex = focusedSuggestion
+          ? Number(focusedSuggestion.getAttribute("data-suggestion-index"))
+          : suggestionIndex;
+
+        if (
+          [
+            "ArrowLeft",
+            "ArrowRight",
+            "ArrowDown",
+            "ArrowUp",
+            "Enter",
+            "Escape",
+            "Tab",
+          ].includes(e.key)
+        ) {
+          // Keep gallery-level shortcuts from stealing focus from the open listbox.
+          e.stopPropagation();
+        }
 
         switch (e.key) {
+          case "ArrowLeft":
+          case "ArrowRight":
+            if (
+              navigationIndex >= 0 &&
+              navigationIndex < searchExamples.length
+            ) {
+              e.preventDefault();
+              const step = e.key === "ArrowRight" ? 1 : -1;
+              focusKeyboardSuggestion(
+                (navigationIndex + step + searchExamples.length) %
+                  searchExamples.length
+              );
+            }
+            break;
           case "ArrowDown":
             e.preventDefault();
-            setSuggestionIndex((prev) => (prev + 1) % len);
+            focusKeyboardSuggestion((navigationIndex + 1) % len);
             break;
           case "ArrowUp":
             e.preventDefault();
-            setSuggestionIndex((prev) => (prev - 1 + len) % len);
+            focusKeyboardSuggestion((navigationIndex - 1 + len) % len);
             break;
           case "Enter":
             e.preventDefault();
-            if (suggestionIndex >= 0 && suggestionIndex < len) {
-              handleSuggestionClick(displayedSuggestions[suggestionIndex]);
+            if (navigationIndex >= 0 && navigationIndex < len) {
+              handleSuggestionClick(displayedSuggestions[navigationIndex]);
             }
             break;
           case "Escape":
             e.preventDefault();
+            inputRef.current?.focus();
             setShowSuggestions(false);
             setSuggestionIndex(-1);
-            inputRef.current?.focus();
             break;
           case "Tab":
             e.preventDefault();
-            setSuggestionIndex((prev) => (prev + 1) % len);
+            focusKeyboardSuggestion((navigationIndex + 1) % len);
             break;
           default:
             break;
@@ -474,9 +552,17 @@ export const SearchBar = memo(
           setSuggestionIndex(-1);
           return;
         }
-        setQuery(suggestion.text);
-        addToHistory(suggestion.text);
-        onSearch(suggestion.text, hasActiveFilters ? filters : undefined);
+        const searchQuery = suggestion.query ?? suggestion.text;
+        const nextFilters = suggestion.filters
+          ? { ...filters, ...suggestion.filters }
+          : filters;
+        const hasFilters = Object.values(nextFilters).some(Boolean);
+        if (suggestion.filters) {
+          setFilters(nextFilters);
+        }
+        setQuery(searchQuery);
+        addToHistory(searchQuery);
+        onSearch(searchQuery, hasFilters ? nextFilters : undefined);
         setShowSuggestions(false);
       }
 
@@ -995,7 +1081,6 @@ export const SearchBar = memo(
           {showSuggestionPanel && (
             <SearchSuggestionsPanel
               clearHistory={clearHistory}
-              examplesDisabled={examplesDisabled}
               floatingPanelMaxHeight={floatingPanelMaxHeight}
               handleSuggestionClick={handleSuggestionClick}
               handleSuggestionKeyDown={handleSuggestionKeyDown}
@@ -1015,6 +1100,14 @@ export const SearchBar = memo(
                 }
                 setShowSuggestions(false);
                 setSuggestionIndex(-1);
+              }}
+              onRefreshStarters={() => {
+                setSuggestionIndex(-1);
+                starters.refresh().catch(() => undefined);
+              }}
+              onResetStarterFilters={() => {
+                setFilters({});
+                onSearch("");
               }}
               onTimePresetSelect={(preset) => {
                 const range = preset.getRange();
@@ -1058,6 +1151,9 @@ export const SearchBar = memo(
               recentSuggestions={recentSuggestions}
               searchExamples={searchExamples}
               setSuggestionIndex={setSuggestionIndex}
+              starterEmptyReason={starters.emptyReason}
+              starterLoading={starters.loading}
+              starterStatus={starters.status}
               suggestionIndex={suggestionIndex}
               suggestions={suggestions}
               timePresets={timePresets}

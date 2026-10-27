@@ -22,6 +22,7 @@ import {
   TooltipPortalProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { SearchTextButton } from "@/features/search-bar/SearchTextButton";
 import type { ExifFilters } from "@/types/search";
 import { cn } from "@/utils/tailwind";
 
@@ -116,7 +117,7 @@ export function FilterPresets({
   presentation = "popover",
 }: FilterPresetsProps) {
   const { t } = useTranslation();
-  const [presets, setPresets] = useState<FilterPreset[]>([]);
+  const [presets, setPresets] = useState<FilterPreset[]>(loadPresets);
   const [presetName, setPresetName] = useState("");
   const [showSave, setShowSave] = useState(false);
   const [showLoad, setShowLoad] = useState(false);
@@ -264,32 +265,26 @@ export function FilterPresets({
       )}
       key={preset.name}
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            className={cn(
-              "min-w-0 flex-1 truncate text-left text-[12px] text-foreground",
-              inline && "px-2.5 py-1.5"
-            )}
-            data-search-preset={preset.name}
-            onClick={() => {
-              if (onLoadSearchPreset) {
-                onLoadSearchPreset(preset);
-              } else {
-                onLoadPreset(preset.filters);
-              }
-              markSearchPresetUsed(preset.name);
-              setShowLoad(false);
-            }}
-            type="button"
-          >
-            {preset.name}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
-          {preset.name}
-        </TooltipContent>
-      </Tooltip>
+      <SearchTextButton
+        className={cn(
+          "min-w-0 flex-1 truncate text-left text-[12px] text-foreground",
+          inline && "px-2.5 py-1.5"
+        )}
+        data-search-preset={preset.name}
+        onClick={() => {
+          if (onLoadSearchPreset) {
+            onLoadSearchPreset(preset);
+          } else {
+            onLoadPreset(preset.filters);
+          }
+          markSearchPresetUsed(preset.name);
+          setShowLoad(false);
+        }}
+        tooltipText={preset.name}
+        type="button"
+      >
+        {preset.name}
+      </SearchTextButton>
       <Tooltip>
         <TooltipTrigger asChild>
           <button

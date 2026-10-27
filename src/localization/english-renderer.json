@@ -1395,14 +1395,9 @@
   "applyFilters": "Apply Filters",
   "searchSuggestions": "Search Suggestions",
   "recentSearches": "Recent Searches",
-  "searchStarterTitle": "Try searching like this",
-  "searchStarterDescription": "Describe the subject, scene, or when the photo was taken",
+  "searchStarterTitle": "Explore your library",
   "searchStarterWildcardHint": "File names and wildcards also work, such as *.jpg and DSC_*",
   "searchStarterAiUnavailable": "Finish AI indexing before using semantic search examples",
-  "searchExampleAutumnLeaves": "autumn leaves",
-  "searchExampleSeasideSunset": "sunset by the sea",
-  "searchExampleCuteCat": "cute cat",
-  "searchExampleNightCity": "city streets at night",
   "selectedPhotos": "{{count}} selected",
   "moreActions": "More",
   "favorite": "Favorite",
@@ -2187,5 +2182,28 @@
   "searchLoadPresets": "Search presets ({{count}})",
   "searchPresetsEmpty": "No presets yet. Enter a query or filters to save this search.",
   "searchPresetSaveFailed": "Could not save the search preset. Check local storage.",
-  "albumAlreadyContainsPhotos": "Selected photos are already in “{{album}}”. No duplicates were added."
+  "albumAlreadyContainsPhotos": "Selected photos are already in “{{album}}”. No duplicates were added.",
+  "searchStarterUi": {
+    "month": "Explore by month",
+    "byTag": "Explore by tag",
+    "emptyLibrary": "Your library is empty. Add a photo folder to start exploring.",
+    "emptyScope": "No photos match the current conditions. Try clearing the filters.",
+    "unavailable": "No library ideas are available right now. Try More ideas later, or enter a search.",
+    "clearFilters": "Clear filters",
+    "quickTime": "Quick dates",
+    "personalized": "Search ideas from your library and interests",
+    "refresh": "More ideas",
+    "refreshHint": "Explore other themes; ideas refresh daily",
+    "empty": "No reliable ideas in this scope yet. Try describing what you want to find.",
+    "failed": "Ideas could not be loaded. Try More ideas to retry.",
+    "busy": "Search or indexing is taking priority. Try More ideas again shortly.",
+    "colorMode": "Color search uses the current color. Clear it to explore semantic ideas.",
+    "source": {
+      "library": "From your library",
+      "interest": "You might like",
+      "rediscovery": "Rediscover old photos"
+    },
+    "person": "Person",
+    "tag": "Tag"
+  }
 }
