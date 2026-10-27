@@ -292,6 +292,51 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
       expect(layout.inside).toBe(true);
       expect(layout.overflow).toBe(false);
       expect(layout.columns).toBe(layout.width >= 720 ? 2 : 1);
+      const presetStrip = panel.locator("[data-search-preset-strip]");
+      await presetStrip.locator("[data-search-preset]").first().hover();
+      const panelScroll = await panel.evaluate((node) => node.scrollTop);
+      await page.mouse.wheel(0, 160);
+      await expect
+        .poll(() => presetStrip.evaluate((node) => node.scrollLeft))
+        .toBeGreaterThan(0);
+      expect(await panel.evaluate((node) => node.scrollTop)).toBe(panelScroll);
+      await page.mouse.wheel(0, -160);
+      await expect
+        .poll(() => presetStrip.evaluate((node) => node.scrollLeft))
+        .toBe(0);
+      await presetStrip.evaluate((node) => {
+        node.scrollLeft = node.scrollWidth;
+      });
+      await presetStrip.hover();
+      if (
+        await panel.evaluate((node) => node.scrollHeight > node.clientHeight)
+      ) {
+        const edge = await presetStrip.evaluate((node) => ({
+          scrollLeft: node.scrollLeft,
+          maxScroll: node.scrollWidth - node.clientWidth,
+          width: node.getBoundingClientRect().width,
+        }));
+        await page.mouse.wheel(0, 160);
+        await expect
+          .poll(() => panel.evaluate((node) => node.scrollTop), {
+            message: `Wheel should scroll the panel at the preset edge: ${JSON.stringify(edge)}`,
+          })
+          .toBeGreaterThan(panelScroll);
+      }
+      await panel.evaluate((node) => {
+        node.scrollTop = 0;
+      });
+      await presetStrip.evaluate((node) => {
+        node.scrollLeft = 0;
+      });
+      await presetStrip.hover();
+      await page.mouse.wheel(160, 0);
+      await expect
+        .poll(() => presetStrip.evaluate((node) => node.scrollLeft))
+        .toBeGreaterThan(0);
+      await presetStrip.evaluate((node) => {
+        node.scrollLeft = 0;
+      });
       const cards = panel.locator("[data-search-starters] [role=option]");
       await expect(cards.first().locator("img"))
         .toBeVisible()
@@ -367,14 +412,16 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
         exact: true,
       });
       expect(await refresh.getAttribute("data-slot")).toBe("tooltip-trigger");
+      await input.focus();
+      await input.hover();
       await refresh.hover();
-      await expect(page.getByRole("tooltip")).toHaveText(
-        "Explore other themes; ideas refresh daily"
-      );
+      const refreshHint = page.getByRole("tooltip", {
+        name: "Explore other themes; ideas refresh daily",
+        exact: true,
+      });
+      await expect(refreshHint).toBeVisible();
       await cards.first().hover();
-      await expect(page.getByRole("tooltip")).not.toHaveText(
-        "Explore other themes; ideas refresh daily"
-      );
+      await expect(refreshHint).not.toBeVisible();
       const seen = new Set(first);
       for (let round = 0; round < 2; round++) {
         const beforeBatch = await cards.evaluateAll((nodes) =>

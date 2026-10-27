@@ -60,6 +60,111 @@ describe("FilterPresets", () => {
     vi.clearAllMocks();
   });
 
+  function renderScrollablePresets() {
+    seedPresets([
+      { createdAt: 1, filters: { creator: "Jane" }, name: "Travel" },
+      { createdAt: 2, filters: { creator: "John" }, name: "Work" },
+    ]);
+    const view = render(
+      <FilterPresets
+        currentFilters={{}}
+        onLoadPreset={vi.fn()}
+        presentation="inline"
+      />
+    );
+    const strip = view.container.querySelector<HTMLElement>(
+      "[data-search-preset-strip]"
+    );
+    if (!strip) {
+      throw new Error("Search preset strip is missing");
+    }
+    let offset = 0;
+    Object.defineProperties(strip, {
+      clientWidth: { configurable: true, value: 300 },
+      scrollWidth: { configurable: true, value: 900 },
+      scrollLeft: {
+        configurable: true,
+        get: () => offset,
+        set: (value: number) => {
+          offset = Math.max(
+            0,
+            Math.min(strip.scrollWidth - strip.clientWidth, value)
+          );
+        },
+      },
+    });
+    return { strip, ...view };
+  }
+
+  it("scrolls presets horizontally with a wheel over a preset and updates edge fades", () => {
+    const { strip } = renderScrollablePresets();
+    const preset = screen.getByRole("button", { name: "Travel" });
+    expect(fireEvent.wheel(preset, { deltaY: 120 })).toBe(false);
+    expect(strip.scrollLeft).toBe(120);
+    expect(strip).toHaveAttribute("data-left-fade", "true");
+    expect(strip).toHaveAttribute("data-right-fade", "true");
+    expect(fireEvent.wheel(preset, { deltaY: -200 })).toBe(false);
+    expect(strip.scrollLeft).toBe(0);
+    expect(strip).toHaveAttribute("data-left-fade", "false");
+    expect(fireEvent.wheel(preset, { deltaY: 900 })).toBe(false);
+    expect(strip.scrollLeft).toBe(600);
+    expect(strip).toHaveAttribute("data-right-fade", "false");
+  });
+
+  it.each([
+    { deltaMode: 1, deltaY: 3, offset: 48 },
+    { deltaMode: 2, deltaY: 1, offset: 300 },
+  ])("supports wheel delta mode $deltaMode", ({
+    deltaMode,
+    deltaY,
+    offset,
+  }) => {
+    const { strip } = renderScrollablePresets();
+    expect(fireEvent.wheel(strip, { deltaMode, deltaY })).toBe(false);
+    expect(strip.scrollLeft).toBe(offset);
+  });
+
+  it.each([
+    { position: 0, deltaY: -120 },
+    { position: 600, deltaY: 120 },
+  ])("allows panel scrolling at the $position edge", ({ position, deltaY }) => {
+    const { strip } = renderScrollablePresets();
+    strip.scrollLeft = position;
+    expect(fireEvent.wheel(strip, { deltaY })).toBe(true);
+    expect(strip.scrollLeft).toBe(position);
+  });
+
+  it("keeps native horizontal gestures, zoom and nonoverflowing content unchanged", () => {
+    const { strip } = renderScrollablePresets();
+    expect(fireEvent.wheel(strip, { deltaX: 100, deltaY: 10 })).toBe(true);
+    expect(fireEvent.wheel(strip, { ctrlKey: true, deltaY: 120 })).toBe(true);
+    Object.defineProperty(strip, "scrollWidth", { value: 300 });
+    expect(fireEvent.wheel(strip, { deltaY: 120 })).toBe(true);
+    expect(strip.scrollLeft).toBe(0);
+  });
+
+  it.each([
+    599.5, 600.5,
+  ])("allows panel scrolling at a fractional right edge of %s", (limit) => {
+    const { strip } = renderScrollablePresets();
+    let offset = limit;
+    Object.defineProperty(strip, "scrollLeft", {
+      get: () => offset,
+      set: (value: number) => {
+        offset = Math.min(limit, value);
+      },
+    });
+    expect(fireEvent.wheel(strip, { deltaY: 120 })).toBe(true);
+    expect(strip.scrollLeft).toBe(limit);
+  });
+
+  it("removes the native wheel listener when the preset strip unmounts", () => {
+    const { strip, unmount } = renderScrollablePresets();
+    unmount();
+    expect(fireEvent.wheel(strip, { deltaY: 120 })).toBe(true);
+    expect(strip.scrollLeft).toBe(0);
+  });
+
   it("deletes a preset immediately and offers an eight-second undo", async () => {
     seedPresets([
       { createdAt: 1, filters: { creator: "Jane" }, name: "Travel" },

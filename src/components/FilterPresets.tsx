@@ -160,12 +160,40 @@ export function FilterPresets({
       return;
     }
     updateStripFade();
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(updateStripFade);
-    observer.observe(strip);
-    return () => observer.disconnect();
+    const handleWheel = (event: WheelEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.ctrlKey ||
+        Math.abs(event.deltaY) <= Math.abs(event.deltaX)
+      ) {
+        return;
+      }
+      let unit = 1;
+      if (event.deltaMode === 1) {
+        unit = 16;
+      } else if (event.deltaMode === 2) {
+        unit = strip.clientWidth;
+      }
+      const previousScroll = strip.scrollLeft;
+      // Native clamping preserves fractional scroll limits under display scaling.
+      strip.scrollLeft += event.deltaY * unit;
+      if (strip.scrollLeft === previousScroll) {
+        return;
+      }
+      event.preventDefault();
+      updateStripFade();
+    };
+    // React wheel listeners are passive; cancellation keeps the panel still.
+    strip.addEventListener("wheel", handleWheel, { passive: false });
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(updateStripFade);
+    observer?.observe(strip);
+    return () => {
+      strip.removeEventListener("wheel", handleWheel);
+      observer?.disconnect();
+    };
   }, [presentation, presets, updateStripFade]);
 
   function handleSave() {
