@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotoCard } from "@/components/PhotoCard";
 import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
@@ -50,6 +51,35 @@ describe("PhotoCard", () => {
     const { container } = render(<PhotoCard {...baseProps} />);
     const img = container.querySelector("img");
     expect(img).not.toBeInTheDocument();
+  });
+
+  it("acknowledges a cached image only during committed effects under StrictMode", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
+      true
+    );
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      512
+    );
+    vi.mocked(toGalleryThumbnailUrl).mockReturnValue("http://gallery/1/256");
+    const onDisplayed = vi.fn();
+    vi.mocked(useGalleryThumbnail).mockReturnValue({
+      ref: { current: null },
+      url: "http://gallery/1/256",
+      failed: false,
+      onDisplayed,
+    });
+    render(
+      <StrictMode>
+        <PhotoCard {...baseProps} />
+      </StrictMode>
+    );
+    expect(screen.getByRole("img", { name: "test-photo.jpg" })).toHaveAttribute(
+      "data-load-state",
+      "loaded"
+    );
+    // StrictMode commits the mount effect twice; replaying state calculations
+    // must not send another acknowledgment that could release a newer request.
+    expect(onDisplayed).toHaveBeenCalledTimes(2);
   });
 
   it("clears a failed placeholder only after a rebound managed resource succeeds", () => {

@@ -207,16 +207,19 @@ function PhotoCardImage({
     const image = imageRef.current;
     // Cached thumbnails can already be decoded before their new load event.
     // Reveal them before paint when switching back to the photo gallery.
+    if (
+      hasThumbnail &&
+      renderImage &&
+      image?.complete &&
+      image.naturalWidth > 0
+    ) {
+      // A state updater can replay during a later render. Acknowledge only
+      // here, after commit, so replay cannot release a newer image request.
+      onDisplayed?.();
+      setLoadState("cached");
+      return;
+    }
     setLoadState((current) => {
-      if (
-        hasThumbnail &&
-        renderImage &&
-        image?.complete &&
-        image.naturalWidth > 0
-      ) {
-        onDisplayed?.();
-        return "cached";
-      }
       if (
         preserveLoaded &&
         hasThumbnail &&
