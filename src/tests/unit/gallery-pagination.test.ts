@@ -2,9 +2,11 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { readMigrationFiles } from "drizzle-orm/migrator";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { folders, photos } from "@/db/schema";
 import {
+  getGalleryGeometryRevision,
   getGalleryLayoutPrefix,
   getGalleryRevision,
   listGalleryPhotos,
@@ -39,6 +41,109 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe("gallery keyset pagination", () => {
+  it("upgrades existing tag associations without resetting layout revisions", () => {
+    const upgrading = new Database(":memory:");
+    try {
+      const migrations = readMigrationFiles({ migrationsFolder: "drizzle" });
+      for (const migration of migrations.slice(0, -1)) {
+        for (const statement of migration.sql) {
+          upgrading.exec(statement);
+        }
+      }
+      upgrading.exec(
+        "INSERT INTO photos(id,path,filename,created_at) VALUES(1,'/existing.jpg','existing.jpg',1); INSERT INTO tags(id,name,created_at) VALUES(1,'existing',1); INSERT INTO photo_tags(photo_id,tag_id) VALUES(1,1)"
+      );
+      const before = upgrading
+        .prepare("SELECT * FROM gallery_data_revision ORDER BY id")
+        .all();
+      for (const statement of migrations.at(-1)?.sql ?? []) {
+        upgrading.exec(statement);
+      }
+      expect(
+        upgrading
+          .prepare(
+            "SELECT * FROM gallery_data_revision WHERE id IN (1,2) ORDER BY id"
+          )
+          .all()
+      ).toEqual(before);
+      expect(
+        upgrading.prepare("SELECT photo_id,tag_id FROM photo_tags").all()
+      ).toEqual([{ photo_id: 1, tag_id: 1 }]);
+      upgrading.exec("DELETE FROM photo_tags WHERE photo_id=1 AND tag_id=1");
+      expect(
+        upgrading
+          .prepare(
+            "SELECT * FROM gallery_data_revision WHERE id IN (1,2) ORDER BY id"
+          )
+          .all()
+      ).toEqual(before);
+      expect(
+        upgrading
+          .prepare("SELECT revision FROM gallery_data_revision WHERE id=3")
+          .get()
+      ).toEqual({ revision: 1 });
+    } finally {
+      upgrading.close();
+    }
+  });
+  for (const mutation of [
+    "DELETE FROM photo_tags WHERE photo_id=1 AND tag_id=1",
+    "UPDATE photo_tags SET origin='manual',user_confirmed=1 WHERE photo_id=1",
+    "INSERT INTO photo_tags(photo_id,tag_id) VALUES(25,1)",
+    "UPDATE tags SET name='renamed' WHERE id=1",
+    "UPDATE tags SET parent_id=2 WHERE id=1",
+    "DELETE FROM tags WHERE id=1",
+  ]) {
+    it(`isolates tag revisions from ordinary/favorite pagination: ${mutation}`, () => {
+      sqlite.exec(
+        "INSERT INTO tags(id,name,created_at) VALUES(1,'tag',1),(2,'parent',1); INSERT INTO photo_tags(photo_id,tag_id) SELECT id,1 FROM photos WHERE id<=20; UPDATE photos SET is_favorite=1"
+      );
+      const base = { sort: "date" as const, order: "desc" as const, limit: 4 };
+      const ordinary = listGalleryPhotos(base);
+      const favorite = listGalleryPhotos({ ...base, favoriteOnly: true });
+      const tagged = listGalleryPhotos({ ...base, tagId: 1 });
+      const before = [getGalleryRevision(), getGalleryGeometryRevision()];
+      sqlite.exec(mutation);
+      expect([getGalleryRevision(), getGalleryGeometryRevision()]).toEqual(
+        before
+      );
+      expect(() =>
+        listGalleryPhotos({ ...base, cursor: ordinary.nextCursor })
+      ).not.toThrow();
+      expect(() =>
+        listGalleryPhotos({
+          ...base,
+          favoriteOnly: true,
+          cursor: favorite.nextCursor,
+        })
+      ).not.toThrow();
+      expect(() =>
+        listGalleryPhotos({ ...base, tagId: 1, cursor: tagged.nextCursor })
+      ).toThrow("GALLERY_CURSOR_EXPIRED");
+      const fresh = listGalleryPhotos({ ...base, tagId: 1 });
+      expect(fresh.geometryRevision).toBe(fresh.revision);
+    });
+  }
+
+  it("refreshes descendant AND/OR counts and sources after removing a tag", () => {
+    sqlite.exec(
+      "INSERT INTO tags(id,name,parent_id,created_at) VALUES(1,'parent',NULL,1),(2,'child',1,1),(3,'other',NULL,1); INSERT INTO photo_tags(photo_id,tag_id) VALUES(1,2),(1,3),(2,2),(3,3)"
+    );
+    const base = {
+      sort: "date" as const,
+      order: "desc" as const,
+      limit: 100,
+      tagIds: [1, 3],
+    };
+    expect(listGalleryPhotos({ ...base, tagMode: "and" }).total).toBe(1);
+    expect(listGalleryPhotos({ ...base, tagMode: "or" }).total).toBe(3);
+    const revision = listGalleryPhotos(base).geometryRevision;
+    sqlite.exec("DELETE FROM photo_tags WHERE photo_id=1 AND tag_id=2");
+    expect(listGalleryPhotos({ ...base, tagMode: "and" }).total).toBe(0);
+    expect(listGalleryPhotos({ ...base, tagMode: "or" }).total).toBe(3);
+    expect(listGalleryPhotos(base).geometryRevision).not.toBe(revision);
+  });
+
   for (const sort of ["date", "name", "size"] as const) {
     for (const order of ["asc", "desc"] as const) {
       it(`${sort}/${order} has stable null and equal-key boundaries in both directions`, () => {

@@ -74,11 +74,17 @@ export function getGalleryGeometryRevision(): number {
 }
 
 function getListingRevision(input: PhotoListFilter): number {
-  // Favorite changes affect membership only in the Favorites filter. Other
-  // scopes keep their cursor and geometry while card content is refreshed.
-  return input.favoriteOnly
+  const layoutRevision = input.favoriteOnly
     ? getGalleryRevision()
     : getGalleryGeometryRevision();
+  // Tag evidence changes membership/order only in a tag-filtered listing.
+  const tagRevision =
+    input.tagId != null || input.tagIds?.length
+      ? (getDatabase().get<{ revision: number }>(
+          sql`SELECT revision FROM gallery_data_revision WHERE id=3`
+        )?.revision ?? 0)
+      : 0;
+  return layoutRevision + tagRevision;
 }
 function fingerprint(input: GalleryListInput): string {
   return createHash("sha256")
@@ -312,9 +318,7 @@ export function listGalleryPhotos(input: GalleryListInput) {
     items,
     ...total,
     revision,
-    geometryRevision: input.favoriteOnly
-      ? revision
-      : getGalleryGeometryRevision(),
+    geometryRevision: revision,
     nextCursor: !forward || hasExtra ? encode(rows.at(-1)) : null,
     previousCursor: (forward ? Boolean(cursor) : hasExtra)
       ? encode(rows[0])

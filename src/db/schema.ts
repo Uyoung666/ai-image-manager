@@ -40,6 +40,7 @@ export const folders = sqliteTable(
   })
 );
 
+/** 1: layout + favorites; 2: layout; 3: tag membership and evidence. */
 export const galleryDataRevision = sqliteTable("gallery_data_revision", {
   id: integer("id").primaryKey(),
   revision: integer("revision").notNull().default(0),
