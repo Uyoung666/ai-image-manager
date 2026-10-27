@@ -1,6 +1,13 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import type { Photo } from "@/types/photo";
+import { getTagsChangedDetail } from "@/utils/tag-change-event";
 
 interface UsePhotoDetailPanelReturn {
   detailDismissed: boolean;
@@ -8,6 +15,25 @@ interface UsePhotoDetailPanelReturn {
   dismissDetail: () => void;
   navigateDetail: (direction: "prev" | "next") => void;
   showPhoto: (photo: Photo) => void;
+}
+
+interface TagEditSession {
+  order: number[];
+  photo: Photo;
+  routeKey: string;
+}
+
+function shouldEndTagEdit(
+  editing: TagEditSession | null,
+  routeKey: string,
+  selectedIds: Set<number>
+) {
+  return (
+    editing &&
+    (editing.routeKey !== routeKey ||
+      selectedIds.size > 1 ||
+      (selectedIds.size === 1 && !selectedIds.has(editing.photo.id)))
+  );
 }
 
 /**
@@ -28,7 +54,9 @@ export function usePhotoDetailPanel(
   selectedIds: Set<number>,
   photos: Photo[],
   routeKey: string,
-  onSelect: (id: number) => void
+  onSelect: (id: number) => void,
+  retainOnTagChange = false,
+  editScopeKey = routeKey
 ): UsePhotoDetailPanelReturn {
   const { getSession, saveSession } = useBrowseSession();
 
@@ -43,6 +71,39 @@ export function usePhotoDetailPanel(
 
   // 用 ref 追踪当前 detailPhoto id，避免将 detailPhoto 放入 effect 依赖
   const detailPhotoIdRef = useRef<number | null>(null);
+  const editingRef = useRef<TagEditSession | null>(null);
+  const currentRef = useRef({ detailPhoto, photos, routeKey: editScopeKey });
+  currentRef.current = { detailPhoto, photos, routeKey: editScopeKey };
+
+  useEffect(() => {
+    if (!retainOnTagChange) {
+      return;
+    }
+    const retain = (event: Event) => {
+      const detail = getTagsChangedDetail(event);
+      const current = currentRef.current;
+      if (
+        detail?.source !== "detail" ||
+        !current.detailPhoto ||
+        !detail.photoIds?.includes(current.detailPhoto.id)
+      ) {
+        return;
+      }
+      if (
+        editingRef.current?.photo.id !== current.detailPhoto.id ||
+        editingRef.current.routeKey !== current.routeKey
+      ) {
+        editingRef.current = {
+          photo: { ...current.detailPhoto },
+          order: current.photos.map((photo) => photo.id),
+          routeKey: current.routeKey,
+        };
+        setDetailPhoto(editingRef.current.photo);
+      }
+    };
+    window.addEventListener("tags-changed", retain);
+    return () => window.removeEventListener("tags-changed", retain);
+  }, [retainOnTagChange]);
 
   // 同步 selectedIds → detailPhoto
   // 规则：
@@ -53,7 +114,11 @@ export function usePhotoDetailPanel(
   //
   // 注意：detailDismissed 和 detailPhoto 不在依赖数组中。
   // 它们由本 effect 输出（setState），通过 ref 解耦避免循环。
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: selection, dismissal and the temporary tag-edit session must commit before paint.
   useLayoutEffect(() => {
+    if (shouldEndTagEdit(editingRef.current, editScopeKey, selectedIds)) {
+      editingRef.current = null;
+    }
     if (selectedIds.size === 1) {
       const id = selectedIds.values().next().value;
       if (id === undefined) {
@@ -79,14 +144,21 @@ export function usePhotoDetailPanel(
       return;
     }
 
+    // A tag edit may remove this photo from the result and the visible selection.
+    // Keep only the inspector session; batch operations still use visible IDs.
+    if (editingRef.current && !userDismissedRef.current) {
+      return;
+    }
+
     if (detailPhotoIdRef.current !== null) {
       setDetailPhoto(null);
       detailPhotoIdRef.current = null;
     }
     prevSelectedIdRef.current = null;
     userDismissedRef.current = false;
-  }, [selectedIds, photos, routeKey, saveSession]);
+  }, [selectedIds, photos, routeKey, editScopeKey, saveSession]);
   const dismissDetail = useCallback(() => {
+    editingRef.current = null;
     userDismissedRef.current = true;
     setDetailDismissed(true);
     setDetailPhoto(null);
@@ -100,14 +172,24 @@ export function usePhotoDetailPanel(
         return;
       }
       const currentIdx = photos.findIndex((p) => p.id === detailPhoto.id);
-      if (currentIdx < 0) {
-        return;
-      }
       const nextIdx = direction === "prev" ? currentIdx - 1 : currentIdx + 1;
-      if (nextIdx < 0 || nextIdx >= photos.length) {
+      let nextPhoto: Photo | undefined = photos[nextIdx];
+      if (currentIdx < 0) {
+        const order = editingRef.current?.order ?? [];
+        const previousIndex = order.indexOf(detailPhoto.id);
+        const candidates =
+          direction === "prev"
+            ? order.slice(0, previousIndex).reverse()
+            : order.slice(previousIndex + 1);
+        const available = new Map(photos.map((photo) => [photo.id, photo]));
+        nextPhoto = candidates
+          .map((id) => available.get(id))
+          .find((photo) => photo !== undefined);
+      }
+      if (!nextPhoto) {
         return;
       }
-      const nextPhoto = photos[nextIdx];
+      editingRef.current = null;
       setDetailDismissed(false);
       setDetailPhoto(nextPhoto);
       detailPhotoIdRef.current = nextPhoto.id;
@@ -125,6 +207,7 @@ export function usePhotoDetailPanel(
    */
   const showPhoto = useCallback(
     (photo: Photo) => {
+      editingRef.current = null;
       userDismissedRef.current = false;
       setDetailDismissed(false);
       prevSelectedIdRef.current = photo.id;

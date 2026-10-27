@@ -2,6 +2,17 @@ import { ipc } from "@/ipc/manager";
 import { batchTagPhotoLimit } from "@/lib/batch-tag-limits";
 
 export const photoTagActions = {
+  getPhotoTags: (photoId: number) =>
+    ipc.client.photos.getPhotoTags({ id: photoId }),
+  getTags: () => ipc.client.photos.getTags({}),
+  add: (photoId: number, tagId: number) =>
+    ipc.client.photos.setPhotoTag({ photoId, tagId }),
+  remove: (photoId: number, tagId: number) =>
+    ipc.client.photos.removePhotoTag({ photoId, tagId }),
+  confirm: (photoId: number, tagId: number) =>
+    ipc.client.photos.confirmPhotoTag({ photoId, tagId }),
+  create: (name: string, color: string) =>
+    ipc.client.photos.addTag({ name, color }),
   list: () => ipc.client.photos.getTagOptions(),
   summary: async (ids: number[]) => {
     const counts = new Map<number, number>();

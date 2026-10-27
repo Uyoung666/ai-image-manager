@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { queryClient } from "@/providers/QueryProvider";
+import { notifyTagsChanged } from "@/utils/tag-change-event";
 
 type Tag = Awaited<ReturnType<typeof photoTagActions.list>>[number];
 type Intent = "add" | "remove";
@@ -78,13 +79,13 @@ function TagChoice({
   );
 }
 
-function notifyChanged() {
+function notifyChanged(photoIds: number[], source: "batch" | "undo") {
   // The tags-changed subscribers refresh text/tag scopes and smart albums.
   // Tag mutations do not change the unfiltered gallery's order or membership.
   for (const key of ["tags", "albums"]) {
     queryClient.invalidateQueries({ queryKey: [key] });
   }
-  window.dispatchEvent(new Event("tags-changed"));
+  notifyTagsChanged({ photoIds, source });
 }
 
 export function BatchTagDialog({
@@ -170,7 +171,7 @@ export function BatchTagDialog({
         setProgress
       );
       if (result.changed) {
-        notifyChanged();
+        notifyChanged(photoIds, "batch");
       }
       if (result.failed) {
         toast.error(t("batchTagsPartial", { count: result.failed }));
@@ -190,7 +191,7 @@ export function BatchTagDialog({
               try {
                 const restored = await photoTagActions.undo(result.operationId);
                 if (restored.restored) {
-                  notifyChanged();
+                  notifyChanged(photoIds, "undo");
                 }
                 if (restored.expired || restored.skipped) {
                   toast.error(

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 
@@ -10,11 +16,13 @@ const {
   getPhotoTagsMock,
   getTagsMock,
   suggestTagsMock,
+  removePhotoTagMock,
 } = vi.hoisted(() => ({
   getPhotoTagAnalysisStatusMock: vi.fn(),
   getPhotoTagsMock: vi.fn(() => new Promise(() => undefined)),
   getTagsMock: vi.fn(() => new Promise(() => undefined)),
   suggestTagsMock: vi.fn(),
+  removePhotoTagMock: vi.fn(),
 }));
 
 vi.mock("@/ipc/manager", () => ({
@@ -26,6 +34,7 @@ vi.mock("@/ipc/manager", () => ({
         getPhotoTags: getPhotoTagsMock,
         getTags: getTagsMock,
         suggestTags: suggestTagsMock,
+        removePhotoTag: removePhotoTagMock,
       },
     },
   },
@@ -47,7 +56,106 @@ describe("PhotoDetailPanel preview", () => {
     getPhotoTagsMock.mockReset();
     getTagsMock.mockReset();
     suggestTagsMock.mockReset();
+    removePhotoTagMock.mockReset();
     getPhotoTagAnalysisStatusMock.mockResolvedValue({ state: "ready" });
+  });
+
+  it("removes tags locally and rejects an earlier tag read after another removal", async () => {
+    const tags = [1, 2, 3].map((id) => ({
+      id,
+      name: `EditTag${id}`,
+      isConfirmed: true,
+      confidence: null,
+      color: "#123456",
+    }));
+    let oldRead!: (value: typeof tags) => void;
+    getPhotoTagsMock
+      .mockResolvedValueOnce(tags)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            oldRead = resolve;
+          })
+      )
+      .mockResolvedValueOnce([tags[2]]);
+    getTagsMock.mockResolvedValue(tags);
+    removePhotoTagMock.mockResolvedValue({ ok: true });
+    render(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={basePhoto}
+      />
+    );
+    const first = await screen.findByText("EditTag1");
+    first.focus();
+    fireEvent.click(first);
+    await waitFor(() =>
+      expect(screen.queryByText("EditTag1")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("EditTag2")).toHaveFocus();
+    fireEvent.click(screen.getByText("EditTag2"));
+    await waitFor(() =>
+      expect(screen.queryByText("EditTag2")).not.toBeInTheDocument()
+    );
+    await act(async () => oldRead(tags));
+    expect(screen.queryByText("EditTag1")).not.toBeInTheDocument();
+    expect(screen.queryByText("EditTag2")).not.toBeInTheDocument();
+    expect(screen.getByText("EditTag3")).toHaveFocus();
+  });
+
+  it("does not refresh the next photo with a previous photo's delayed write", async () => {
+    const firstTag = { id: 1, name: "OldPhotoTag", isConfirmed: true };
+    const nextTag = { id: 2, name: "NextPhotoTag", isConfirmed: true };
+    getPhotoTagsMock
+      .mockResolvedValueOnce([firstTag])
+      .mockResolvedValueOnce([nextTag]);
+    getTagsMock.mockResolvedValue([]);
+    let saved!: () => void;
+    removePhotoTagMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          saved = resolve;
+        })
+    );
+    const { rerender } = render(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={basePhoto}
+      />
+    );
+    fireEvent.click(await screen.findByText("OldPhotoTag"));
+    rerender(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={{ ...basePhoto, id: 2 }}
+      />
+    );
+    await screen.findByText("NextPhotoTag");
+    await act(async () => saved());
+    expect(screen.getByText("NextPhotoTag")).toBeInTheDocument();
+    expect(screen.queryByText("OldPhotoTag")).not.toBeInTheDocument();
+    expect(getPhotoTagsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a tag when its removal fails", async () => {
+    getPhotoTagsMock.mockResolvedValue([
+      { id: 1, name: "FailedTag", isConfirmed: true },
+    ]);
+    getTagsMock.mockResolvedValue([]);
+    removePhotoTagMock.mockRejectedValueOnce(new Error("write failed"));
+    render(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={basePhoto}
+      />
+    );
+    fireEvent.click(await screen.findByText("FailedTag"));
+    await waitFor(() => expect(removePhotoTagMock).toHaveBeenCalledOnce());
+    expect(screen.getByText("FailedTag")).toBeInTheDocument();
   });
 
   it("keeps a stable preview frame and uses the cached thumbnail", () => {

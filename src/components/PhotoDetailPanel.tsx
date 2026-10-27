@@ -26,6 +26,7 @@ import {
   readPhotoDetailAdvancedMetadataExpanded,
   savePhotoDetailAdvancedMetadataExpanded,
 } from "@/actions/photo-detail-panel-preferences";
+import { photoTagActions } from "@/actions/photo-tags";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SmoothInput } from "@/components/ui/smooth-input";
 import {
@@ -37,6 +38,7 @@ import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { getDateLocale } from "@/utils/date-locale";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { notifyTagsChanged } from "@/utils/tag-change-event";
 
 interface PhotoDetail {
   filename: string;
@@ -174,6 +176,12 @@ export function PhotoDetailPanel({
   const tagInputRef = useRef<HTMLInputElement>(null);
   const contentScrollRef = useRef<HTMLDivElement>(null);
   const photoRequestRef = useRef(0);
+  const tagRequestRef = useRef(0);
+  const pendingTagWritesRef = useRef(new Set<string>());
+  const tagFocusRef = useRef<{ photoId: number; ids: number[] } | null>(null);
+  const activePhotoId = photo?.id;
+  const activePhotoIdRef = useRef(activePhotoId);
+  activePhotoIdRef.current = activePhotoId;
   const aiStatusRequestRef = useRef(0);
   const aiSuggestionRequestRef = useRef(0);
   const [visible, setVisible] = useState(false);
@@ -195,7 +203,9 @@ export function PhotoDetailPanel({
 
   useEffect(() => {
     aiSuggestionRequestRef.current += 1;
-    const cached = photo ? suggestionCache.get(photo.id) : undefined;
+    const cached = activePhotoId
+      ? suggestionCache.get(activePhotoId)
+      : undefined;
     if (cached) {
       setAiSuggestions(cached);
     } else {
@@ -205,7 +215,7 @@ export function PhotoDetailPanel({
     setNewTagName("");
     setShowTagInput(false);
     setShowAllTags(false);
-  }, [photo?.id, photo]);
+  }, [activePhotoId]);
 
   // Keyboard navigation (↑/↓) when panel is visible
   useEffect(() => {
@@ -311,16 +321,21 @@ export function PhotoDetailPanel({
 
   const loadTags = useCallback(
     async (requestId = photoRequestRef.current) => {
-      if (!photo) {
+      if (activePhotoId === undefined) {
         return;
       }
-      const photoId = photo.id;
+      const photoId = activePhotoId;
+      const tagRequest = ++tagRequestRef.current;
       try {
         const [pTags, aTags] = await Promise.all([
-          ipc.client.photos.getPhotoTags({ id: photoId }),
-          ipc.client.photos.getTags({}),
+          photoTagActions.getPhotoTags(photoId),
+          photoTagActions.getTags(),
         ]);
-        if (photoRequestRef.current !== requestId) {
+        if (
+          activePhotoIdRef.current !== photoId ||
+          photoRequestRef.current !== requestId ||
+          tagRequestRef.current !== tagRequest
+        ) {
           return;
         }
         setPhotoTags((pTags as TagInfo[]) || []);
@@ -329,12 +344,32 @@ export function PhotoDetailPanel({
         console.error("[loadTags] failed:", err);
       }
     },
-    [photo]
+    [activePhotoId]
   );
+
+  useLayoutEffect(() => {
+    const pending = tagFocusRef.current;
+    if (!pending || pending.photoId !== activePhotoId) {
+      return;
+    }
+    tagFocusRef.current = null;
+    const next = pending.ids
+      .filter((id) => photoTags.some((tag) => tag.id === id))
+      .map((id) =>
+        panelRef.current?.querySelector<HTMLButtonElement>(
+          `[data-photo-tag-id="${id}"]`
+        )
+      )
+      .find(Boolean);
+    (
+      next ??
+      panelRef.current?.querySelector<HTMLButtonElement>("[data-add-photo-tag]")
+    )?.focus({ preventScroll: true });
+  }, [activePhotoId, photoTags]);
 
   useEffect(() => {
     const requestId = ++aiStatusRequestRef.current;
-    if (!photo) {
+    if (activePhotoId === undefined) {
       setAiTagTaskState("unavailable");
       return;
     }
@@ -349,7 +384,7 @@ export function PhotoDetailPanel({
     const refresh = async () => {
       try {
         const result = (await ipc.client.photos.getPhotoTagAnalysisStatus({
-          id: photo.id,
+          id: activePhotoId,
         })) as {
           state: "ready" | "indexing" | "tagging" | "busy" | "unavailable";
         };
@@ -383,10 +418,10 @@ export function PhotoDetailPanel({
       active = false;
       clearInterval(interval);
     };
-  }, [photo?.id, loadTags, photo]);
+  }, [activePhotoId, loadTags]);
 
   useEffect(() => {
-    if (!photo) {
+    if (activePhotoId === undefined) {
       photoRequestRef.current += 1;
       return;
     }
@@ -395,7 +430,7 @@ export function PhotoDetailPanel({
     setExif(null);
     setPhotoTags([]);
     ipc.client.photos
-      .getPhotoExif({ id: photo.id })
+      .getPhotoExif({ id: activePhotoId })
       .then((result) => {
         if (photoRequestRef.current === requestId) {
           setExif(result as ExifData | null);
@@ -412,7 +447,11 @@ export function PhotoDetailPanel({
         }
       });
     loadTags(requestId);
-  }, [photo?.id, loadTags, photo]);
+    return () => {
+      photoRequestRef.current += 1;
+      tagRequestRef.current += 1;
+    };
+  }, [activePhotoId, loadTags]);
 
   useEffect(() => {
     if (showTagInput && tagInputRef.current) {
@@ -420,42 +459,82 @@ export function PhotoDetailPanel({
     }
   }, [showTagInput]);
 
-  async function handleAddTag(tagId: number) {
-    if (!photo) {
+  async function mutateTag(
+    tagId: number,
+    operation: "add" | "remove" | "confirm"
+  ) {
+    if (activePhotoId === undefined) {
       return;
     }
+    const photoId = activePhotoId;
+    const requestId = photoRequestRef.current;
+    const key = `${photoId}:${tagId}`;
+    if (pendingTagWritesRef.current.has(key)) {
+      return;
+    }
+    pendingTagWritesRef.current.add(key);
+    tagRequestRef.current += 1;
+    const restoreFocus =
+      document.activeElement?.getAttribute("data-photo-tag-id") ===
+      String(tagId);
     try {
-      await ipc.client.photos.setPhotoTag({ photoId: photo.id, tagId });
-      loadTags();
-      window.dispatchEvent(new CustomEvent("tags-changed"));
+      await photoTagActions[operation](photoId, tagId);
+      notifyTagsChanged({ photoIds: [photoId], source: "detail" });
+      if (
+        activePhotoIdRef.current !== photoId ||
+        photoRequestRef.current !== requestId
+      ) {
+        return;
+      }
+      if (operation === "remove" && restoreFocus) {
+        const index = photoTags.findIndex((tag) => tag.id === tagId);
+        tagFocusRef.current = {
+          photoId,
+          ids: [
+            ...photoTags.slice(index + 1),
+            ...photoTags.slice(0, index).reverse(),
+          ].map((tag) => tag.id),
+        };
+      }
+      setPhotoTags((current) => {
+        if (operation === "remove") {
+          return current.filter((tag) => tag.id !== tagId);
+        }
+        if (operation === "confirm") {
+          return current.map((tag) =>
+            tag.id === tagId ? { ...tag, isConfirmed: true } : tag
+          );
+        }
+        const tag = allTags.find((item) => item.id === tagId);
+        return tag && !current.some((item) => item.id === tagId)
+          ? [...current, { ...tag, confidence: null, isConfirmed: true }]
+          : current;
+      });
+      loadTags(requestId);
     } catch {
-      toast.error(t("addTagFailed"));
+      if (activePhotoIdRef.current === photoId) {
+        const errorKey = {
+          add: "addTagFailed",
+          remove: "removeTagFailed",
+          confirm: "confirmTagFailed",
+        } as const;
+        toast.error(t(errorKey[operation]));
+      }
+    } finally {
+      pendingTagWritesRef.current.delete(key);
     }
   }
 
-  async function handleRemoveTag(tagId: number) {
-    if (!photo) {
-      return;
-    }
-    try {
-      await ipc.client.photos.removePhotoTag({ photoId: photo.id, tagId });
-      loadTags();
-      window.dispatchEvent(new CustomEvent("tags-changed"));
-    } catch {
-      toast.error(t("removeTagFailed"));
-    }
+  function handleAddTag(tagId: number) {
+    return mutateTag(tagId, "add");
   }
 
-  async function handleConfirmTag(tagId: number) {
-    if (!photo) {
-      return;
-    }
-    try {
-      await ipc.client.photos.confirmPhotoTag({ photoId: photo.id, tagId });
-      loadTags();
-    } catch {
-      toast.error(t("confirmTagFailed"));
-    }
+  function handleRemoveTag(tagId: number) {
+    return mutateTag(tagId, "remove");
+  }
+
+  function handleConfirmTag(tagId: number) {
+    return mutateTag(tagId, "confirm");
   }
 
   async function handleCreateTag() {
@@ -463,21 +542,24 @@ export function PhotoDetailPanel({
     if (!(name && photo)) {
       return;
     }
+    const photoId = photo.id;
+    const requestId = photoRequestRef.current;
+    tagRequestRef.current += 1;
     try {
-      const created = await ipc.client.photos.addTag({
-        name,
-        color: getTagColor(name),
-      });
+      const created = await photoTagActions.create(name, getTagColor(name));
       const tag = created as TagInfo;
-      await ipc.client.photos.setPhotoTag({
-        photoId: photo.id,
-        tagId: tag.id,
-      });
+      await photoTagActions.add(photoId, tag.id);
+      notifyTagsChanged({ photoIds: [photoId], source: "detail" });
+      if (
+        activePhotoIdRef.current !== photoId ||
+        photoRequestRef.current !== requestId
+      ) {
+        return;
+      }
       setNewTagName("");
       setShowTagInput(false);
       setShowAllTags(false);
-      loadTags();
-      window.dispatchEvent(new CustomEvent("tags-changed"));
+      loadTags(requestId);
     } catch {
       toast.error(t("createTagFailed"));
     }
@@ -541,27 +623,21 @@ export function PhotoDetailPanel({
       const existing = allTags.find((t) => t.name === tagName);
       if (existing) {
         if (!photoTagIds.has(existing.id)) {
-          await ipc.client.photos.setPhotoTag({
-            photoId,
-            tagId: existing.id,
-          });
+          await photoTagActions.add(photoId, existing.id);
         }
       } else {
-        const created = await ipc.client.photos.addTag({
-          name: tagName,
-          color: getTagColor(tagName),
-        });
+        const created = await photoTagActions.create(
+          tagName,
+          getTagColor(tagName)
+        );
         const tag = created as TagInfo;
-        await ipc.client.photos.setPhotoTag({
-          photoId,
-          tagId: tag.id,
-        });
+        await photoTagActions.add(photoId, tag.id);
       }
+      notifyTagsChanged({ photoIds: [photoId], source: "detail" });
       if (aiSuggestionRequestRef.current !== requestId) {
         return;
       }
       loadTags();
-      window.dispatchEvent(new CustomEvent("tags-changed"));
       setAiSuggestions((prev) =>
         prev ? prev.filter((s) => s.tag !== tagName) : null
       );
@@ -833,6 +909,7 @@ export function PhotoDetailPanel({
                               ? "border border-foreground/30 border-dashed bg-foreground/5 text-foreground"
                               : "text-white/90 hover:opacity-80"
                           }`}
+                          data-photo-tag-id={tag.id}
                           onClick={() =>
                             unconfirmed
                               ? handleConfirmTag(tag.id)
@@ -871,6 +948,7 @@ export function PhotoDetailPanel({
                           <button
                             aria-label={t("remove")}
                             className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-muted-foreground/70 opacity-0 transition-opacity hover:bg-destructive hover:text-white group-hover:opacity-100"
+                            data-photo-tag-id={tag.id}
                             onClick={() => handleRemoveTag(tag.id)}
                             type="button"
                           >
@@ -885,6 +963,7 @@ export function PhotoDetailPanel({
               })}
               <button
                 className="rounded-[4px] border border-input border-dashed px-1.5 py-0.5 text-[11px] text-muted-foreground/70 hover:border-muted-foreground hover:text-muted-foreground"
+                data-add-photo-tag
                 onClick={() => {
                   setShowTagInput(true);
                   setShowAllTags(false);
