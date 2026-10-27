@@ -20,13 +20,14 @@ declare global {
   interface Window {
     galleryFrameProbe: { stop: () => number[][] };
     galleryModeProbe: {
-      photoFrames: number;
+      modeFrames: number;
       stop: () => Array<{
         photos: number;
         sequences: number;
         scrollTop: number | null;
         readyImages: number;
         hiddenReadyImages: number;
+        pendingImages: number;
       }>;
     };
     gallerySequenceGate: {
@@ -194,6 +195,64 @@ async function launch() {
 async function navigate(route: string) {
   await page.evaluate((next) => window.__e2eNavigate?.(next), route);
   await page.locator("main").first().waitFor();
+}
+
+async function startModeProbe(mode: "photos" | "sequences") {
+  await page.evaluate((targetMode) => {
+    const frames: ReturnType<Window["galleryModeProbe"]["stop"]> = [];
+    let frame = 0;
+    const probe = {
+      modeFrames: 0,
+      stop: () => {
+        cancelAnimationFrame(frame);
+        return frames;
+      },
+    };
+    const sample = () => {
+      const grid = document.querySelector<HTMLElement>("[data-masonry-scroll]");
+      const bounds = grid?.getBoundingClientRect();
+      const photos =
+        grid?.querySelectorAll(
+          '[data-photo-id][role="option"]:not([data-sequence-id])'
+        ).length ?? 0;
+      const sequences =
+        grid?.querySelectorAll("[data-sequence-id]").length ?? 0;
+      const selector =
+        targetMode === "photos"
+          ? '[data-photo-id][role="option"]:not([data-sequence-id])'
+          : "[data-sequence-id]";
+      const cards = [
+        ...(grid?.querySelectorAll<HTMLElement>(selector) ?? []),
+      ].filter((card) => {
+        const rect = card.getBoundingClientRect();
+        return (
+          bounds &&
+          rect.width > 0 &&
+          rect.bottom > bounds.top + 60 &&
+          rect.top < bounds.bottom
+        );
+      });
+      const images = cards
+        .flatMap((card) => [...card.querySelectorAll("img")])
+        .filter((image) => image.complete && image.naturalWidth > 0);
+      if ((targetMode === "photos" ? photos : sequences) > 0) {
+        probe.modeFrames++;
+      }
+      frames.push({
+        photos,
+        sequences,
+        scrollTop: grid?.scrollTop ?? null,
+        readyImages: images.length,
+        hiddenReadyImages: images.filter(
+          (image) => Number(getComputedStyle(image).opacity) < 0.99
+        ).length,
+        pendingImages: cards.length - images.length,
+      });
+      frame = requestAnimationFrame(sample);
+    };
+    window.galleryModeProbe = probe;
+    sample();
+  }, mode);
 }
 
 test.describe.configure({ mode: "serial" });
@@ -369,64 +428,27 @@ for (const size of SIZES) {
       .poll(() => scroll.evaluate((element) => element.scrollTop))
       .toBe(0);
 
-    await page.evaluate(() => {
-      const frames: Array<{
-        photos: number;
-        sequences: number;
-        scrollTop: number | null;
-        readyImages: number;
-        hiddenReadyImages: number;
-      }> = [];
-      let frame = 0;
-      const probe = {
-        photoFrames: 0,
-        stop: () => {
-          cancelAnimationFrame(frame);
-          return frames;
-        },
-      };
-      const sample = () => {
-        const grid = document.querySelector<HTMLElement>(
-          "[data-masonry-scroll]"
-        );
-        const bounds = grid?.getBoundingClientRect();
-        const photos = [
-          ...(grid?.querySelectorAll<HTMLElement>(
-            '[data-photo-id][role="option"]:not([data-sequence-id])'
-          ) ?? []),
-        ];
-        const images = photos
-          .flatMap((photo) => [...photo.querySelectorAll("img")])
-          .filter((image) => {
-            const rect = image.getBoundingClientRect();
-            return (
-              bounds &&
-              rect.bottom > bounds.top + 60 &&
-              rect.top < bounds.bottom &&
-              image.complete &&
-              image.naturalWidth > 0
-            );
-          });
-        if (photos.length > 0) {
-          probe.photoFrames++;
-        }
-        frames.push({
-          photos: photos.length,
-          sequences: grid?.querySelectorAll("[data-sequence-id]").length ?? 0,
-          scrollTop: grid?.scrollTop ?? null,
-          readyImages: images.length,
-          hiddenReadyImages: images.filter(
-            (image) => Number(getComputedStyle(image).opacity) < 0.99
-          ).length,
-        });
-        frame = requestAnimationFrame(sample);
-      };
-      window.galleryModeProbe = probe;
-      sample();
-    });
+    await expect
+      .poll(() =>
+        page.locator("[data-sequence-id] img").evaluateAll(
+          (images) =>
+            images.length === 3 &&
+            images.every((element) => {
+              const image = element as HTMLImageElement;
+              return (
+                image.complete &&
+                image.naturalWidth > 0 &&
+                Number(getComputedStyle(image).opacity) > 0.99
+              );
+            })
+        )
+      )
+      .toBe(true);
+
+    await startModeProbe("photos");
     await photoMode.click();
     await expect
-      .poll(() => page.evaluate(() => window.galleryModeProbe.photoFrames))
+      .poll(() => page.evaluate(() => window.galleryModeProbe.modeFrames))
       .toBeGreaterThanOrEqual(12);
     const frames = await page.evaluate(() => window.galleryModeProbe.stop());
     fs.writeFileSync(
@@ -446,6 +468,59 @@ for (const size of SIZES) {
     await expect(page.locator(".home-gallery-restore-overlay")).toHaveCount(0);
     await page.screenshot({
       path: test.info().outputPath("sequence-photo-settled.png"),
+    });
+
+    await startModeProbe("sequences");
+    await page.getByRole("button", { name: SEQUENCE_MODE }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.galleryModeProbe.modeFrames))
+      .toBeGreaterThanOrEqual(12);
+    const returnFrames = await page.evaluate(() =>
+      window.galleryModeProbe.stop()
+    );
+    fs.writeFileSync(
+      test.info().outputPath("photo-sequence-frames.json"),
+      JSON.stringify(returnFrames, null, 2)
+    );
+    const sequenceFrames = returnFrames.filter((frame) => frame.sequences > 0);
+    expect(sequenceFrames.length).toBeGreaterThanOrEqual(12);
+    expect(sequenceFrames.every((frame) => frame.scrollTop === 0)).toBe(true);
+    expect(
+      sequenceFrames.every(
+        (frame) =>
+          frame.readyImages > 0 &&
+          frame.hiddenReadyImages === 0 &&
+          frame.pendingImages === 0
+      )
+    ).toBe(true);
+    expect(
+      returnFrames.every((frame) => frame.photos > 0 || frame.sequences > 0)
+    ).toBe(true);
+    const overflow = await page.evaluate(() => {
+      return [
+        document.documentElement,
+        document.body,
+        ...document.querySelectorAll("main"),
+        document.querySelector("[data-masonry-scroll]"),
+      ]
+        .filter(
+          (element): element is HTMLElement => element instanceof HTMLElement
+        )
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          return (
+            element.scrollWidth > element.clientWidth + 1 ||
+            rect.left < -1 ||
+            rect.right > innerWidth + 1 ||
+            rect.top < -1 ||
+            rect.bottom > innerHeight + 1
+          );
+        })
+        .map((element) => element.tagName);
+    });
+    expect(overflow).toEqual([]);
+    await page.screenshot({
+      path: test.info().outputPath("photo-sequence-settled.png"),
     });
   });
 }

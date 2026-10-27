@@ -1,7 +1,23 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SequenceCard } from "@/components/SequenceCard";
+import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
 import type { PhotoSequence } from "@/types/photo-sequence";
+import { toGalleryThumbnailUrl } from "@/utils/local-media-url";
+
+vi.mock("@/hooks/useGalleryThumbnail", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/useGalleryThumbnail")>();
+  return { ...actual, useGalleryThumbnail: vi.fn(actual.useGalleryThumbnail) };
+});
+vi.mock("@/utils/local-media-url", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/utils/local-media-url")>();
+  return {
+    ...actual,
+    toGalleryThumbnailUrl: vi.fn(actual.toGalleryThumbnailUrl),
+  };
+});
 
 const SEQUENCE_BADGE_LABEL = /^sequenceBurst/;
 
@@ -24,6 +40,19 @@ const sequence: PhotoSequence = {
   startedAt: 0,
   type: "burst",
 };
+const coverProps = {
+  isSelected: false,
+  onClick: vi.fn(),
+  onOpen: vi.fn(),
+  onOpenDetails: vi.fn(),
+  sequence,
+};
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.mocked(useGalleryThumbnail).mockReset();
+  vi.mocked(toGalleryThumbnailUrl).mockReset();
+});
 
 describe("SequenceCard", () => {
   it("shows a full-order frame marker without selecting the sequence", () => {
@@ -75,12 +104,130 @@ describe("SequenceCard", () => {
     );
     const image = container.querySelector("img");
     expect(image).toHaveAttribute("loading", "eager");
+    expect(image).toHaveAttribute("data-load-state", "loading");
     expect(image).toHaveClass("opacity-0");
 
     if (image) {
       fireEvent.load(image);
     }
     expect(image).toHaveClass("opacity-100");
+    expect(image).toHaveClass("transition-opacity");
+  });
+
+  it("reveals a cached cover before another load event without restarting its fade", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
+      true
+    );
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      512
+    );
+    const { container } = render(<SequenceCard {...coverProps} />);
+    const image = screen.getByRole("img", { name: sequence.photo.filename });
+
+    expect(image).toHaveAttribute("data-load-state", "loaded");
+    expect(image).toHaveClass("opacity-100", "transition-none");
+    expect(image).not.toHaveClass("transition-opacity");
+    expect(container.querySelector('div[aria-hidden="true"]')).toBeNull();
+    fireEvent.load(image);
+    expect(image).toHaveClass("transition-none");
+  });
+
+  it("reveals a cached cover when the virtualized card mounts again", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
+      true
+    );
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      512
+    );
+    const { rerender } = render(<SequenceCard {...coverProps} />);
+    rerender(<div />);
+    rerender(<SequenceCard {...coverProps} />);
+
+    expect(
+      screen.getByRole("img", { name: sequence.photo.filename })
+    ).toHaveClass("opacity-100", "transition-none");
+  });
+
+  it("waits for a cold replacement after a cached cover", () => {
+    const complete = vi
+      .spyOn(HTMLImageElement.prototype, "complete", "get")
+      .mockReturnValue(true);
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      512
+    );
+    const { rerender } = render(<SequenceCard {...coverProps} />);
+    complete.mockReturnValue(false);
+    rerender(
+      <SequenceCard
+        {...coverProps}
+        sequence={{
+          ...sequence,
+          photo: {
+            ...sequence.photo,
+            thumbnailPath: "C:/thumbnails/replacement.jpg",
+          },
+        }}
+      />
+    );
+    const image = screen.getByRole("img", { name: sequence.photo.filename });
+    expect(image).toHaveAttribute("data-load-state", "loading");
+    expect(image).toHaveClass("opacity-0");
+    fireEvent.load(image);
+    expect(image).toHaveClass("opacity-100", "transition-opacity");
+  });
+
+  it("keeps a completed but undecodable cover hidden and restores the placeholder on error", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(
+      true
+    );
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      0
+    );
+    const { container } = render(<SequenceCard {...coverProps} />);
+    const image = screen.getByRole("img", { name: sequence.photo.filename });
+    expect(image).toHaveClass("opacity-0");
+    fireEvent.error(image);
+    expect(image).toHaveClass("opacity-0");
+    fireEvent.load(image);
+    expect(image).toHaveClass("opacity-100");
+    fireEvent.error(image);
+    expect(image).toHaveClass("opacity-0");
+    expect(
+      container.querySelector('div[aria-hidden="true"]')
+    ).toBeInTheDocument();
+  });
+
+  it("acknowledges cached managed covers and keeps them visible during a resource upgrade", () => {
+    vi.mocked(toGalleryThumbnailUrl).mockReturnValue("http://gallery/1/256");
+    const thumbnail = {
+      ref: { current: null },
+      url: "http://gallery/1/256",
+      failed: false,
+      onDisplayed: vi.fn(),
+    };
+    const hook = vi.mocked(useGalleryThumbnail).mockReturnValue(thumbnail);
+    const complete = vi
+      .spyOn(HTMLImageElement.prototype, "complete", "get")
+      .mockReturnValue(true);
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+      512
+    );
+    const { rerender } = render(<SequenceCard {...coverProps} />);
+    expect(thumbnail.onDisplayed).toHaveBeenCalledWith(thumbnail.url);
+
+    complete.mockReturnValue(false);
+    const upgradedUrl = "http://gallery/1/512";
+    hook.mockReturnValue({ ...thumbnail, url: upgradedUrl });
+    rerender(<SequenceCard {...coverProps} imageWidth={400} />);
+    const image = screen.getByRole("img", { name: sequence.photo.filename });
+    expect(image).toHaveClass("opacity-100", "transition-none");
+    fireEvent.load(image);
+    expect(thumbnail.onDisplayed).toHaveBeenLastCalledWith(upgradedUrl);
+    expect(image).toHaveClass("transition-none");
+
+    hook.mockReturnValue({ ...thumbnail, url: upgradedUrl, failed: true });
+    rerender(<SequenceCard {...coverProps} imageWidth={500} />);
+    expect(image).toHaveClass("opacity-0");
   });
 
   it("selects and opens sequence details on a normal click", () => {

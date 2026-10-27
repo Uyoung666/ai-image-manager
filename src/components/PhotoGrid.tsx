@@ -1863,7 +1863,7 @@ export const PhotoGrid = memo(
     const renderItem = useCallback(
       (
         photo: DisplayPhoto,
-        index: number,
+        _index: number,
         _style: React.CSSProperties,
         options: {
           renderImage: boolean;
@@ -1954,9 +1954,7 @@ export const PhotoGrid = memo(
                 memberIds.length > 0 &&
                 memberIds.every((id) => selectedIdsRef.current.has(id))
               }
-              loading={
-                index < columnCount * INITIAL_EAGER_ROWS ? "eager" : "lazy"
-              }
+              loading="eager"
               onClick={(_id, event) => {
                 if (onSelectSequence) {
                   onSelectSequence(memberIds, event);
@@ -2073,7 +2071,6 @@ export const PhotoGrid = memo(
         onToggleFavorite,
         searchQuery,
         getDragIds,
-        columnCount,
         containerWidth,
         sequenceByRepresentative,
         onOpenSequence,

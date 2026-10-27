@@ -98,9 +98,10 @@ export const SequenceCard = memo(function SequenceCard({
       ? toLocalMediaUrl(photo.thumbnailPath)
       : null;
   const imageRef = useRef<HTMLImageElement>(null);
-  const [imageState, setImageState] = useState<"loading" | "loaded" | "error">(
-    thumbnailUrl ? "loading" : "error"
-  );
+  const [imageState, setImageState] = useState<
+    "loading" | "cached" | "loaded" | "error"
+  >(thumbnailUrl ? "loading" : "error");
+  const imageLoaded = imageState === "cached" || imageState === "loaded";
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelPendingClick = useCallback(() => {
     if (clickTimerRef.current !== null) {
@@ -109,18 +110,20 @@ export const SequenceCard = memo(function SequenceCard({
     }
   }, []);
   useLayoutEffect(() => {
+    const image = imageRef.current;
+    // Match photo cards: reveal decoded covers before paint without a fade.
+    if (thumbnailUrl && image?.complete && image.naturalWidth > 0) {
+      gallery.onDisplayed(thumbnailUrl);
+      setImageState("cached");
+      return;
+    }
     setImageState((current) =>
-      managed && current === "loaded"
+      managed && (current === "loaded" || current === "cached")
         ? current
         : thumbnailUrl || managed
           ? "loading"
           : "error"
     );
-    const image = imageRef.current;
-    if (image?.complete && image.naturalWidth > 0) {
-      gallery.onDisplayed(thumbnailUrl ?? "");
-      setImageState(image.naturalWidth > 0 ? "loaded" : "error");
-    }
   }, [thumbnailUrl, managed, gallery.onDisplayed]);
   useEffect(() => {
     if (gallery.failed) {
@@ -200,8 +203,12 @@ export const SequenceCard = memo(function SequenceCard({
           // biome-ignore lint/a11y/noNoninteractiveElementInteractions: image load state controls the thumbnail reveal transition
           <img
             alt={photo.filename}
-            className={`h-full w-full object-cover transition-opacity duration-150 motion-reduce:transition-none ${imageState === "loaded" ? "opacity-100" : "opacity-0"}`}
-            data-load-state={imageState === "loaded" ? "loaded" : "loading"}
+            className={`h-full w-full object-cover ${
+              imageState === "cached"
+                ? "transition-none"
+                : "transition-opacity duration-150 motion-reduce:transition-none"
+            } ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+            data-load-state={imageLoaded ? "loaded" : "loading"}
             decoding="async"
             fetchPriority={loading === "eager" ? "high" : "auto"}
             height={photo.height ?? 1}
@@ -209,14 +216,16 @@ export const SequenceCard = memo(function SequenceCard({
             onError={() => setImageState("error")}
             onLoad={() => {
               gallery.onDisplayed(thumbnailUrl);
-              setImageState("loaded");
+              setImageState((current) =>
+                current === "cached" ? current : "loaded"
+              );
             }}
             ref={imageRef}
             src={thumbnailUrl}
             width={photo.width ?? 1}
           />
         )}
-        {imageState !== "loaded" && (
+        {!imageLoaded && (
           <div
             aria-hidden="true"
             className="absolute inset-0 bg-gradient-to-br from-foreground/[0.04] to-transparent"

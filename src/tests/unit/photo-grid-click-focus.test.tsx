@@ -136,6 +136,23 @@ beforeEach(() => {
 });
 
 describe("sequence grid click focus", () => {
+  it("loads a mounted sequence cover beyond the first rows eagerly like photos", () => {
+    grid.indexOffset = 100;
+    const { container } = render(
+      <PhotoGrid
+        {...sequenceProps}
+        sequences={[
+          {
+            ...sequence,
+            photo: { ...sequence.photo, thumbnailPath: "C:/thumbnails/1.jpg" },
+          },
+        ]}
+      />
+    );
+    const image = container.querySelector("[data-sequence-id] img");
+    expect(image).toHaveAttribute("loading", "eager");
+  });
+
   it.each([
     "inline",
     "overlay",
