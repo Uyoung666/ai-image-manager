@@ -127,7 +127,7 @@ test("tag removal refreshes active results and rejects a delayed old response ac
         MessagePort.prototype.postMessage = function (message, transfer) {
           const request =
             typeof message === "string" ? JSON.parse(message) : message;
-          if (request?.p?.u?.includes("listPhotos")) {
+          if (request?.p?.u?.includes("listPhotoPage")) {
             gate.browseRequests++;
           }
           if (request?.p?.u?.includes("searchCompound")) {

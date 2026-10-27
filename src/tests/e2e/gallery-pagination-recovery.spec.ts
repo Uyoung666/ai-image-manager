@@ -16,9 +16,19 @@ const SIZES = [
 const COLUMN_WIDTHS = [140, 220, 320];
 const EDIT_TAGS = /^Edit tags for 2 photos$/;
 const RENDERER_URL = /^(?:http|file):/;
+const TAG_MATCH = /Tag match/;
 
 declare global {
   interface Window {
+    continuityProbe: {
+      stop: () => {
+        missingFrames: number;
+        overlayFrames: number;
+        retained: boolean;
+        offsetChange: number;
+      };
+    };
+    continuitySearchRequests: Array<{ cursor: string | null }>;
     paginationRecoveryRequests: Array<{ cursor: string | null }>;
   }
 }
@@ -68,12 +78,18 @@ async function launch() {
     localStorage.setItem("lang", "en");
     localStorage.setItem("ui.reduceMotion", "true");
     window.paginationRecoveryRequests = [];
+    window.continuitySearchRequests = [];
     const send = MessagePort.prototype.postMessage;
     MessagePort.prototype.postMessage = function (message, transfer) {
       const request =
         typeof message === "string" ? JSON.parse(message) : message;
       if (request?.p?.u?.includes("listPhotoPage")) {
         window.paginationRecoveryRequests.push({
+          cursor: request?.p?.b?.json?.cursor ?? null,
+        });
+      }
+      if (request?.p?.u?.includes("searchCompound")) {
+        window.continuitySearchRequests.push({
           cursor: request?.p?.b?.json?.cursor ?? null,
         });
       }
@@ -156,6 +172,17 @@ test.beforeAll(async () => {
       `INSERT INTO tags(id,name,created_at) VALUES(${9300 + index},'PaginationTag-${index}',1)`
     );
   }
+  for (let index = 0; index < SIZES.length * 3; index++) {
+    statements.push(
+      `INSERT INTO tags(id,name,created_at) VALUES(${9900 + index},'ContinuityTag${index}',1)`
+    );
+    statements.push(
+      `INSERT INTO photo_tags(photo_id,tag_id,is_confirmed,origin,user_confirmed) SELECT id,${9900 + index},1,'manual',1 FROM photos`
+    );
+  }
+  statements.push(
+    "INSERT INTO tags(id,name,created_at) VALUES(9991,'ContinuityExtraA',1),(9992,'ContinuityExtraB',1)"
+  );
   execFileSync(
     electronPath,
     [
@@ -171,6 +198,242 @@ test.beforeAll(async () => {
   );
   await launch();
 });
+
+function fixtureSql(sql: string) {
+  execFileSync(
+    electronPath,
+    [
+      "-e",
+      "const D=require('better-sqlite3');const d=new D(process.argv[1]);try{d.exec(require('node:fs').readFileSync(0,'utf8'))}finally{d.close()}",
+      path.join(profile, "data", "ai-image-manager.db"),
+    ],
+    { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, input: sql, encoding: "utf8" }
+  );
+}
+
+for (const [sizeIndex, size] of SIZES.entries()) {
+  for (const [modeIndex, mode] of ["search", "tag", "browse"].entries()) {
+    const index = sizeIndex * 3 + modeIndex;
+    const tag = `ContinuityTag${index}`;
+    test(`${size.width}x${size.height} ${mode} keeps the gallery and inspector through consecutive tag removals`, async () => {
+      // Reset the host's mutable search sessions as well as renderer storage.
+      // Fixture writes between cases must not invalidate a previous session.
+      await app.close();
+      errors = [];
+      fixtureSql(
+        "INSERT OR IGNORE INTO photo_tags(photo_id,tag_id,is_confirmed,origin,user_confirmed) SELECT id,9991,1,'manual',1 FROM photos; INSERT OR IGNORE INTO photo_tags(photo_id,tag_id,is_confirmed,origin,user_confirmed) SELECT id,9992,1,'manual',1 FROM photos"
+      );
+      await launch();
+      await app.evaluate(({ BrowserWindow }, requested) => {
+        const window = BrowserWindow.getAllWindows()[0];
+        window.setContentSize(requested.width, requested.height);
+        window.webContents.setZoomFactor(1);
+      }, size);
+      await page.evaluate(() => {
+        sessionStorage.clear();
+        localStorage.clear();
+        localStorage.setItem("lang", "en");
+        localStorage.setItem("sidebar_collapsed", "true");
+        localStorage.setItem("grid_column_width", "140");
+        localStorage.setItem("grid_sort_field", "name");
+        localStorage.setItem("grid_sort_order", "asc");
+        localStorage.setItem("ui.reduceMotion", "true");
+      });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => Boolean(window.__e2eNavigate));
+      if (mode === "search") {
+        const input = page.locator("input.home-search-input");
+        await input.fill(tag);
+        await input.press("Enter");
+        if (
+          await page
+            .locator('[data-overlay-kind="search-suggestions"]')
+            .isVisible()
+        ) {
+          await input.press("Escape");
+        }
+      } else if (mode === "tag") {
+        await page
+          .getByRole("button", { name: "Expand sidebar", exact: true })
+          .click();
+        await page.getByRole("button", { name: "Tags", exact: true }).click();
+        await page.locator(`[data-tag-id="${9900 + index}"]`).click();
+        await page.keyboard.press("Escape");
+      }
+      const gallery = page.locator("[data-masonry-scroll]");
+      await expect(gallery).toBeVisible();
+      if (mode !== "browse") {
+        await expect(
+          gallery.getByRole("option", { name: TAG_MATCH }).first()
+        ).toBeVisible();
+      }
+      const requestCount = () =>
+        page.evaluate(
+          (search) =>
+            search
+              ? window.continuitySearchRequests.length
+              : window.paginationRecoveryRequests.length,
+          mode === "search"
+        );
+      await expect
+        .poll(
+          async () => {
+            if ((await requestCount()) >= 3) {
+              return true;
+            }
+            await gallery.hover();
+            await page.mouse.wheel(0, 10_000);
+            await gallery.evaluate((element) => {
+              element.scrollTop = element.scrollHeight;
+            });
+            return false;
+          },
+          { timeout: 30_000, intervals: [100, 200, 300] }
+        )
+        .toBe(true);
+      await gallery.evaluate((element) => {
+        element.scrollTop = Math.min(
+          4200,
+          element.scrollHeight - element.clientHeight - 300
+        );
+      });
+      const selectedId = await gallery.evaluate((element) => {
+        const viewport = element.getBoundingClientRect();
+        const candidates = [
+          ...element.querySelectorAll<HTMLElement>(
+            '[data-photo-id][role="option"]'
+          ),
+        ].filter((card) => {
+          const r = card.getBoundingClientRect();
+          return r.top > viewport.top + 100 && r.bottom < viewport.bottom - 10;
+        });
+        return Number(candidates.at(-1)?.dataset.photoId);
+      });
+      expect(selectedId).toBeGreaterThan(0);
+      await page
+        .locator(`[data-photo-id="${selectedId}"][role="option"]`)
+        .click();
+      const inspector = page.locator('aside[data-surface="inspector"]');
+      await expect(inspector).toBeVisible();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            let frames = 0;
+            const settle = () => {
+              if (++frames >= 20) {
+                resolve();
+              } else {
+                requestAnimationFrame(settle);
+              }
+            };
+            requestAnimationFrame(settle);
+          })
+      );
+      await page.evaluate((selected) => {
+        const gallery = document.querySelector<HTMLElement>(
+          "[data-masonry-scroll]"
+        );
+        if (!gallery) {
+          throw new Error("Missing gallery");
+        }
+        const viewport = gallery.getBoundingClientRect();
+        const anchor = [
+          ...gallery.querySelectorAll<HTMLElement>(
+            '[data-photo-id][role="option"]'
+          ),
+        ].find((card) => {
+          const r = card.getBoundingClientRect();
+          return (
+            Number(card.dataset.photoId) !== selected &&
+            r.top >= viewport.top + 60 &&
+            r.top < viewport.bottom - 30
+          );
+        });
+        if (!anchor) {
+          throw new Error("Missing surviving anchor");
+        }
+        const image = anchor.querySelector("img");
+        const offset = anchor.getBoundingClientRect().top;
+        let missingFrames = 0;
+        let overlayFrames = 0;
+        let frame = 0;
+        const sample = () => {
+          if (!gallery.isConnected) {
+            missingFrames++;
+          }
+          if (
+            document.querySelector(
+              ".home-gallery-restore-content.is-restoring, .home-gallery-restore-overlay:not(.is-exiting)"
+            )
+          ) {
+            overlayFrames++;
+          }
+          frame = requestAnimationFrame(sample);
+        };
+        frame = requestAnimationFrame(sample);
+        window.continuityProbe = {
+          stop: () => {
+            cancelAnimationFrame(frame);
+            return {
+              missingFrames,
+              overlayFrames,
+              retained:
+                anchor.isConnected && anchor.querySelector("img") === image,
+              offsetChange: Math.abs(
+                anchor.getBoundingClientRect().top - offset
+              ),
+            };
+          },
+        };
+      }, selectedId);
+      const before = await requestCount();
+      for (const name of ["ContinuityExtraA", tag, "ContinuityExtraB"]) {
+        const remove = inspector
+          .getByRole("button", { name: "Click to remove", exact: true })
+          .filter({ hasText: name });
+        await remove.click();
+        await expect(remove).toHaveCount(0);
+        await expect(inspector).toBeVisible();
+      }
+      if (mode === "tag") {
+        await expect(page.locator(".home-gallery-toolbar-layer")).toContainText(
+          "619"
+        );
+      }
+      if (mode !== "browse") {
+        await expect(
+          gallery.locator(`[data-photo-id="${selectedId}"]`)
+        ).toHaveCount(0);
+        await expect.poll(requestCount).toBeGreaterThan(before);
+      }
+      await expect(inspector).toContainText(
+        `PaginationFixture-${String(selectedId).padStart(3, "0")}.png`
+      );
+      const continuity = await page.evaluate(() =>
+        window.continuityProbe.stop()
+      );
+      expect(continuity.missingFrames).toBe(0);
+      expect(continuity.overlayFrames).toBe(0);
+      expect(continuity.retained).toBe(true);
+      expect(continuity.offsetChange).toBeLessThanOrEqual(2);
+      if (mode === "browse") {
+        expect(await requestCount()).toBe(before);
+      }
+      await assertBounds();
+      await page.screenshot({
+        path: test.info().outputPath("tag-edit-continuity.png"),
+      });
+      await page.keyboard.press("Escape");
+      await expect(inspector).toHaveCount(0);
+      await assertBounds();
+      fs.writeFileSync(
+        test.info().outputPath("continuity.json"),
+        JSON.stringify({ mode, size, selectedId, ...continuity }, null, 2)
+      );
+      expect(errors).toEqual([]);
+    });
+  }
+}
 
 test.afterAll(async () => {
   await app?.close();
@@ -188,6 +451,14 @@ test.afterEach(async () => {
     fs.writeFileSync(
       test.info().outputPath("pagination-requests.json"),
       JSON.stringify(requests, null, 2)
+    );
+    fs.writeFileSync(
+      test.info().outputPath("search-requests.json"),
+      JSON.stringify(
+        await page.evaluate(() => window.continuitySearchRequests),
+        null,
+        2
+      )
     );
   }
 });
@@ -281,8 +552,7 @@ for (const [sizeIndex, size] of SIZES.entries()) {
       const last = page.locator(
         `[data-photo-id="${PHOTO_COUNT}"][role="option"]`
       );
-      // Each jump reaches the current page boundary. The next page must arrive
-      // with the pointer still, including after a host cursor revision change.
+      // Tag edits leave ordinary pagination valid, including with the pointer still.
       await expect
         .poll(
           async () => {
@@ -318,14 +588,14 @@ for (const [sizeIndex, size] of SIZES.entries()) {
         () => window.paginationRecoveryRequests
       );
       const requestCount = requests.length;
-      expect(requestCount).toBeGreaterThanOrEqual(8);
+      expect(requests.filter(({ cursor }) => cursor === null)).toHaveLength(1);
+      expect(requestCount).toBeGreaterThanOrEqual(7);
       expect(requestCount).toBeLessThanOrEqual(14);
       const cursors = requests
         .map(({ cursor }) => cursor)
         .filter((cursor): cursor is string => cursor !== null);
-      expect(cursors.length).toBeGreaterThanOrEqual(7);
-      // A stale cursor is rejected once before resetting from the first page;
-      // retrying that same opaque value can never restore a changed revision.
+      expect(cursors.length).toBeGreaterThanOrEqual(6);
+      // Tag edits must neither expire nor repeat any loaded cursor.
       expect(new Set(cursors).size).toBe(cursors.length);
       await last.click();
       await expect(page.locator(".selection-menu-count")).toHaveText(
@@ -355,6 +625,146 @@ for (const [sizeIndex, size] of SIZES.entries()) {
     });
   }
 }
+
+test("keeps the final mismatching photo open for further tag edits", async () => {
+  fixtureSql(
+    "INSERT INTO tags(id,name,created_at) VALUES(10001,'ContinuityLastMatch',1); INSERT INTO photo_tags(photo_id,tag_id,is_confirmed,origin,user_confirmed) VALUES(21,10001,1,'manual',1); INSERT OR IGNORE INTO photo_tags(photo_id,tag_id,is_confirmed,origin,user_confirmed) VALUES(21,9991,1,'manual',1)"
+  );
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setContentSize(1280, 800)
+  );
+  await page.evaluate(() => sessionStorage.clear());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const search = page.locator("input.home-search-input");
+  await search.fill("ContinuityLastMatch");
+  await search.press("Enter");
+  if (
+    await page.locator('[data-overlay-kind="search-suggestions"]').isVisible()
+  ) {
+    await search.press("Escape");
+  }
+  await page.locator('[data-photo-id="21"][role="option"]').click();
+  const inspector = page.locator('aside[data-surface="inspector"]');
+  await inspector
+    .getByRole("button", { name: "Click to remove", exact: true })
+    .filter({ hasText: "ContinuityLastMatch" })
+    .click();
+  await expect(page.locator('[data-photo-id][role="option"]')).toHaveCount(0);
+  await expect(inspector).toBeVisible();
+  const extra = inspector
+    .getByRole("button", { name: "Click to remove", exact: true })
+    .filter({ hasText: "ContinuityExtraA" });
+  await extra.click();
+  await expect(extra).toHaveCount(0);
+  await expect(inspector).toBeVisible();
+  await assertBounds();
+  await page.keyboard.press("Escape");
+  await expect(inspector).toHaveCount(0);
+});
+
+test("can leave during the tag-refresh debounce and return to an updated scope", async () => {
+  await app.close();
+  fixtureSql(
+    "INSERT INTO tags(id,name,created_at) VALUES(10002,'ContinuityScope',1); INSERT INTO photo_tags(photo_id,tag_id,is_confirmed,origin,user_confirmed) VALUES(21,10002,1,'manual',1),(22,10002,1,'manual',1)"
+  );
+  await launch();
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setContentSize(1280, 800)
+  );
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    localStorage.setItem("lang", "en");
+    localStorage.setItem("sidebar_collapsed", "false");
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Tags", exact: true }).click();
+  const scope = page.locator('[data-tag-id="10002"]');
+  await scope.click();
+  const cards = page.locator('[data-photo-id][role="option"]');
+  await expect(cards).toHaveCount(2);
+  await page.locator('[data-photo-id="21"][role="option"]').click();
+  await page
+    .getByRole("button", { name: "All Photos", exact: true })
+    .first()
+    .evaluate((button) => {
+      window.addEventListener(
+        "tags-changed",
+        () => (button as HTMLButtonElement).click(),
+        { once: true }
+      );
+    });
+  await page
+    .locator('aside[data-surface="inspector"]')
+    .getByRole("button", { name: "Click to remove", exact: true })
+    .filter({ hasText: "ContinuityScope" })
+    .click();
+  await expect(page.locator('aside[data-surface="inspector"]')).toHaveCount(0);
+  await expect(page.locator(".home-gallery-toolbar-layer")).toContainText(
+    "620"
+  );
+  await page.getByRole("button", { name: "Tags", exact: true }).click();
+  await scope.click();
+  await expect(cards).toHaveCount(1);
+  await expect(
+    page.locator('[data-photo-id="22"][role="option"]')
+  ).toBeVisible();
+  await expect(page.locator(".home-gallery-restore-overlay")).toHaveCount(0);
+  await assertBounds();
+});
+
+test("recovers an actually expired cursor after a sort field changes", async () => {
+  errors = [];
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    localStorage.setItem("grid_sort_field", "date");
+    localStorage.setItem("grid_sort_order", "asc");
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const gallery = page.locator("[data-masonry-scroll]");
+  await expect(gallery).toBeVisible();
+  fixtureSql("UPDATE photos SET file_date=10000 WHERE id=620");
+  try {
+    await gallery.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.paginationRecoveryRequests.filter(
+              ({ cursor }) => cursor === null
+            ).length
+        )
+      )
+      .toBeGreaterThan(1);
+    await expect
+      .poll(
+        async () => {
+          if (
+            await page.locator('[data-photo-id="620"][role="option"]').count()
+          ) {
+            return true;
+          }
+          await gallery.evaluate((element) => {
+            element.scrollTop = element.scrollHeight;
+          });
+          return false;
+        },
+        { timeout: 30_000, intervals: [100, 200, 300] }
+      )
+      .toBe(true);
+    const cursors = await page.evaluate(() =>
+      window.paginationRecoveryRequests
+        .map(({ cursor }) => cursor)
+        .filter(Boolean)
+    );
+    expect(new Set(cursors).size).toBe(cursors.length);
+    expect(errors).toEqual([]);
+  } finally {
+    fixtureSql("UPDATE photos SET file_date=620 WHERE id=620");
+  }
+});
 
 test("retains decoded covers through grid changes and live fractional DPI changes", async () => {
   errors = [];
