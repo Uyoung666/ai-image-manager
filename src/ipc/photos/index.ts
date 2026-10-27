@@ -85,6 +85,10 @@ import {
   searchSpotlight,
 } from "./handlers/search";
 import {
+  getSearchStarterFallbacks,
+  getSearchStarters,
+} from "./handlers/search-starters";
+import {
   acceptSequenceSuggestion,
   clearSequenceExclusions,
   createSequence,
@@ -135,6 +139,8 @@ import {
 } from "./handlers/tags";
 
 export const photos = {
+  getSearchStarterFallbacks,
+  getSearchStarters,
   getTagOptions,
   getBatchTags,
   updateBatchTags,
