@@ -35,7 +35,7 @@ const NAV_ITEMS: NavItem[] = [
     groupKey: "settingsGroupAppearance",
     icon: Paintbrush,
     keywords:
-      "\u5916\u89c2 \u4ea4\u4e92 \u4e3b\u9898 \u6df1\u8272 \u6d45\u8272 \u7cfb\u7edf \u8bed\u8a00 \u4e2d\u6587 \u82f1\u6587 \u7f29\u653e \u754c\u9762\u7f29\u653e \u641c\u7d22 \u5339\u914d \u7075\u654f\u5ea6 \u5bbd\u677e \u6807\u51c6 \u4e25\u683c \u52a8\u753b \u51cf\u5c11\u52a8\u753b appearance interaction theme dark light language chinese english scale zoom search sensitivity relaxed standard strict motion animation",
+      "\u5916\u89c2 \u4ea4\u4e92 \u4e3b\u9898 \u6df1\u8272 \u6d45\u8272 \u7cfb\u7edf \u8bed\u8a00 \u4e2d\u6587 \u82f1\u6587 \u7f29\u653e \u754c\u9762\u7f29\u653e \u641c\u7d22 \u5339\u914d \u7075\u654f\u5ea6 \u5bbd\u677e \u6807\u51c6 \u4e25\u683c \u52a8\u753b \u51cf\u5c11\u52a8\u753b 历史 记录 保留 history retention recent appearance interaction theme dark light language chinese english scale zoom search sensitivity relaxed standard strict motion animation",
     labelKey: "settingsAppearance",
     to: "/settings/appearance",
   },

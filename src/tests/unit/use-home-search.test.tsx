@@ -1,10 +1,16 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  clearSearchHistory,
+  readSearchHistory,
+} from "@/actions/search-history";
 import { useHomeSearch } from "@/features/home/use-home-search";
 import type { Photo, SearchResponse } from "@/types/photo";
 
 const mocks = vi.hoisted(() => ({
+  getHistoryPreferences: vi.fn(),
+  setHistoryPreferences: vi.fn(),
   cancelPending: vi.fn(),
   getPreview: vi.fn(),
   imageSearch: vi.fn(),
@@ -13,6 +19,16 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
+vi.mock("@/ipc/manager", () => ({
+  ipc: {
+    client: {
+      settings: {
+        getSearchHistoryPreferences: mocks.getHistoryPreferences,
+        setSearchHistoryPreferences: mocks.setHistoryPreferences,
+      },
+    },
+  },
+}));
 vi.mock("@/hooks/use-photo-search", () => ({ usePhotoSearch: () => mocks }));
 vi.mock("@/actions/photo-sequences", () => ({
   photoSequenceActions: { list: mocks.listSequences },
@@ -68,6 +84,9 @@ function setup() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
+  mocks.getHistoryPreferences.mockResolvedValue({ enabled: true, limit: 5 });
+  mocks.setHistoryPreferences.mockResolvedValue({ ok: true });
   mocks.runSearch.mockReset();
   mocks.listSequences.mockReset().mockResolvedValue([]);
   mocks.imageSearch.mockReset();
@@ -334,5 +353,63 @@ describe("home search orchestration", () => {
     expect(result.current.searchResults?.map((photo) => photo.id)).toEqual([1]);
     expect(result.current.searchHasMore).toBe(false);
     expect(result.current.searchExactTotal).toBeNull();
+  });
+  it.each([
+    undefined,
+    "NO_MATCHES",
+  ])("records image searches including empty results (%s)", async (errorCode) => {
+    mocks.imageSearch.mockResolvedValue({ results: [], errorCode });
+    const { result } = setup();
+    await act(() => result.current.handleImageSearch("D:/recorded.jpg"));
+    await waitFor(() =>
+      expect(readSearchHistory()[0]).toMatchObject({
+        kind: "image",
+        imagePath: "D:/recorded.jpg",
+      })
+    );
+  });
+  it.each([
+    "SOURCE_NOT_FOUND",
+    "AI_SEARCH_FAILED",
+  ])("does not record failed image searches (%s)", async (errorCode) => {
+    mocks.imageSearch.mockResolvedValue({ results: [], errorCode });
+    const { result } = setup();
+    await act(() => result.current.handleImageSearch("D:/failed.jpg"));
+    expect(readSearchHistory()).toEqual([]);
+  });
+  it("skips automatic restoration and ignores missing source previews", async () => {
+    mocks.imageSearch.mockResolvedValue({ results: [] });
+    const { result } = setup();
+    await act(() =>
+      result.current.handleImageSearch("D:/restored.jpg", {
+        recordHistory: false,
+      })
+    );
+    expect(readSearchHistory()).toEqual([]);
+    mocks.getPreview.mockResolvedValue({ exists: false, dataUrl: null });
+    await act(() => result.current.handleImageSearch("D:/missing.jpg"));
+    expect(readSearchHistory()).toEqual([]);
+  });
+  it("does not resurrect a pending image after the history was cleared", async () => {
+    const search = deferred<{ results: Photo[] }>();
+    mocks.imageSearch.mockReturnValue(search.promise);
+    const { result } = setup();
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.handleImageSearch("D:/old.jpg");
+    });
+    clearSearchHistory();
+    await act(async () => {
+      search.resolve({ results: [] });
+      await pending;
+    });
+    expect(readSearchHistory()).toEqual([]);
+  });
+  it("does not hold image results while history preferences are unavailable", async () => {
+    mocks.getHistoryPreferences.mockReturnValue(new Promise(() => undefined));
+    mocks.imageSearch.mockResolvedValue({ results: [{ id: 8 }] });
+    const { result } = setup();
+    await act(() => result.current.handleImageSearch("D:/fast.jpg"));
+    expect(result.current.searchResults?.map((p) => p.id)).toEqual([8]);
   });
 });

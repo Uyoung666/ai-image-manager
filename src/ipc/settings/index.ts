@@ -9,6 +9,7 @@ import {
   getGpuSettings,
   getMirrorSettings,
   getOpenAtLogin,
+  getSearchHistoryPreferences,
   markGpuPromptShown,
   setAppPreference,
   setAppSetting,
@@ -16,10 +17,13 @@ import {
   setGpuSettings,
   setMirrorSettings,
   setOpenAtLogin,
+  setSearchHistoryPreferences,
   updateDuplicateSettings,
 } from "./handlers";
 
 export const settings = {
+  getSearchHistoryPreferences,
+  setSearchHistoryPreferences,
   getAllAppSettings,
   getAppPreferences,
   getAppSetting,

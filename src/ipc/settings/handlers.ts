@@ -27,6 +27,11 @@ import {
   parseBooleanPreference,
   parseCloseBehavior,
 } from "@/types/app-preferences";
+import {
+  parseSearchHistoryPreferences,
+  SEARCH_HISTORY_PREFERENCES_KEY,
+  SearchHistoryPreferencesSchema,
+} from "@/types/search-history";
 import { normalizeSequenceDetectionSettings } from "@/types/sequence-detection-settings";
 import {
   getDataPath,
@@ -87,6 +92,25 @@ export const getAppSetting = os
       return null;
     }
     return { key: input.key, value };
+  });
+
+export const getSearchHistoryPreferences = os
+  .input(z.object({ legacyHistory: z.boolean() }).optional())
+  .handler(({ input }) => {
+    const saved = getSetting(SEARCH_HISTORY_PREFERENCES_KEY);
+    const preferences = parseSearchHistoryPreferences(saved);
+    if (saved === null && input?.legacyHistory) {
+      preferences.limit = 20;
+      setSetting(SEARCH_HISTORY_PREFERENCES_KEY, JSON.stringify(preferences));
+    }
+    return preferences;
+  });
+
+export const setSearchHistoryPreferences = os
+  .input(SearchHistoryPreferencesSchema)
+  .handler(({ input }) => {
+    setSetting(SEARCH_HISTORY_PREFERENCES_KEY, JSON.stringify(input));
+    return { ok: true };
   });
 
 export const getDuplicateSettings = os.handler(() => {

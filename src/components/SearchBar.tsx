@@ -38,6 +38,7 @@ import { useSearchHistory } from "@/features/search-bar/use-search-history";
 import { useSearchOverlayInteraction } from "@/features/search-bar/use-search-overlay-interaction";
 import { useSearchStarters } from "@/features/search-bar/use-search-starters";
 import type { ExifFilters, SearchMode } from "@/types/search";
+import { searchHistoryLabel } from "@/types/search-history";
 import { getSearchSuggestions } from "@/utils/search-suggestions";
 import {
   getTimePresets,
@@ -140,7 +141,10 @@ export const SearchBar = memo(
       const timePresets = useMemo(() => getTimePresets(t), [t]);
       const {
         history,
+        preferences: historyPreferences,
+        ready: historyReady,
         addToHistory,
+        removeHistory,
         clearHistory: clearSavedSearchHistory,
       } = useSearchHistory();
       const {
@@ -210,9 +214,14 @@ export const SearchBar = memo(
 
         // 4) History matches
         const matchingHistory = history
-          .filter((h) => h.toLowerCase().includes(q) && h !== q)
-          .slice(0, 3)
-          .map((h) => ({ type: "history" as const, text: h }));
+          .filter((entry) =>
+            searchHistoryLabel(entry).toLowerCase().includes(q)
+          )
+          .map((entry) => ({
+            type: "history" as const,
+            text: searchHistoryLabel(entry),
+            historyEntry: entry,
+          }));
         all.push(...matchingHistory);
 
         return all;
@@ -231,7 +240,12 @@ export const SearchBar = memo(
               !aiStatus.indexReady)
         );
       const recentSuggestions = useMemo<SearchSuggestion[]>(
-        () => history.slice(0, 5).map((text) => ({ type: "history", text })),
+        () =>
+          history.map((entry) => ({
+            type: "history",
+            text: searchHistoryLabel(entry),
+            historyEntry: entry,
+          })),
         [history]
       );
       const {
@@ -257,10 +271,13 @@ export const SearchBar = memo(
       });
       const starters = useSearchStarters({
         open: showSuggestionPanel && !query.trim(),
-        enabled: !imageSearchActive,
+        enabled: !imageSearchActive && historyReady,
+        historyEnabled: historyReady && historyPreferences.enabled,
         semanticEnabled: !examplesDisabled,
         language: i18n?.resolvedLanguage ?? i18n?.language ?? "zh",
-        history,
+        history: history.flatMap((entry) =>
+          entry.kind === "text" ? [entry.query] : []
+        ),
         filters,
         colorHex,
       });
@@ -292,7 +309,8 @@ export const SearchBar = memo(
             item.type === active.type &&
             item.text === active.text &&
             item.id === active.id &&
-            item.tagId === active.tagId
+            item.tagId === active.tagId &&
+            item.historyEntry?.id === active.historyEntry?.id
         );
         if (nextIndex !== suggestionIndex) {
           setSuggestionIndex(nextIndex);
@@ -463,6 +481,17 @@ export const SearchBar = memo(
         }
 
         switch (e.key) {
+          case "Delete": {
+            const entry = displayedSuggestions[navigationIndex]?.historyEntry;
+            if (entry) {
+              e.preventDefault();
+              e.stopPropagation();
+              removeHistory(entry.id);
+              setSuggestionIndex(-1);
+              suggestionListRef.current?.focus();
+            }
+            break;
+          }
           case "ArrowLeft":
           case "ArrowRight":
             if (
@@ -525,6 +554,12 @@ export const SearchBar = memo(
       }
 
       function handleSuggestionClick(suggestion: SearchSuggestion) {
+        if (suggestion.historyEntry?.kind === "image") {
+          onImageSearch?.(suggestion.historyEntry.imagePath);
+          setShowSuggestions(false);
+          setSuggestionIndex(-1);
+          return;
+        }
         if (suggestion.type === "person" && suggestion.id != null) {
           navigate({
             to: "/people/$identityId",
@@ -796,6 +831,10 @@ export const SearchBar = memo(
                         setQuery(e.target.value);
                         setShowSuggestions(true);
                         setSuggestionIndex(-1); // 输入变化时重置高亮
+                      }}
+                      onClick={() => {
+                        setShowSuggestions(true);
+                        setShowFilters(false);
                       }}
                       onFocus={() => {
                         setInputFocused(true);
@@ -1084,6 +1123,7 @@ export const SearchBar = memo(
               floatingPanelMaxHeight={floatingPanelMaxHeight}
               handleSuggestionClick={handleSuggestionClick}
               handleSuggestionKeyDown={handleSuggestionKeyDown}
+              historyDisabled={historyReady && !historyPreferences.enabled}
               onBlur={(e) => {
                 // 焦点离开建议列表且没有回到 input 时关闭
                 const related = e.relatedTarget as Node | null;
@@ -1104,6 +1144,11 @@ export const SearchBar = memo(
               onRefreshStarters={() => {
                 setSuggestionIndex(-1);
                 starters.refresh().catch(() => undefined);
+              }}
+              onRemoveHistory={(id) => {
+                removeHistory(id);
+                setSuggestionIndex(-1);
+                suggestionListRef.current?.focus({ preventScroll: true });
               }}
               onResetStarterFilters={() => {
                 setFilters({});

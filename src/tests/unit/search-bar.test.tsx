@@ -8,10 +8,16 @@ import {
 import userEvent from "@testing-library/user-event";
 import { type ComponentProps, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  readSearchHistory,
+  SEARCH_HISTORY_STORAGE_KEY,
+  setSearchHistoryPreferences,
+} from "@/actions/search-history";
 import { SearchBar } from "@/components/SearchBar";
 import { clearSearchStarterCache } from "@/features/search-bar/use-search-starters";
 import { ipc } from "@/ipc/manager";
 import type { ExifFilters } from "@/types/search";
+import { SEARCH_HISTORY_PREFERENCES_KEY } from "@/types/search-history";
 
 const presetToast = vi.hoisted(() => ({
   error: vi.fn(),
@@ -26,8 +32,17 @@ vi.mock("sonner", () => ({ toast: presetToast }));
 vi.mock("@/ipc/manager", () => ({
   ipc: {
     client: {
+      settings: {
+        getSearchHistoryPreferences: vi
+          .fn()
+          .mockResolvedValue({ enabled: true, limit: 5 }),
+        setSearchHistoryPreferences: vi.fn().mockResolvedValue({ ok: true }),
+      },
       faces: { listFaceIdentities: vi.fn().mockResolvedValue([]) },
       photos: {
+        getImageSearchPreview: vi
+          .fn()
+          .mockResolvedValue({ dataUrl: null, exists: true }),
         getSearchStarters: vi.fn(),
         getSearchStarterFallbacks: vi.fn(),
         getExifCandidates: vi.fn().mockResolvedValue({}),
@@ -105,6 +120,9 @@ describe("SearchBar", () => {
     localStorage.clear();
     clearSearchStarterCache();
     vi.clearAllMocks();
+    vi.mocked(
+      ipc.client.settings.getSearchHistoryPreferences
+    ).mockResolvedValue({ enabled: true, limit: 5 });
     vi.mocked(ipc.client.photos.getSearchStarterFallbacks)
       .mockReset()
       .mockResolvedValue({
@@ -753,7 +771,9 @@ describe("SearchBar", () => {
 
     expect(onSearch).toHaveBeenCalledWith("海边的日落", undefined);
     expect(
-      JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || "[]")
+      readSearchHistory().flatMap((entry) =>
+        entry.kind === "text" ? [entry.query] : []
+      )
     ).toContain("海边的日落");
     expect(screen.queryByText("探索你的图库")).not.toBeInTheDocument();
   });
@@ -851,7 +871,6 @@ describe("SearchBar", () => {
     render(<ControlledSearchBar />);
     await user.click(screen.getByRole("combobox"));
     const history = screen.getByRole("option", { name: "我的搜索记录" });
-    expect(history).not.toHaveAttribute("data-slot", "tooltip-trigger");
     expect(history).not.toHaveAttribute("title");
     act(() => history.focus());
     await user.hover(history);
@@ -999,7 +1018,9 @@ describe("SearchBar", () => {
       dateTo: "2023-02-28",
     });
     expect(
-      JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) ?? "[]")
+      readSearchHistory().flatMap((entry) =>
+        entry.kind === "text" ? [entry.query] : []
+      )
     ).toContain("beach");
   });
 
@@ -1650,5 +1671,139 @@ describe("SearchBar", () => {
     await user.click(screen.getByRole("button", { name: "clearSearch" }));
 
     expect(onClear).toHaveBeenCalled();
+  });
+  it("shows all retained records in a bounded scroll region and matches beyond the old three-item limit", async () => {
+    vi.mocked(
+      ipc.client.settings.getSearchHistoryPreferences
+    ).mockResolvedValue({ enabled: true, limit: 20 });
+    localStorage.setItem(
+      SEARCH_HISTORY_PREFERENCES_KEY,
+      JSON.stringify({ enabled: true, limit: 20 })
+    );
+    localStorage.setItem(
+      SEARCH_HISTORY_KEY,
+      JSON.stringify(Array.from({ length: 12 }, (_, i) => `history ${i}`))
+    );
+    const { container } = render(<ControlledSearchBar />);
+    const user = userEvent.setup();
+    const input = screen.getByRole("combobox");
+    await user.click(input);
+    expect(container.querySelector("[data-search-history-scroll]")).toHaveClass(
+      "max-h-[200px]",
+      "overflow-y-auto"
+    );
+    expect(
+      screen.getByRole("option", { name: "history 11" })
+    ).toBeInTheDocument();
+    const scroll = container.querySelector(
+      "[data-search-history-scroll]"
+    ) as HTMLElement;
+    expect(scroll).toHaveClass("search-history-scroll", "scroll-py-6");
+    Object.defineProperties(scroll, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+    fireEvent.scroll(scroll);
+    expect(scroll).toHaveAttribute("data-top-fade", "false");
+    expect(scroll).toHaveAttribute("data-bottom-fade", "true");
+    scroll.scrollTop = 150;
+    fireEvent.scroll(scroll);
+    expect(scroll).toHaveAttribute("data-top-fade", "true");
+    expect(scroll).toHaveAttribute("data-bottom-fade", "true");
+    scroll.scrollTop = 300;
+    fireEvent.scroll(scroll);
+    expect(scroll).toHaveAttribute("data-top-fade", "true");
+    expect(scroll).toHaveAttribute("data-bottom-fade", "false");
+    Object.defineProperty(scroll, "scrollHeight", { value: 80 });
+    scroll.scrollTop = 0;
+    fireEvent.scroll(scroll);
+    expect(scroll).toHaveAttribute("data-top-fade", "false");
+    expect(scroll).toHaveAttribute("data-bottom-fade", "false");
+    await user.type(input, "history");
+    expect(screen.getAllByRole("option")).toHaveLength(12);
+  });
+  it("hides history before initialization and while disabled, then restores it without private searches", async () => {
+    let resolve!: (value: { enabled: boolean; limit: 5 }) => void;
+    vi.mocked(
+      ipc.client.settings.getSearchHistoryPreferences
+    ).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      })
+    );
+    localStorage.setItem(
+      SEARCH_HISTORY_KEY,
+      JSON.stringify(["private old search"])
+    );
+    const before = readSearchHistory();
+    const { container } = render(<ControlledSearchBar />);
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    expect(
+      screen.queryByRole("option", { name: "private old search" })
+    ).not.toBeInTheDocument();
+    expect(ipc.client.photos.getSearchStarters).not.toHaveBeenCalled();
+    await act(async () => resolve({ enabled: false, limit: 5 }));
+    expect(screen.getByText("searchHistoryUi.disabled")).toBeInTheDocument();
+    expect(
+      screen
+        .getByText("searchHistoryUi.disabled")
+        .closest("[data-search-suggestions-footer]")
+    ).not.toBeNull();
+    expect(container.querySelector("[data-search-history]")).toBeNull();
+    fireEvent.change(input, { target: { value: "private" } });
+    expect(
+      screen.queryByRole("option", { name: "private old search" })
+    ).not.toBeInTheDocument();
+    vi.mocked(
+      ipc.client.settings.getSearchHistoryPreferences
+    ).mockResolvedValue({ enabled: false, limit: 5 });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => Promise.resolve());
+    expect(readSearchHistory()).toEqual(before);
+    fireEvent.change(input, { target: { value: "" } });
+    await act(async () =>
+      setSearchHistoryPreferences({ enabled: true, limit: 5 })
+    );
+    fireEvent.focus(input);
+    expect(
+      screen.getByRole("option", { name: "private old search" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("searchHistoryUi.disabled")
+    ).not.toBeInTheDocument();
+  });
+  it("replays an image history through the image callback and removes individual records", async () => {
+    localStorage.setItem(
+      SEARCH_HISTORY_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        entries: [
+          {
+            kind: "image",
+            imagePath: "D:/history-reference.jpg",
+            lastUsedAt: 1,
+          },
+        ],
+      })
+    );
+    const onImageSearch = vi.fn();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar onImageSearch={onImageSearch} onSearch={onSearch} />
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox"));
+    await user.click(
+      screen.getByRole("option", { name: "searchHistoryUi.imageLabel" })
+    );
+    expect(onImageSearch).toHaveBeenCalledWith("D:/history-reference.jpg");
+    expect(onSearch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("combobox"));
+    await user.click(
+      screen.getByRole("button", { name: "searchHistoryUi.remove" })
+    );
+    expect(readSearchHistory()).toEqual([]);
   });
 });

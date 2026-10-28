@@ -45,6 +45,52 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("search starter loading and cache", () => {
+  it("isolates history-based cards and late replies when history is disabled", async () => {
+    const { result, rerender } = renderHook(
+      (props) => useSearchStarters(props),
+      {
+        initialProps: {
+          ...initial,
+          history: ["private"],
+          historyEnabled: true,
+        },
+      }
+    );
+    await waitFor(() => expect(result.current.batch).toHaveLength(4));
+    let finish!: (response: SearchStarterResponse) => void;
+    vi.mocked(searchStarterActions.get).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.refresh();
+    });
+    await waitFor(() => expect(finish).toBeDefined());
+    vi.mocked(searchStarterActions.get).mockResolvedValue(ready("neutral"));
+    rerender({ ...initial, history: ["private"], historyEnabled: false });
+    expect(result.current.batch).toEqual([]);
+    await waitFor(() =>
+      expect(result.current.batch[0]?.key).toContain("neutral")
+    );
+    expect(searchStarterActions.get).toHaveBeenLastCalledWith(
+      expect.objectContaining({ history: [] })
+    );
+    expect(searchStarterActions.fallbacks).toHaveBeenLastCalledWith(
+      expect.objectContaining({ history: [] })
+    );
+    await act(async () => {
+      finish(ready("late-private"));
+      await pending;
+    });
+    expect(result.current.batch[0]?.key).toContain("neutral");
+    rerender({ ...initial, history: ["private"], historyEnabled: true });
+    await waitFor(() =>
+      expect(result.current.batch[0]?.key).toContain("first")
+    );
+  });
   it("loads asynchronously without exposing fabricated examples", async () => {
     let resolve: ((response: SearchStarterResponse) => void) | undefined;
     vi.mocked(searchStarterActions.get).mockImplementationOnce(

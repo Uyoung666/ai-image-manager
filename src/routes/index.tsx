@@ -1148,7 +1148,9 @@ function HomePage() {
       isReady: () => aiStatusRef.current?.hasVectors !== undefined,
       restore: () => {
         if (saved.searchMode === "image" && saved.imageSearchPath) {
-          imageSearchRef.current(saved.imageSearchPath);
+          imageSearchRef.current(saved.imageSearchPath, {
+            recordHistory: false,
+          });
         } else {
           handleSearch(
             saved.searchQuery,

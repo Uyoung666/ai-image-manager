@@ -1675,6 +1675,26 @@ i18n.use(initReactI18next).init({
         reset: "重置",
         applyFilters: "应用筛选",
         searchSuggestions: "搜索建议",
+        searchHistoryUi: {
+          enabled: "搜索历史",
+          enabledHint:
+            "开启后保存并显示文字和图片搜索历史。关闭后隐藏已有记录、停止记录且不用于推荐，重新开启可恢复显示。",
+          disabled: "搜索历史已关闭",
+          limit: "搜索历史保留数量",
+          limitHint:
+            "文字和图片共用额度，更多记录可滚动查看。调低会移除超出的旧记录，调高不会恢复已移除的记录。",
+          reduceTitle: "减少历史保留数量？",
+          reduceHint:
+            "将保留最近 {{limit}} 条，移除 {{count}} 条较早的记录。移除后无法恢复。",
+          reduceConfirm: "减少并移除旧记录",
+          limitOption: "最近 {{count}} 条",
+          clear: "清空搜索历史",
+          clearHint: "清空全部文字和图片搜索记录，保留当前设置。",
+          imageLabel: "以图搜图：{{filename}}",
+          sourceMissing: "原图不可用",
+          remove: "移除搜索记录：{{name}}",
+          saveFailed: "搜索历史保存失败，搜索仍可正常使用。",
+        },
         recentSearches: "最近搜索",
         searchStarterTitle: "探索你的图库",
         searchStarterUi: {

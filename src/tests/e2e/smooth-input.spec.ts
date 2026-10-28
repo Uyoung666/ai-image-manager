@@ -240,13 +240,13 @@ test("IME confirmation, theme changes and accessibility fallbacks preserve editi
   await search.fill("中文");
   await expectCaretAligned(search);
   const history = await page.evaluate(() =>
-    localStorage.getItem("search_history")
+    localStorage.getItem("search_history_v2")
   );
   await search.dispatchEvent("compositionstart", { data: "zhong" });
   await expect(search).not.toHaveAttribute("data-smooth-caret-active", "true");
   await search.dispatchEvent("keydown", { key: "Enter", isComposing: true });
   expect(
-    await page.evaluate(() => localStorage.getItem("search_history"))
+    await page.evaluate(() => localStorage.getItem("search_history_v2"))
   ).toBe(history);
   await search.dispatchEvent("compositionend", { data: "中" });
   await expectCaretAligned(search);

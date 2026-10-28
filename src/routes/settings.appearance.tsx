@@ -14,6 +14,7 @@ import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
 import { setZoomFactor } from "@/actions/window";
 import { FilterDropdown } from "@/components/filter-dropdown";
 import LangToggle from "@/components/lang-toggle";
+import { SearchHistorySettings } from "@/components/settings/SearchHistorySettings";
 import { SettingRow } from "@/components/settings/setting-row";
 import {
   SettingsPageShell,
@@ -381,6 +382,7 @@ function AppearanceSettingsPage() {
           description={t("searchSensitivityHint")}
           title={t("settingsSearchSensitivity")}
         />
+        <SearchHistorySettings />
         <SettingRow
           action={
             <Switch

@@ -8,8 +8,12 @@ import {
 /** Full text is useful only when the visible label actually overflows. */
 export function SearchTextButton({
   tooltipText,
+  tooltipAlways = false,
   ...props
-}: ComponentProps<"button"> & { tooltipText?: string }) {
+}: ComponentProps<"button"> & {
+  tooltipText?: string;
+  tooltipAlways?: boolean;
+}) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const button = <button {...props} ref={buttonRef} />;
@@ -27,7 +31,8 @@ export function SearchTextButton({
           Boolean(
             nextOpen &&
               label &&
-              (label.scrollWidth > label.clientWidth ||
+              (tooltipAlways ||
+                label.scrollWidth > label.clientWidth ||
                 label.scrollHeight > label.clientHeight)
           )
         );

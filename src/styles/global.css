@@ -667,58 +667,72 @@
   );
 }
 
-.search-preset-strip {
-  --preset-fade-left: 0px;
-  --preset-fade-right: 0px;
+.search-preset-strip,
+.search-history-scroll {
+  --search-fade-direction: to right;
+  --search-fade-start: 0px;
+  --search-fade-end: 0px;
   scrollbar-color: transparent transparent;
   scrollbar-width: thin;
   -webkit-mask-image: linear-gradient(
-    to right,
+    var(--search-fade-direction),
     transparent 0,
-    black var(--preset-fade-left),
-    black calc(100% - var(--preset-fade-right)),
+    black var(--search-fade-start),
+    black calc(100% - var(--search-fade-end)),
     transparent 100%
   );
   mask-image: linear-gradient(
-    to right,
+    var(--search-fade-direction),
     transparent 0,
-    black var(--preset-fade-left),
-    black calc(100% - var(--preset-fade-right)),
+    black var(--search-fade-start),
+    black calc(100% - var(--search-fade-end)),
     transparent 100%
   );
 }
 
-.search-preset-strip::-webkit-scrollbar-thumb {
+.search-history-scroll {
+  --search-fade-direction: to bottom;
+}
+
+.search-preset-strip::-webkit-scrollbar-thumb,
+.search-history-scroll::-webkit-scrollbar-thumb {
   background: transparent;
 }
 
-.search-preset-strip:hover {
+.search-preset-strip:hover,
+.search-history-scroll:hover {
   scrollbar-color: color-mix(in srgb, var(--primary) 35%, transparent)
     transparent;
 }
 
-.search-preset-strip:hover::-webkit-scrollbar-thumb {
+.search-preset-strip:hover::-webkit-scrollbar-thumb,
+.search-history-scroll:hover::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--primary) 30%, transparent);
 }
 
-.search-preset-strip:hover::-webkit-scrollbar-thumb:hover {
+.search-preset-strip:hover::-webkit-scrollbar-thumb:hover,
+.search-history-scroll:hover::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--primary) 55%, transparent);
 }
 
-.search-preset-strip[data-left-fade="true"] {
-  --preset-fade-left: 24px;
+.search-preset-strip[data-left-fade="true"],
+.search-history-scroll[data-top-fade="true"] {
+  --search-fade-start: 24px;
 }
 
-.search-preset-strip[data-right-fade="true"] {
-  --preset-fade-right: 24px;
+.search-preset-strip[data-right-fade="true"],
+.search-history-scroll[data-bottom-fade="true"] {
+  --search-fade-end: 24px;
 }
 
 @media (forced-colors: active) {
-  .search-preset-strip:hover {
+  .search-preset-strip:hover,
+  .search-history-scroll:hover {
     scrollbar-color: auto;
   }
 
-  .search-preset-strip:hover::-webkit-scrollbar-thumb {
+  .search-preset-strip:hover::-webkit-scrollbar-thumb,
+  .search-history-scroll:hover::-webkit-scrollbar-thumb {
     background: ButtonText;
   }
 }

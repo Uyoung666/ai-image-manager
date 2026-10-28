@@ -1,9 +1,13 @@
-import { Clock, RefreshCw, Search } from "lucide-react";
-import type {
-  FocusEventHandler,
-  KeyboardEventHandler,
-  ReactNode,
-  Ref,
+import { Clock, EyeOff, RefreshCw, Search } from "lucide-react";
+import {
+  type FocusEventHandler,
+  type KeyboardEventHandler,
+  type ReactNode,
+  type Ref,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -18,6 +22,7 @@ import {
 import type { SearchStarterResponse } from "@/types/search-starters";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 import { cn } from "@/utils/tailwind";
+import { SearchHistorySuggestion } from "./SearchHistorySuggestion";
 import { SearchStarterGallery } from "./SearchStarterGallery";
 import { SearchTextButton } from "./SearchTextButton";
 
@@ -26,8 +31,10 @@ interface SearchSuggestionsPanelProps {
   floatingPanelMaxHeight: number;
   handleSuggestionClick: (suggestion: SearchSuggestion) => void;
   handleSuggestionKeyDown: KeyboardEventHandler<HTMLDivElement>;
+  historyDisabled: boolean;
   onBlur: FocusEventHandler<HTMLDivElement>;
   onRefreshStarters: () => void;
+  onRemoveHistory: (id: string) => void;
   onResetStarterFilters: () => void;
   onTimePresetSelect: (
     preset: ReturnType<typeof getTimePresets>[number]
@@ -48,9 +55,11 @@ interface SearchSuggestionsPanelProps {
 
 export function SearchSuggestionsPanel({
   clearHistory,
+  onRemoveHistory,
   floatingPanelMaxHeight,
   handleSuggestionClick,
   handleSuggestionKeyDown,
+  historyDisabled,
   onBlur,
   onRefreshStarters,
   onResetStarterFilters,
@@ -69,6 +78,44 @@ export function SearchSuggestionsPanel({
   timePresets,
 }: SearchSuggestionsPanelProps) {
   const { t } = useTranslation();
+  const historyScrollRef = useRef<HTMLDivElement>(null);
+  const [historyFade, setHistoryFade] = useState({ top: false, bottom: false });
+  const updateHistoryFade = useCallback(() => {
+    const list = historyScrollRef.current;
+    if (!list) {
+      return;
+    }
+    const top = list.scrollTop > 2;
+    const bottom = list.scrollHeight - list.scrollTop - list.clientHeight > 2;
+    setHistoryFade((previous) =>
+      previous.top === top && previous.bottom === bottom
+        ? previous
+        : { top, bottom }
+    );
+  }, []);
+  useEffect(() => {
+    const list = historyScrollRef.current;
+    if (query.trim() || recentSuggestions.length === 0 || !list) {
+      return;
+    }
+    updateHistoryFade();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(updateHistoryFade);
+    observer?.observe(list);
+    return () => observer?.disconnect();
+  }, [query, recentSuggestions, updateHistoryFade]);
+  const historyStatus = historyDisabled && (
+    <span
+      className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground/70"
+      data-search-history-status
+      role="status"
+    >
+      <EyeOff aria-hidden="true" className="h-3 w-3" />
+      {t("searchHistoryUi.disabled")}
+    </span>
+  );
   const disabled = starterStatus === "color";
   let emptyKey = "searchStarterUi.empty";
   if (disabled) {
@@ -110,16 +157,21 @@ export function SearchSuggestionsPanel({
       )}
       {query.trim() ? (
         <div className="py-1.5">
-          <div className="px-3 pb-1.5 font-medium text-[11px] text-muted-foreground">
-            {t("searchSuggestions")}
+          <div className="flex min-w-0 items-center justify-between gap-3 px-3 pb-1.5 font-medium text-[11px] text-muted-foreground">
+            <span>{t("searchSuggestions")}</span>
+            {historyStatus}
           </div>
           {suggestions.map((suggestion, index) => (
             <SuggestionButton
               index={index}
               isActive={index === suggestionIndex}
-              key={`${suggestion.type}-${suggestion.text}`}
+              key={
+                suggestion.historyEntry?.id ??
+                `${suggestion.type}-${suggestion.text}`
+              }
               onClick={() => handleSuggestionClick(suggestion)}
               onMouseEnter={() => setSuggestionIndex(index)}
+              onRemoveHistory={onRemoveHistory}
               suggestion={suggestion}
             />
           ))}
@@ -239,24 +291,41 @@ export function SearchSuggestionsPanel({
                     {t("clearAll")}
                   </button>
                 </div>
-                {recentSuggestions.map((suggestion, index) => {
-                  const itemIndex = searchExamples.length + index;
-                  return (
-                    <SuggestionButton
-                      index={itemIndex}
-                      isActive={itemIndex === suggestionIndex}
-                      key={`${suggestion.type}-${suggestion.text}`}
-                      onClick={() => handleSuggestionClick(suggestion)}
-                      onMouseEnter={() => setSuggestionIndex(itemIndex)}
-                      suggestion={suggestion}
-                    />
-                  );
-                })}
+                <div
+                  className="search-history-scroll max-h-[200px] min-h-0 scroll-py-6 overflow-y-auto overscroll-contain"
+                  data-bottom-fade={historyFade.bottom}
+                  data-search-history-scroll
+                  data-top-fade={historyFade.top}
+                  onScroll={updateHistoryFade}
+                  ref={historyScrollRef}
+                >
+                  {recentSuggestions.map((suggestion, index) => {
+                    const itemIndex = searchExamples.length + index;
+                    return (
+                      <SuggestionButton
+                        index={itemIndex}
+                        isActive={itemIndex === suggestionIndex}
+                        key={
+                          suggestion.historyEntry?.id ??
+                          `${suggestion.type}-${suggestion.text}`
+                        }
+                        onClick={() => handleSuggestionClick(suggestion)}
+                        onMouseEnter={() => setSuggestionIndex(itemIndex)}
+                        onRemoveHistory={onRemoveHistory}
+                        suggestion={suggestion}
+                      />
+                    );
+                  })}
+                </div>
               </section>
             )}
           </div>
-          <div className="border-border border-t px-3 py-2 text-[11px] text-muted-foreground">
-            {t("searchStarterWildcardHint")}
+          <div
+            className="flex min-w-0 items-center justify-between gap-3 border-border border-t px-3 py-2 text-[11px] text-muted-foreground"
+            data-search-suggestions-footer
+          >
+            <span className="min-w-0">{t("searchStarterWildcardHint")}</span>
+            {historyStatus}
           </div>
         </>
       )}
@@ -270,14 +339,28 @@ function SuggestionButton({
   isActive,
   onClick,
   onMouseEnter,
+  onRemoveHistory,
 }: {
   suggestion: SearchSuggestion;
   index: number;
   isActive: boolean;
   onClick: () => void;
   onMouseEnter: () => void;
+  onRemoveHistory: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  if (suggestion.historyEntry) {
+    return (
+      <SearchHistorySuggestion
+        entry={suggestion.historyEntry}
+        index={index}
+        isActive={isActive}
+        onClick={onClick}
+        onMouseEnter={onMouseEnter}
+        onRemove={onRemoveHistory}
+      />
+    );
+  }
   const isPerson = suggestion.type === "person";
   const cover = suggestion.coverThumbnailPath || suggestion.coverPhotoPath;
   let categoryLabel = suggestion.category;

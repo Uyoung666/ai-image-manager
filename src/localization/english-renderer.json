@@ -2205,5 +2205,22 @@
     },
     "person": "Person",
     "tag": "Tag"
+  },
+  "searchHistoryUi": {
+    "enabled": "Search history",
+    "enabledHint": "Save and show text and image searches. Turning this off hides existing history, stops recording and using it for recommendations. Turn it on again to restore the history display.",
+    "disabled": "Search history is off",
+    "limit": "Search history limit",
+    "limitHint": "Text and image searches share this limit. Scroll to see more. Lowering it removes older entries; raising it does not restore removed entries.",
+    "reduceTitle": "Reduce the history limit?",
+    "reduceHint": "Keep the last {{limit}} searches and remove {{count}} older entries. Removed entries cannot be restored.",
+    "reduceConfirm": "Reduce and remove older entries",
+    "limitOption": "Last {{count}} searches",
+    "clear": "Clear search history",
+    "clearHint": "Clear all text and image searches while keeping your preferences.",
+    "imageLabel": "Image search: {{filename}}",
+    "sourceMissing": "Source unavailable",
+    "remove": "Remove search: {{name}}",
+    "saveFailed": "Search history could not be saved. You can still search."
   }
 }

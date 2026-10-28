@@ -114,6 +114,7 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
     await page.addInitScript(() => {
       const metadataMode = localStorage.getItem("starter-use-metadata") === "1";
       localStorage.setItem("lang", "en");
+      localStorage.removeItem("search_history_v2");
       localStorage.setItem(
         "search_history",
         JSON.stringify([
@@ -412,14 +413,33 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
         exact: true,
       });
       expect(await refresh.getAttribute("data-slot")).toBe("tooltip-trigger");
+      await app.evaluate(({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows().find(
+          (item) =>
+            !item.isDestroyed() &&
+            item.webContents.getURL().includes("index.html")
+        );
+        win?.focus();
+        win?.webContents.focus();
+      });
+      await expect
+        .poll(() => page.evaluate(() => document.hasFocus()))
+        .toBe(true);
       await input.focus();
-      await input.hover();
-      await refresh.hover();
+      if (size.zoom) {
+        // Electron CDP hover coordinates differ under page zoom; use the keyboard path here.
+        await page.keyboard.press("Tab");
+        await refresh.focus();
+      } else {
+        await input.hover();
+        await refresh.hover();
+      }
       const refreshHint = page.getByRole("tooltip", {
         name: "Explore other themes; ideas refresh daily",
         exact: true,
       });
       await expect(refreshHint).toBeVisible();
+      await input.focus();
       await cards.first().hover();
       await expect(refreshHint).not.toBeVisible();
       const seen = new Set(first);
@@ -482,21 +502,31 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
       await expect(cards.first()).toBeFocused();
       await expect(panel.locator('[aria-selected="true"]')).toHaveCount(1);
       await page.keyboard.press("ArrowUp");
-      const lastHistory = panel.getByRole("option", {
-        name: "City",
-        exact: true,
-      });
+      const lastHistory = panel
+        .locator("[data-search-history] [role=option]")
+        .last();
       await expect(lastHistory).toBeFocused();
       await expect(lastHistory).toBeInViewport();
-      expect(await lastHistory.getAttribute("data-slot")).not.toBe(
-        "tooltip-trigger"
-      );
-      await lastHistory.hover();
+      if (!size.zoom) {
+        await lastHistory.hover();
+      }
       await page.waitForTimeout(500);
-      await expect(page.getByRole("tooltip")).not.toBeVisible();
+      const truncated = await lastHistory
+        .locator("[data-search-tooltip-text]")
+        .evaluate((el) => el.scrollWidth > el.clientWidth);
+      if (truncated) {
+        await expect(page.getByRole("tooltip")).toBeVisible();
+      } else {
+        await expect(page.getByRole("tooltip")).not.toBeVisible();
+      }
       await page.keyboard.press("Escape");
       await expect(panel).not.toBeVisible();
     }
+    await app.evaluate(({ BrowserWindow }) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.setZoomFactor(1);
+      }
+    });
     // Metadata cards and their real searches remain functional without an AI index.
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.evaluate(() =>

@@ -1,7 +1,5 @@
 import type { ExifFilters } from "@/types/search";
-
-const HISTORY_KEY = "search_history";
-export const MAX_HISTORY = 20;
+import type { SearchHistoryEntry } from "@/types/search-history";
 
 export interface TagInfo {
   color: string | null;
@@ -20,6 +18,7 @@ export interface SearchSuggestion {
   coverPhotoPath?: string | null;
   coverThumbnailPath?: string | null;
   filters?: ExifFilters;
+  historyEntry?: SearchHistoryEntry;
   /** 人物身份元数据（仅 type === "person" 时携带，用于头像渲染与精准导航） */
   id?: number;
   key?: string;
@@ -87,34 +86,6 @@ export function getTimePresets(t: (key: string) => string): TimePreset[] {
       },
     },
   ];
-}
-
-export function loadHistory(): string[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveHistory(items: string[]) {
-  try {
-    localStorage.setItem(
-      HISTORY_KEY,
-      JSON.stringify(items.slice(0, MAX_HISTORY))
-    );
-  } catch {
-    /* ignore */
-  }
-}
-
-export function clearSavedHistory() {
-  try {
-    localStorage.removeItem(HISTORY_KEY);
-  } catch {
-    /* ignore */
-  }
 }
 
 export function getFilterLabel(

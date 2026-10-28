@@ -186,6 +186,7 @@ export function useSearchStarters({
   semanticEnabled = true,
   language,
   history,
+  historyEnabled = true,
   filters,
   colorHex,
 }: {
@@ -194,26 +195,28 @@ export function useSearchStarters({
   semanticEnabled?: boolean;
   language: string;
   history: string[];
+  historyEnabled?: boolean;
   filters: ExifFilters;
   colorHex?: string | null;
 }) {
   const input: SearchStarterInput = {
     language: language.startsWith("zh") ? "zh" : "en",
     locale: displayLocale(language),
-    history: history
+    history: (historyEnabled ? history : [])
       .filter((text) => typeof text === "string")
       .slice(0, 20)
       .map((text) => text.slice(0, 500)),
     filters: buildSearchFilterParams(filters),
     ...(colorHex ? { colorHex } : {}),
   };
-  // History changes affect ranking, not the eligibility of the visible cards.
+  // Keep normal ranking updates stable, but isolate recommendations when history is disabled.
   const key = JSON.stringify([
     localSearchDay(),
     input.language,
     input.locale,
     input.filters,
     input.colorHex,
+    historyEnabled,
   ]);
   const currentKey = useRef(key);
   currentKey.current = key;
@@ -223,6 +226,7 @@ export function useSearchStarters({
   const [state, setState] = useState(() => {
     const entry = cache.get(key);
     return {
+      key,
       batch: entry?.batch ?? [],
       status: entry
         ? statusOf(entry, semanticEnabled)
@@ -269,6 +273,7 @@ export function useSearchStarters({
         entry.fallback?.emptyReason === "library" ||
         entry.fallback?.emptyReason === "scope";
       setState({
+        key,
         batch: entry.batch,
         status: statusOf(entry, snapshot.semanticEnabled),
         emptyReason: entry.fallback?.emptyReason,
@@ -353,6 +358,7 @@ export function useSearchStarters({
     lastOpening.current = { key, open };
     if (!enabled || colorHex) {
       setState({
+        key,
         batch: [],
         status: colorHex ? "color" : "unavailable",
         emptyReason: undefined,
@@ -368,6 +374,7 @@ export function useSearchStarters({
       chooseBatch(entry, semanticEnabled);
     }
     setState({
+      key,
       batch: entry.batch,
       status: statusOf(entry, semanticEnabled),
       emptyReason: entry.fallback?.emptyReason,
@@ -386,8 +393,15 @@ export function useSearchStarters({
   }, [key, open, enabled, colorHex, semanticEnabled]);
 
   return {
-    ...state,
+    ...(state.key === key && enabled
+      ? state
+      : {
+          batch: [],
+          status: "empty" as const,
+          emptyReason: undefined,
+          loading: enabled,
+        }),
     validity: cache.get(key)?.validity,
-    refresh: () => loadRef.current(true),
+    refresh: () => (enabled ? loadRef.current(true) : Promise.resolve()),
   };
 }

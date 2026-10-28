@@ -4,6 +4,10 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { imageSearchActions } from "@/actions/image-search";
 import { photoSequenceActions } from "@/actions/photo-sequences";
+import {
+  beginSearchHistoryRecording,
+  recordImageSearchHistory,
+} from "@/actions/search-history";
 import type { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import type { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { usePhotoSearch } from "@/hooks/use-photo-search";
@@ -540,7 +544,12 @@ export function useHomeSearch({
   searchHandlerRef.current = performSearch;
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: image search coordinates preview, source validation, and generation-safe result states
-  async function handleImageSearch(imagePath: string) {
+  async function handleImageSearch(
+    imagePath: string,
+    options?: { recordHistory?: boolean }
+  ) {
+    const historyTicket =
+      options?.recordHistory === false ? null : beginSearchHistoryRecording();
     cancelTagRefresh();
     cancelPendingPhotoSearch();
     const gen = ++searchGenerationRef.current;
@@ -607,6 +616,19 @@ export function useHomeSearch({
       }
       if (result.error) {
         console.warn("[ImageSearch]", result.error);
+      }
+      if (
+        historyTicket &&
+        (!result.errorCode || result.errorCode === "NO_MATCHES")
+      ) {
+        recordImageSearchHistory(
+          imagePath,
+          historyTicket,
+          () => gen === searchGenerationRef.current
+        ).catch(() => undefined);
+      }
+      if (gen !== searchGenerationRef.current) {
+        return;
       }
       const results = (result as { results?: Photo[] }).results ?? [];
       setSearchResults(results);
