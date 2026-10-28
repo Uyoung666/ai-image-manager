@@ -3,6 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { vi } from "vitest";
 
+// UI tests run in a foreground document unless a lifecycle test overrides it.
+if (typeof document !== "undefined") {
+  Object.defineProperty(document, "hasFocus", {
+    configurable: true,
+    value: () => true,
+  });
+}
+
 const electronTestDataRoot = path.join(
   os.tmpdir(),
   `ai-image-manager-vitest-${process.pid}`
