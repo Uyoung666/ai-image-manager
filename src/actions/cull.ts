@@ -3,6 +3,9 @@ import { trackCullWrite } from "@/utils/cull-write-state";
 
 /** All renderer culling operations pass through this typed boundary. */
 export const cullActions = {
+  clearArchivedTasks: (
+    input: Parameters<typeof ipc.client.cull.clearArchivedTasks>[0]
+  ) => ipc.client.cull.clearArchivedTasks(input),
   listTaskSummaries: (
     input: Parameters<typeof ipc.client.cull.listTaskSummaries>[0]
   ) => ipc.client.cull.listTaskSummaries(input),

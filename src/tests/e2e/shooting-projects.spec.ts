@@ -1493,6 +1493,121 @@ test("explains completed offline previews and disables redundant preparation acr
   }
 });
 
+test("keeps archives compact with the shared glass toolbar and clears all confirmed archives while preserving photos", async () => {
+  const fixture = await createFixture("shooting-archive-clear-layout");
+  const sourceBytes = fs.readFileSync(fixture.sourceFile);
+  const copied = path.join(fixture.root, "delivered-original.png");
+  fs.copyFileSync(fixture.sourceFile, copied);
+  try {
+    const page = await launch(fixture);
+    await navigateToCull(page);
+    const projectId = await openFolder(fixture, page);
+    await waitPrepared(fixture, 1);
+    await page.getByTestId(`cull-archive-project-${projectId}`).click();
+    const rows = Array.from(
+      { length: 24 },
+      (_, index) =>
+        `INSERT INTO cull_sessions(name,mode,created_at,archived_at) VALUES('Library archive ${index}','curate',${index + 1},10);`
+    );
+    execute(
+      fixture,
+      rows.join("\n") +
+        `\nINSERT INTO cull_sessions(name,mode,created_at) VALUES('Active library stays','curate',1);\nINSERT INTO photos(path,filename,created_at) VALUES('${fixture.sourceFile.replaceAll("'", "''")}','original.png',1);`
+    );
+    await page.getByTestId("cull-archive-list-link").click();
+    await expect(page.locator("[data-task-key]")).toHaveCount(25);
+    const header = page.getByTestId("cull-list-header");
+    const scroll = page.getByTestId("cull-list-scroll");
+    for (const size of SIZES) {
+      await resize(fixture, page, size);
+      await scroll.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      await expect
+        .poll(() =>
+          header.evaluate((element) =>
+            element.classList.contains("is-scrolled")
+          )
+        )
+        .toBe(false);
+      const bounds = await header.boundingBox();
+      expect(bounds?.height).toBeLessThanOrEqual(104);
+      await scroll.evaluate((element) => {
+        element.scrollTop = 400;
+      });
+      await expect
+        .poll(() =>
+          header.evaluate((element) =>
+            element.classList.contains("is-scrolled")
+          )
+        )
+        .toBe(true);
+      await expect
+        .poll(() =>
+          header.evaluate((element) => getComputedStyle(element).backdropFilter)
+        )
+        .toContain("blur");
+      expect(
+        Math.abs(
+          ((await header.boundingBox())?.y ?? -1000) - (bounds?.y ?? 1000)
+        )
+      ).toBeLessThan(2);
+      await expectLayoutInsideViewport(page);
+      await expect(page.getByTestId("cull-clear-archives")).toBeInViewport({
+        ratio: 1,
+      });
+      if (size.width === 720 || size.width === 1280) {
+        await screenshot(
+          fixture,
+          page,
+          `archive-glass-${size.width}x${size.height}.png`
+        );
+      }
+    }
+    await resize(fixture, page, SIZES[0], 1.25);
+    await expectLayoutInsideViewport(page);
+    await page.getByRole("searchbox").fill("Library archive 23");
+    await expect(page.locator("[data-task-key]")).toHaveCount(1);
+    await page.getByTestId("cull-clear-archives").click();
+    await expect(page.getByRole("dialog")).toContainText(
+      "Clear all 25 archived tasks?"
+    );
+    await expectLayoutInsideViewport(page);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(
+      database(
+        fixture,
+        "SELECT id FROM cull_sessions WHERE archived_at IS NOT NULL AND project_id IS NULL"
+      )
+    ).toHaveLength(24);
+    await page.getByTestId("cull-clear-archives").click();
+    await screenshot(fixture, page, "clear-archives-confirm-125.png");
+    await page.getByTestId("cull-clear-archives-confirm").click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.getByRole("searchbox").fill("");
+    await expect(
+      page.getByText("No archived culling tasks", { exact: true })
+    ).toBeVisible();
+    expect(database(fixture, "SELECT id FROM shooting_projects")).toHaveLength(
+      0
+    );
+    expect(
+      database<{ name: string }>(fixture, "SELECT name FROM cull_sessions")
+    ).toEqual([{ name: "Active library stays" }]);
+    expect(database(fixture, "SELECT id FROM photos")).toHaveLength(1);
+    expect(fs.readFileSync(fixture.sourceFile)).toEqual(sourceBytes);
+    expect(fs.readFileSync(copied)).toEqual(sourceBytes);
+    expect(
+      fs.existsSync(
+        path.join(fixture.profile, "data", "shooting-projects", projectId)
+      )
+    ).toBe(false);
+    expectNoProjectImports(fixture);
+  } finally {
+    await close(fixture);
+  }
+});
+
 test("drops a folder into direct culling and imports completed output with a visible folder and thumbnails", async () => {
   const fixture = await createFixture("shooting-drop-library");
   const output = path.join(fixture.root, "交付目录");

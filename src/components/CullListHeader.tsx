@@ -1,6 +1,7 @@
 import { Archive, ArrowLeft, Info } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { CullArchiveActions } from "@/components/CullArchiveActions";
 import { Button } from "@/components/ui/button";
 import { SmoothInput } from "@/components/ui/smooth-input";
 import {
@@ -106,20 +107,7 @@ export function CullListHeader({
       >
         {children}
         {archived ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label={t("cullProject.back")}
-                data-testid="cull-archive-list-link"
-                onClick={onArchive}
-                size="icon"
-                variant="ghost"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("cullProject.back")}</TooltipContent>
-          </Tooltip>
+          <CullArchiveActions onBack={onArchive} />
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>

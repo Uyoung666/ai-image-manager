@@ -3,6 +3,7 @@ import {
   applyProjectPkTopN,
   archiveSession,
   batchUpdatePhotoStatus,
+  clearArchivedTasks,
   completeSession,
   createSession,
   deleteSession,
@@ -27,6 +28,7 @@ import {
 import { getPhotoExif, getPhotoMedia } from "./media";
 
 export const cull = {
+  clearArchivedTasks,
   getPhotoMedia,
   getPhotoExif,
   addPhotosToSession,

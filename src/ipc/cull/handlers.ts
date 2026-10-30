@@ -75,6 +75,41 @@ import { getCullProgressDelta } from "./state";
 
 const SQLITE_ID_CHUNK_SIZE = 500;
 
+export const clearArchivedTasks = os
+  .input(
+    z
+      .object({
+        confirmed: z.literal(true),
+        tasks: z
+          .array(
+            z.discriminatedUnion("kind", [
+              z
+                .object({
+                  kind: z.literal("project"),
+                  id: z.string().uuid(),
+                  archivedAt: z.number().int().positive(),
+                })
+                .strict(),
+              z
+                .object({
+                  kind: z.literal("library"),
+                  id: z.number().int().positive(),
+                  archivedAt: z.number().int().positive(),
+                })
+                .strict(),
+            ])
+          )
+          .max(10_000),
+      })
+      .strict()
+  )
+  .handler(async ({ input }) => {
+    const { clearArchivedCullTasks } = await import(
+      "@/services/cull-task-archive"
+    );
+    return clearArchivedCullTasks(input.tasks);
+  });
+
 export const startProjectSession = os
   .input(
     z.object({

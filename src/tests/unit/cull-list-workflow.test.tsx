@@ -153,6 +153,61 @@ describe("shared culling list filters", () => {
     expect(header).not.toHaveClass("is-scrolled");
   });
 
+  it("confirms and clears the whole archive independently of the current search", async () => {
+    mocks.clearArchives.mockResolvedValue({
+      deleted: 2,
+      failed: 0,
+      skipped: 0,
+    });
+    render(<CullListPage archivedView />);
+    await screen.findByText("Archived shoot");
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "Archived shoot" },
+    });
+    await waitFor(() =>
+      expect(screen.getAllByTestId("shooting-project-card")).toHaveLength(1)
+    );
+    fireEvent.click(screen.getByTestId("cull-clear-archives"));
+    await screen.findByTestId("cull-clear-archives-dialog");
+    expect(mocks.list).toHaveBeenLastCalledWith({ archived: true, search: "" });
+    expect(mocks.clearArchives).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    expect(mocks.clearArchives).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("cull-clear-archives"));
+    await screen.findByTestId("cull-clear-archives-dialog");
+    mocks.list.mockResolvedValue([]);
+    fireEvent.click(screen.getByTestId("cull-clear-archives-confirm"));
+    await waitFor(() =>
+      expect(mocks.clearArchives).toHaveBeenCalledWith({
+        confirmed: true,
+        tasks: [
+          { kind: "project", id: "archived", archivedAt: 4 },
+          { kind: "library", id: 3, archivedAt: 4 },
+        ],
+      })
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    );
+    expect(
+      await screen.findByText("cullProject.noMatches")
+    ).toBeInTheDocument();
+  });
+
+  it("keeps failed bulk deletion visible and retryable", async () => {
+    mocks.clearArchives.mockRejectedValueOnce(new Error("Unavailable"));
+    render(<CullListPage archivedView />);
+    await screen.findByText("Archived shoot");
+    fireEvent.click(screen.getByTestId("cull-clear-archives"));
+    await screen.findByTestId("cull-clear-archives-confirm");
+    fireEvent.click(screen.getByTestId("cull-clear-archives-confirm"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "cullProject.archive.clearFailed"
+    );
+    expect(screen.getByTestId("cull-clear-archives-confirm")).toBeEnabled();
+    expect(screen.getByText("Archived shoot")).toBeInTheDocument();
+  });
+
   it("keeps completed tasks in the active list and shows both sources in settings archives", async () => {
     const view = render(<CullListPage />);
     await screen.findByText("Active shoot");
