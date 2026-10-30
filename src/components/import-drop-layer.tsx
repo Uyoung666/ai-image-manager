@@ -7,6 +7,7 @@ type ImportDropZone = "image" | "folders";
 interface ImportDropLayerProps {
   className?: string;
   kind: ExternalDropKind | null;
+  label?: string;
   onDragOver: (event: React.DragEvent, zone: ImportDropZone) => void;
   onDrop: (event: React.DragEvent, zone: ImportDropZone) => void;
   zone: ImportDropZone;
@@ -28,6 +29,7 @@ function getZoneIcon(zone: ImportDropZone, allowed: boolean) {
 
 export function ImportDropLayer({
   kind,
+  label: customLabel,
   onDragOver,
   onDrop,
   className,
@@ -40,7 +42,7 @@ export function ImportDropLayer({
   }
 
   const allowed = kind === zone;
-  const label = getZoneLabel(zone, t);
+  const label = customLabel ?? getZoneLabel(zone, t);
 
   return (
     <div

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WhatsNewRouteImport } from './routes/whats-new'
 import { Route as TrashRouteImport } from './routes/trash'
+import { Route as ShootingProjectsRouteImport } from './routes/shooting-projects'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PeopleRouteImport } from './routes/people'
 import { Route as DuplicatesRouteImport } from './routes/duplicates'
@@ -18,6 +19,7 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CullRouteImport } from './routes/cull'
 import { Route as AlbumsRouteImport } from './routes/albums'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ShootingProjectsProjectIdRouteImport } from './routes/shooting-projects.$projectId'
 import { Route as SettingsWatermarkRouteImport } from './routes/settings.watermark'
 import { Route as SettingsWanderRouteImport } from './routes/settings.wander'
 import { Route as SettingsUpdateRouteImport } from './routes/settings.update'
@@ -25,6 +27,7 @@ import { Route as SettingsStorageRouteImport } from './routes/settings.storage'
 import { Route as SettingsSequencesRouteImport } from './routes/settings.sequences'
 import { Route as SettingsPluginsRouteImport } from './routes/settings.plugins'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
+import { Route as SettingsCullArchiveRouteImport } from './routes/settings.cull-archive'
 import { Route as SettingsCloudSyncRouteImport } from './routes/settings.cloud-sync'
 import { Route as SettingsBehaviorRouteImport } from './routes/settings.behavior'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
@@ -44,6 +47,11 @@ const WhatsNewRoute = WhatsNewRouteImport.update({
 const TrashRoute = TrashRouteImport.update({
   id: '/trash',
   path: '/trash',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShootingProjectsRoute = ShootingProjectsRouteImport.update({
+  id: '/shooting-projects',
+  path: '/shooting-projects',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -81,6 +89,12 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ShootingProjectsProjectIdRoute =
+  ShootingProjectsProjectIdRouteImport.update({
+    id: '/$projectId',
+    path: '/$projectId',
+    getParentRoute: () => ShootingProjectsRoute,
+  } as any)
 const SettingsWatermarkRoute = SettingsWatermarkRouteImport.update({
   id: '/watermark',
   path: '/watermark',
@@ -114,6 +128,11 @@ const SettingsPluginsRoute = SettingsPluginsRouteImport.update({
 const SettingsDiagnosticsRoute = SettingsDiagnosticsRouteImport.update({
   id: '/diagnostics',
   path: '/diagnostics',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsCullArchiveRoute = SettingsCullArchiveRouteImport.update({
+  id: '/cull-archive',
+  path: '/cull-archive',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsCloudSyncRoute = SettingsCloudSyncRouteImport.update({
@@ -175,6 +194,7 @@ export interface FileRoutesByFullPath {
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
+  '/shooting-projects': typeof ShootingProjectsRouteWithChildren
   '/trash': typeof TrashRoute
   '/whats-new': typeof WhatsNewRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
@@ -187,6 +207,7 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/behavior': typeof SettingsBehaviorRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/cull-archive': typeof SettingsCullArchiveRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/plugins': typeof SettingsPluginsRoute
   '/settings/sequences': typeof SettingsSequencesRoute
@@ -194,6 +215,7 @@ export interface FileRoutesByFullPath {
   '/settings/update': typeof SettingsUpdateRoute
   '/settings/wander': typeof SettingsWanderRoute
   '/settings/watermark': typeof SettingsWatermarkRoute
+  '/shooting-projects/$projectId': typeof ShootingProjectsProjectIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -203,6 +225,7 @@ export interface FileRoutesByTo {
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
+  '/shooting-projects': typeof ShootingProjectsRouteWithChildren
   '/trash': typeof TrashRoute
   '/whats-new': typeof WhatsNewRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
@@ -215,6 +238,7 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/behavior': typeof SettingsBehaviorRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/cull-archive': typeof SettingsCullArchiveRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/plugins': typeof SettingsPluginsRoute
   '/settings/sequences': typeof SettingsSequencesRoute
@@ -222,6 +246,7 @@ export interface FileRoutesByTo {
   '/settings/update': typeof SettingsUpdateRoute
   '/settings/wander': typeof SettingsWanderRoute
   '/settings/watermark': typeof SettingsWatermarkRoute
+  '/shooting-projects/$projectId': typeof ShootingProjectsProjectIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -232,6 +257,7 @@ export interface FileRoutesById {
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
+  '/shooting-projects': typeof ShootingProjectsRouteWithChildren
   '/trash': typeof TrashRoute
   '/whats-new': typeof WhatsNewRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
@@ -244,6 +270,7 @@ export interface FileRoutesById {
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/behavior': typeof SettingsBehaviorRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/cull-archive': typeof SettingsCullArchiveRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/plugins': typeof SettingsPluginsRoute
   '/settings/sequences': typeof SettingsSequencesRoute
@@ -251,6 +278,7 @@ export interface FileRoutesById {
   '/settings/update': typeof SettingsUpdateRoute
   '/settings/wander': typeof SettingsWanderRoute
   '/settings/watermark': typeof SettingsWatermarkRoute
+  '/shooting-projects/$projectId': typeof ShootingProjectsProjectIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -262,6 +290,7 @@ export interface FileRouteTypes {
     | '/duplicates'
     | '/people'
     | '/settings'
+    | '/shooting-projects'
     | '/trash'
     | '/whats-new'
     | '/albums/$albumId'
@@ -274,6 +303,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/behavior'
     | '/settings/cloud-sync'
+    | '/settings/cull-archive'
     | '/settings/diagnostics'
     | '/settings/plugins'
     | '/settings/sequences'
@@ -281,6 +311,7 @@ export interface FileRouteTypes {
     | '/settings/update'
     | '/settings/wander'
     | '/settings/watermark'
+    | '/shooting-projects/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -290,6 +321,7 @@ export interface FileRouteTypes {
     | '/duplicates'
     | '/people'
     | '/settings'
+    | '/shooting-projects'
     | '/trash'
     | '/whats-new'
     | '/albums/$albumId'
@@ -302,6 +334,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/behavior'
     | '/settings/cloud-sync'
+    | '/settings/cull-archive'
     | '/settings/diagnostics'
     | '/settings/plugins'
     | '/settings/sequences'
@@ -309,6 +342,7 @@ export interface FileRouteTypes {
     | '/settings/update'
     | '/settings/wander'
     | '/settings/watermark'
+    | '/shooting-projects/$projectId'
   id:
     | '__root__'
     | '/'
@@ -318,6 +352,7 @@ export interface FileRouteTypes {
     | '/duplicates'
     | '/people'
     | '/settings'
+    | '/shooting-projects'
     | '/trash'
     | '/whats-new'
     | '/albums/$albumId'
@@ -330,6 +365,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/behavior'
     | '/settings/cloud-sync'
+    | '/settings/cull-archive'
     | '/settings/diagnostics'
     | '/settings/plugins'
     | '/settings/sequences'
@@ -337,6 +373,7 @@ export interface FileRouteTypes {
     | '/settings/update'
     | '/settings/wander'
     | '/settings/watermark'
+    | '/shooting-projects/$projectId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -347,6 +384,7 @@ export interface RootRouteChildren {
   DuplicatesRoute: typeof DuplicatesRoute
   PeopleRoute: typeof PeopleRouteWithChildren
   SettingsRoute: typeof SettingsRouteWithChildren
+  ShootingProjectsRoute: typeof ShootingProjectsRouteWithChildren
   TrashRoute: typeof TrashRoute
   WhatsNewRoute: typeof WhatsNewRoute
 }
@@ -365,6 +403,13 @@ declare module '@tanstack/react-router' {
       path: '/trash'
       fullPath: '/trash'
       preLoaderRoute: typeof TrashRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/shooting-projects': {
+      id: '/shooting-projects'
+      path: '/shooting-projects'
+      fullPath: '/shooting-projects'
+      preLoaderRoute: typeof ShootingProjectsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -416,6 +461,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/shooting-projects/$projectId': {
+      id: '/shooting-projects/$projectId'
+      path: '/$projectId'
+      fullPath: '/shooting-projects/$projectId'
+      preLoaderRoute: typeof ShootingProjectsProjectIdRouteImport
+      parentRoute: typeof ShootingProjectsRoute
+    }
     '/settings/watermark': {
       id: '/settings/watermark'
       path: '/watermark'
@@ -463,6 +515,13 @@ declare module '@tanstack/react-router' {
       path: '/diagnostics'
       fullPath: '/settings/diagnostics'
       preLoaderRoute: typeof SettingsDiagnosticsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/cull-archive': {
+      id: '/settings/cull-archive'
+      path: '/cull-archive'
+      fullPath: '/settings/cull-archive'
+      preLoaderRoute: typeof SettingsCullArchiveRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/cloud-sync': {
@@ -579,6 +638,7 @@ interface SettingsRouteChildren {
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsBehaviorRoute: typeof SettingsBehaviorRoute
   SettingsCloudSyncRoute: typeof SettingsCloudSyncRoute
+  SettingsCullArchiveRoute: typeof SettingsCullArchiveRoute
   SettingsDiagnosticsRoute: typeof SettingsDiagnosticsRoute
   SettingsPluginsRoute: typeof SettingsPluginsRoute
   SettingsSequencesRoute: typeof SettingsSequencesRoute
@@ -595,6 +655,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsBehaviorRoute: SettingsBehaviorRoute,
   SettingsCloudSyncRoute: SettingsCloudSyncRoute,
+  SettingsCullArchiveRoute: SettingsCullArchiveRoute,
   SettingsDiagnosticsRoute: SettingsDiagnosticsRoute,
   SettingsPluginsRoute: SettingsPluginsRoute,
   SettingsSequencesRoute: SettingsSequencesRoute,
@@ -608,6 +669,17 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
   SettingsRouteChildren,
 )
 
+interface ShootingProjectsRouteChildren {
+  ShootingProjectsProjectIdRoute: typeof ShootingProjectsProjectIdRoute
+}
+
+const ShootingProjectsRouteChildren: ShootingProjectsRouteChildren = {
+  ShootingProjectsProjectIdRoute: ShootingProjectsProjectIdRoute,
+}
+
+const ShootingProjectsRouteWithChildren =
+  ShootingProjectsRoute._addFileChildren(ShootingProjectsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AlbumsRoute: AlbumsRouteWithChildren,
@@ -616,6 +688,7 @@ const rootRouteChildren: RootRouteChildren = {
   DuplicatesRoute: DuplicatesRoute,
   PeopleRoute: PeopleRouteWithChildren,
   SettingsRoute: SettingsRouteWithChildren,
+  ShootingProjectsRoute: ShootingProjectsRouteWithChildren,
   TrashRoute: TrashRoute,
   WhatsNewRoute: WhatsNewRoute,
 }
