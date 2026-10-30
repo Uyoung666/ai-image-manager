@@ -25,17 +25,20 @@ describe("inspectDataPathDestination", () => {
     });
   });
 
-  it("rejects managed directories that do not contain a library database", () => {
+  it.each([
+    "models",
+    "shooting-projects",
+  ])("rejects existing %s data without a library database", (directory) => {
     vi.spyOn(fs, "statSync").mockImplementation(() => {
       throw new Error("missing");
     });
     vi.spyOn(fs, "existsSync").mockImplementation((candidate) =>
-      String(candidate).endsWith(`${path.sep}models`)
+      String(candidate).endsWith(`${path.sep}${directory}`)
     );
 
     expect(inspectDataPathDestination(path.resolve("not-a-library"))).toEqual({
       kind: "conflict",
-      conflictingDirectory: "models",
+      conflictingDirectory: directory,
     });
   });
 

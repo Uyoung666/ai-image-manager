@@ -20,6 +20,7 @@ describe("CullStartDialog", () => {
 
   it("creates a curate session with the selected strategy", async () => {
     vi.mocked(ipc.client.cull.createSession).mockResolvedValue({
+      archivedAt: null,
       completedAt: null,
       completedComparisons: 0,
       createdAt: Date.now(),
@@ -30,6 +31,9 @@ describe("CullStartDialog", () => {
       sortStrategy: "similarity",
       status: "active",
       totalPhotos: 3,
+      projectId: null,
+      projectScope: null,
+      projectScopeOpen: false,
     });
     const onCreated = vi.fn();
     render(

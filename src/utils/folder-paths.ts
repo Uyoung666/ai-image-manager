@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { folders } from "@/db/schema";
 import { registerGalleryCleanup } from "@/utils/gallery-lifecycle";
@@ -23,6 +24,7 @@ export function getFolderPaths(): string[] {
     const indexedFolders = db
       .select({ path: folders.path })
       .from(folders)
+      .where(eq(folders.explicitOnly, false))
       .all();
     const paths = indexedFolders.map((f) => f.path);
     foldersCache = { paths, timestamp: now };

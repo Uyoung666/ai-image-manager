@@ -6,7 +6,12 @@ import { eq, sql } from "drizzle-orm";
 import { app, BrowserWindow } from "electron";
 import { z } from "zod";
 import { getDatabase } from "@/db";
-import { duplicateCleanupPlans, duplicateReviewGroups } from "@/db/schema";
+import {
+  duplicateCleanupPlans,
+  duplicateReviewGroups,
+  shootingProjectPhotos,
+  shootingProjects,
+} from "@/db/schema";
 import {
   getDuplicateSensitivityConfig,
   parseDuplicateSensitivity,
@@ -42,6 +47,10 @@ import {
   DATA_PATH_SUBDIRECTORIES,
   inspectDataPathDestination,
 } from "@/utils/data-path-destination";
+import {
+  projectPreviewMigrationOwnership,
+  removeMigratedDataDirectory,
+} from "@/utils/data-path-migration-cleanup";
 
 const diagLog = (msg: string) => {
   try {
@@ -350,6 +359,35 @@ export const setDataPath = os
       };
     }
     const usesExistingLibrary = destination.kind === "existing-library";
+    let previewOwnership = projectPreviewMigrationOwnership([], []);
+    if (
+      !usesExistingLibrary &&
+      fs.existsSync(path.join(oldPath, "shooting-projects"))
+    ) {
+      try {
+        const db = getDatabase();
+        previewOwnership = projectPreviewMigrationOwnership(
+          db
+            .select({ id: shootingProjects.id })
+            .from(shootingProjects)
+            .all()
+            .map((project) => project.id),
+          db
+            .select({
+              projectId: shootingProjectPhotos.projectId,
+              id: shootingProjectPhotos.id,
+              previewRelativePath: shootingProjectPhotos.previewRelativePath,
+            })
+            .from(shootingProjectPhotos)
+            .all()
+        );
+      } catch (error) {
+        return {
+          ok: false,
+          error: `无法核验拍摄项目预览归属：${(error as Error).message}`,
+        };
+      }
+    }
     const subDirs = DATA_PATH_SUBDIRECTORIES;
     diagLog(
       usesExistingLibrary
@@ -423,7 +461,7 @@ export const setDataPath = os
         await fsp.cp(src, dst, {
           recursive: true,
           force: false,
-          errorOnExist: false,
+          errorOnExist: true,
         });
         copied++;
         copiedDirs.add(dir);
@@ -448,7 +486,11 @@ export const setDataPath = os
       const rollbackErrors: string[] = [];
       for (const dst of destinationDirs) {
         try {
-          await fsp.rm(dst, { recursive: true, force: true });
+          await removeMigratedDataDirectory(
+            newPath,
+            path.basename(dst),
+            previewOwnership
+          );
         } catch (err) {
           rollbackErrors.push(
             `${path.basename(dst)}: ${(err as Error)?.message ?? String(err)}`
@@ -499,7 +541,7 @@ export const setDataPath = os
         }
         try {
           diagLog(`setDataPath: cleanup removing old ${oldSub}`);
-          await fsp.rm(oldSub, { recursive: true, force: true });
+          await removeMigratedDataDirectory(oldPath, dir, previewOwnership);
           cleaned++;
           diagLog(`setDataPath: cleanup ${dir} OK`);
         } catch (err) {
@@ -558,7 +600,7 @@ export const setDataPath = os
     const cleanupErrorsAfterStart: string[] = [];
     for (const dir of copiedDirs) {
       try {
-        await fsp.rm(path.join(oldPath, dir), { recursive: true, force: true });
+        await removeMigratedDataDirectory(oldPath, dir, previewOwnership);
         cleanedAfterStart++;
       } catch (err) {
         cleanupErrorsAfterStart.push(

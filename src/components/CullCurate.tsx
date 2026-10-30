@@ -11,6 +11,8 @@ import {
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { cullActions } from "@/actions/cull";
+import { CullWaitingState } from "@/components/CullWaitingState";
 import {
   Dialog,
   DialogContent,
@@ -26,12 +28,14 @@ import {
 import { ZoomableImage } from "@/components/ZoomableImage";
 import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
-import { ipc } from "@/ipc/manager";
 import type { SessionSummary } from "@/routes/cull.$sessionId";
+import type { CullAvailability } from "@/types/cull";
+import { type CullMediaPhoto, getCullProjectPreview } from "@/utils/cull-media";
+import { cullShortcutBlocked } from "@/utils/cull-shortcuts";
 
 // ── Types ──
 
-interface PhotoInfo {
+interface PhotoInfo extends CullMediaPhoto {
   duelPreviewPath?: string | null;
   fileDate: number | null;
   filename: string;
@@ -71,14 +75,23 @@ interface ExifData {
 }
 
 interface CurateResult {
+  availability?: CullAvailability;
   done: boolean;
+  preparing?: boolean;
   similarCount?: number;
   single?: SingleItem;
   stats: { total: number; completed: number; remaining: number };
+  waiting?: boolean;
 }
 
 interface CullCurateProps {
+  completionActions?: React.ReactNode;
+  finishLabel?: string;
+  onCompleted?: () => void;
   onMutationSuccess: () => void;
+  onReview?: () => void;
+  onSourceDetails?: () => void;
+  quietSelectionFeedback?: boolean;
   session: Pick<
     SessionSummary,
     | "id"
@@ -106,11 +119,28 @@ function formatExifDate(ts: number | null): string {
 // ── Component ──
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: curation state and keyboard workflow are intentionally kept together
-export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
+export function CullCurate({
+  session,
+  finishLabel,
+  onMutationSuccess,
+  onSourceDetails,
+  onReview,
+  onCompleted,
+  completionActions,
+  quietSelectionFeedback = false,
+}: CullCurateProps) {
   const { t } = useTranslation();
   const requestedPreviewIdsRef = useRef(new Set<number>());
   const [previewResolutions, setPreviewResolutions] = useState<
-    Record<number, { path: string | null; useOriginal: boolean }>
+    Record<
+      number,
+      {
+        path: string | null;
+        useOriginal: boolean;
+        previewUrl?: string;
+        originalUrl?: string;
+      }
+    >
   >({});
 
   // React 19: mark photo-switch state as non-urgent transition
@@ -130,7 +160,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
     queryKey: ["cull", "pair", session.id, photoFetchId],
     queryFn: async () => {
       const excludeSessionPhotoIds = Array.from(erroredPhotosRef.current);
-      const result = (await ipc.client.cull.getNextPair({
+      const result = (await cullActions.getNextPair({
         sessionId: session.id,
         excludeSessionPhotoIds:
           excludeSessionPhotoIds.length > 0
@@ -140,26 +170,75 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       return result;
     },
     placeholderData: keepPreviousData,
+    refetchInterval: (query) => {
+      if (query.state.data?.availability) {
+        return query.state.data.waiting ? 700 : false;
+      }
+      return query.state.data?.waiting || query.state.data?.preparing
+        ? 700
+        : false;
+    },
+    refetchOnWindowFocus: false,
     staleTime: 0,
     gcTime: 30_000,
   });
 
   const data = photoQuery.data;
   const done = data?.done ?? false;
+  const reviewedThisVisit = useRef(false);
+  const notifiedCompletion = useRef(false);
+  useEffect(() => {
+    if (data?.single) {
+      reviewedThisVisit.current = true;
+    }
+  }, [data?.single]);
+
   const item = data?.single ?? null;
   const stats = data?.stats ?? null;
   const similarCount = (data as { similarCount?: number })?.similarCount ?? 0;
 
+  useEffect(() => {
+    if (item?.photo.source?.kind !== "project") {
+      return;
+    }
+    let active = true;
+    cullActions
+      .getPhotoMedia({
+        sessionId: session.id,
+        sessionPhotoId: item.sessionPhotoId,
+      })
+      .then((media) => {
+        if (active && media) {
+          setPreviewResolutions((current) => ({
+            ...current,
+            [item.photo.id]: {
+              path: null,
+              useOriginal: false,
+              previewUrl: media.previewUrl,
+              originalUrl: media.originalUrl ?? undefined,
+            },
+          }));
+        }
+      })
+      .catch(() => {
+        /* Existing prepared preview remains usable if media resolution fails. */
+      });
+    return () => {
+      active = false;
+    };
+  }, [item, session.id]);
+
   // 懒触发生成对比预览，并直接更新本地资源，避免刷新整条选片查询链路。
   useEffect(() => {
     if (
+      item?.photo.source?.kind !== "project" &&
       !item?.photo?.duelPreviewPath &&
       item?.photo?.id &&
       !requestedPreviewIdsRef.current.has(item.photo.id)
     ) {
       const photoId = item.photo.id;
       requestedPreviewIdsRef.current.add(photoId);
-      ipc.client.cull
+      cullActions
         .ensureDuelPreview({ photoId })
         .then((result) => {
           const resolved = result as {
@@ -184,14 +263,16 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
   const keepMutation = useMutation({
     mutationFn: async (current: SingleItem) => {
-      await ipc.client.cull.updatePhotoStatus({
+      await cullActions.updatePhotoStatus({
         sessionId: session.id,
         photoId: current.sessionPhotoId,
         status: "kept",
       });
     },
     onSuccess: () => {
-      toast.success(t("cullKeep"));
+      if (!quietSelectionFeedback) {
+        toast.success(t("cullKeep"));
+      }
       onMutationSuccess();
       startTransition(() => {
         setPhotoFetchId((n) => n + 1);
@@ -206,7 +287,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
   const rejectMutation = useMutation({
     mutationFn: async (current: SingleItem) => {
-      await ipc.client.cull.updatePhotoStatus({
+      await cullActions.updatePhotoStatus({
         sessionId: session.id,
         photoId: current.sessionPhotoId,
         status: "rejected",
@@ -227,7 +308,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
   const undoMutation = useMutation({
     mutationFn: async () => {
-      return (await ipc.client.cull.undoLastAction({
+      return (await cullActions.undoLastAction({
         sessionId: session.id,
       })) as { success: boolean };
     },
@@ -248,7 +329,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
   const skipSimilarMutation = useMutation({
     mutationFn: async (current: SingleItem) => {
-      const result = (await ipc.client.cull.skipSimilarPhotos({
+      const result = (await cullActions.skipSimilarPhotos({
         sessionId: session.id,
         photoId: current.sessionPhotoId,
       })) as { skippedCount: number };
@@ -270,16 +351,45 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
     },
   });
 
-  const completeMutation = useMutation({
-    mutationFn: async () => {
-      await ipc.client.cull.completeSession({ sessionId: session.id });
+  const completeMutation = useMutation<void, Error, boolean | undefined>({
+    mutationFn: async (_notify = true) => {
+      await cullActions.completeSession({ sessionId: session.id });
     },
-    onSuccess: () => onMutationSuccess(),
+    onSuccess: (_result, notify) => {
+      onMutationSuccess();
+      notifiedCompletion.current = true;
+      if (notify !== false) {
+        onCompleted?.();
+      }
+    },
     onError: (err) => {
       console.error("[complete] failed:", err);
       toast.error(t("cullActionFailed"));
     },
   });
+
+  const autoCompleteSessionRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (
+      !(done && data?.stats.total) ||
+      photoQuery.isFetching ||
+      photoQuery.isPlaceholderData ||
+      session.status === "completed" ||
+      autoCompleteSessionRef.current === session.id
+    ) {
+      return;
+    }
+    autoCompleteSessionRef.current = session.id;
+    completeMutation.mutate(reviewedThisVisit.current);
+  }, [
+    done,
+    data?.stats.total,
+    photoQuery.isFetching,
+    photoQuery.isPlaceholderData,
+    session.id,
+    session.status,
+    completeMutation.mutate,
+  ]);
 
   const isSubmitting =
     keepMutation.isPending ||
@@ -313,8 +423,11 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       return;
     }
     let cancelled = false;
-    ipc.client.photos
-      .getPhotoExif({ id: item.photo.id })
+    cullActions
+      .getPhotoExif({
+        sessionId: session.id,
+        sessionPhotoId: item.sessionPhotoId,
+      })
       .then((r) => {
         if (!cancelled) {
           setExif(r as ExifData | null);
@@ -326,7 +439,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
     return () => {
       cancelled = true;
     };
-  }, [item]);
+  }, [item, session.id]);
 
   // Keyboard shortcuts — item data via ref to avoid stale closures
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -350,6 +463,9 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   useEffect(() => {
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: shortcut handler preserves the existing keyboard workflow
     function onKey(e: KeyboardEvent) {
+      if (cullShortcutBlocked(e)) {
+        return;
+      }
       // ? 键始终处理（切换面板），不受面板打开状态影响
       if (e.key === "?") {
         e.preventDefault();
@@ -407,13 +523,43 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   const showTransition = isTransitioning || isFetchingNext;
   const showSpinner = useDebouncedFlag(showTransition, 150);
 
+  if (
+    done &&
+    session.status !== "completed" &&
+    (completeMutation.isPending || completeMutation.isError)
+  ) {
+    return (
+      <div
+        className="flex h-full flex-col items-center justify-center gap-3 p-4"
+        role="status"
+      >
+        <p className="text-muted-foreground text-sm">
+          {t(
+            completeMutation.isError
+              ? "cullActionFailed"
+              : "shootingProject.saving"
+          )}
+        </p>
+        {completeMutation.isError && (
+          <button
+            className="rounded border px-3 py-2 text-sm"
+            onClick={() => completeMutation.mutate(reviewedThisVisit.current)}
+            type="button"
+          >
+            {t("retry")}
+          </button>
+        )}
+      </div>
+    );
+  }
+
   // Done state
-  if (done) {
+  if (done || (completionActions && session.status === "completed")) {
     const kc = session.keptCount;
     const rc = session.rejectedCount;
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center">
+      <div className="flex h-full min-h-0 overflow-y-auto p-3">
+        <div className="m-auto max-w-full text-center">
           <Eye className="mx-auto h-12 w-12 text-success/50" />
           <p className="mt-4 font-medium text-[16px] text-foreground">
             {t("cullCurateComplete")}
@@ -422,6 +568,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
             {t("cullKeptCount", { count: kc })} ·{" "}
             {t("cullRejectedCount", { count: rc })}
           </p>
+          {completionActions}
         </div>
       </div>
     );
@@ -452,7 +599,18 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   }
 
   if (!item) {
-    return null;
+    return (
+      <CullWaitingState
+        availability={data?.availability}
+        onRetry={() => {
+          erroredPhotosRef.current.clear();
+          setPhotoFetchId((value) => value + 1);
+          onMutationSuccess();
+        }}
+        onReview={onReview}
+        onSourceDetails={onSourceDetails}
+      />
+    );
   }
 
   function renderExifRow(label: string, value: string | null | undefined) {
@@ -511,6 +669,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
           </button>
           <button
             className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            data-testid="cull-curate-undo"
             disabled={isSubmitting}
             onClick={() => undoMutation.mutate()}
             type="button"
@@ -526,6 +685,8 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         className={`relative flex min-h-0 min-w-0 flex-1 animate-photo-fade-in items-center justify-center overflow-hidden ${
           showTransition ? "pointer-events-none" : ""
         }`}
+        data-photo-id={item.photo.projectPhotoId ?? item.photo.id}
+        data-testid="cull-curate-current"
         key={photoFetchId}
         onMouseEnter={() => setShowExif(true)}
         onMouseLeave={() => setShowExif(false)}
@@ -547,6 +708,16 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
             filePath={item.photo.path}
             key={item.photo.id}
             onError={handleImageError}
+            originalUrl={
+              previewResolutions[item.photo.id]?.originalUrl ??
+              item.photo.originalUrl ??
+              undefined
+            }
+            originalWidth={item.photo.width}
+            previewUrl={
+              previewResolutions[item.photo.id]?.previewUrl ??
+              getCullProjectPreview(item.photo)
+            }
             thumbnailPath={item.photo.thumbnailPath}
             useOriginalAsPreview={
               previewResolutions[item.photo.id]?.useOriginal ?? false
@@ -566,6 +737,18 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
                 {exif ? (
                   <>
                     {renderExifRow(t("cullFileName"), item.photo.filename)}
+                    {item.photo.source?.kind === "project" &&
+                      item.photo.previewWidth &&
+                      item.photo.previewHeight &&
+                      renderExifRow(
+                        t("cullProject.previewSize", {
+                          width: item.photo.previewWidth,
+                          height: item.photo.previewHeight,
+                          originalWidth: item.photo.width,
+                          originalHeight: item.photo.height,
+                        }),
+                        " "
+                      )}
                     {renderExifRow(
                       t("cullDateTaken"),
                       formatExifDate(exif.dateTaken)
@@ -640,6 +823,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         </button>
         <button
           className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-destructive/25 bg-destructive/[0.08] px-4 py-2 text-[13px] text-destructive backdrop-blur-md transition-all hover:border-destructive/45 hover:bg-destructive/[0.14] hover:text-destructive-foreground hover:shadow-[0_0_16px_-4px_var(--destructive)/25] disabled:opacity-40 sm:px-5 sm:py-2.5"
+          data-testid="cull-curate-reject"
           disabled={isSubmitting}
           onClick={() => rejectMutation.mutate(item)}
           type="button"
@@ -649,6 +833,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         </button>
         <button
           className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-amber-500/30 bg-amber-500/[0.12] px-5 py-2 font-medium text-[14px] text-foreground backdrop-blur-md transition-all hover:border-amber-500/50 hover:bg-amber-500/[0.20] hover:shadow-[0_0_20px_-4px_var(--amber-500)/30] active:scale-[0.96] disabled:opacity-40 sm:px-6 sm:py-3"
+          data-testid="cull-curate-keep"
           disabled={isSubmitting}
           onClick={() => keepMutation.mutate(item)}
           type="button"
@@ -683,10 +868,10 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
               <button
                 className="rounded-[6px] bg-primary px-4 py-2 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 disabled={isSubmitting}
-                onClick={() => completeMutation.mutate()}
+                onClick={() => completeMutation.mutate(true)}
                 type="button"
               >
-                {t("cullFinishAndViewResults")}
+                {finishLabel ?? t("cullFinishAndViewResults")}
               </button>
             </div>
           </DialogContent>

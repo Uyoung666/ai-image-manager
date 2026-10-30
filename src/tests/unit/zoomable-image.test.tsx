@@ -13,6 +13,64 @@ vi.mock("@/utils/local-media-url", () => ({
 }));
 
 describe("ZoomableImage", () => {
+  it("uses only explicit project URLs in progressive mode", () => {
+    render(
+      <ZoomableImage
+        alt="authorized project"
+        enableOriginalOnZoom
+        enableProgressiveLoading
+        filePath="not-a-library-photo.jpg"
+        originalUrl="http://media.test/shooting-project-original?id=2"
+        previewUrl="http://media.test/shooting-project-preview?id=2"
+      />
+    );
+    const image = screen.getByRole("img", { name: "authorized project" });
+    expect(image).toHaveAttribute(
+      "src",
+      "http://media.test/shooting-project-preview?id=2"
+    );
+    fireEvent.load(image);
+    expect(image).toHaveAttribute(
+      "src",
+      "http://media.test/shooting-project-preview?id=2"
+    );
+    fireEvent.error(image);
+    expect(image.getAttribute("src")).not.toContain("not-a-library-photo");
+  });
+  it("keeps project previews isolated from all original-file fallback paths", () => {
+    const onError = vi.fn();
+    const { rerender } = render(
+      <ZoomableImage
+        alt="project photo"
+        enableOriginalOnZoom
+        enableProgressiveLoading
+        filePath="card.nef"
+        onError={onError}
+        previewOnly
+        previewUrl="http://media.test/shooting-project-preview?id=1"
+      />
+    );
+    const preview = screen.getByRole("img", { name: "project photo" });
+    expect(preview).toHaveAttribute(
+      "src",
+      "http://media.test/shooting-project-preview?id=1"
+    );
+    fireEvent.error(preview);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("img", { name: "project photo" })).toBeNull();
+    rerender(
+      <ZoomableImage
+        alt="project photo"
+        filePath="card.nef"
+        previewOnly
+        previewUrl="http://media.test/shooting-project-preview?id=2"
+      />
+    );
+    expect(screen.getByRole("img", { name: "project photo" })).toHaveAttribute(
+      "src",
+      "http://media.test/shooting-project-preview?id=2"
+    );
+  });
   it("keeps the thumbnail while a duel preview is still pending", () => {
     render(
       <ZoomableImage

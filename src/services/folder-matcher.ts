@@ -2,6 +2,24 @@ import path from "node:path";
 import { getDatabase } from "@/db";
 import { folders } from "@/db/schema";
 
+const TRAILING_SEPARATORS = /\/+$/;
+
+function normalizeFolderMatchPath(value: string): string {
+  return value
+    .replace(/\\/g, "/")
+    .replace(TRAILING_SEPARATORS, "")
+    .toLowerCase();
+}
+
+export function matchesManagedFolderPath(
+  filePath: string,
+  folderPath: string
+): boolean {
+  return normalizeFolderMatchPath(filePath).startsWith(
+    `${normalizeFolderMatchPath(folderPath)}/`
+  );
+}
+
 interface FolderEntry {
   depth: number;
   id: number;
@@ -47,7 +65,7 @@ export class FolderMatcher {
 
     let matchedId: number | null = null;
     for (const folder of this.folders) {
-      if (normalized.startsWith(`${folder.normalizedPath}/`)) {
+      if (matchesManagedFolderPath(normalized, folder.normalizedPath)) {
         matchedId = folder.id;
         break;
       }
@@ -65,7 +83,7 @@ export class FolderMatcher {
   }
 
   private normalizePath(p: string): string {
-    return p.replace(/\\/g, "/").toLowerCase();
+    return normalizeFolderMatchPath(p);
   }
 }
 

@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  Archive,
   Brain,
   Cloud,
   Compass,
@@ -70,6 +71,13 @@ const NAV_ITEMS: NavItem[] = [
       "\u7167\u7247\u4f53\u9a8c \u5e8f\u5217\u8bc6\u522b \u8fde\u62cd \u5ef6\u65f6\u6444\u5f71 \u8bc6\u522b burst timelapse sequence detection recognition",
     labelKey: "settingsSequenceDetection",
     to: "/settings/sequences",
+  },
+  {
+    groupKey: "settingsGroupPhotos",
+    icon: Archive,
+    keywords: "归档 选片 恢复 任务 archive cull restore selection tasks",
+    labelKey: "cullProject.archive.title",
+    to: "/settings/cull-archive",
   },
   {
     groupKey: "settingsGroupData",
@@ -197,7 +205,12 @@ export function SettingsSidebar() {
                         : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     }`}
                     onClick={() => {
-                      navigate({ to: item.to });
+                      navigate({
+                        to: item.to,
+                        state: {
+                          cullSettingsReturn: location.state.cullSettingsReturn,
+                        },
+                      });
                     }}
                     type="button"
                   >

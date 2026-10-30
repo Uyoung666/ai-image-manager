@@ -14,6 +14,7 @@ import {
   LayoutGrid,
   LayoutList,
   Star,
+  Swords,
   Trash2,
   Undo2,
   XCircle,
@@ -21,6 +22,8 @@ import {
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { cullActions } from "@/actions/cull";
+import { shootingProjectActions } from "@/actions/shooting-projects";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FilterDropdown } from "@/components/filter-dropdown";
@@ -38,10 +41,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { ZoomableImage } from "@/components/ZoomableImage";
 import { ipc } from "@/ipc/manager";
-import { toLocalMediaUrl } from "@/utils/local-media-url";
+import {
+  type CullMediaPhoto,
+  getCullProjectPreview,
+  getCullThumbnail,
+} from "@/utils/cull-media";
 
-interface PhotoInfo {
+interface PhotoInfo extends CullMediaPhoto {
   fileDate: number | null;
   filename: string;
   fileSize: number;
@@ -60,13 +68,23 @@ interface RankedItem {
   id: number;
   losses: number;
   photo: PhotoInfo;
+  rank?: number | null;
   rating: number;
   status: "pending" | "kept" | "rejected";
   wins: number;
 }
 
 interface CullResultProps {
+  canApplyRanking?: boolean;
+  initialStatusFilter?: "all" | "kept";
+  onRankingApplied?: () => void;
   onUpdate?: () => void;
+  project?: {
+    id: string;
+    rankingSessionId?: number | null;
+    onStartPk: (photoIds: string[]) => void;
+    onCopy: (photoIds?: string[]) => void;
+  };
   session: {
     id: number;
     name: string;
@@ -83,6 +101,7 @@ const CullResultCard = memo(
   function CullResultCard({
     item,
     index,
+    displayRank,
     isSelected,
     isDuel,
     onSelect,
@@ -92,6 +111,7 @@ const CullResultCard = memo(
   }: {
     item: RankedItem;
     index: number;
+    displayRank: number | null;
     isSelected: boolean;
     isDuel: boolean;
     onSelect: (id: number, index: number, e: React.MouseEvent) => void;
@@ -120,6 +140,11 @@ const CullResultCard = memo(
         }`}
         data-card=""
         data-card-id={item.id}
+        data-photo-id={item.photo.projectPhotoId ?? item.photo.id}
+        data-rank={displayRank ?? undefined}
+        data-rating={displayRank === null ? undefined : item.rating}
+        data-selected={isSelected}
+        data-testid="cull-result-card"
         onClick={(e) => onSelect(item.id, index, e)}
         onDoubleClick={() => onPreview(index)}
       >
@@ -130,7 +155,7 @@ const CullResultCard = memo(
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
             decoding="async"
             loading="lazy"
-            src={toLocalMediaUrl(item.photo.thumbnailPath ?? item.photo.path)}
+            src={getCullThumbnail(item.photo)}
           />
 
           {/* Bottom gradient overlay */}
@@ -162,19 +187,14 @@ const CullResultCard = memo(
             </div>
           )}
 
-          {/* Heart watermark for kept items */}
-          {isKept && (
-            <div className="pointer-events-none absolute right-1 bottom-1 z-[5] select-none text-[72px] text-white/10 leading-none">
-              ♥
-            </div>
-          )}
-
           {/* Rank + Duel stats overlay at bottom */}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-2 pb-1.5">
-            <span className="font-semibold text-[11px] text-white/80">
-              #{index + 1}
-            </span>
-            {isDuel && (
+            {displayRank !== null && (
+              <span className="font-semibold text-[11px] text-white/80">
+                #{displayRank}
+              </span>
+            )}
+            {isDuel && displayRank !== null && (
               <span className="text-[11px] text-white/70">
                 {item.rating}
                 <span className="ml-0.5 text-[9px] text-white/40">Elo</span>
@@ -257,6 +277,9 @@ const CullResultCard = memo(
   },
   (prev, next) =>
     prev.item.id === next.item.id &&
+    prev.index === next.index &&
+    prev.isDuel === next.isDuel &&
+    prev.displayRank === next.displayRank &&
     prev.isSelected === next.isSelected &&
     prev.item.status === next.item.status &&
     prev.item.rating === next.item.rating &&
@@ -271,6 +294,7 @@ const CullResultCard = memo(
 const CullResultRow = memo(function CullResultRow({
   item,
   index,
+  displayRank,
   isSelected,
   isDuel,
   onSelect,
@@ -280,6 +304,7 @@ const CullResultRow = memo(function CullResultRow({
 }: {
   item: RankedItem;
   index: number;
+  displayRank: number | null;
   isSelected: boolean;
   isDuel: boolean;
   onSelect: (id: number, index: number, e: React.MouseEvent) => void;
@@ -312,9 +337,11 @@ const CullResultRow = memo(function CullResultRow({
       >
         {isSelected && <CheckCircle2 className="h-3.5 w-3.5" />}
       </div>
-      <span className="w-7 text-center font-semibold text-[13px] text-muted-foreground">
-        #{index + 1}
-      </span>
+      {displayRank !== null && (
+        <span className="w-7 text-center font-semibold text-[13px] text-muted-foreground">
+          #{displayRank}
+        </span>
+      )}
       <div className="h-12 w-12 shrink-0 overflow-hidden rounded-[4px] bg-muted">
         <img
           alt={item.photo.filename}
@@ -326,7 +353,7 @@ const CullResultRow = memo(function CullResultRow({
             e.stopPropagation();
             onPreview(index);
           }}
-          src={toLocalMediaUrl(item.photo.thumbnailPath ?? item.photo.path)}
+          src={getCullThumbnail(item.photo)}
         />
       </div>
       <div className="min-w-0 flex-1">
@@ -342,7 +369,7 @@ const CullResultRow = memo(function CullResultRow({
           )}
         </div>
       </div>
-      {isDuel && (
+      {isDuel && displayRank !== null && (
         <div className="flex shrink-0 items-center gap-3 text-right">
           <div>
             <span className="font-semibold text-[14px] text-foreground">
@@ -418,7 +445,14 @@ const CullResultRow = memo(function CullResultRow({
 // CullResult — main component
 // ──────────────────────────────────────────────────────────────
 
-export function CullResult({ session, onUpdate }: CullResultProps) {
+export function CullResult({
+  session,
+  onUpdate,
+  project,
+  initialStatusFilter = "all",
+  canApplyRanking = true,
+  onRankingApplied,
+}: CullResultProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [deleting, setDeleting] = useState(false);
@@ -457,7 +491,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
   const [galleryColumns, setGalleryColumns] = useState(5);
   const [statusFilter, setStatusFilter] = useState<
     "all" | "pending" | "kept" | "rejected"
-  >("all");
+  >(initialStatusFilter);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [resultSort, setResultSort] = useState<
     "default" | "dateAsc" | "dateDesc"
@@ -522,9 +556,22 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           }
           return (a.photo.fileDate ?? 0) - (b.photo.fileDate ?? 0);
         }
+        if (project && (a.rank === null || b.rank === null)) {
+          if (a.rank === null && b.rank === null) {
+            return (a.photo.fileDate ?? 0) - (b.photo.fileDate ?? 0);
+          }
+          return a.rank === null ? 1 : -1;
+        }
+        if (
+          project &&
+          typeof a.rank === "number" &&
+          typeof b.rank === "number"
+        ) {
+          return a.rank - b.rank;
+        }
         return b.rating - a.rating;
       }),
-    [session.items, isDuel, resultSort]
+    [session.items, isDuel, resultSort, project]
   );
   const visibleItems = useMemo(
     () =>
@@ -536,8 +583,18 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     [sorted, statusFilter, favoriteOnly]
   );
   const rankedForTopN = useMemo(
-    () => [...session.items].sort((a, b) => b.rating - a.rating),
+    () =>
+      [...session.items]
+        .filter((item) => item.rank !== null)
+        .sort((a, b) => b.rating - a.rating || (a.rank ?? 0) - (b.rank ?? 0)),
     [session.items]
+  );
+  const rankByItem = useMemo(
+    () =>
+      new Map(
+        rankedForTopN.map((item, index) => [item.id, item.rank ?? index + 1])
+      ),
+    [rankedForTopN]
   );
 
   const selectedIds = useMemo(
@@ -549,6 +606,37 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     () => visibleItems.map((i) => i.photo),
     [visibleItems]
   );
+
+  const [projectPreviewMedia, setProjectPreviewMedia] = useState<{
+    photoId: number;
+    previewUrl: string;
+    originalUrl: string | null;
+  } | null>(null);
+  const previewItem = visibleItems[lightboxIndex];
+  useEffect(() => {
+    if (!(project && previewItem)) {
+      return;
+    }
+    let active = true;
+    setProjectPreviewMedia(null);
+    cullActions
+      .getPhotoMedia({ sessionId: session.id, sessionPhotoId: previewItem.id })
+      .then((media) => {
+        if (active && media) {
+          setProjectPreviewMedia({
+            photoId: previewItem.photo.id,
+            previewUrl: media.previewUrl,
+            originalUrl: media.originalUrl,
+          });
+        }
+      })
+      .catch(() => {
+        /* The cached project preview remains available. */
+      });
+    return () => {
+      active = false;
+    };
+  }, [project, previewItem, session.id]);
 
   // ── useVirtualizer (list view only) ──
   const virtualizer = useVirtualizer({
@@ -737,7 +825,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     async (itemId: number, status: "kept" | "rejected" | "pending") => {
       setUpdating((s) => new Set(s).add(itemId));
       try {
-        await ipc.client.cull.updatePhotoStatus({
+        await cullActions.updatePhotoStatus({
           sessionId: session.id,
           photoId: itemId,
           status,
@@ -783,7 +871,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       }
       setUpdating((s) => new Set([...s, ...items.map((i) => i.id)]));
       try {
-        await ipc.client.cull.batchUpdatePhotoStatus({
+        await cullActions.batchUpdatePhotoStatus({
           sessionId: session.id,
           photoIds: items.map((i) => i.id),
           status,
@@ -810,6 +898,25 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       return;
     }
     // In duel mode, pick from top of sorted list; in curate mode, pick pending first then rejected
+    if (project && isDuel) {
+      if (!canApplyRanking) {
+        return;
+      }
+      try {
+        await cullActions.applyProjectPkTopN({
+          projectId: project.id,
+          sessionId: project.rankingSessionId ?? session.id,
+          count: n,
+        });
+        setTopN("");
+        setTopNConfirmOpen(false);
+        onUpdate?.();
+        onRankingApplied?.();
+      } catch {
+        toast.error(t("cullActionFailed"));
+      }
+      return;
+    }
     const pool = isDuel
       ? rankedForTopN.slice(0, n).filter((i) => i.status !== "kept")
       : [
@@ -822,7 +929,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     }
     setUpdating((s) => new Set([...s, ...topItems.map((i) => i.id)]));
     try {
-      await ipc.client.cull.batchUpdatePhotoStatus({
+      await cullActions.batchUpdatePhotoStatus({
         sessionId: session.id,
         photoIds: topItems.map((i) => i.id),
         status: "kept",
@@ -836,7 +943,18 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     } finally {
       setUpdating(new Set());
     }
-  }, [session.id, sorted, rankedForTopN, topN, isDuel, onUpdate, t]);
+  }, [
+    session.id,
+    sorted,
+    rankedForTopN,
+    topN,
+    isDuel,
+    onUpdate,
+    t,
+    project,
+    canApplyRanking,
+    onRankingApplied,
+  ]);
 
   const handleTrashRejected = useCallback(async () => {
     if (rejected.length === 0) {
@@ -864,7 +982,12 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
   const handleUndo = useCallback(async () => {
     try {
-      const result = (await ipc.client.cull.undoLastAction({
+      if (project) {
+        await shootingProjectActions.undo(project.id);
+        onUpdate?.();
+        return;
+      }
+      const result = (await cullActions.undoLastAction({
         sessionId: session.id,
       })) as { reason?: string; success: boolean };
       if (!result.success) {
@@ -880,7 +1003,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       console.error("[CullResult] undo failed:", error);
       toast.error(t("cullActionFailed"));
     }
-  }, [onUpdate, queryClient, session.id, t]);
+  }, [onUpdate, queryClient, session.id, t, project]);
 
   // ── Render ──
 
@@ -926,22 +1049,24 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             placeholder={t("cullResultSort")}
             value={resultSort}
           />
-          <button
-            aria-pressed={favoriteOnly}
-            className={`shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
-              favoriteOnly
-                ? "bg-amber-500/15 text-amber-500"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            onClick={() => {
-              setFavoriteOnly((value) => !value);
-              setSelected(new Set());
-            }}
-            type="button"
-          >
-            <Star className="mr-1 inline h-3 w-3" />
-            {t("favorites")}
-          </button>
+          {!project && (
+            <button
+              aria-pressed={favoriteOnly}
+              className={`shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
+                favoriteOnly
+                  ? "bg-amber-500/15 text-amber-500"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => {
+                setFavoriteOnly((value) => !value);
+                setSelected(new Set());
+              }}
+              type="button"
+            >
+              <Star className="mr-1 inline h-3 w-3" />
+              {t("favorites")}
+            </button>
+          )}
           <button
             aria-label={t("cullUndo")}
             className="shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
@@ -954,12 +1079,20 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           {/* Top N is meaningful only for Elo-ranked duel sessions. */}
           {isDuel && (
             <input
+              aria-label={t("cullTopNPlaceholder")}
               className="w-16 shrink-0 rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-center text-[11px] text-foreground outline-none focus:border-primary"
+              data-testid="cull-top-n-input"
+              disabled={!canApplyRanking}
               onChange={(e) => setTopN(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   const n = Number.parseInt(topN, 10);
-                  if (!Number.isNaN(n) && n >= 1 && n <= total) {
+                  if (
+                    canApplyRanking &&
+                    !Number.isNaN(n) &&
+                    n >= 1 &&
+                    n <= rankedForTopN.length
+                  ) {
                     setTopNConfirmOpen(true);
                   }
                 }
@@ -971,35 +1104,45 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           {isDuel && (
             <button
               className="shrink-0 whitespace-nowrap rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
-              disabled={!topN || Number.isNaN(Number.parseInt(topN, 10))}
+              data-testid="cull-top-n-apply"
+              disabled={
+                !(canApplyRanking && topN) ||
+                Number.isNaN(Number.parseInt(topN, 10))
+              }
               onClick={() => setTopNConfirmOpen(true)}
               type="button"
             >
-              {t("cullTopNApply", { n: Number.parseInt(topN, 10) || 0 })}
+              {t(project ? "cullProject.keepTopN" : "cullTopNApply", {
+                n: Number.parseInt(topN, 10) || 0,
+              })}
             </button>
           )}
           <span className="h-3 w-px bg-border/50" />
-          <button
-            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-            disabled={kept.length === 0}
-            onClick={() => {
-              setExportIds(kept.map((i) => i.photo.id));
-              setExportOpen(true);
-            }}
-            type="button"
-          >
-            <Download className="h-3 w-3" />
-            {t("cullExportKept")}
-          </button>
-          <button
-            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-40"
-            disabled={rejected.length === 0 || deleting}
-            onClick={() => setTrashConfirmOpen(true)}
-            type="button"
-          >
-            <Trash2 className="h-3 w-3" />
-            {t("cullTrashRejected")}
-          </button>
+          {!project && (
+            <button
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+              disabled={kept.length === 0}
+              onClick={() => {
+                setExportIds(kept.map((item) => item.photo.id));
+                setExportOpen(true);
+              }}
+              type="button"
+            >
+              <Download className="h-3 w-3" />
+              {t("cullExportKept")}
+            </button>
+          )}
+          {!project && (
+            <button
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-40"
+              disabled={rejected.length === 0 || deleting}
+              onClick={() => setTrashConfirmOpen(true)}
+              type="button"
+            >
+              <Trash2 className="h-3 w-3" />
+              {t("cullTrashRejected")}
+            </button>
+          )}
           <button
             className="shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground/50 transition-colors hover:text-foreground"
             onClick={toggleSelectAll}
@@ -1058,25 +1201,54 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           <button
             className="shrink-0 whitespace-nowrap rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => {
-              setExportIds(selectedIds);
-              setExportOpen(true);
+              if (project) {
+                project.onCopy(
+                  sorted
+                    .filter((item) => selected.has(item.id))
+                    .map((item) => item.photo.projectPhotoId ?? "")
+                    .filter(Boolean)
+                );
+              } else {
+                setExportIds(selectedIds);
+                setExportOpen(true);
+              }
             }}
             type="button"
           >
             <Download className="mr-1 inline h-3 w-3" />
-            {t("cullExportSelected")}
+            {t(project ? "shootingProject.copySelected" : "cullExportSelected")}
           </button>
-          <button
-            className="shrink-0 whitespace-nowrap rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => {
-              setAlbumIds(selectedIds);
-              setAlbumOpen(true);
-            }}
-            type="button"
-          >
-            <FolderPlus className="mr-1 inline h-3 w-3" />
-            {t("cullAddToAlbumSelected")}
-          </button>
+          {project ? (
+            <button
+              className="shrink-0 rounded px-2 py-1 text-primary text-xs disabled:opacity-40"
+              data-testid="cull-start-selected-pk"
+              disabled={selected.size < 2}
+              onClick={() =>
+                project.onStartPk(
+                  sorted
+                    .filter((item) => selected.has(item.id))
+                    .map((item) => item.photo.projectPhotoId ?? "")
+                    .filter(Boolean)
+                )
+              }
+              type="button"
+            >
+              <Swords className="mr-1 inline h-3 w-3" />
+              {t("cullProject.pkSelected", { count: selected.size })}
+            </button>
+          ) : (
+            <button
+              className="shrink-0 whitespace-nowrap rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => {
+                setAlbumIds(selectedIds);
+                setAlbumOpen(true);
+              }}
+              type="button"
+            >
+              <FolderPlus className="mr-1 inline h-3 w-3" />
+              {t("cullAddToAlbumSelected")}
+            </button>
+          )}
         </div>
       )}
 
@@ -1125,6 +1297,9 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
                       const index = start + offset;
                       return (
                         <CullResultCard
+                          displayRank={
+                            isDuel ? (rankByItem.get(item.id) ?? null) : null
+                          }
                           index={index}
                           isDuel={isDuel}
                           isSelected={selected.has(item.id)}
@@ -1188,6 +1363,9 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
                     }}
                   >
                     <CullResultRow
+                      displayRank={
+                        isDuel ? (rankByItem.get(item.id) ?? null) : null
+                      }
                       index={virtualRow.index}
                       isDuel={isDuel}
                       isSelected={selected.has(item.id)}
@@ -1212,7 +1390,13 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             <DialogHeader>
               <DialogTitle>{t("cullTopN")}</DialogTitle>
               <DialogDescription>
-                {t("cullTopNConfirm", { n: Number.parseInt(topN, 10) || 0 })}
+                {t(
+                  project ? "cullProject.keepTopNConfirm" : "cullTopNConfirm",
+                  {
+                    n: Number.parseInt(topN, 10) || 0,
+                    count: rankedForTopN.length,
+                  }
+                )}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -1225,10 +1409,14 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
               </button>
               <button
                 className="rounded-[6px] bg-primary px-4 py-2 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
+                data-testid="cull-top-n-confirm"
+                disabled={!canApplyRanking}
                 onClick={handleTopNApply}
                 type="button"
               >
-                {t("cullTopNApply", { n: Number.parseInt(topN, 10) || 0 })}
+                {t(project ? "cullProject.keepTopN" : "cullTopNApply", {
+                  n: Number.parseInt(topN, 10) || 0,
+                })}
               </button>
             </DialogFooter>
           </DialogContent>
@@ -1266,44 +1454,107 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         </Dialog>
       )}
 
-      {/* Export dialog */}
-      <ExportDialog
-        onClose={() => setExportOpen(false)}
-        open={exportOpen}
-        photoIds={exportIds}
-      />
+      {project ? (
+        <Dialog
+          onOpenChange={(open) => !open && setLightboxIndex(-1)}
+          open={lightboxIndex >= 0}
+        >
+          <DialogContent className="flex h-[calc(100dvh-2rem)] w-[calc(100dvw-2rem)] max-w-none flex-col overflow-hidden">
+            <DialogHeader>
+              <DialogTitle className="min-w-0 break-all pr-6">
+                {lightboxPhotos[lightboxIndex]?.filename}
+              </DialogTitle>
+              {lightboxPhotos[lightboxIndex]?.previewWidth && (
+                <DialogDescription className="break-words">
+                  {t("cullProject.previewSize", {
+                    width: lightboxPhotos[lightboxIndex].previewWidth,
+                    height: lightboxPhotos[lightboxIndex].previewHeight,
+                    originalWidth: lightboxPhotos[lightboxIndex].width,
+                    originalHeight: lightboxPhotos[lightboxIndex].height,
+                  })}
+                </DialogDescription>
+              )}
+            </DialogHeader>
+            {lightboxPhotos[lightboxIndex] && (
+              <div className="min-h-0 min-w-0 flex-1">
+                <ZoomableImage
+                  alt={lightboxPhotos[lightboxIndex].filename}
+                  enableOriginalOnZoom
+                  enableProgressiveLoading
+                  filePath={lightboxPhotos[lightboxIndex].path}
+                  originalUrl={
+                    (projectPreviewMedia?.photoId ===
+                    lightboxPhotos[lightboxIndex].id
+                      ? projectPreviewMedia.originalUrl
+                      : lightboxPhotos[lightboxIndex].originalUrl) ?? undefined
+                  }
+                  originalWidth={lightboxPhotos[lightboxIndex].width}
+                  previewUrl={getCullProjectPreview(
+                    lightboxPhotos[lightboxIndex]
+                  )}
+                />
+              </div>
+            )}
+            <div className="flex justify-between gap-2">
+              <button
+                disabled={lightboxIndex <= 0}
+                onClick={() => setLightboxIndex((i) => i - 1)}
+                type="button"
+              >
+                {t("previous")}
+              </button>
+              <button
+                disabled={lightboxIndex >= lightboxPhotos.length - 1}
+                onClick={() => setLightboxIndex((i) => i + 1)}
+                type="button"
+              >
+                {t("next")}
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <>
+          {/* Export dialog */}
+          <ExportDialog
+            onClose={() => setExportOpen(false)}
+            open={exportOpen}
+            photoIds={exportIds}
+          />
 
-      {/* Add to album dialog */}
-      <AddToAlbumDialog
-        elevated={lightboxIndex >= 0}
-        onClose={() => setAlbumOpen(false)}
-        open={albumOpen}
-        photoIds={albumIds}
-      />
+          {/* Add to album dialog */}
+          <AddToAlbumDialog
+            elevated={lightboxIndex >= 0}
+            onClose={() => setAlbumOpen(false)}
+            open={albumOpen}
+            photoIds={albumIds}
+          />
 
-      {/* Lightbox */}
-      <PhotoLightbox
-        initialIndex={lightboxIndex}
-        modalOpen={albumOpen}
-        onAddToAlbum={(photoId) => {
-          setAlbumIds([photoId]);
-          setAlbumOpen(true);
-        }}
-        onClose={() => setLightboxIndex(-1)}
-        onToggleFavorite={async (photoId, nextFavorite) => {
-          await ipc.client.photos.toggleFavorite({
-            ids: [photoId],
-            favorite: nextFavorite,
-          });
-          queryClient.invalidateQueries({
-            queryKey: ["photos"],
-            refetchType: "active",
-          });
-          onUpdate?.();
-        }}
-        open={lightboxIndex >= 0}
-        photos={lightboxPhotos}
-      />
+          {/* Lightbox */}
+          <PhotoLightbox
+            initialIndex={lightboxIndex}
+            modalOpen={albumOpen}
+            onAddToAlbum={(photoId) => {
+              setAlbumIds([photoId]);
+              setAlbumOpen(true);
+            }}
+            onClose={() => setLightboxIndex(-1)}
+            onToggleFavorite={async (photoId, nextFavorite) => {
+              await ipc.client.photos.toggleFavorite({
+                ids: [photoId],
+                favorite: nextFavorite,
+              });
+              queryClient.invalidateQueries({
+                queryKey: ["photos"],
+                refetchType: "active",
+              });
+              onUpdate?.();
+            }}
+            open={lightboxIndex >= 0}
+            photos={lightboxPhotos}
+          />
+        </>
+      )}
     </div>
   );
 }

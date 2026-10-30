@@ -5,7 +5,6 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import {
-  advancedExifData,
   exifData,
   faceIdentities,
   faceIdentityMembers,
@@ -13,6 +12,7 @@ import {
   photos,
   photoTags,
 } from "@/db/schema";
+import { readPhotoExif } from "@/services/photo-exif";
 import { buildPhotoListFilter } from "@/services/photo-list-filter";
 
 const _GLOB_WILDCARD_RE = /[*?[]/;
@@ -435,37 +435,6 @@ export const getPhotoDetail = os.input(IdSchema).handler(({ input }) => {
   return photo || null;
 });
 
-export const getPhotoExif = os.input(IdSchema).handler(({ input }) => {
-  const db = getDatabase();
-  const basic = db
-    .select()
-    .from(exifData)
-    .where(eq(exifData.photoId, input.id))
-    .get();
-  if (!basic) {
-    return null;
-  }
-  const advancedRow = db
-    .select()
-    .from(advancedExifData)
-    .where(eq(advancedExifData.photoId, input.id))
-    .get();
-  if (!advancedRow) {
-    return { ...basic, advanced: null };
-  }
-  try {
-    const normalized = advancedRow.normalizedJson
-      ? JSON.parse(advancedRow.normalizedJson)
-      : null;
-    const vendorRaw = advancedRow.vendorRawJson
-      ? JSON.parse(advancedRow.vendorRawJson)
-      : {};
-    return {
-      ...basic,
-      advanced: normalized ? { ...normalized, vendorRaw } : null,
-      advancedStatus: advancedRow.status,
-    };
-  } catch {
-    return { ...basic, advanced: null, advancedStatus: advancedRow.status };
-  }
-});
+export const getPhotoExif = os
+  .input(IdSchema)
+  .handler(({ input }) => readPhotoExif(input.id));

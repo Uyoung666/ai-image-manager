@@ -2,6 +2,7 @@ import { Eye, Swords } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { cullActions } from "@/actions/cull";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +12,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SmoothInput } from "@/components/ui/smooth-input";
-import { ipc } from "@/ipc/manager";
 
 interface CullStartDialogProps {
   defaultName?: string;
@@ -78,7 +78,7 @@ export function CullStartDialog({
     }
     setCreating(true);
     try {
-      const session = (await ipc.client.cull.createSession({
+      const session = (await cullActions.createSession({
         mode,
         name: name.trim() || `${t("cullTitle")} · ${photoIds.length}`,
         photoIds,

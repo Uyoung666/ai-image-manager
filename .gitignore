@@ -134,6 +134,10 @@ docs/*
 !docs/gallery-loading.md
 !docs/gallery-validation.md
 !docs/gallery-density-validation.md
+# Shooting project development notes and verification images stay local.
+docs/shooting-projects.md
+docs/shooting-projects-validation.md
+docs/shooting-projects-assets/
 
 # Scripts (test utilities / one-off tools)
 convert-formats.mjs

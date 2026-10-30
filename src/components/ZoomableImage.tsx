@@ -87,6 +87,12 @@ interface ZoomableImageProps {
   fillContainer?: boolean;
   onError?: () => void;
   onSync?: (state: ZoomState) => void;
+  /** Explicit host-authorized original; project URLs never fall back to paths. */
+  originalUrl?: string;
+  originalWidth?: number;
+  previewOnly?: boolean;
+  /** Host-resolved project preview; never derive original file access from it. */
+  previewUrl?: string;
   thumbnailPath?: string | null;
   /** 预览策略已确认可直接使用原图（小尺寸浏览器原生格式） */
   useOriginalAsPreview?: boolean;
@@ -117,6 +123,10 @@ const ZoomableImageComponent = forwardRef<
   {
     alt,
     filePath,
+    previewUrl,
+    originalUrl,
+    originalWidth,
+    previewOnly = false,
     duelPreviewPath,
     enableProgressiveLoading = false,
     enableOriginalOnZoom = false,
@@ -131,6 +141,13 @@ const ZoomableImageComponent = forwardRef<
   const { t } = useTranslation();
   const [loaded, setLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    if (previewUrl !== undefined) {
+      setLoaded(false);
+      setHasError(false);
+    }
+  }, [previewUrl]);
 
   const [source, setSource] = useState<ImageSource>(() =>
     isRawExtension(filePath) ? "preview" : "image"
@@ -379,9 +396,11 @@ const ZoomableImageComponent = forwardRef<
 
   const startOriginalLoad = useCallback(() => {
     if (
+      previewOnly ||
+      (previewUrl !== undefined && !originalUrl) ||
       !enableOriginalOnZoom ||
       useOriginalAsPreview ||
-      !supportsOriginalZoom(filePath)
+      !(originalUrl || supportsOriginalZoom(filePath))
     ) {
       return;
     }
@@ -443,7 +462,7 @@ const ZoomableImageComponent = forwardRef<
       setOriginalLoading(false);
     };
     // 原图走 /image 路由
-    img.src = toLocalMediaUrl(filePath);
+    img.src = originalUrl ?? toLocalMediaUrl(filePath);
   }, [
     enableOriginalOnZoom,
     filePath,
@@ -451,6 +470,9 @@ const ZoomableImageComponent = forwardRef<
     originalLoading,
     originalError,
     useOriginalAsPreview,
+    previewOnly,
+    previewUrl,
+    originalUrl,
   ]);
 
   const scheduleOriginalRelease = useCallback(() => {
@@ -497,7 +519,10 @@ const ZoomableImageComponent = forwardRef<
       }
 
       const displayPixels = Math.max(fit.w, fit.h) * scale;
-      if (displayPixels > ORIGINAL_UPGRADE_PIXELS) {
+      if (
+        (originalUrl && scale > 1.05) ||
+        displayPixels > ORIGINAL_UPGRADE_PIXELS
+      ) {
         startOriginalLoad();
       } else if (
         (originalLoaded || originalLoading) &&
@@ -522,6 +547,7 @@ const ZoomableImageComponent = forwardRef<
     getFitSize,
     startOriginalLoad,
     scheduleOriginalRelease,
+    originalUrl,
   ]);
 
   // 清理释放计时器
@@ -603,8 +629,17 @@ const ZoomableImageComponent = forwardRef<
 
       const targetScale = Math.min(
         MAX_SCALE,
-        Math.max(1.1, geometry.naturalWidth / fitW)
+        Math.max(
+          1.1,
+          (originalUrl && originalWidth
+            ? originalWidth
+            : geometry.naturalWidth) / fitW
+        )
       );
+
+      if (originalUrl) {
+        startOriginalLoad();
+      }
 
       const clamped = clampToBounds(0, 0, targetScale);
 
@@ -615,7 +650,14 @@ const ZoomableImageComponent = forwardRef<
       setIsDragging(false);
       setTimeout(() => fireSync(), 0);
     },
-    [fireSync, cancelInertia, clampToBounds]
+    [
+      fireSync,
+      cancelInertia,
+      clampToBounds,
+      originalUrl,
+      originalWidth,
+      startOriginalLoad,
+    ]
   );
 
   const handleWheel = useCallback(
@@ -818,6 +860,9 @@ const ZoomableImageComponent = forwardRef<
 
   // ── URL 构造（legacy 模式）────────────────────────────────────
   const src = (() => {
+    if (previewOnly || previewUrl !== undefined) {
+      return previewUrl || "";
+    }
     if (source === "preview") {
       return toPreviewUrl(filePath);
     }
@@ -825,18 +870,26 @@ const ZoomableImageComponent = forwardRef<
   })();
 
   // ── 渐进式模式 URL 构造 ────────────────────────────────────────
-  const tier1Src = toLocalMediaUrl(thumbnailPath ?? filePath);
+  const tier1Src = previewUrl ?? toLocalMediaUrl(thumbnailPath ?? filePath);
   // Tier 2：有对比预览用 duel-preview 路由，否则回退到原图
   let tier2Src = tier1Src;
-  if (duelPreviewPath) {
+  if (previewUrl !== undefined) {
+    tier2Src = previewUrl;
+  } else if (duelPreviewPath) {
     tier2Src = toDuelPreviewUrl(duelPreviewPath);
   } else if (useOriginalAsPreview) {
     tier2Src = toLocalMediaUrl(filePath);
   }
-  const tier3Src = toLocalMediaUrl(filePath);
+  const tier3Src =
+    originalUrl ?? (previewUrl === undefined ? toLocalMediaUrl(filePath) : "");
 
   // ── 降级链：ref 驱动，杜绝闭包过期竞态 ─────────────────────────
   const handleImageError = useCallback(() => {
+    if (previewOnly || previewUrl !== undefined) {
+      setHasError(true);
+      onError?.();
+      return;
+    }
     const cur = sourceRef.current;
 
     if (cur === "preview") {
@@ -853,7 +906,7 @@ const ZoomableImageComponent = forwardRef<
       onError?.();
       return;
     }
-  }, [onError]);
+  }, [onError, previewOnly, previewUrl]);
 
   // ── 错误状态 UI ─────────────────────────────────────────────────
   if (hasError) {
@@ -865,7 +918,11 @@ const ZoomableImageComponent = forwardRef<
   }
 
   // ── 渐进式渲染（PK 选片用）────────────────────────────────────
-  if (enableProgressiveLoading) {
+  if (
+    enableProgressiveLoading &&
+    !previewOnly &&
+    (previewUrl === undefined || originalUrl)
+  ) {
     // 确定当前应显示的图片源
     const currentSrc = (() => {
       if (originalLoaded && activeTier === "original") {

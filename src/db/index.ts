@@ -47,6 +47,11 @@ import {
   pluginInstallations,
   pluginPreferences,
   searchDataRevision,
+  shootingProjectActions,
+  shootingProjectOutputItems,
+  shootingProjectOutputs,
+  shootingProjectPhotos,
+  shootingProjects,
   tags,
 } from "./schema";
 
@@ -90,6 +95,11 @@ const schema = {
   pluginInstallations,
   pluginPreferences,
   searchDataRevision,
+  shootingProjectActions,
+  shootingProjectOutputs,
+  shootingProjectOutputItems,
+  shootingProjectPhotos,
+  shootingProjects,
   tags,
 };
 

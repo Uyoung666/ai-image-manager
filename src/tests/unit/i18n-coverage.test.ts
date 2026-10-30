@@ -3,6 +3,7 @@ import { vi } from "vitest";
 vi.unmock("react-i18next");
 
 import i18n from "@/localization/i18n";
+import { validateLocaleBundle } from "@/plugins/manifest";
 
 function flatten(
   value: unknown,
@@ -36,6 +37,13 @@ function interpolationNames(value: unknown): string[] {
 }
 
 describe("i18n resources", () => {
+  it("keeps built-in catalogs within the locale provider safety limits", () => {
+    for (const language of ["zh", "en"]) {
+      expect(() =>
+        validateLocaleBundle(i18n.getResourceBundle(language, "translation"))
+      ).not.toThrow();
+    }
+  });
   it("keeps Chinese and English translation keys structurally identical", () => {
     const zh = i18n.getResourceBundle("zh", "translation");
     const en = i18n.getResourceBundle("en", "translation");

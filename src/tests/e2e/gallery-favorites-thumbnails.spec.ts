@@ -219,7 +219,9 @@ for (const size of SIZES) {
         heldIds.add(id);
         await gate;
       }
-      await route.continue();
+      // Electron can cancel CDP-continued image requests before HTTP dispatch.
+      // Fulfill the gated request with the real host response instead.
+      await route.fulfill({ response: await route.fetch() });
     });
     try {
       await page.reload({ waitUntil: "domcontentloaded" });
@@ -229,11 +231,14 @@ for (const size of SIZES) {
       await expect(
         page.locator('main [data-photo-id][role="option"]')
       ).toHaveCount(2);
+      release();
+      // Preload completion creates a second DOM image request. Keep the handler
+      // installed through that handoff before restoring native cache behavior.
+      await assertFavoritesLoaded();
     } finally {
       release();
       await page.unrouteAll({ behavior: "wait" });
     }
-    await assertFavoritesLoaded();
 
     // With routing removed Chromium's native cache is active for this visit.
     await selectSidebar(ALL_PHOTOS);

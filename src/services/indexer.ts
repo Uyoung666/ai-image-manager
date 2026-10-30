@@ -6,6 +6,7 @@ import PQueue from "p-queue";
 import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos } from "@/db/schema";
+import { invalidateFoldersCache } from "@/utils/folder-paths";
 import { createLogger } from "@/utils/logger";
 import { deletePhotoVectors } from "./ai-embedder";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./background-file-watcher";
 import { extractDominantColors } from "./color-extractor";
 import { checkNewPhotoDuplicates } from "./dedup-service";
+import { registerExplicitPhotoFolder } from "./explicit-library-folders";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
 import {
   type ExifOrientation,
@@ -21,6 +23,7 @@ import {
   resolveImageOrientation,
 } from "./image-orientation";
 import { findMissingPhotoIds } from "./orphan-photo-check";
+import { computePHash } from "./perceptual-hash";
 import { extractRawPreview, isRawFile, readRawDimensions } from "./raw-preview";
 import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
 
@@ -331,98 +334,6 @@ function shouldIndex(filePath: string): boolean {
 // --- pHash (Perceptual Hash) — DCT-based ---
 // Resize → 32×32 grayscale → 2D DCT → top-left 8×8 low-freq → median threshold → 64-bit hex.
 // More robust than aHash against scaling, compression, and brightness changes.
-
-function dct1D(input: Float64Array): Float64Array {
-  const N = input.length;
-  const output = new Float64Array(N);
-  const piOver2N = Math.PI / (2 * N);
-  for (let k = 0; k < N; k++) {
-    let sum = 0;
-    for (let n = 0; n < N; n++) {
-      sum += input[n] * Math.cos((2 * n + 1) * k * piOver2N);
-    }
-    output[k] = sum;
-  }
-  return output;
-}
-
-function dct2D(matrix: Float64Array[], size: number): Float64Array[] {
-  // DCT on rows
-  const rowTransformed: Float64Array[] = [];
-  for (let i = 0; i < size; i++) {
-    rowTransformed.push(dct1D(matrix[i]));
-  }
-  // DCT on columns
-  const result: Float64Array[] = Array.from(
-    { length: size },
-    () => new Float64Array(size)
-  );
-  for (let j = 0; j < size; j++) {
-    const col = new Float64Array(size);
-    for (let i = 0; i < size; i++) {
-      col[i] = rowTransformed[i][j];
-    }
-    const colDct = dct1D(col);
-    for (let i = 0; i < size; i++) {
-      result[i][j] = colDct[i];
-    }
-  }
-  return result;
-}
-
-async function computePHash(input: string | Buffer): Promise<string | null> {
-  try {
-    const SIZE = 32;
-    const { data } = await sharp(input)
-      .rotate()
-      .resize(SIZE, SIZE, { fit: "fill" })
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const pixels = new Uint8Array(data);
-
-    // Build 32×32 float matrix
-    const matrix: Float64Array[] = [];
-    for (let i = 0; i < SIZE; i++) {
-      const row = new Float64Array(SIZE);
-      for (let j = 0; j < SIZE; j++) {
-        row[j] = pixels[i * SIZE + j];
-      }
-      matrix.push(row);
-    }
-
-    // 2D DCT
-    const dct = dct2D(matrix, SIZE);
-
-    // Extract top-left 8×8 (lowest frequency coefficients, excluding DC at [0][0])
-    const lowFreq: number[] = [];
-    for (let i = 0; i < 8; i++) {
-      for (let j = 0; j < 8; j++) {
-        if (i === 0 && j === 0) {
-          continue; // skip DC component
-        }
-        lowFreq.push(dct[i][j]);
-      }
-    }
-
-    // Median threshold
-    const sorted = [...lowFreq].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-
-    // 64-bit hash (63 values from 8×8 minus DC = 63, pad to 64)
-    let hash = 0n;
-    for (let i = 0; i < lowFreq.length; i++) {
-      if (lowFreq[i] > median) {
-        hash += 2n ** BigInt(i);
-      }
-    }
-
-    return hash.toString(16).padStart(16, "0");
-  } catch {
-    return null;
-  }
-}
 
 async function readBasicMeta(filePath: string): Promise<{
   width: number;
@@ -930,6 +841,65 @@ async function indexSingleFile(
   return photoId;
 }
 
+/** Import only confirmed files, with catalog folders but without scanning or watching siblings. */
+export async function indexExplicitPhotoFiles(
+  filePaths: string[],
+  signal?: AbortSignal,
+  rootPath?: string
+): Promise<{ added: number; failed: number; photoIds: number[] }> {
+  const db = getDatabase();
+  const photoIds: number[] = [];
+  let failed = 0;
+  for (const candidate of new Set(filePaths)) {
+    if (signal?.aborted) {
+      break;
+    }
+    const filePath = path.resolve(candidate);
+    if (!shouldIndex(filePath)) {
+      failed++;
+      continue;
+    }
+    const existing = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(eq(photos.path, filePath))
+      .get();
+    try {
+      const folderId = registerExplicitPhotoFolder(filePath, rootPath);
+      if (existing) {
+        db.update(photos)
+          .set({ folderId })
+          .where(eq(photos.id, existing.id))
+          .run();
+        db.update(folders)
+          .set({
+            photoCount: sql`(select count(*) from photos where folder_id = ${folderId} and deleted_at is null)`,
+          })
+          .where(eq(folders.id, folderId))
+          .run();
+        continue;
+      }
+      const id = await indexSingleFile(filePath, folderId);
+      if (!id) {
+        failed++;
+        continue;
+      }
+      photoIds.push(id);
+      if (folderId !== null) {
+        db.update(folders)
+          .set({
+            photoCount: sql`(select count(*) from photos where folder_id = ${folderId} and deleted_at is null)`,
+          })
+          .where(eq(folders.id, folderId))
+          .run();
+      }
+    } catch {
+      failed++;
+    }
+  }
+  return { added: photoIds.length, failed, photoIds };
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Folder scanning preserves cancellation, batching, duplicate handling, and progress lifecycle in one public operation.
 export async function scanFolder(
   folderPath: string,
@@ -995,6 +965,7 @@ export async function scanFolder(
         photoCount: 0,
         lastScannedAt: null,
         createdAt: Date.now(),
+        explicitOnly: false,
         isWatching: false,
         watcherStartedAt: null,
         lastWatcherEventAt: null,
@@ -1002,6 +973,11 @@ export async function scanFolder(
     }
 
     const folderId = folder.id;
+    db.update(folders)
+      .set({ explicitOnly: false })
+      .where(eq(folders.id, folderId))
+      .run();
+    invalidateFoldersCache();
 
     // Async walk — avoids blocking the main process on large folders.
     // Each directory level yields the event loop via setImmediate to keep the UI responsive.
@@ -1572,6 +1548,7 @@ export function startWatching(
   const indexedFolders = db
     .select({ id: folders.id, path: folders.path })
     .from(folders)
+    .where(eq(folders.explicitOnly, false))
     .all();
 
   for (const folder of indexedFolders) {
@@ -1705,6 +1682,11 @@ export function watchFolder(
     return;
   }
   const db = getDatabase();
+  db.update(folders)
+    .set({ explicitOnly: false })
+    .where(eq(folders.path, path.resolve(folderPath)))
+    .run();
+  invalidateFoldersCache();
   const context = createWatcher(db, folderPath, findFolderId(db, folderPath));
   if (!context) {
     return;

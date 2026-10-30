@@ -1,0 +1,1 @@
+ALTER TABLE `cull_sessions` ADD `archived_at` integer;

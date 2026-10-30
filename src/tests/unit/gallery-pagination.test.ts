@@ -45,7 +45,15 @@ describe("gallery keyset pagination", () => {
     const upgrading = new Database(":memory:");
     try {
       const migrations = readMigrationFiles({ migrationsFolder: "drizzle" });
-      for (const migration of migrations.slice(0, -1)) {
+      const tagRevisionIndex = migrations.findIndex((migration) =>
+        migration.sql.some((statement) =>
+          statement.includes(
+            "INSERT INTO gallery_data_revision (id, revision) VALUES (3, 0)"
+          )
+        )
+      );
+      expect(tagRevisionIndex).toBeGreaterThanOrEqual(0);
+      for (const migration of migrations.slice(0, tagRevisionIndex)) {
         for (const statement of migration.sql) {
           upgrading.exec(statement);
         }
@@ -56,7 +64,7 @@ describe("gallery keyset pagination", () => {
       const before = upgrading
         .prepare("SELECT * FROM gallery_data_revision ORDER BY id")
         .all();
-      for (const statement of migrations.at(-1)?.sql ?? []) {
+      for (const statement of migrations[tagRevisionIndex].sql) {
         upgrading.exec(statement);
       }
       expect(

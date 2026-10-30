@@ -13,6 +13,7 @@ import {
   Album,
   CircleHelp,
   Folder,
+  ImagePlay,
   Images,
   LayoutDashboard,
   Paintbrush,
@@ -36,6 +37,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ShootingProjectCreateDialog } from "@/components/ShootingProjectCreateDialog";
 import {
   Dialog,
   DialogContent,
@@ -55,6 +57,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useDirectCulling } from "@/hooks/use-direct-culling";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
@@ -294,6 +297,7 @@ export function Sidebar({
   onToggleCollapse,
   totalPhotos,
 }: SidebarProps) {
+  const directCulling = useDirectCulling();
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1354,6 +1358,12 @@ export function Sidebar({
               onClick={() => navigate({ to: "/cull" })}
             />
             <RailButton
+              active={location.pathname.startsWith("/shooting-projects")}
+              icon={<ImagePlay className="h-4 w-4" />}
+              label={t("cullProject.openFolder")}
+              onClick={directCulling.open}
+            />
+            <RailButton
               active={location.pathname === "/trash"}
               badge={trashCount > 0}
               icon={<Trash2 className="h-4 w-4" />}
@@ -2076,6 +2086,13 @@ export function Sidebar({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {directCulling.source && (
+        <ShootingProjectCreateDialog
+          initialSource={directCulling.source}
+          onClose={directCulling.close}
+          onCreated={directCulling.complete}
+        />
+      )}
     </>
   );
 }

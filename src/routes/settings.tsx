@@ -6,6 +6,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsSidebar } from "@/components/settings/SettingsSidebar";
 import {
@@ -18,6 +19,8 @@ function SettingsLayout() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const backToCull = useRef(location.state.cullSettingsReturn === true).current;
+  const backLabel = t(backToCull ? "cullProject.back" : "settingsBackHome");
 
   return (
     <div
@@ -33,14 +36,20 @@ function SettingsLayout() {
           <TooltipTrigger asChild>
             <button
               className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
-              onClick={() => navigate({ to: "/" })}
+              data-testid="settings-back"
+              onClick={() =>
+                navigate({
+                  to: backToCull ? "/cull" : "/",
+                  state: { cullSettingsReturn: false },
+                })
+              }
               type="button"
             >
               <ArrowLeft className="h-5 w-5" />
-              <span className="sr-only">{t("settingsBackHome")}</span>
+              <span className="sr-only">{backLabel}</span>
             </button>
           </TooltipTrigger>
-          <TooltipContent>{t("settingsBackHome")}</TooltipContent>
+          <TooltipContent>{backLabel}</TooltipContent>
         </Tooltip>
         <h1 className="min-w-0 font-semibold text-[18px] text-foreground leading-tight [overflow-wrap:anywhere]">
           {t("settingsTitle")}

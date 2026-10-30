@@ -1,37 +1,41 @@
 import {
   createFileRoute,
   Outlet,
+  useLocation,
   useMatch,
   useNavigate,
 } from "@tanstack/react-router";
-import { ArrowLeft, Eye, Plus, Swords } from "lucide-react";
+import { Eye, FolderOpen, Plus, Swords } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { CullSessionCard } from "@/components/CullSessionCard";
+import { cullActions } from "@/actions/cull";
+import { shootingProjectActions } from "@/actions/shooting-projects";
+import { CullFolderDrop } from "@/components/CullFolderDrop";
+import { CullListHeader } from "@/components/CullListHeader";
+import { CullTaskCard } from "@/components/CullTaskCard";
 import { RouteError } from "@/components/RouteError";
+import { ShootingProjectCreateDialog } from "@/components/ShootingProjectCreateDialog";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SmoothInput } from "@/components/ui/smooth-input";
+import { CULL_ARCHIVE_CHANGED } from "@/hooks/use-cull-task-archive";
+import { useDirectCulling } from "@/hooks/use-direct-culling";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
-
-interface CullSession {
-  completedAt: number | null;
-  completedComparisons: number;
-  createdAt: number;
-  id: number;
-  mode: "duel" | "curate";
-  name: string;
-  pkMode?: string;
-  status: "active" | "completed";
-  totalPhotos: number;
-}
+import type { CullTaskSummary } from "@/types/cull";
+import {
+  readCullSearch,
+  rememberCullReturn,
+  saveCullSearch,
+} from "@/utils/cull-navigation";
 
 interface Folder {
   displayName: string;
@@ -41,21 +45,53 @@ interface Folder {
   totalPhotoCount?: number;
 }
 
-function sortCullSessions(sessions: CullSession[]): CullSession[] {
-  return [...sessions].sort((a, b) => {
-    if (a.status !== b.status) {
-      return a.status === "completed" ? 1 : -1;
-    }
-    return b.createdAt - a.createdAt;
-  });
+function CullListEmpty({
+  archived,
+  searching,
+}: {
+  archived: boolean;
+  searching: boolean;
+}) {
+  const { t } = useTranslation();
+  let title = archived ? "cullProject.archive.empty" : "cullNoSessions";
+  let description = archived
+    ? "cullProject.archive.emptyDescription"
+    : "cullNoSessionsDesc";
+  if (searching) {
+    title = "cullProject.noMatches";
+    description = "cullProject.noMatchesHint";
+  }
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="max-w-80 text-center">
+        <Swords className="mx-auto h-10 w-10 text-muted-foreground/40" />
+        <p className="mt-3 font-medium text-base text-foreground">{t(title)}</p>
+        <p className="mt-2 text-muted-foreground text-sm">{t(description)}</p>
+        {!archived && (
+          <p className="mt-4 text-muted-foreground text-xs">
+            {t("cullHowToStart")}
+          </p>
+        )}
+      </div>
+    </div>
+  );
 }
 
-function CullListPage() {
+export function CullListPage({
+  archivedView = false,
+}: {
+  archivedView?: boolean;
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [sessions, setSessions] = useState<CullSession[]>([]);
+  const location = useLocation();
+  const [tasks, setTasks] = useState<CullTaskSummary[]>([]);
+  const [search, setSearch] = useState(() => readCullSearch(archivedView));
+  const directCulling = useDirectCulling();
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const listRequest = useRef(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newMode, setNewMode] = useState<"duel" | "curate">("duel");
@@ -68,45 +104,85 @@ function CullListPage() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
-  const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<
-    number | null
-  >(null);
+  const [savingTask, setSavingTask] = useState(false);
+  const [pendingDeleteTask, setPendingDeleteTask] =
+    useState<CullTaskSummary | null>(null);
   const [renameSession, setRenameSession] = useState<{
-    id: number;
+    task: CullTaskSummary;
     name: string;
   } | null>(null);
   const composingRef = useRef(false);
   const [noFolderHint, setNoFolderHint] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  useRouteScrollRestoration(scrollRef, { getRouteKey: () => "cull-list" });
+  const [scrolled, setScrolled] = useState(false);
+  useRouteScrollRestoration(scrollRef, {
+    getRouteKey: () =>
+      `${archivedView ? "cull-archive" : "cull-list"}:${search}`,
+    restoreReady: !loading,
+    itemCount: tasks.length,
+  });
 
   const loadSessions = useCallback(
     async (showInitialLoading = false) => {
+      const request = ++listRequest.current;
       if (showInitialLoading) {
         setLoading(true);
       } else {
         setRefreshing(true);
       }
       try {
-        const result = await ipc.client.cull.listSessions({});
-        setSessions(result as CullSession[]);
+        const result = await cullActions.listTaskSummaries({
+          search,
+          archived: archivedView,
+        });
+        if (request !== listRequest.current) {
+          return;
+        }
+        setListError(false);
+        setTasks(result);
       } catch (err) {
+        if (request !== listRequest.current) {
+          return;
+        }
+        setListError(true);
         console.error("[loadSessions] failed:", err);
         toast.error(t("cullActionFailed"));
       } finally {
-        if (showInitialLoading) {
+        if (request === listRequest.current) {
           setLoading(false);
-        } else {
           setRefreshing(false);
         }
       }
     },
-    [t]
+    [t, search, archivedView]
   );
 
   useEffect(() => {
-    loadSessions(true);
+    loadSessions(false);
+    const refresh = () => {
+      loadSessions();
+    };
+    window.addEventListener(CULL_ARCHIVE_CHANGED, refresh);
+    return () => {
+      window.removeEventListener(CULL_ARCHIVE_CHANGED, refresh);
+      listRequest.current += 1;
+    };
   }, [loadSessions]);
+
+  const preparingTasks = tasks.some(
+    (task) =>
+      task.outputStatus === "pending" ||
+      task.outputStatus === "running" ||
+      task.scanStatus === "pending" ||
+      task.scanStatus === "running"
+  );
+  useEffect(() => {
+    if (!preparingTasks) {
+      return;
+    }
+    const timer = setInterval(() => loadSessions(), 1500);
+    return () => clearInterval(timer);
+  }, [preparingTasks, loadSessions]);
 
   const loadFolders = useCallback(async () => {
     try {
@@ -117,6 +193,26 @@ function CullListPage() {
       toast.error(t("cullActionFailed"));
     }
   }, [t]);
+
+  function openTask(task: CullTaskSummary) {
+    rememberCullReturn(
+      task.kind,
+      task.id,
+      archivedView,
+      location.state.cullSettingsReturn
+    );
+    if (task.kind === "project") {
+      navigate({
+        to: "/shooting-projects/$projectId",
+        params: { projectId: task.id },
+      });
+    } else {
+      navigate({
+        to: "/cull/$sessionId",
+        params: { sessionId: String(task.id) },
+      });
+    }
+  }
 
   async function handleCreate() {
     if (creating) {
@@ -136,7 +232,7 @@ function CullListPage() {
     setCreating(true);
     setNoFolderHint(false);
     try {
-      const result = (await ipc.client.cull.createSession({
+      const result = (await cullActions.createSession({
         name: sessionName,
         mode: newMode,
         pkMode: newPkMode,
@@ -157,21 +253,33 @@ function CullListPage() {
     }
   }
 
-  async function handleDelete(sessionId: number) {
+  async function handleDelete(task: CullTaskSummary) {
+    if (savingTask) {
+      return;
+    }
+    setSavingTask(true);
     try {
-      await ipc.client.cull.deleteSession({ sessionId });
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-      setPendingDeleteSessionId(null);
+      if (task.kind === "project") {
+        await shootingProjectActions.delete(task.id);
+      } else {
+        await cullActions.deleteSession({ sessionId: task.id });
+      }
+      setTasks((current) =>
+        current.filter((item) => item.kind !== task.kind || item.id !== task.id)
+      );
+      setPendingDeleteTask(null);
       toast.success(t("cullSessionDeleted"));
     } catch (err) {
       console.error("[handleDelete] failed:", err);
       toast.error(t("cullActionFailed"));
+    } finally {
+      setSavingTask(false);
     }
   }
 
   async function handleDuplicate(sessionId: number) {
     try {
-      await ipc.client.cull.duplicateSession({ sessionId });
+      await cullActions.duplicateSession({ sessionId });
       await loadSessions();
       toast.success(t("cullSessionDuplicated"));
     } catch (error) {
@@ -181,25 +289,30 @@ function CullListPage() {
   }
 
   async function handleRename() {
-    if (!renameSession?.name.trim()) {
+    if (savingTask || !renameSession?.name.trim()) {
       return;
     }
+    setSavingTask(true);
     try {
-      await ipc.client.cull.renameSession({
-        sessionId: renameSession.id,
-        name: renameSession.name.trim(),
-      });
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === renameSession.id
-            ? { ...session, name: renameSession.name.trim() }
-            : session
-        )
-      );
+      const { task } = renameSession;
+      if (task.kind === "project") {
+        await shootingProjectActions.rename({
+          projectId: task.id,
+          name: renameSession.name.trim(),
+        });
+      } else {
+        await cullActions.renameSession({
+          sessionId: task.id,
+          name: renameSession.name.trim(),
+        });
+      }
+      await loadSessions();
       setRenameSession(null);
     } catch (error) {
       console.error("[handleRename] failed:", error);
       toast.error(t("cullActionFailed"));
+    } finally {
+      setSavingTask(false);
     }
   }
 
@@ -215,6 +328,8 @@ function CullListPage() {
     return mode === "curate" ? t("cullModeCurate") : t("cullModeDuel");
   }
 
+  const visibleCount = tasks.length;
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -224,101 +339,131 @@ function CullListPage() {
   }
 
   return (
-    <div
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background"
-      data-surface="page"
+    <CullFolderDrop
+      disabled={directCulling.busy}
+      enabled={!archivedView}
+      onFolder={directCulling.openFromPath}
     >
-      {/* Header */}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-border border-b px-3 py-3 sm:px-6 sm:py-4">
-        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
-          <button
-            className="shrink-0 text-muted-foreground hover:text-foreground"
-            onClick={() => navigate({ to: "/" })}
-            type="button"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <h1 className="min-w-0 truncate font-semibold text-[18px] text-foreground">
-            {t("cullTitle")}
-          </h1>
-          <span className="shrink-0 text-[13px] text-muted-foreground/70">
-            {t("cullSessionCount", { count: sessions.length })}
-          </span>
-        </div>
-        <button
-          className="flex shrink-0 items-center gap-1.5 rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
-          onClick={() => {
-            setNewName("");
-            setNewMode("duel");
-            setNewPkMode("standard");
-            setNewSortStrategy("time");
-            setSelectedFolderId(null);
-            setNoFolderHint(false);
-            loadFolders();
-            setCreateOpen(true);
-          }}
-          type="button"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          {t("cullNew")}
-        </button>
-      </div>
-
       <div
         aria-busy={refreshing}
-        className="relative min-h-0 flex-1 overflow-y-auto p-3 sm:p-6"
+        className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]"
+        data-testid="cull-list-scroll"
+        onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 4)}
         ref={scrollRef}
       >
-        {refreshing && (
-          <div className="pointer-events-none absolute top-4 right-4 z-10 rounded-full bg-background/80 p-2 shadow-sm">
-            <LoadingSpinner size="sm" />
-          </div>
-        )}
-        {sessions.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="max-w-[320px] text-center">
-              <Swords className="mx-auto h-10 w-10 text-muted-foreground/40" />
-              <p className="mt-3 font-medium text-[16px] text-foreground">
-                {t("cullNoSessions")}
-              </p>
-              <p className="mt-2 text-[13px] text-muted-foreground/70">
-                {t("cullNoSessionsDesc")}
-              </p>
-              <p className="mt-4 text-[12px] text-muted-foreground/50">
-                {t("cullHowToStart")}
-              </p>
+        <CullListHeader
+          archived={archivedView}
+          count={visibleCount}
+          onArchive={() =>
+            navigate({
+              to: archivedView ? "/cull" : "/settings/cull-archive",
+              state: { cullSettingsReturn: !archivedView },
+            })
+          }
+          onHome={() => navigate({ to: "/" })}
+          onSearch={(value) => {
+            setSearch(value);
+            saveCullSearch(archivedView, value);
+          }}
+          scrolled={scrolled}
+          search={search}
+        >
+          {!archivedView && (
+            <>
+              <Button
+                className="h-auto min-h-8 max-w-full whitespace-normal"
+                data-testid="cull-open-folder"
+                disabled={directCulling.opening}
+                onClick={directCulling.open}
+                size="lg"
+                type="button"
+              >
+                <FolderOpen className="h-4 w-4" />
+                {t("cullProject.openFolder")}
+              </Button>
+              <Button
+                className="h-auto min-h-8 max-w-full whitespace-normal"
+                onClick={() => {
+                  setNewName("");
+                  setNewMode("duel");
+                  setNewPkMode("standard");
+                  setNewSortStrategy("time");
+                  setSelectedFolderId(null);
+                  setNoFolderHint(false);
+                  loadFolders();
+                  setCreateOpen(true);
+                }}
+                size="lg"
+                type="button"
+                variant="outline"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t("cullProject.fromLibrary")}
+              </Button>
+            </>
+          )}
+        </CullListHeader>
+        <div className="min-h-0 p-3 sm:p-6">
+          {refreshing && (
+            <div className="pointer-events-none absolute top-4 right-4 z-10 rounded-full bg-background/80 p-2 shadow-sm">
+              <LoadingSpinner size="sm" />
             </div>
-          </div>
-        ) : (
-          <div
-            className="grid gap-3"
-            style={{
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(min(240px, 100%), 1fr))",
-            }}
-          >
-            {sortCullSessions(sessions).map((session) => (
-              <CullSessionCard
-                getModeIcon={getModeIcon}
-                getModeLabel={getModeLabel}
-                key={session.id}
-                onClick={() =>
-                  navigate({
-                    to: "/cull/$sessionId",
-                    params: { sessionId: String(session.id) },
-                  })
-                }
-                onDelete={() => setPendingDeleteSessionId(session.id)}
-                onDuplicate={() => handleDuplicate(session.id)}
-                onRename={() =>
-                  setRenameSession({ id: session.id, name: session.name })
-                }
-                session={session}
-              />
-            ))}
-          </div>
-        )}
+          )}
+          {listError && (
+            <div className="flex flex-wrap items-center gap-2 p-3" role="alert">
+              <p className="text-destructive text-sm">
+                {t("cullActionFailed")}
+              </p>
+              <button
+                className="rounded border px-3 py-2 text-xs"
+                onClick={() => loadSessions()}
+                type="button"
+              >
+                {t("retry")}
+              </button>
+            </div>
+          )}
+          {!listError && visibleCount === 0 && (
+            <CullListEmpty
+              archived={archivedView}
+              searching={Boolean(search.trim())}
+            />
+          )}
+          {!listError && visibleCount > 0 && (
+            <div
+              className="grid items-stretch gap-4"
+              data-testid="cull-task-grid"
+              style={{
+                gridTemplateColumns:
+                  "repeat(auto-fill, minmax(min(300px, 100%), 1fr))",
+              }}
+            >
+              {tasks.map((task) => (
+                <CullTaskCard
+                  key={`${task.kind}:${task.id}`}
+                  onDelete={() => setPendingDeleteTask(task)}
+                  onDuplicate={
+                    task.kind === "library"
+                      ? () => handleDuplicate(task.id)
+                      : undefined
+                  }
+                  onOpen={() => openTask(task)}
+                  onRename={() => setRenameSession({ task, name: task.name })}
+                  task={task}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {directCulling.source && (
+        <ShootingProjectCreateDialog
+          initialSource={directCulling.source}
+          onClose={directCulling.close}
+          onCreated={directCulling.complete}
+        />
+      )}
 
       {/* Create dialog */}
       <Dialog
@@ -528,15 +673,27 @@ function CullListPage() {
         </DialogContent>
       </Dialog>
       <Dialog
-        onOpenChange={(open) => !open && setRenameSession(null)}
+        onOpenChange={(open) => !(open || savingTask) && setRenameSession(null)}
         open={renameSession !== null}
       >
-        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[360px] overflow-y-auto">
+        <DialogContent
+          aria-describedby={undefined}
+          className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[360px] overflow-y-auto"
+        >
           <DialogHeader>
-            <DialogTitle>{t("cullRenameSession")}</DialogTitle>
+            <DialogTitle>
+              {t(
+                renameSession?.task.kind === "project"
+                  ? "shootingProject.rename"
+                  : "cullRenameSession"
+              )}
+            </DialogTitle>
           </DialogHeader>
           <SmoothInput
+            aria-label={t("cullSessionName")}
             className="rounded-[6px] border border-input bg-transparent px-3 py-2 text-[13px] outline-none focus:border-primary"
+            disabled={savingTask}
+            maxLength={200}
             onChange={(event) =>
               setRenameSession((current) =>
                 current ? { ...current, name: event.target.value } : null
@@ -545,11 +702,16 @@ function CullListPage() {
             value={renameSession?.name ?? ""}
           />
           <div className="flex flex-wrap justify-end gap-2">
-            <button onClick={() => setRenameSession(null)} type="button">
+            <button
+              disabled={savingTask}
+              onClick={() => setRenameSession(null)}
+              type="button"
+            >
               {t("cancel")}
             </button>
             <button
               className="rounded-[6px] bg-primary px-4 py-2 text-[12px] text-primary-foreground"
+              disabled={savingTask || !renameSession?.name.trim()}
               onClick={handleRename}
               type="button"
             >
@@ -559,29 +721,43 @@ function CullListPage() {
         </DialogContent>
       </Dialog>
       <Dialog
-        onOpenChange={(open) => !open && setPendingDeleteSessionId(null)}
-        open={pendingDeleteSessionId !== null}
+        onOpenChange={(open) =>
+          !(open || savingTask) && setPendingDeleteTask(null)
+        }
+        open={pendingDeleteTask !== null}
       >
         <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[360px] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{t("cullDeleteSessionTitle")}</DialogTitle>
+            <DialogTitle>
+              {t(
+                pendingDeleteTask?.kind === "project"
+                  ? "shootingProject.delete"
+                  : "cullDeleteSessionTitle"
+              )}
+            </DialogTitle>
           </DialogHeader>
-          <p className="text-[13px] text-muted-foreground">
-            {t("cullDeleteSessionDescription")}
-          </p>
+          <DialogDescription className="text-[13px] text-muted-foreground">
+            {t(
+              pendingDeleteTask?.kind === "project"
+                ? "shootingProject.deleteDescription"
+                : "cullDeleteSessionDescription"
+            )}
+          </DialogDescription>
           <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground"
-              onClick={() => setPendingDeleteSessionId(null)}
+              disabled={savingTask}
+              onClick={() => setPendingDeleteTask(null)}
               type="button"
             >
               {t("cancel")}
             </button>
             <button
               className="rounded-[6px] bg-destructive px-4 py-2 text-[12px] text-destructive-foreground"
+              disabled={savingTask}
               onClick={() => {
-                if (pendingDeleteSessionId !== null) {
-                  handleDelete(pendingDeleteSessionId);
+                if (pendingDeleteTask !== null) {
+                  handleDelete(pendingDeleteTask);
                 }
               }}
               type="button"
@@ -591,7 +767,7 @@ function CullListPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </CullFolderDrop>
   );
 }
 

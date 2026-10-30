@@ -1,6 +1,11 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { cullSessionPhotos, photos } from "@/db/schema";
+import {
+  getProjectCullSession,
+  loadProjectCullRows,
+} from "@/services/project-cull";
+import type { CullPhotoSource } from "@/types/cull";
 
 export function selectPhotoFields() {
   return {
@@ -19,12 +24,12 @@ export function selectPhotoFields() {
   };
 }
 
-export function loadPendingWithMetadata(sessionId: number) {
+function loadLibraryPendingWithMetadata(sessionId: number) {
   const db = getDatabase();
   return db
     .select({
       id: cullSessionPhotos.id,
-      photoId: cullSessionPhotos.photoId,
+      photoId: photos.id,
       rating: cullSessionPhotos.rating,
       comparisons: cullSessionPhotos.comparisons,
       wins: cullSessionPhotos.wins,
@@ -56,13 +61,69 @@ export function loadPendingWithMetadata(sessionId: number) {
     .all();
 }
 
-export type PendingRow = ReturnType<typeof loadPendingWithMetadata>[number];
+export type PendingRow = ReturnType<
+  typeof loadLibraryPendingWithMetadata
+>[number] & {
+  projectId?: string;
+  projectPhotoId?: string;
+  previewWidth?: number | null;
+  previewHeight?: number | null;
+  previewStatus?: "pending" | "ready" | "failed";
+};
+
+export function loadProjectWithMetadata(sessionId: number): PendingRow[] {
+  const session = getProjectCullSession(sessionId);
+  return loadProjectCullRows(sessionId).map((row) =>
+    projectRowWithMetadata(row, session?.projectId ?? undefined)
+  );
+}
+
+export function projectRowWithMetadata(
+  row: ReturnType<typeof loadProjectCullRows>[number],
+  projectId?: string
+): PendingRow {
+  return {
+    ...row,
+    status: row.status === "undecided" ? "pending" : row.status,
+    photoId: row.id,
+    projectId,
+    path: row.filename,
+    width: row.width ?? 0,
+    height: row.height ?? 0,
+    fileDate: row.fileDate ?? row.modifiedAt,
+    thumbnailPath: null,
+    duelPreviewPath: null,
+    isFavorite: false,
+    isIndexed: false,
+  };
+}
+
+export function loadPendingWithMetadata(sessionId: number): PendingRow[] {
+  const session = getProjectCullSession(sessionId);
+  if (!session?.projectId) {
+    return loadLibraryPendingWithMetadata(sessionId);
+  }
+  const rows = loadProjectWithMetadata(sessionId);
+  return session.mode === "duel"
+    ? rows
+    : rows.filter((row) => row.status === "pending");
+}
 
 export function buildPairItem(row: PendingRow) {
   return {
     sessionPhotoId: row.id,
     photo: {
       id: row.photoId,
+      source: (row.projectId && row.projectPhotoId
+        ? {
+            kind: "project",
+            projectId: row.projectId,
+            photoId: row.projectPhotoId,
+          }
+        : { kind: "library", photoId: row.photoId }) as CullPhotoSource,
+      projectPhotoId: row.projectPhotoId,
+      previewWidth: row.previewWidth,
+      previewHeight: row.previewHeight,
       filename: row.filename,
       path: row.path,
       width: row.width,

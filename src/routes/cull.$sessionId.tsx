@@ -4,13 +4,22 @@ import { ArrowLeft, BarChart3, Eye, RotateCcw, Swords } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { cullActions } from "@/actions/cull";
 import { enterTemporaryDarkTheme } from "@/actions/theme";
+import { CullArchiveButton } from "@/components/CullArchiveButton";
 import { CullCurate } from "@/components/CullCurate";
 import { CullDuel } from "@/components/CullDuel";
 import { CullResult } from "@/components/CullResult";
 import { RouteError } from "@/components/RouteError";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { ipc } from "@/ipc/manager";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { useCullArchiveRefresh } from "@/hooks/use-cull-task-archive";
+import { cullReturnOptions } from "@/utils/cull-navigation";
 
 // ── Shared types ──
 
@@ -38,12 +47,14 @@ interface SessionPhoto {
     isFavorite: boolean | null;
     isIndexed: boolean;
   };
+  rank?: number | null;
   rating: number;
   status: "pending" | "kept" | "rejected";
   wins: number;
 }
 
 export interface Session {
+  archivedAt?: number | null;
   completedAt: number | null;
   completedComparisons: number;
   createdAt: number;
@@ -52,6 +63,9 @@ export interface Session {
   mode: "duel" | "curate";
   name: string;
   pkMode?: string;
+  projectId?: string | null;
+  projectScopeOpen?: boolean;
+  rankingSessionId?: number | null;
   sortStrategy?: string;
   status: "active" | "completed";
   totalPhotos: number;
@@ -163,7 +177,7 @@ function CullSessionContent({
   );
 }
 
-function CullSessionPage() {
+export function CullSessionPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { sessionId } = Route.useParams();
@@ -175,7 +189,7 @@ function CullSessionPage() {
   const sessionQuery = useQuery({
     queryKey: ["cull", "summary", sessionId],
     queryFn: async () => {
-      const result = await ipc.client.cull.getSessionSummary({
+      const result = await cullActions.getSessionSummary({
         sessionId: Number(sessionId),
       });
       return result as SessionSummary;
@@ -183,15 +197,20 @@ function CullSessionPage() {
     staleTime: 10_000,
   });
 
+  useCullArchiveRefresh("library", Number(sessionId), sessionQuery.refetch);
+
   const resultQuery = useQuery({
     queryKey: ["cull", "session", sessionId],
     queryFn: async () => {
-      const result = await ipc.client.cull.getSession({
+      const result = await cullActions.getSession({
         sessionId: Number(sessionId),
       });
       return result as Session;
     },
-    enabled: showResults,
+    enabled:
+      showResults &&
+      Boolean(sessionQuery.data) &&
+      !sessionQuery.data?.projectId,
     staleTime: 5000,
   });
 
@@ -199,17 +218,27 @@ function CullSessionPage() {
   const isLoading = sessionQuery.isLoading && !sessionQuery.data;
 
   useEffect(() => {
-    if (session?.mode !== "duel") {
+    if (session?.projectId) {
+      navigate({
+        to: "/shooting-projects/$projectId",
+        params: { projectId: session.projectId },
+        replace: true,
+      });
+    }
+  }, [session?.projectId, navigate]);
+
+  useEffect(() => {
+    if (session?.projectId || session?.mode !== "duel") {
       return;
     }
     return enterTemporaryDarkTheme();
-  }, [session?.mode]);
+  }, [session?.mode, session?.projectId]);
 
   useEffect(() => {
-    if (session?.status === "completed") {
+    if (!session?.projectId && session?.status === "completed") {
       setShowResults(true);
     }
-  }, [session?.status]);
+  }, [session?.status, session?.projectId]);
 
   // File-change listener: invalidates both session AND pair queries
   // so header stats refresh AND CullDuel/CullCurate immediately refetch.
@@ -256,7 +285,7 @@ function CullSessionPage() {
   }, [sessionId, queryClient]);
 
   // Loading state
-  if (isLoading) {
+  if (isLoading || session?.projectId) {
     return (
       <div
         className="flex h-full items-center justify-center bg-black"
@@ -313,40 +342,77 @@ function CullSessionPage() {
       data-surface="immersive"
     >
       {/* Header */}
-      <div
-        className="flex shrink-0 items-center justify-between border-border border-b px-3 py-2 sm:px-6 sm:py-3"
-        data-surface="immersive-chrome"
-      >
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-4">
-          <button
-            className="shrink-0 text-muted-foreground hover:text-foreground"
-            onClick={() => navigate({ to: "/cull" })}
-            type="button"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <h1 className="min-w-0 max-w-full truncate font-semibold text-[16px] text-foreground">
-            {session.name}
-          </h1>
-          {!showResults && (
-            <span className="min-w-0 truncate text-[12px] text-muted-foreground/70">
-              <SessionProgress
-                isDuel={isDuel}
-                keepCount={keepCount}
-                pendingCount={pendingCount}
-                rejectCount={rejectCount}
-                session={session}
-              />
+      <TooltipProvider>
+        <div
+          className="flex shrink-0 items-center justify-between border-border border-b px-3 py-2 sm:px-6 sm:py-3"
+          data-surface="immersive-chrome"
+        >
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-4">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  aria-label={t("cullProject.back")}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  onClick={() =>
+                    navigate(cullReturnOptions("library", sessionId))
+                  }
+                  type="button"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("cullProject.back")}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <h1
+                  className="min-w-0 max-w-full truncate font-semibold text-[16px] text-foreground"
+                  // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated task name must expose its tooltip to keyboard users
+                  tabIndex={0}
+                >
+                  {session.name}
+                </h1>
+              </TooltipTrigger>
+              <TooltipContent>{session.name}</TooltipContent>
+            </Tooltip>
+            {!showResults && (
+              <span className="min-w-0 truncate text-[12px] text-muted-foreground/70">
+                <SessionProgress
+                  isDuel={isDuel}
+                  keepCount={keepCount}
+                  pendingCount={pendingCount}
+                  rejectCount={rejectCount}
+                  session={session}
+                />
+              </span>
+            )}
+            <span className="shrink-0 rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
+              {t("cullKeptCount", { count: keepCount })}
+            </span>
+            <span className="shrink-0 rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-medium text-[10px] text-destructive">
+              {t("cullRejectedCount", { count: rejectCount })}
+            </span>
+          </div>
+          {session.archivedAt != null && (
+            <span className="shrink-0 px-2 text-muted-foreground text-xs">
+              {t("cullProject.archive.taskArchived")}
             </span>
           )}
-          <span className="shrink-0 rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
-            {t("cullKeptCount", { count: keepCount })}
-          </span>
-          <span className="shrink-0 rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-medium text-[10px] text-destructive">
-            {t("cullRejectedCount", { count: rejectCount })}
-          </span>
+          <CullArchiveButton
+            onChanged={() => {
+              if (session.archivedAt == null) {
+                navigate({ to: "/cull" });
+              }
+            }}
+            task={{
+              kind: "library",
+              id: session.id,
+              name: session.name,
+              archivedAt: session.archivedAt,
+            }}
+          />
         </div>
-      </div>
+      </TooltipProvider>
 
       {/* Toggle bar */}
       <div
@@ -403,7 +469,7 @@ function CullSessionPage() {
             className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             onClick={async () => {
               try {
-                await ipc.client.cull.resumeSession({ sessionId: session.id });
+                await cullActions.resumeSession({ sessionId: session.id });
                 await queryClient.invalidateQueries({
                   queryKey: ["cull", "summary", sessionId],
                 });

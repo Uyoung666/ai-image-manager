@@ -176,6 +176,22 @@ describe("useImportDropZones", () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
+  it("hands folder drops to direct culling without enqueueing a library scan", async () => {
+    const onFolderDrop = vi.fn();
+    const { result } = renderHook(() =>
+      useImportDropZones({ onImageSearch: vi.fn(), onFolderDrop })
+    );
+    const folders = createDataTransfer([
+      { directory: true, name: "Shoot", path: "C:/Photos/Shoot" },
+    ]);
+    await act(async () =>
+      result.current.handleZoneDrop(createDropEvent(folders), "folders")
+    );
+    expect(onFolderDrop).toHaveBeenCalledWith(["C:/Photos/Shoot"]);
+    expect(ipc.client.photos.scanFolder).not.toHaveBeenCalled();
+    expect(result.current.dragKind).toBeNull();
+  });
+
   it("does not intercept internal photo drops at the application root", () => {
     const { result } = renderHook(() =>
       useImportDropZones({ onImageSearch: vi.fn() })

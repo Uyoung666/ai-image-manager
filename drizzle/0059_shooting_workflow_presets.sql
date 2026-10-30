@@ -1,0 +1,1 @@
+ALTER TABLE `shooting_projects` ADD `workflow` text DEFAULT 'curate' NOT NULL;

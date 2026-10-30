@@ -1,5 +1,14 @@
 import { os } from "@orpc/server";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import {
@@ -8,20 +17,37 @@ import {
   cullSessions,
   folders,
   photos,
+  shootingProjects,
 } from "@/db/schema";
 import { BKTree, hammingDistance } from "@/services/bk-tree";
+import { listCullTaskSummaries } from "@/services/cull-task-summary";
 import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
+import {
+  applyProjectCullTopN,
+  archiveCullSession,
+  getProjectCullSession,
+  listProjectCullSessions,
+  loadProjectCullRows,
+  loadProjectResultRows,
+  projectCullPreparing,
+  startProjectCullSession,
+  syncProjectCullMembers,
+  updateProjectCullStatus,
+} from "@/services/project-cull";
 import { getSetting } from "@/services/settings-manager";
+import { undoShootingProjectSelection } from "@/services/shooting-projects";
 import {
   generateDuelPreview,
   getDuelPreviewStrategy,
 } from "@/services/thumbnailer";
+import type { CullAvailability } from "@/types/cull";
 import {
   bkTreeCaches,
   clearCullCaches,
   clearCullPairCaches,
   comparedPairCaches,
   curateOrderCaches,
+  projectActiveCandidateCaches,
   type SimPair,
   setBoundedCullCache,
   similarityCaches,
@@ -31,7 +57,9 @@ import { computeElo, PK_MODE_CONFIG } from "./elo";
 import {
   buildPairItem,
   loadPendingWithMetadata,
+  loadProjectWithMetadata,
   type PendingRow,
+  projectRowWithMetadata,
   selectPhotoFields,
 } from "./queries";
 import {
@@ -46,6 +74,76 @@ import {
 import { getCullProgressDelta } from "./state";
 
 const SQLITE_ID_CHUNK_SIZE = 500;
+
+export const clearArchivedTasks = os
+  .input(
+    z
+      .object({
+        confirmed: z.literal(true),
+        tasks: z
+          .array(
+            z.discriminatedUnion("kind", [
+              z
+                .object({
+                  kind: z.literal("project"),
+                  id: z.string().uuid(),
+                  archivedAt: z.number().int().positive(),
+                })
+                .strict(),
+              z
+                .object({
+                  kind: z.literal("library"),
+                  id: z.number().int().positive(),
+                  archivedAt: z.number().int().positive(),
+                })
+                .strict(),
+            ])
+          )
+          .max(10_000),
+      })
+      .strict()
+  )
+  .handler(async ({ input }) => {
+    const { clearArchivedCullTasks } = await import(
+      "@/services/cull-task-archive"
+    );
+    return clearArchivedCullTasks(input.tasks);
+  });
+
+export const startProjectSession = os
+  .input(
+    z.object({
+      projectId: z.string().uuid(),
+      mode: z.enum(["curate", "duel"]),
+      reuseExisting: z.boolean().optional(),
+      scope: z
+        .discriminatedUnion("kind", [
+          z.object({ kind: z.literal("all") }),
+          z.object({
+            kind: z.literal("selected"),
+            photoIds: z.array(z.string().uuid()).min(2),
+          }),
+        ])
+        .optional(),
+      pkMode: z.enum(["quick", "standard", "fine"]).optional(),
+      sortStrategy: z.enum(["time", "similarity"]).optional(),
+    })
+  )
+  .handler(({ input }) => startProjectCullSession(input));
+
+export const listProjectSessions = os
+  .input(z.object({ projectId: z.string().uuid() }))
+  .handler(({ input }) => listProjectCullSessions(input.projectId));
+
+export const applyProjectPkTopN = os
+  .input(
+    z.object({
+      projectId: z.string().uuid(),
+      sessionId: z.number().int().positive(),
+      count: z.number().int().positive(),
+    })
+  )
+  .handler(({ input }) => applyProjectCullTopN(input));
 
 function uniqueIds(ids: number[]): number[] {
   return [...new Set(ids)];
@@ -160,6 +258,9 @@ export const addPhotosToSession = os
     if (!session) {
       throw new Error("选片会话不存在");
     }
+    if (session.projectId) {
+      throw new Error("拍摄项目请通过项目照片来源添加候选");
+    }
     if (session.status === "completed") {
       throw new Error("请先恢复已完成的选片会话");
     }
@@ -238,33 +339,61 @@ export const recordSkip = os.input(RecordSkipSchema).handler(({ input }) => {
       }),
     })
     .run();
+  projectActiveCandidateCaches.delete(input.sessionId);
   return { success: true };
 });
 
-export const listSessions = os.handler(() => {
-  const db = getDatabase();
-  const sessions = db
-    .select()
-    .from(cullSessions)
-    .orderBy(desc(cullSessions.createdAt))
-    .all();
-  const counts = db
-    .select({
-      sessionId: cullSessionPhotos.sessionId,
-      count: sql<number>`count(case when ${photos.deletedAt} is null then 1 end)`,
-    })
-    .from(cullSessionPhotos)
-    .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
-    .groupBy(cullSessionPhotos.sessionId)
-    .all();
-  const countBySession = new Map(
-    counts.map((row) => [row.sessionId, row.count])
-  );
-  return sessions.map((session) => ({
-    ...session,
-    totalPhotos: countBySession.get(session.id) ?? 0,
-  }));
-});
+export const listTaskSummaries = os
+  .input(
+    z
+      .object({
+        archived: z.boolean().optional(),
+        search: z.string().max(200).optional(),
+      })
+      .default({})
+  )
+  .handler(({ input }) => listCullTaskSummaries(input));
+
+export const listSessions = os
+  .input(z.object({ archived: z.boolean().optional() }).default({}))
+  .handler(({ input }) => {
+    const db = getDatabase();
+    const sessions = db
+      .select()
+      .from(cullSessions)
+      .where(
+        and(
+          isNull(cullSessions.projectId),
+          input.archived
+            ? isNotNull(cullSessions.archivedAt)
+            : isNull(cullSessions.archivedAt)
+        )
+      )
+      .orderBy(desc(cullSessions.createdAt))
+      .all();
+    const counts = db
+      .select({
+        sessionId: cullSessionPhotos.sessionId,
+        count: sql<number>`count(case when ${photos.deletedAt} is null then 1 end)`,
+      })
+      .from(cullSessionPhotos)
+      .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+      .groupBy(cullSessionPhotos.sessionId)
+      .all();
+    const countBySession = new Map(
+      counts.map((row) => [row.sessionId, row.count])
+    );
+    return sessions.map((session) => ({
+      ...session,
+      totalPhotos: countBySession.get(session.id) ?? 0,
+    }));
+  });
+
+export const archiveSession = os
+  .input(
+    z.object({ sessionId: z.number().int().positive(), archived: z.boolean() })
+  )
+  .handler(({ input }) => archiveCullSession(input));
 
 export const getSession = os.input(SessionIdSchema).handler(({ input }) => {
   const db = getDatabase();
@@ -275,6 +404,19 @@ export const getSession = os.input(SessionIdSchema).handler(({ input }) => {
     .get();
   if (!session) {
     throw new Error("选片会话不存在");
+  }
+
+  if (session.projectId) {
+    const rows = loadProjectWithMetadata(input.sessionId);
+    return {
+      ...(getProjectCullSession(session.id) ?? session),
+      totalPhotos: rows.length,
+      items: rows.map((row) => ({
+        id: row.id,
+        status: row.status,
+        ...buildPairItem(row),
+      })),
+    };
   }
 
   const items = db
@@ -316,6 +458,33 @@ export const getSession = os.input(SessionIdSchema).handler(({ input }) => {
   return { ...session, totalPhotos: actualCount?.count ?? 0, items };
 });
 
+export const getProjectResults = os
+  .input(
+    z.object({
+      projectId: z.string().uuid(),
+      rankingSessionId: z.number().int().positive().optional(),
+    })
+  )
+  .handler(({ input }) => {
+    const { session, ranking, rows } = loadProjectResultRows(
+      input.projectId,
+      input.rankingSessionId
+    );
+    return {
+      ...session,
+      mode: ranking ? "duel" : "curate",
+      rankingSessionId: ranking?.id ?? null,
+      projectScopeOpen: ranking?.projectScopeOpen ?? false,
+      totalPhotos: rows.length,
+      items: rows.map((row) => ({
+        id: row.id,
+        status: row.status === "undecided" ? "pending" : row.status,
+        rank: row.rank,
+        ...buildPairItem(projectRowWithMetadata(row, input.projectId)),
+      })),
+    };
+  });
+
 export const getSessionSummary = os
   .input(SessionIdSchema)
   .handler(({ input }) => {
@@ -327,6 +496,24 @@ export const getSessionSummary = os
       .get();
     if (!session) {
       throw new Error("选片会话不存在");
+    }
+    if (session.projectId) {
+      const rows = loadProjectWithMetadata(session.id);
+      const keptCount = rows.filter((row) => row.status === "kept").length;
+      const rejectedCount = rows.filter(
+        (row) => row.status === "rejected"
+      ).length;
+      return {
+        ...(getProjectCullSession(session.id) ?? session),
+        totalPhotos: rows.length,
+        keptCount,
+        rejectedCount,
+        pendingCount: rows.length - keptCount - rejectedCount,
+        completedComparisons:
+          session.mode === "curate"
+            ? keptCount + rejectedCount
+            : session.completedComparisons,
+      };
     }
     const counts = db
       .select({
@@ -464,14 +651,46 @@ function sortBySimilarityGroups(pending: PendingRow[]): PendingRow[] {
     .flatMap((g) => g.sort((a, b) => (a.fileDate ?? 0) - (b.fileDate ?? 0)));
 }
 
+function describeCullAvailability(
+  project: typeof shootingProjects.$inferSelect | undefined,
+  state: {
+    blocked: boolean;
+    previewsPending: boolean;
+    total: number;
+    duel: boolean;
+  }
+): CullAvailability["reason"] | undefined {
+  if (!project) {
+    return "failed";
+  }
+  if (project.scanStatus === "pending" || project.scanStatus === "running") {
+    return "scanning";
+  }
+  if (state.blocked && project.sourceStatus !== "online") {
+    return "offline";
+  }
+  if (
+    ["failed", "interrupted"].includes(project.scanStatus) ||
+    project.previewsCleared
+  ) {
+    return "failed";
+  }
+  if (state.blocked) {
+    return state.previewsPending ? "previews" : "failed";
+  }
+  if (state.total === 0) {
+    return "empty";
+  }
+  if (state.duel && state.total < 2) {
+    return "insufficient";
+  }
+  return undefined;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This handler coordinates the culling pair-selection phases.
 export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
   const db = getDatabase();
-  const session = db
-    .select()
-    .from(cullSessions)
-    .where(eq(cullSessions.id, input.sessionId))
-    .get();
+  const session = syncProjectCullMembers(input.sessionId);
   if (!session) {
     throw new Error("选片会话不存在");
   }
@@ -480,6 +699,15 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
   const config = PK_MODE_CONFIG[pkMode] ?? PK_MODE_CONFIG.standard;
 
   let pending = loadPendingWithMetadata(input.sessionId);
+  const previewsPending = pending.some(
+    (row) => row.previewStatus === "pending"
+  );
+  const unavailable = session.projectId
+    ? pending.filter((row) => row.previewStatus !== "ready").length
+    : 0;
+  if (session.projectId) {
+    pending = pending.filter((row) => row.previewStatus === "ready");
+  }
 
   // Filter out photos the frontend can't load (prevents infinite retry loop)
   const excludeIds = input.excludeSessionPhotoIds ?? [];
@@ -494,38 +722,141 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
     }
   }
 
-  const curateTotal =
-    session.mode === "curate"
-      ? (db
-          .select({ count: sql<number>`count(*)` })
-          .from(cullSessionPhotos)
-          .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
-          .where(
-            and(
-              eq(cullSessionPhotos.sessionId, input.sessionId),
-              isNull(photos.deletedAt)
-            )
+  let curateTotal = pending.length;
+  if (session.projectId) {
+    curateTotal = loadProjectCullRows(session.id).length;
+  } else if (session.mode === "curate") {
+    curateTotal =
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(cullSessionPhotos)
+        .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+        .where(
+          and(
+            eq(cullSessionPhotos.sessionId, input.sessionId),
+            isNull(photos.deletedAt)
           )
-          .get()?.count ?? 0)
-      : pending.length;
+        )
+        .get()?.count ?? 0;
+  }
   const readyCount = pending.filter(
     (p) => p.comparisons >= config.minComparisons
   ).length;
   const stats = {
     total: curateTotal,
-    completed: session.completedComparisons,
+    completed:
+      session.projectId && session.mode === "curate"
+        ? loadProjectCullRows(session.id).filter(
+            (row) => row.status === "kept" || row.status === "rejected"
+          ).length
+        : session.completedComparisons,
     remaining: pending.length,
     ...(session.mode === "duel" ? { ready: readyCount } : {}),
   };
 
-  // Completed sessions always return done
-  if (session.status === "completed") {
-    return { done: true, stats };
+  const waiting = Boolean(
+    session.projectId &&
+      (projectCullPreparing(session.id) ||
+        unavailable > 0 ||
+        excludeIds.length > 0)
+  );
+  function exhausted(extraStats = stats) {
+    if (session?.projectId) {
+      const project = db
+        .select()
+        .from(shootingProjects)
+        .where(eq(shootingProjects.id, session?.projectId))
+        .get();
+      const reason = describeCullAvailability(project, {
+        blocked: unavailable > 0 || excludeIds.length > 0,
+        previewsPending,
+        total: extraStats.total,
+        duel: session?.mode === "duel",
+      });
+      if (reason) {
+        return {
+          done: false,
+          waiting: reason === "scanning" || reason === "previews",
+          preparing: true,
+          availability: {
+            projectId: session?.projectId,
+            reason,
+            unavailable: unavailable + excludeIds.length,
+          },
+          stats: extraStats,
+        };
+      }
+    }
+    return { done: !waiting, waiting, preparing: waiting, stats: extraStats };
+  }
+
+  // Completed library sessions always return done
+  if (session.status === "completed" && !session.projectId) {
+    return exhausted();
+  }
+
+  const activeCandidates = session.projectId
+    ? projectActiveCandidateCaches.get(session.id)
+    : undefined;
+  if (activeCandidates) {
+    const byId = new Map(pending.map((row) => [row.id, row]));
+    const current = activeCandidates.ids.map((id) => byId.get(id));
+    if (current.every((row): row is PendingRow => row !== undefined)) {
+      if (session.mode === "duel" && current.length === 2) {
+        return {
+          done: false,
+          pair: current.map(buildPairItem),
+          reason: activeCandidates.reason,
+          phase: activeCandidates.phase,
+          stats,
+        };
+      }
+      if (session.mode === "curate" && current.length === 1) {
+        const item = current[0];
+        const phash = item.phash;
+        return {
+          done: false,
+          single: buildPairItem(item),
+          similarCount: phash
+            ? pending.filter(
+                (row) =>
+                  row.id !== item.id &&
+                  row.phash &&
+                  hammingDistance(phash, row.phash) <= 8
+              ).length
+            : 0,
+          stats,
+        };
+      }
+    }
+    projectActiveCandidateCaches.delete(session.id);
+  }
+
+  function selectedPair(
+    a: PendingRow,
+    b: PendingRow,
+    reason: string,
+    phase: string
+  ) {
+    if (session?.projectId) {
+      setBoundedCullCache(projectActiveCandidateCaches, session.id, {
+        ids: [a.id, b.id],
+        reason,
+        phase,
+      });
+    }
+    return {
+      done: false,
+      pair: [buildPairItem(a), buildPairItem(b)],
+      stats: { ...stats, ready: readyCount },
+      reason,
+      phase,
+    };
   }
 
   if (session.mode === "curate") {
     if (pending.length === 0) {
-      return { done: true, stats };
+      return exhausted();
     }
 
     const strategy = session.sortStrategy ?? "time";
@@ -546,17 +877,49 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
         .map((id) => pendingById.get(id))
         .filter((photo): photo is PendingRow => photo !== undefined);
       if (sorted.length !== pending.length) {
-        clearCullCaches(input.sessionId);
-        sorted = sortBySimilarityGroups([...pending]);
+        const ordered = new Set(orderCache.orderedIds);
+        sorted = session.projectId
+          ? [
+              ...sorted,
+              ...sortBySimilarityGroups(
+                pending.filter((row) => !ordered.has(row.id))
+              ),
+            ]
+          : sortBySimilarityGroups([...pending]);
         setBoundedCullCache(curateOrderCaches, input.sessionId, {
           orderedIds: sorted.map((photo) => photo.id),
         });
       }
     } else {
-      sorted.sort((a, b) => (a.fileDate ?? 0) - (b.fileDate ?? 0));
+      sorted.sort((a, b) =>
+        session.projectId ? a.id - b.id : (a.fileDate ?? 0) - (b.fileDate ?? 0)
+      );
     }
 
-    const item = sorted[0];
+    const project = session.projectId
+      ? db
+          .select({ currentPhotoId: shootingProjects.currentPhotoId })
+          .from(shootingProjects)
+          .where(eq(shootingProjects.id, session.projectId))
+          .get()
+      : null;
+    const item =
+      sorted.find((row) => row.projectPhotoId === project?.currentPhotoId) ??
+      sorted[0];
+    if (session.projectId) {
+      setBoundedCullCache(projectActiveCandidateCaches, session.id, {
+        ids: [item.id],
+      });
+      if (
+        item.projectPhotoId &&
+        project?.currentPhotoId !== item.projectPhotoId
+      ) {
+        db.update(shootingProjects)
+          .set({ currentPhotoId: item.projectPhotoId })
+          .where(eq(shootingProjects.id, session.projectId))
+          .run();
+      }
+    }
 
     let similarCount = 0;
     const itemPHash = item.phash;
@@ -573,27 +936,7 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
 
     return {
       done: false,
-      single: {
-        sessionPhotoId: item.id,
-        photo: {
-          id: item.photoId,
-          filename: item.filename,
-          path: item.path,
-          width: item.width,
-          height: item.height,
-          fileSize: item.fileSize,
-          format: item.format,
-          thumbnailPath: item.thumbnailPath,
-          duelPreviewPath: item.duelPreviewPath,
-          fileDate: item.fileDate,
-          isFavorite: item.isFavorite,
-          isIndexed: item.isIndexed,
-        },
-        rating: item.rating,
-        comparisons: item.comparisons,
-        wins: item.wins,
-        losses: item.losses,
-      },
+      single: buildPairItem(item),
       similarCount,
       stats,
     };
@@ -601,15 +944,12 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
 
   // Duel mode: find best pair
   if (pending.length < 2) {
-    return { done: true, stats };
+    return exhausted();
   }
 
   // All photos compared enough — done (unless recompare is enabled)
   if (readyCount === pending.length && !config.allowRecompare) {
-    return {
-      done: true,
-      stats: { ...stats, ready: readyCount },
-    };
+    return exhausted({ ...stats, ready: readyCount });
   }
 
   // Incremental comparedPairs cache: only load new logs since last check.
@@ -878,13 +1218,7 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
       console.log(
         `[Cull] Phase 1 (similarity dist=${best.distance}${best.sameBurst ? ", burst" : ""}): paired #${best.a.photoId} vs #${best.b.photoId}`
       );
-      return {
-        done: false,
-        pair: [buildPairItem(best.a), buildPairItem(best.b)],
-        stats: { ...stats, ready: readyCount },
-        reason: "similarity",
-        phase: "similarity",
-      };
+      return selectedPair(best.a, best.b, "similarity", "similarity");
     }
   }
 
@@ -909,13 +1243,7 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
         console.log(
           `[Cull] Phase 2 (under-compared, offset=${offset}): paired #${a.photoId}(c=${a.comparisons}) vs #${b.photoId}(c=${b.comparisons})`
         );
-        return {
-          done: false,
-          pair: [buildPairItem(a), buildPairItem(b)],
-          stats: { ...stats, ready: readyCount },
-          reason: "fill",
-          phase: "fill",
-        };
+        return selectedPair(a, b, "fill", "fill");
       }
     }
   }
@@ -941,13 +1269,7 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
       console.log(
         `[Cull] Phase 2 fallback (all-pairs-blocked, force-repair, pending=${pending.length} under=${under.length}): #${a.photoId}(c=${a.comparisons}) vs #${b.photoId}(c=${b.comparisons})`
       );
-      return {
-        done: false,
-        pair: [buildPairItem(a), buildPairItem(b)],
-        stats: { ...stats, ready: readyCount },
-        reason: "fill",
-        phase: "fill",
-      };
+      return selectedPair(a, b, "fill", "fill");
     }
   }
 
@@ -969,13 +1291,7 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
         console.log(
           `[Cull] Phase 3 (swiss rating, offset=${offset}): paired #${a.photoId}(r=${a.rating}) vs #${b.photoId}(r=${b.rating})`
         );
-        return {
-          done: false,
-          pair: [buildPairItem(a), buildPairItem(b)],
-          stats: { ...stats, ready: readyCount },
-          reason: "rating",
-          phase: "swiss",
-        };
+        return selectedPair(a, b, "rating", "swiss");
       }
     }
   }
@@ -1015,19 +1331,13 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
           console.log(
             `[Cull] Phase 4 (recompare, excess=${excessComparisons}/${maxExcessComparisons}): re-comparing #${a.photoId} vs #${b.photoId}`
           );
-          return {
-            done: false,
-            pair: [buildPairItem(a), buildPairItem(b)],
-            stats: { ...stats, ready: readyCount },
-            reason: "recompare",
-            phase: "recompare",
-          };
+          return selectedPair(a, b, "recompare", "recompare");
         }
       }
     }
   }
 
-  return { done: true, stats: { ...stats, ready: readyCount } };
+  return exhausted({ ...stats, ready: readyCount });
 });
 
 export const submitComparison = os
@@ -1157,10 +1467,17 @@ export const submitComparison = os
       return { newWinnerRating, newLoserRating, ratingDelta: delta };
     });
 
+    projectActiveCandidateCaches.delete(sessionId);
     return result;
   });
 
 export const undoLastAction = os.input(SessionIdSchema).handler(({ input }) => {
+  const projectSession = getProjectCullSession(input.sessionId);
+  if (projectSession?.projectId && projectSession.mode === "curate") {
+    return undoShootingProjectSelection(projectSession.projectId).then(() => ({
+      success: true,
+    }));
+  }
   const db = getDatabase();
   const session = db
     .select({ status: cullSessions.status })
@@ -1380,12 +1697,21 @@ export const undoLastAction = os.input(SessionIdSchema).handler(({ input }) => {
 export const updatePhotoStatus = os
   .input(UpdatePhotoStatusSchema)
   .handler(({ input }) => {
+    if (getProjectCullSession(input.sessionId)?.projectId) {
+      const result = updateProjectCullStatus(
+        input.sessionId,
+        [input.photoId],
+        input.status
+      );
+      clearCullPairCaches(input.sessionId);
+      return { ...result, changed: result.updatedCount > 0 };
+    }
     const db = getDatabase();
     const result = db.transaction(() => {
       const existing = db
         .select({
           id: cullSessionPhotos.id,
-          photoId: cullSessionPhotos.photoId,
+          photoId: photos.id,
           status: cullSessionPhotos.status,
           isFavorite: photos.isFavorite,
         })
@@ -1461,6 +1787,15 @@ export const updatePhotoStatus = os
 export const batchUpdatePhotoStatus = os
   .input(BatchUpdatePhotoStatusSchema)
   .handler(({ input }) => {
+    if (getProjectCullSession(input.sessionId)?.projectId) {
+      const result = updateProjectCullStatus(
+        input.sessionId,
+        input.photoIds,
+        input.status
+      );
+      clearCullPairCaches(input.sessionId);
+      return result;
+    }
     const db = getDatabase();
     const requestedIds = uniqueIds(input.photoIds);
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Batch status updates preserve the existing transaction and progress semantics.
@@ -1490,7 +1825,7 @@ export const batchUpdatePhotoStatus = os
         const rows = db
           .select({
             id: cullSessionPhotos.id,
-            photoId: cullSessionPhotos.photoId,
+            photoId: photos.id,
             status: cullSessionPhotos.status,
             isFavorite: photos.isFavorite,
           })
@@ -1587,6 +1922,33 @@ export const skipSimilarPhotos = os
   .handler(({ input }) => {
     const db = getDatabase();
 
+    if (getProjectCullSession(input.sessionId)?.projectId) {
+      const pending = loadPendingWithMetadata(input.sessionId);
+      const current = pending.find((row) => row.id === input.photoId);
+      if (!current) {
+        throw new Error("照片不在当前选片会话中");
+      }
+      if (!current.phash) {
+        return { skippedCount: 0 };
+      }
+      const phash = current.phash;
+      const similar = pending.filter(
+        (row) =>
+          row.id !== current.id &&
+          row.phash &&
+          hammingDistance(phash, row.phash) <= input.threshold
+      );
+      if (similar.length) {
+        updateProjectCullStatus(
+          input.sessionId,
+          similar.map((row) => row.id),
+          "rejected"
+        );
+      }
+      clearCullPairCaches(input.sessionId);
+      return { skippedCount: similar.length };
+    }
+
     const current = db
       .select({ phash: photos.phash })
       .from(cullSessionPhotos)
@@ -1680,10 +2042,17 @@ export const skipSimilarPhotos = os
 export const completeSession = os
   .input(SessionIdSchema)
   .handler(({ input }) => {
+    syncProjectCullMembers(input.sessionId);
+    if (projectCullPreparing(input.sessionId)) {
+      throw new Error("照片仍在准备，请等待文件发现完成");
+    }
     const db = getDatabase();
     const result = db
       .update(cullSessions)
-      .set({ status: "completed", completedAt: Date.now() })
+      .set({
+        status: "completed",
+        completedAt: sql`COALESCE(completed_at, ${Date.now()})`,
+      })
       .where(eq(cullSessions.id, input.sessionId))
       .run();
     if (result.changes === 0) {
@@ -1724,6 +2093,9 @@ export const duplicateSession = os
       .get();
     if (!source) {
       throw new Error("选片会话不存在");
+    }
+    if (source.projectId) {
+      throw new Error("请在项目中开始新的 PK 轮次");
     }
     const photoIds = db
       .select({ photoId: cullSessionPhotos.photoId })

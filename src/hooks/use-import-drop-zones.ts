@@ -12,6 +12,7 @@ import {
 type ImportDropZone = "image" | "folders";
 
 interface UseImportDropZonesOptions {
+  onFolderDrop?: (paths: string[]) => void | Promise<void>;
   onImageSearch: (imagePath: string) => void | Promise<void>;
 }
 
@@ -68,6 +69,7 @@ async function enqueueFolderImports(
 
 export function useImportDropZones({
   onImageSearch,
+  onFolderDrop,
 }: UseImportDropZonesOptions) {
   const { t } = useTranslation();
   const [dragKind, setDragKind] = useState<ExternalDropKind | null>(null);
@@ -177,9 +179,13 @@ export function useImportDropZones({
         toast.error(t("toastFolderDropFailed"));
         return;
       }
-      await enqueueFolderImports(folderPaths, t);
+      if (onFolderDrop) {
+        await onFolderDrop(folderPaths);
+      } else {
+        await enqueueFolderImports(folderPaths, t);
+      }
     },
-    [clearDragState, onImageSearch, t]
+    [clearDragState, onImageSearch, onFolderDrop, t]
   );
 
   return {
