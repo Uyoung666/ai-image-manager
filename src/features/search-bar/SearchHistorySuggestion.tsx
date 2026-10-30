@@ -103,7 +103,14 @@ export function SearchHistorySuggestion({
   }, [imagePath]);
   const missing = preview?.exists === false;
   return (
-    <div className="flex min-w-0 items-center" ref={row}>
+    <div
+      className={cn(
+        "group flex min-w-0 items-stretch transition-colors",
+        isActive ? "bg-foreground/8" : "hover:bg-foreground/5"
+      )}
+      data-search-history-row
+      ref={row}
+    >
       <SearchTextButton
         aria-label={
           imagePath
@@ -114,8 +121,8 @@ export function SearchHistorySuggestion({
         className={cn(
           "flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors",
           isActive
-            ? "bg-foreground/8 text-foreground"
-            : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            ? "text-foreground"
+            : "text-muted-foreground group-hover:text-foreground"
         )}
         data-suggestion-index={index}
         id={`search-suggestion-${index}`}
@@ -160,10 +167,11 @@ export function SearchHistorySuggestion({
         <TooltipTrigger asChild>
           <button
             aria-label={t("searchHistoryUi.remove", { name: label })}
-            className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="flex w-8 shrink-0 items-center justify-center self-stretch text-muted-foreground hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
             data-search-action
             onClick={() => onRemove(entry.id)}
             onMouseDown={(event) => event.preventDefault()}
+            onPointerMove={onMouseEnter}
             type="button"
           >
             <X aria-hidden="true" className="h-3.5 w-3.5" />

@@ -492,7 +492,7 @@ export const SearchBar = memo(
               e.stopPropagation();
               removeHistory(entry.id);
               setSuggestionIndex(-1);
-              suggestionListRef.current?.focus();
+              suggestionListRef.current?.focus({ preventScroll: true });
             }
             break;
           }

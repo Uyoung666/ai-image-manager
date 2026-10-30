@@ -1822,6 +1822,49 @@ describe("SearchBar", () => {
       screen.queryByText("searchHistoryUi.disabled")
     ).not.toBeInTheDocument();
   });
+  it("only scrolls for keyboard navigation and keeps history deletion separate from search", async () => {
+    localStorage.setItem(
+      SEARCH_HISTORY_KEY,
+      JSON.stringify(["first", "second"])
+    );
+    const onSearch = vi.fn();
+    const user = userEvent.setup();
+    render(<ControlledSearchBar onSearch={onSearch} />);
+    await user.click(screen.getByRole("combobox"));
+    const options = screen.getAllByRole("option");
+    const scroll = vi.fn();
+    for (const option of options) {
+      Object.defineProperty(option, "scrollIntoView", { value: scroll });
+    }
+    const first = screen.getByRole("option", { name: "first" });
+    const second = screen.getByRole("option", { name: "second" });
+    const row = first.closest("[data-search-history-row]") as HTMLElement;
+    const remove = row.querySelector("[data-search-action]") as HTMLElement;
+    fireEvent.pointerMove(first);
+    fireEvent.pointerMove(second);
+    fireEvent.pointerMove(remove);
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(row).toHaveClass("bg-foreground/8", "items-stretch");
+    expect(remove).toHaveClass("w-8", "self-stretch");
+    expect(scroll).not.toHaveBeenCalled();
+    await user.keyboard("{ArrowDown}");
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenLastCalledWith({
+      block: "nearest",
+      inline: "nearest",
+    });
+    await user.click(remove);
+    expect(screen.queryByRole("option", { name: "first" })).toBeNull();
+    expect(second).toBeInTheDocument();
+    expect(screen.getByRole("listbox")).toHaveFocus();
+    act(() => second.focus());
+    const focus = vi.spyOn(screen.getByRole("listbox"), "focus");
+    await user.keyboard("{Delete}");
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(readSearchHistory()).toEqual([]);
+    expect(onSearch).not.toHaveBeenCalled();
+  });
+
   it("replays an image history through the image callback and removes individual records", async () => {
     localStorage.setItem(
       SEARCH_HISTORY_STORAGE_KEY,

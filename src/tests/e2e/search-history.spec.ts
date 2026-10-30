@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { expect } from "@playwright/test";
+import { expect, type Locator } from "@playwright/test";
 import { waitForHomeWindow } from "./helpers/home-window";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
@@ -288,6 +288,64 @@ test("mixed history, persisted preferences, keyboard scrolling and responsive bo
       await expect(scroll).toHaveAttribute("data-top-fade", "true");
       await expect(scroll).toHaveAttribute("data-bottom-fade", "true");
       await scroll.scrollIntoViewIfNeeded();
+      const checkPointerScroll = async (list: Locator) => {
+        for (const fraction of [0.5, 1]) {
+          await page.mouse.move(0, 0);
+          await list.evaluate((el, position) => {
+            el.scrollTop = (el.scrollHeight - el.clientHeight) * position + 7;
+          }, fraction);
+          const before = await list.evaluate((el) => el.scrollTop);
+          const panelBefore = await panel.evaluate((el) => el.scrollTop);
+          const bounds = await list.boundingBox();
+          if (!bounds) {
+            throw new Error("History list bounds missing");
+          }
+          for (const offset of [2, 12, 40]) {
+            await page.mouse.move(
+              bounds.x + bounds.width / 2,
+              bounds.y + offset
+            );
+            await page.evaluate(
+              () =>
+                new Promise<void>((resolve) => {
+                  requestAnimationFrame(() =>
+                    requestAnimationFrame(() => resolve())
+                  );
+                })
+            );
+            expect(await list.evaluate((el) => el.scrollTop)).toBeCloseTo(
+              before,
+              0
+            );
+            expect(await panel.evaluate((el) => el.scrollTop)).toBeCloseTo(
+              panelBefore,
+              0
+            );
+          }
+        }
+      };
+      const rowGeometry = await scroll
+        .locator("[data-search-history-row]")
+        .evaluateAll((rows) =>
+          rows.slice(0, 2).map((row) => {
+            const bounds = row.getBoundingClientRect();
+            const action = row
+              .querySelector("[data-search-action]")
+              ?.getBoundingClientRect();
+            return action
+              ? [
+                  bounds.top - action.top,
+                  bounds.bottom - action.bottom,
+                  action.width,
+                ]
+              : [];
+          })
+        );
+      expect(rowGeometry).toEqual([
+        [0, 0, 32],
+        [0, 0, 32],
+      ]);
+      await checkPointerScroll(scroll);
       await capture(`history-middle-${size.width}-${size.zoom}.png`);
       const last = panel.getByRole("option", { name: LAST_HISTORY });
       await last.focus();
@@ -299,24 +357,53 @@ test("mixed history, persisted preferences, keyboard scrolling and responsive bo
       await expect(scroll).toHaveAttribute("data-bottom-fade", "false");
       await checkBounds();
       await capture(`history-${size.width}-${size.zoom}.png`);
+      const savedHistory = await page.evaluate(() =>
+        localStorage.getItem("search_history_v2")
+      );
+      const beforeDelete = await scroll.evaluate((el) => el.scrollTop);
       await page.keyboard.press("Delete");
       await expect(
         panel.getByRole("option", { name: LAST_HISTORY })
       ).toHaveCount(0);
-      // Restore that row for the next viewport without changing settings.
-      await page.evaluate(() => {
-        const data = JSON.parse(
-          localStorage.getItem("search_history_v2") ?? "{}"
-        );
-        data.entries.push({
-          kind: "text",
-          query:
-            "History 59 with a very long search description that should truncate safely across narrow windows",
-          lastUsedAt: 40,
-        });
-        localStorage.setItem("search_history_v2", JSON.stringify(data));
+      expect(await scroll.evaluate((el) => el.scrollTop)).toBeCloseTo(
+        await scroll.evaluate(
+          (el, previous) =>
+            Math.min(previous, el.scrollHeight - el.clientHeight),
+          beforeDelete
+        ),
+        0
+      );
+      const previousRow = scroll.locator("[data-search-history-row]").last();
+      const remove = previousRow.locator("[data-search-action]");
+      await remove.hover();
+      await expect(page.getByRole("tooltip")).toBeVisible();
+      await capture(`history-delete-hover-${size.width}-${size.zoom}.png`);
+      const beforeClickDelete = await scroll.evaluate((el) => el.scrollTop);
+      await remove.click();
+      await expect(scroll.locator("[data-search-history-row]")).toHaveCount(59);
+      expect(await scroll.evaluate((el) => el.scrollTop)).toBeCloseTo(
+        await scroll.evaluate(
+          (el, previous) =>
+            Math.min(previous, el.scrollHeight - el.clientHeight),
+          beforeClickDelete
+        ),
+        0
+      );
+      // Restore the deleted rows for the next viewport without changing settings.
+      await page.evaluate((saved) => {
+        if (!saved) {
+          throw new Error("History snapshot missing");
+        }
+        localStorage.setItem("search_history_v2", saved);
         window.dispatchEvent(new Event("search-history-changed"));
-      });
+      }, savedHistory);
+      await page.keyboard.press("Escape");
+      await input.click();
+      await input.fill("History");
+      await expect(panel.getByRole("option").first()).toBeVisible();
+      await checkPointerScroll(panel);
+      await checkBounds();
+      await input.fill("");
       await page.keyboard.press("Escape");
     }
     await app.evaluate(({ BrowserWindow }) =>

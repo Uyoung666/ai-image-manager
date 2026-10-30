@@ -183,18 +183,6 @@ export function useSearchOverlayInteraction({
     }, 150);
   }
 
-  useEffect(() => {
-    if (suggestionIndex < 0 || !suggestionListRef.current) {
-      return;
-    }
-    const activeEl = suggestionListRef.current.querySelector(
-      `[data-suggestion-index="${suggestionIndex}"]`
-    );
-    if (activeEl) {
-      activeEl.scrollIntoView?.({ block: "nearest" });
-    }
-  }, [suggestionIndex]);
-
   return {
     inputRef,
     dropdownRef,
