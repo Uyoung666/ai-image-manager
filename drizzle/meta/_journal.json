@@ -393,6 +393,48 @@
       "when": 1793026800000,
       "tag": "0055_gallery_tag_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1793153616228,
+      "tag": "0056_shooting_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1793161663924,
+      "tag": "0057_shooting_project_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1793184841337,
+      "tag": "0058_chunky_reptil",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1793199049010,
+      "tag": "0059_shooting_workflow_presets",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1793239040177,
+      "tag": "0060_cull_task_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1793284085057,
+      "tag": "0061_cull_preferences_and_explicit_folders",
+      "breakpoints": true
     }
   ]
 }

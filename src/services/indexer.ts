@@ -995,6 +995,7 @@ export async function scanFolder(
         photoCount: 0,
         lastScannedAt: null,
         createdAt: Date.now(),
+        explicitOnly: false,
         isWatching: false,
         watcherStartedAt: null,
         lastWatcherEventAt: null,

@@ -1385,7 +1385,7 @@ export const updatePhotoStatus = os
       const existing = db
         .select({
           id: cullSessionPhotos.id,
-          photoId: cullSessionPhotos.photoId,
+          photoId: photos.id,
           status: cullSessionPhotos.status,
           isFavorite: photos.isFavorite,
         })
@@ -1490,7 +1490,7 @@ export const batchUpdatePhotoStatus = os
         const rows = db
           .select({
             id: cullSessionPhotos.id,
-            photoId: cullSessionPhotos.photoId,
+            photoId: photos.id,
             status: cullSessionPhotos.status,
             isFavorite: photos.isFavorite,
           })
@@ -1726,7 +1726,7 @@ export const duplicateSession = os
       throw new Error("选片会话不存在");
     }
     const photoIds = db
-      .select({ photoId: cullSessionPhotos.photoId })
+      .select({ photoId: photos.id })
       .from(cullSessionPhotos)
       .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
       .where(

@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -29,6 +31,9 @@ export const folders = sqliteTable(
     createdAt: integer("created_at")
       .notNull()
       .$defaultFn(() => Date.now()),
+    explicitOnly: integer("explicit_only", { mode: "boolean" })
+      .notNull()
+      .default(false),
     isWatching: integer("is_watching", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -1077,6 +1082,14 @@ export const cloudConfigs = sqliteTable("cloud_configs", {
 
 export const cullSessions = sqliteTable("cull_sessions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: text("project_id").references(
+    (): AnySQLiteColumn => shootingProjects.id,
+    { onDelete: "cascade" }
+  ),
+  projectScope: text("project_scope", { enum: ["all", "selected"] }),
+  projectScopeOpen: integer("project_scope_open", { mode: "boolean" })
+    .notNull()
+    .default(false),
   name: text("name").notNull(),
   mode: text("mode").notNull().default("duel"),
   status: text("status").notNull().default("active"),
@@ -1088,6 +1101,7 @@ export const cullSessions = sqliteTable("cull_sessions", {
     .notNull()
     .$defaultFn(() => Date.now()),
   completedAt: integer("completed_at"),
+  archivedAt: integer("archived_at"),
 });
 
 export const cullSessionPhotos = sqliteTable(
@@ -1097,9 +1111,13 @@ export const cullSessionPhotos = sqliteTable(
     sessionId: integer("session_id")
       .references(() => cullSessions.id, { onDelete: "cascade" })
       .notNull(),
-    photoId: integer("photo_id")
-      .references(() => photos.id, { onDelete: "cascade" })
-      .notNull(),
+    photoId: integer("photo_id").references(() => photos.id, {
+      onDelete: "cascade",
+    }),
+    projectPhotoId: text("project_photo_id").references(
+      (): AnySQLiteColumn => shootingProjectPhotos.id,
+      { onDelete: "cascade" }
+    ),
     rating: integer("rating").notNull().default(1500),
     comparisons: integer("comparisons").notNull().default(0),
     wins: integer("wins").notNull().default(0),
@@ -1109,6 +1127,17 @@ export const cullSessionPhotos = sqliteTable(
   (table) => ({
     sessionIdIdx: index("idx_csp_session_id").on(table.sessionId),
     photoIdIdx: index("idx_csp_photo_id").on(table.photoId),
+    projectPhotoIdIdx: index("idx_csp_project_photo_id").on(
+      table.projectPhotoId
+    ),
+    uniqueProjectPhoto: uniqueIndex("idx_csp_session_project_photo").on(
+      table.sessionId,
+      table.projectPhotoId
+    ),
+    exactlyOneSource: check(
+      "csp_exactly_one_source",
+      sql`(${table.photoId} IS NOT NULL AND ${table.projectPhotoId} IS NULL) OR (${table.photoId} IS NULL AND ${table.projectPhotoId} IS NOT NULL)`
+    ),
     ratingIdx: index("idx_csp_rating").on(table.rating),
     uniqueSessionPhoto: uniqueIndex("idx_csp_session_photo").on(
       table.sessionId,
@@ -1158,3 +1187,194 @@ export const cloudSyncLog = sqliteTable("cloud_sync_log", {
     .notNull()
     .$defaultFn(() => Date.now()),
 });
+
+/** Shooting projects have their own lifetime, independent of library photos. */
+export const shootingProjects = sqliteTable(
+  "shooting_projects",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    pkMode: text("pk_mode", { enum: ["quick", "standard", "fine"] })
+      .notNull()
+      .default("standard"),
+    workflow: text("workflow", { enum: ["curate", "duel", "hybrid"] })
+      .notNull()
+      .default("curate"),
+    sourceRoot: text("source_root").notNull(),
+    sourceStatus: text("source_status", {
+      enum: ["online", "offline", "inaccessible"],
+    }).notNull(),
+    sourceCheckedAt: integer("source_checked_at").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    lastOpenedAt: integer("last_opened_at").notNull(),
+    archivedAt: integer("archived_at"),
+    currentPhotoId: text("current_photo_id"),
+    browsingJson: text("browsing_json"),
+    scanStatus: text("scan_status", {
+      enum: ["pending", "running", "completed", "failed", "interrupted"],
+    })
+      .notNull()
+      .default("pending"),
+    scanKind: text("scan_kind", { enum: ["initial", "incremental"] })
+      .notNull()
+      .default("initial"),
+    scanErrorsJson: text("scan_errors_json").notNull().default("[]"),
+    initialScanCompleted: integer("initial_scan_completed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    previewsCleared: integer("previews_cleared", { mode: "boolean" })
+      .notNull()
+      .default(false),
+  },
+  (table) => ({
+    recentIdx: index("idx_shooting_projects_recent").on(
+      table.archivedAt,
+      table.lastOpenedAt
+    ),
+  })
+);
+
+export const shootingProjectPhotos = sqliteTable(
+  "shooting_project_photos",
+  {
+    id: text("id").primaryKey(),
+    phash: text("phash"),
+    exifJson: text("exif_json"),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => shootingProjects.id, { onDelete: "cascade" }),
+    relativePath: text("relative_path").notNull(),
+    filename: text("filename").notNull(),
+    fileSize: integer("file_size").notNull(),
+    modifiedAt: integer("modified_at").notNull(),
+    dateTaken: integer("date_taken"),
+    format: text("format").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    status: text("status", {
+      enum: ["pending", "undecided", "kept", "rejected"],
+    })
+      .notNull()
+      .default("pending"),
+    sourceStatus: text("source_status", {
+      enum: ["unverified", "available", "missing", "inaccessible", "changed"],
+    })
+      .notNull()
+      .default("unverified"),
+    lightweightFingerprint: text("lightweight_fingerprint"),
+    contentHash: text("content_hash"),
+    previewRelativePath: text("preview_relative_path"),
+    previewStatus: text("preview_status", {
+      enum: ["pending", "ready", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    previewWidth: integer("preview_width"),
+    previewHeight: integer("preview_height"),
+    previewError: text("preview_error"),
+    previewBytes: integer("preview_bytes").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => ({
+    uniqueProjectPath: uniqueIndex("idx_shooting_project_photos_path").on(
+      table.projectId,
+      table.relativePath
+    ),
+    projectStatusIdx: index("idx_shooting_project_photos_status").on(
+      table.projectId,
+      table.status
+    ),
+  })
+);
+
+export const shootingProjectActions = sqliteTable(
+  "shooting_project_actions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => shootingProjects.id, { onDelete: "cascade" }),
+    payload: text("payload").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => ({
+    projectIdx: index("idx_shooting_project_actions_project").on(
+      table.projectId,
+      table.id
+    ),
+  })
+);
+
+export const shootingProjectOutputs = sqliteTable(
+  "shooting_project_outputs",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => shootingProjects.id, { onDelete: "cascade" }),
+    targetRoot: text("target_root").notNull(),
+    status: text("status", {
+      enum: [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted",
+      ],
+    })
+      .notNull()
+      .default("pending"),
+    createdAt: integer("created_at").notNull(),
+    completedAt: integer("completed_at"),
+  },
+  (table) => ({
+    projectIdx: index("idx_shooting_project_outputs_project").on(
+      table.projectId
+    ),
+  })
+);
+
+export const shootingProjectOutputItems = sqliteTable(
+  "shooting_project_output_items",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => shootingProjectOutputs.id, { onDelete: "cascade" }),
+    photoId: text("photo_id").notNull(),
+    kind: text("kind", { enum: ["original", "xmp"] }).notNull(),
+    relativePath: text("relative_path").notNull(),
+    sourcePath: text("source_path").notNull(),
+    targetPath: text("target_path").notNull(),
+    tempPath: text("temp_path").notNull(),
+    fileSize: integer("file_size").notNull(),
+    modifiedAt: real("modified_at").notNull(),
+    lightweightFingerprint: text("lightweight_fingerprint"),
+    sourceHash: text("source_hash"),
+    sha256: text("sha256"),
+    status: text("status", {
+      enum: [
+        "pending",
+        "copying",
+        "verifying",
+        "committing",
+        "completed",
+        "failed",
+        "cancelled",
+      ],
+    })
+      .notNull()
+      .default("pending"),
+    copiedBytes: integer("copied_bytes").notNull().default(0),
+    error: text("error"),
+  },
+  (table) => ({
+    taskIdx: index("idx_shooting_project_output_items_task").on(table.taskId),
+    targetIdx: uniqueIndex("idx_shooting_project_output_items_target").on(
+      table.taskId,
+      table.targetPath
+    ),
+  })
+);

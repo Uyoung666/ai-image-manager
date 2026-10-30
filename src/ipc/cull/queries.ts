@@ -24,7 +24,7 @@ export function loadPendingWithMetadata(sessionId: number) {
   return db
     .select({
       id: cullSessionPhotos.id,
-      photoId: cullSessionPhotos.photoId,
+      photoId: photos.id,
       rating: cullSessionPhotos.rating,
       comparisons: cullSessionPhotos.comparisons,
       wins: cullSessionPhotos.wins,
