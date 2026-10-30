@@ -856,7 +856,7 @@ async function galleryLegacyPreview(
       stats
     );
     if (
-      stats.mtimeMs >= sourceChangedAt &&
+      stats.mtimeMs > sourceChangedAt &&
       (meta.orientation ?? 1) === 1 &&
       Math.max(meta.width ?? 0, meta.height ?? 0) >= requiredEdge
     ) {
@@ -894,7 +894,7 @@ export async function getGalleryThumbnailHint(
   const legacyStat = await readStat(legacy);
   if (
     !legacyStat ||
-    legacyStat.mtimeMs <
+    legacyStat.mtimeMs <=
       Math.max(source.mtimeMs, source.ctimeMs, source.birthtimeMs)
   ) {
     return undefined;

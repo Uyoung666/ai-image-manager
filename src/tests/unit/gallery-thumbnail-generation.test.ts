@@ -264,6 +264,53 @@ describe("physical gallery thumbnail generation", () => {
       writes.mockRestore();
     }
   });
+  it("does not trust a legacy preview whose timestamp ties the source change", async () => {
+    const preview = await generateThumbnail(original, "md");
+    const replacement = await sharp({
+      create: { width: 700, height: 700, channels: 3, background: "#b68229" },
+    })
+      .jpeg()
+      .toBuffer();
+    await fs.promises.writeFile(original, replacement);
+    const timestamp = fs.statSync(preview.thumbnailPath).mtimeMs;
+    const tiedSource = Object.assign(fs.statSync(original), {
+      mtimeMs: timestamp,
+      ctimeMs: timestamp,
+      birthtimeMs: timestamp,
+    });
+    const actualStat = fs.promises.stat.bind(fs.promises);
+    const stat = vi
+      .spyOn(fs.promises, "stat")
+      .mockImplementation((file) =>
+        String(file) === original
+          ? Promise.resolve(tiedSource)
+          : actualStat(file)
+      );
+    try {
+      expect(
+        await getGalleryThumbnailHint(
+          { path: original, width: 700, height: 700 },
+          512,
+          tiedSource,
+          (file) => actualStat(file).catch(() => undefined)
+        )
+      ).toBeUndefined();
+      const result = await generateGalleryThumbnail(
+        original,
+        512,
+        undefined,
+        0,
+        {
+          width: 700,
+          height: 700,
+        }
+      );
+      expect(result.thumbnailPath).not.toBe(preview.thumbnailPath);
+      expect(result).toMatchObject({ width: 512, height: 512 });
+    } finally {
+      stat.mockRestore();
+    }
+  });
   it("does not reuse an old preview when a replacement preserves the source mtime", async () => {
     const old = new Date(Date.now() - 60_000);
     await fs.promises.utimes(original, old, old);

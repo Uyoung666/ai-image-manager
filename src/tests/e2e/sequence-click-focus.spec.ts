@@ -193,47 +193,35 @@ async function findSequence() {
   });
   await expect
     .poll(
-      async () => {
-        if (await card.count()) {
-          return true;
-        }
-        await gallery.evaluate((element) => {
-          element.scrollTop += element.clientHeight * 0.65;
-        });
-        return false;
-      },
+      () =>
+        gallery.evaluate((scroll, id) => {
+          const element = scroll.querySelector<HTMLElement>(
+            `[data-sequence-id="${id}"]`
+          );
+          if (!element) {
+            const next = scroll.scrollTop + scroll.clientHeight * 0.65;
+            scroll.scrollTop =
+              next >= scroll.scrollHeight - scroll.clientHeight ? 0 : next;
+            return false;
+          }
+          const inset =
+            document
+              .querySelector(
+                ".home-gallery-toolbar-layer, .page-toolbar.absolute"
+              )
+              ?.getBoundingClientRect().height ?? 0;
+          const delta =
+            element.getBoundingClientRect().top -
+            scroll.getBoundingClientRect().top -
+            inset -
+            40;
+          if (Math.abs(delta) > 2) {
+            scroll.scrollTop += delta;
+            return false;
+          }
+          return (element.querySelector("img")?.naturalWidth ?? 0) > 0;
+        }, targetSequence),
       { timeout: 30_000, intervals: [100, 150] }
-    )
-    .toBe(true);
-  await expect
-    .poll(() =>
-      gallery.evaluate((scroll, id) => {
-        const element = scroll.querySelector<HTMLElement>(
-          `[data-sequence-id="${id}"]`
-        );
-        if (!element) {
-          return false;
-        }
-        const inset =
-          document
-            .querySelector(
-              ".home-gallery-toolbar-layer, .page-toolbar.absolute"
-            )
-            ?.getBoundingClientRect().height ?? 0;
-        scroll.scrollTop +=
-          element.getBoundingClientRect().top -
-          scroll.getBoundingClientRect().top -
-          inset -
-          40;
-        return true;
-      }, targetSequence)
-    )
-    .toBe(true);
-  await expect
-    .poll(() =>
-      card
-        .locator("img")
-        .evaluate((image) => (image as HTMLImageElement).naturalWidth > 0)
     )
     .toBe(true);
   return card;

@@ -236,6 +236,11 @@ test("tag removal refreshes active results and rejects a delayed old response ac
       .filter({ hasText: TAG });
     await remove.click();
     await expect(cards).toHaveCount(2);
+    // Removing the selected result restores search focus and may reopen suggestions.
+    await input.press("Escape");
+    await expect(
+      page.locator('[data-overlay-kind="search-suggestions"]')
+    ).not.toBeVisible();
     await cards.first().click();
     await remove.click();
     await expect(cards).toHaveCount(1);

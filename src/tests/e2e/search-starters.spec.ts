@@ -508,14 +508,10 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
         .poll(() => page.evaluate(() => document.hasFocus()))
         .toBe(true);
       await input.focus();
-      if (size.zoom) {
-        // Electron CDP hover coordinates differ under page zoom; use the keyboard path here.
-        await page.keyboard.press("Tab");
-        await refresh.focus();
-      } else {
-        await input.hover();
-        await refresh.hover();
-      }
+      // Use real keyboard navigation after native window focus restoration.
+      // Hover coverage remains below on truncated and untruncated idea cards.
+      await page.keyboard.press("Tab");
+      await refresh.focus();
       const refreshHint = page.getByRole("tooltip", {
         name: "Explore other themes; ideas refresh daily",
         exact: true,
