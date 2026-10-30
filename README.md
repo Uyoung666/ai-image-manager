@@ -1,19 +1,30 @@
-# AI Image Manager
-
 <div align="center">
 
-**面向 Windows 的本地优先 AI 照片管理工具**
+<img src="assets/icons/icon-256.png" alt="AI Image Manager 图标" width="96" height="96">
 
-在自己的电脑上索引、搜索、整理、选片、分析和分享照片；照片库不需要迁移到应用专用目录。
+<h1>AI Image Manager</h1>
+
+**让每一张照片，都更容易被找到。**
+
+面向 Windows 的本地优先 AI 照片管理工具，支持自然语言搜索、智能整理与专业选片。
+
+**简体中文** · [English](README.en.md)
 
 [![Release](https://img.shields.io/github/v/release/Uyoung666/ai-image-manager?style=flat-square)](https://github.com/Uyoung666/ai-image-manager/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](#系统要求)
 [![License](https://img.shields.io/github/license/Uyoung666/ai-image-manager?style=flat-square)](LICENSE)
-[![Electron](https://img.shields.io/badge/Electron-41-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 
-[官方网站](https://ai-image-manager.uyoungvision.cn) · [下载最新正式版](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [使用指南](GUIDE.md) · [English](README.en.md)
+[**下载最新正式版**](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [官方网站](https://ai-image-manager.uyoungvision.cn) · [使用指南](GUIDE.md) · [主要功能](#主要功能)
 
 </div>
+
+<p align="center">
+  <a href="assets/readme/screenshot-zh-2026-10-30.png">
+    <img src="assets/readme/hero-zh.webp" alt="AI Image Manager 中文界面：搜索预设、图库探索、最近搜索与照片网格" width="100%">
+  </a>
+  <br>
+  <sub>用户提供的界面截图，2026-10-30。点击查看原始截图。</sub>
+</p>
 
 ---
 
@@ -50,8 +61,6 @@ Setup 和启用更新器的 MSI 支持应用内更新；ZIP 与禁用更新器�
 - **按需联网**：自动更新会访问更新服务；WebDAV/S3 和诊断提交只有在用户主动启用或执行时才会产生相应网络访问。
 - **面向真实图库**：增量索引、虚拟化照片网格和独立 AI Worker 适合持续增长的本地图库。
 - **摄影工作流集中**：浏览、筛选、人物整理、重复检测、专业选片、EXIF 分析和导出分享在同一个桌面应用中完成。
-
-![AI Image Manager 首页](screenshots/v2.0.0/home.png)
 
 ## 快速开始
 

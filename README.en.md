@@ -1,19 +1,30 @@
-# AI Image Manager
-
 <div align="center">
 
-**A local-first AI photo manager for Windows**
+<img src="assets/icons/icon-256.png" alt="AI Image Manager icon" width="96" height="96">
 
-Index, search, organize, curate, analyze, and share your photo library on your own computer without moving the original files.
+<h1>AI Image Manager</h1>
+
+**Find every photo more easily.**
+
+A local-first AI photo manager for Windows, with natural-language search, smart organization, and professional photo culling.
+
+[简体中文](README.md) · **English**
 
 [![Release](https://img.shields.io/github/v/release/Uyoung666/ai-image-manager?style=flat-square)](https://github.com/Uyoung666/ai-image-manager/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](#system-requirements)
 [![License](https://img.shields.io/github/license/Uyoung666/ai-image-manager?style=flat-square)](LICENSE)
-[![Electron](https://img.shields.io/badge/Electron-41-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 
-[Website](https://ai-image-manager.uyoungvision.cn) · [Download latest stable release](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [User Guide](GUIDE.en.md) · [简体中文](README.md)
+[**Download latest stable release**](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [Website](https://ai-image-manager.uyoungvision.cn) · [User Guide](GUIDE.en.md) · [Features](#main-capabilities)
 
 </div>
+
+<p align="center">
+  <a href="assets/readme/screenshot-en-2026-10-30.png">
+    <img src="assets/readme/hero-en.webp" alt="AI Image Manager English interface: search presets, library exploration, recent searches, and the photo grid" width="100%">
+  </a>
+  <br>
+  <sub>User-provided interface screenshot, October 30, 2026. Click to view the original screenshot.</sub>
+</p>
 
 ---
 
@@ -50,8 +61,6 @@ Chinese and English are built in. For Japanese, download the matching official `
 - **Network by intent**: automatic updates contact the update service; WebDAV/S3 and diagnostic submission create the corresponding network activity only when enabled or initiated by the user.
 - **Designed for real libraries**: incremental indexing, a virtualized gallery, and isolated AI workers support libraries that keep growing.
 - **One photography workflow**: browsing, culling, people management, duplicate review, EXIF analysis, export, and sharing live in one desktop app.
-
-![AI Image Manager home screen](screenshots/v2.0.0/home.png)
 
 ## Quick start
 
