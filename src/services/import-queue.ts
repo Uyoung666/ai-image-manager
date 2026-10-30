@@ -73,7 +73,13 @@ function readUnfinishedRoots(): string[] {
     return getDatabase()
       .select({ path: folders.path })
       .from(folders)
-      .where(and(isNull(folders.lastScannedAt), isNull(folders.parentId)))
+      .where(
+        and(
+          isNull(folders.lastScannedAt),
+          isNull(folders.parentId),
+          eq(folders.explicitOnly, false)
+        )
+      )
       .all()
       .map((folder) => folder.path);
   }
@@ -398,6 +404,12 @@ async function processNext(): Promise<void> {
 }
 
 // ── Public API ─────────────────────────────────────────────────────
+
+/** Explicit file imports join the normal AI scheduler without scanning folders. */
+export function requestExplicitFileEmbedding(): void {
+  aiEmbeddingPending = true;
+  runPendingAiEmbedding();
+}
 
 /**
  * Enqueue a folder for import.

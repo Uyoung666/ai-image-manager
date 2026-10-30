@@ -128,8 +128,8 @@ beforeAll(async () => {
       },
       {
         id: 3,
-        path: path.join(runtime.root, "unapproved.jpg"),
-        filename: "unapproved.jpg",
+        path: path.join(runtime.root, "explicit-missing.jpg"),
+        filename: "explicit-missing.jpg",
       },
       {
         id: 4,
@@ -168,7 +168,7 @@ describe("ID thumbnail HTTP lifecycle", () => {
       404
     );
     expect((await request(3, undefined, undefined, 256, true)).status).toBe(
-      403
+      404
     );
     await request(1, undefined, undefined, 256);
     const exact = await request(1, undefined, undefined, 256, true);
@@ -202,7 +202,7 @@ describe("ID thumbnail HTTP lifecycle", () => {
     expect((await sharp(result.body).metadata()).width).toBe(512);
     expect(result.headers["cache-control"]).toBe("private, no-cache");
     expect((await request(2)).status).toBe(404);
-    expect((await request(3)).status).toBe(403);
+    expect((await request(3)).status).toBe(404);
     expect((await request(4)).status).toBe(404);
     expect((await request(999)).status).toBe(404);
   });
@@ -252,7 +252,7 @@ describe("ID thumbnail HTTP lifecycle", () => {
     ).toBe(404);
     expect(
       (await request(3, undefined, undefined, 256, false, true)).status
-    ).toBe(403);
+    ).toBe(404);
   });
   it("repairs a pixel-damaged legacy preview even when it exactly matches the requested edge", async () => {
     const file = path.join(path.dirname(original), "repair-exact.jpg");

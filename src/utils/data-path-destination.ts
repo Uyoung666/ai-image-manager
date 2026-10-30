@@ -6,6 +6,7 @@ export const DATA_PATH_SUBDIRECTORIES = [
   "models",
   "thumbnails",
   "vectors",
+  "shooting-projects",
 ] as const;
 
 export type DataPathDestination =

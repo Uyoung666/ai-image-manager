@@ -9,6 +9,7 @@ import { photos } from "./photos";
 import { plugins } from "./plugins";
 import { settings } from "./settings";
 import { shell } from "./shell";
+import { shootingProjects } from "./shooting-projects";
 import { theme } from "./theme";
 import { wander } from "./wander";
 import { window } from "./window";
@@ -18,6 +19,7 @@ export const router = {
   cloud,
   faces,
   settings,
+  shootingProjects,
   theme,
   window,
   app,

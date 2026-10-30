@@ -16,6 +16,7 @@ import {
   wasAutoRepaired,
 } from "@/services/ai-embedder";
 import { shutdownPool } from "@/services/embed-worker-pool";
+import { repairUnassignedLibraryPhotos } from "@/services/explicit-library-folders";
 import { resumeInterruptedImports, stopImports } from "@/services/import-queue";
 import {
   cleanupOrphanedRecordsAsync,
@@ -256,6 +257,7 @@ registry.register({
   level: ServiceLevel.Critical,
   start: () => {
     initDatabase();
+    repairUnassignedLibraryPhotos();
   },
   stop: () => {
     closeDatabase();
@@ -288,6 +290,29 @@ registry.register({
 
 let orphanCleanupController: AbortController | null = null;
 let orphanCleanupTask: Promise<void> | null = null;
+
+registry.register({
+  name: "shootingProjects",
+  level: ServiceLevel.Critical,
+  dependencies: ["database"],
+  start: async () => {
+    const core = await import("./shooting-projects");
+    const output = await import("./shooting-project-output");
+    const library = await import("./shooting-project-library");
+    await core.startShootingProjectServices();
+    await output.startShootingProjectOutputServices();
+    library.startShootingProjectLibraryServices();
+  },
+  stop: async () => {
+    const library = await import("./shooting-project-library");
+    const output = await import("./shooting-project-output");
+    const core = await import("./shooting-projects");
+    await library.stopShootingProjectLibraryTasks();
+    await output.stopShootingProjectOutputTasks();
+    await core.stopShootingProjectServices();
+  },
+  health: () => ({ status: "ok" as const }),
+});
 
 registry.register({
   name: "fileWatcher",
