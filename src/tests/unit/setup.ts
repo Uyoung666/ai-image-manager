@@ -161,6 +161,7 @@ vi.mock("react-i18next", () => ({
         "searchStarterUi.person": "人物",
         "searchStarterUi.tag": "标签",
         searchStarterWildcardHint: "也支持文件名和通配符，例如 *.jpg、DSC_*",
+        searchAiDisclaimer: "AI 搜索结果可能存在偏差或遗漏。",
         searchStarterAiUnavailable: "请先完成 AI 索引，再使用语义搜索示例",
         datePeriodicAny: "不限",
         dateMonthValue: "{{value}} 月",

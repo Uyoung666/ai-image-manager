@@ -1583,6 +1583,7 @@
   "recentSearches": "Recent Searches",
   "searchStarterTitle": "Explore your library",
   "searchStarterWildcardHint": "File names and wildcards also work, such as *.jpg and DSC_*",
+  "searchAiDisclaimer": "AI search results may be inaccurate or incomplete.",
   "searchStarterAiUnavailable": "Finish AI indexing before using semantic search examples",
   "selectedPhotos": "{{count}} selected",
   "moreActions": "More",

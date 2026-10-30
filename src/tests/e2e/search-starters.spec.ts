@@ -293,6 +293,43 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
       expect(layout.inside).toBe(true);
       expect(layout.overflow).toBe(false);
       expect(layout.columns).toBe(layout.width >= 720 ? 2 : 1);
+      const footer = panel.locator("[data-search-suggestions-footer]");
+      const disclaimer = footer.getByText(
+        "AI search results may be inaccurate or incomplete.",
+        { exact: true }
+      );
+      await disclaimer.scrollIntoViewIfNeeded();
+      await expect(disclaimer).toBeInViewport();
+      const footerLayout = await footer.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const hint = element.firstElementChild?.getBoundingClientRect();
+        const notice = element.lastElementChild?.getBoundingClientRect();
+        return {
+          overflow: element.scrollWidth > element.clientWidth + 1,
+          contained: [...element.querySelectorAll("span")].every((node) => {
+            const rect = node.getBoundingClientRect();
+            return (
+              rect.left >= bounds.left &&
+              rect.right <= bounds.right + 1 &&
+              rect.top >= bounds.top &&
+              rect.bottom <= bounds.bottom + 1
+            );
+          }),
+          separated: Boolean(
+            hint &&
+              notice &&
+              (notice.left >= hint.right || notice.top >= hint.bottom)
+          ),
+        };
+      });
+      expect(footerLayout).toEqual({
+        overflow: false,
+        contained: true,
+        separated: true,
+      });
+      await panel.evaluate((node) => {
+        node.scrollTop = 0;
+      });
       const presetStrip = panel.locator("[data-search-preset-strip]");
       await presetStrip.locator("[data-search-preset]").first().hover();
       const panelScroll = await panel.evaluate((node) => node.scrollTop);

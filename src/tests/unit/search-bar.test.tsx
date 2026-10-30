@@ -682,6 +682,10 @@ describe("SearchBar", () => {
     expect(screen.getByText("去年秋天的红叶")).toBeInTheDocument();
     expect(screen.getByText("海边的日落")).toBeInTheDocument();
     expect(screen.queryByText("最近搜索")).not.toBeInTheDocument();
+    const disclaimer = screen.getByText("AI 搜索结果可能存在偏差或遗漏。");
+    const footer = disclaimer.closest("[data-search-suggestions-footer]");
+    expect(footer).toHaveTextContent("也支持文件名和通配符，例如 *.jpg、DSC_*");
+    expect(footer).toHaveClass("flex-wrap");
   });
 
   it("executes a trusted tag card without a model and preserves the current filters", async () => {
@@ -1800,6 +1804,11 @@ describe("SearchBar", () => {
         .closest("[data-search-suggestions-footer]")
     ).not.toBeNull();
     expect(container.querySelector("[data-search-history]")).toBeNull();
+    expect(
+      screen
+        .getByText("AI 搜索结果可能存在偏差或遗漏。")
+        .closest("[data-search-suggestions-footer]")
+    ).toHaveTextContent("searchHistoryUi.disabled");
     fireEvent.change(input, { target: { value: "private" } });
     expect(
       screen.queryByRole("option", { name: "private old search" })

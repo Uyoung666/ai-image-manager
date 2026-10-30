@@ -2036,6 +2036,7 @@ i18n.use(initReactI18next).init({
           tag: "标签",
         },
         searchStarterWildcardHint: "也支持文件名和通配符，例如 *.jpg、DSC_*",
+        searchAiDisclaimer: "AI 搜索结果可能存在偏差或遗漏。",
         searchStarterAiUnavailable: "请先完成 AI 索引，再使用语义搜索示例",
 
         // Selection / sort / status

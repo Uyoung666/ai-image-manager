@@ -327,11 +327,18 @@ export function SearchSuggestionsPanel({
             )}
           </div>
           <div
-            className="flex min-w-0 items-center justify-between gap-3 border-border border-t px-3 py-2 text-[11px] text-muted-foreground"
+            className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-border border-t px-3 py-2 text-[11px] text-muted-foreground"
             data-search-suggestions-footer
           >
-            <span className="min-w-0">{t("searchStarterWildcardHint")}</span>
-            {historyStatus}
+            <span className="min-w-0 break-words">
+              {t("searchStarterWildcardHint")}
+            </span>
+            <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-x-3 gap-y-1">
+              <span className="min-w-0 break-words">
+                {t("searchAiDisclaimer")}
+              </span>
+              {historyStatus}
+            </div>
           </div>
         </>
       )}

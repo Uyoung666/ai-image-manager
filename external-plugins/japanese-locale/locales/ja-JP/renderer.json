@@ -1553,6 +1553,7 @@
   "recentSearches": "最近の検索",
   "searchStarterTitle": "ライブラリを探索",
   "searchStarterWildcardHint": "ファイル名とワイルドカードも使用できます（例：*.jpg、DSC_*）",
+  "searchAiDisclaimer": "AI 検索の結果には誤りや漏れが含まれる場合があります。",
   "searchStarterAiUnavailable": "セマンティック検索の例を使う前に AI インデックス作成を完了してください",
   "selectedPhotos": "{{count}} 枚を選択中",
   "moreActions": "その他",
