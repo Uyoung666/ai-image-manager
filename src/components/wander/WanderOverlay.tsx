@@ -1,5 +1,5 @@
 /** biome-ignore-all lint/style/useFilenamingConvention: component names follow the repository's existing React convention. */
-import { Pause, Play, Save, SkipForward, X } from "lucide-react";
+import { Save, SkipForward, X } from "lucide-react";
 import {
   type MouseEvent,
   useCallback,
@@ -11,6 +11,9 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { recordWanderExposure } from "@/actions/wander";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Pause } from "@/components/icons/pause";
+import { Play } from "@/components/icons/play";
 import { HamsterWheelLoader } from "@/components/startup-splash";
 import {
   Tooltip,
@@ -806,21 +809,23 @@ export function WanderOverlay({
           )}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                aria-label={t(paused ? "wander.play" : "wander.pause")}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 text-white/90 hover:bg-white/20"
-                disabled={saving || preparingNext}
-                onBlur={handleControlsLeave}
-                onClick={togglePaused}
-                onFocus={handleControlsEnter}
-                type="button"
-              >
-                {paused ? (
-                  <Play className="h-4 w-4" />
-                ) : (
-                  <Pause className="h-4 w-4" />
-                )}
-              </button>
+              <IconMotionTrigger asChild disabled={saving || preparingNext}>
+                <button
+                  aria-label={t(paused ? "wander.play" : "wander.pause")}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 text-white/90 hover:bg-white/20"
+                  disabled={saving || preparingNext}
+                  onBlur={handleControlsLeave}
+                  onClick={togglePaused}
+                  onFocus={handleControlsEnter}
+                  type="button"
+                >
+                  {paused ? (
+                    <Play className="h-4 w-4" />
+                  ) : (
+                    <Pause className="h-4 w-4" />
+                  )}
+                </button>
+              </IconMotionTrigger>
             </TooltipTrigger>
             <TooltipContent className="z-[10020]">
               {t(paused ? "wander.play" : "wander.pause")}

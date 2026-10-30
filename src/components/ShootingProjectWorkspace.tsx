@@ -3,13 +3,10 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Check,
-  Copy,
   Eye,
   FolderSync,
   Info,
   ListChecks,
-  RefreshCw,
-  Swords,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -22,6 +19,10 @@ import { CullCurate } from "@/components/CullCurate";
 import { CullDuel } from "@/components/CullDuel";
 import { CullResult } from "@/components/CullResult";
 import { FilterDropdown } from "@/components/filter-dropdown";
+import { Copy } from "@/components/icons/copy";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { RefreshCw } from "@/components/icons/refresh-cw";
+import { Swords } from "@/components/icons/swords";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -610,15 +611,17 @@ export function ShootingProjectWorkspace({ projectId }: { projectId: string }) {
                 }}
               />
             )}
-            <Button
-              className="h-auto min-h-8 max-w-full whitespace-normal text-xs"
-              data-testid="shooting-copy-kept"
-              disabled={!data?.counts.kept}
-              onClick={() => setCopyIds(undefined)}
-            >
-              <Copy className="h-3.5 w-3.5" />
-              {t("shootingProject.copyKept")}
-            </Button>
+            <IconMotionTrigger asChild disabled={!data?.counts.kept}>
+              <Button
+                className="h-auto min-h-8 max-w-full whitespace-normal text-xs"
+                data-testid="shooting-copy-kept"
+                disabled={!data?.counts.kept}
+                onClick={() => setCopyIds(undefined)}
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {t("shootingProject.copyKept")}
+              </Button>
+            </IconMotionTrigger>
             {outputs.tasks[0] && (
               <Button
                 className="h-auto min-h-8 max-w-full whitespace-normal text-xs"
@@ -672,20 +675,22 @@ export function ShootingProjectWorkspace({ projectId }: { projectId: string }) {
             <Eye className="h-4 w-4" />
             {t("cullProject.curateTab")}
           </Button>
-          <Button
-            aria-pressed={view === "duel"}
-            data-testid="shooting-tab-duel"
-            onClick={() => {
-              setView("duel");
-              if (!duelId) {
-                openNewRound();
-              }
-            }}
-            variant={view === "duel" ? "secondary" : "ghost"}
-          >
-            <Swords className="h-4 w-4" />
-            {t("cullProject.duelTab")}
-          </Button>
+          <IconMotionTrigger asChild>
+            <Button
+              aria-pressed={view === "duel"}
+              data-testid="shooting-tab-duel"
+              onClick={() => {
+                setView("duel");
+                if (!duelId) {
+                  openNewRound();
+                }
+              }}
+              variant={view === "duel" ? "secondary" : "ghost"}
+            >
+              <Swords className="h-4 w-4" />
+              {t("cullProject.duelTab")}
+            </Button>
+          </IconMotionTrigger>
           <Button
             aria-pressed={view === "result"}
             data-testid="shooting-tab-result"
@@ -924,10 +929,12 @@ export function ShootingProjectWorkspace({ projectId }: { projectId: string }) {
                 saving={workspace.saveStatus === "saving"}
               />
             )}
-            <Button onClick={() => workspace.refresh(true)} variant="outline">
-              <RefreshCw className="h-4 w-4" />
-              {t("shootingProject.checkSource")}
-            </Button>
+            <IconMotionTrigger asChild>
+              <Button onClick={() => workspace.refresh(true)} variant="outline">
+                <RefreshCw className="h-4 w-4" />
+                {t("shootingProject.checkSource")}
+              </Button>
+            </IconMotionTrigger>
           </DialogContent>
         </Dialog>
         <Dialog onOpenChange={setOutputsOpen} open={outputsOpen}>

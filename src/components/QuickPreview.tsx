@@ -1,7 +1,7 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/noNoninteractiveElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: scoped component lint cleanup preserves existing UI behavior
-import { ArrowLeft, ArrowRight, Expand, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, X } from "lucide-react";
 import {
   type MouseEvent,
   useCallback,
@@ -11,6 +11,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { Expand } from "@/components/icons/expand";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
 import {
   PreviewContextMenu,
   type PreviewMenuState,
@@ -315,15 +317,17 @@ function PreviewControl({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          aria-label={label}
-          className="flex h-8 w-8 items-center justify-center rounded-md bg-white/10 text-white/90 hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-white disabled:opacity-30"
-          disabled={disabled}
-          onClick={onClick}
-          type="button"
-        >
-          {children}
-        </button>
+        <IconMotionTrigger asChild disabled={disabled}>
+          <button
+            aria-label={label}
+            className="flex h-8 w-8 items-center justify-center rounded-md bg-white/10 text-white/90 hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-white disabled:opacity-30"
+            disabled={disabled}
+            onClick={onClick}
+            type="button"
+          >
+            {children}
+          </button>
+        </IconMotionTrigger>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>

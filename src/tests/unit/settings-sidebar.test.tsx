@@ -44,4 +44,18 @@ describe("SettingsSidebar", () => {
       state: { cullSettingsReturn: true },
     });
   });
+
+  it("uses the connect icon for plugins and preserves navigation state", () => {
+    render(<SettingsSidebar />);
+    const control = screen.getByRole("button", { name: "settingsPlugins" });
+    const icon = control.querySelector("svg");
+    expect(icon).toHaveAttribute("data-animated-icon", "connect");
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+    expect(icon?.querySelectorAll("path")).toHaveLength(6);
+    fireEvent.click(control);
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/settings/plugins",
+      state: { cullSettingsReturn: true },
+    });
+  });
 });

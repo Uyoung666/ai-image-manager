@@ -331,7 +331,13 @@ describe("Sidebar", () => {
   it("opens folder shortcuts from the collapsed navigation rail", () => {
     render(<Sidebar {...baseProps} collapsed />);
 
-    fireEvent.click(screen.getByRole("button", { name: "文件夹快捷入口" }));
+    const shortcut = screen.getByRole("button", { name: "文件夹快捷入口" });
+    expect(shortcut.querySelector("svg")).toHaveAttribute(
+      "data-animated-icon",
+      "folders"
+    );
+    expect(shortcut.querySelectorAll("path")).toHaveLength(2);
+    fireEvent.click(shortcut);
 
     expect(
       screen.getByText("暂无快捷文件夹。展开侧边栏后，可右键文件夹将其置顶。")
@@ -916,7 +922,12 @@ describe("Sidebar", () => {
 
   it("has dashboard and settings links", () => {
     render(<Sidebar {...baseProps} />);
-    expect(screen.getByRole("button", { name: "仪表盘" })).toBeInTheDocument();
+    const dashboard = screen.getByRole("button", { name: "仪表盘" });
+    expect(dashboard.querySelector("svg")).toHaveAttribute(
+      "data-animated-icon",
+      "chart-line"
+    );
+    expect(dashboard.querySelectorAll("path")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
   });
 

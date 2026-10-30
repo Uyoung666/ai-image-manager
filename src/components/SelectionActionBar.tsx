@@ -1,22 +1,19 @@
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
-import {
-  CheckCheck,
-  CloudUpload,
-  Download,
-  Ellipsis,
-  FolderPlus,
-  Heart,
-  ImageIcon,
-  Pencil,
-  Share2,
-  Swords,
-  Tags,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Ellipsis, ImageIcon, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BatchTagDialog } from "@/components/BatchTagDialog";
+import { CheckCheck } from "@/components/icons/check-check";
+import { CloudUpload } from "@/components/icons/cloud-upload";
+import { Download } from "@/components/icons/download";
+import { FavoriteIcon as Star } from "@/components/icons/favorite-icon";
+import { FolderPlus } from "@/components/icons/folder-plus";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Pencil } from "@/components/icons/pencil";
+import { Share2 } from "@/components/icons/share-2";
+import { Swords } from "@/components/icons/swords";
+import { Tags } from "@/components/icons/tags";
+import { Trash2 } from "@/components/icons/trash-2";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   Popover,
@@ -219,10 +216,7 @@ export function SelectionActionBar({
               disabled={executing !== null}
               executing={executing === "favorite"}
               icon={
-                <Heart
-                  className={allFavorite ? "fill-current" : ""}
-                  size={18}
-                />
+                <Star className={allFavorite ? "fill-current" : ""} size={18} />
               }
               label={allFavorite ? t("unfavorite") : t("favorite")}
               onClick={wrapAction("favorite", onToggleFavorite)}
@@ -430,17 +424,19 @@ function MoreAction({
   onClick: () => void;
 }) {
   const action = (
-    <button
-      className="selection-more-menu-item"
-      disabled={disabled}
-      onClick={onClick}
-      type="button"
-    >
-      <span className="selection-more-menu-icon">
-        {executing ? <LoadingSpinner size="sm" variant="inherit" /> : icon}
-      </span>
-      <span className="min-w-0 truncate">{label}</span>
-    </button>
+    <IconMotionTrigger asChild busy={executing} disabled={disabled}>
+      <button
+        className="selection-more-menu-item"
+        disabled={disabled}
+        onClick={onClick}
+        type="button"
+      >
+        <span className="selection-more-menu-icon">
+          {executing ? <LoadingSpinner size="sm" variant="inherit" /> : icon}
+        </span>
+        <span className="min-w-0 truncate">{label}</span>
+      </button>
+    </IconMotionTrigger>
   );
 
   if (!disabledReason) {
@@ -493,18 +489,24 @@ function MenuAction({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          aria-label={label}
-          className={className}
-          disabled={disabled}
-          onClick={onClick}
-          type="button"
-        >
-          <span className="selection-menu-icon">
-            {executing ? <LoadingSpinner size="sm" variant="inherit" /> : icon}
-          </span>
-          <span className="selection-menu-title">{shortLabel ?? label}</span>
-        </button>
+        <IconMotionTrigger asChild busy={executing} disabled={disabled}>
+          <button
+            aria-label={label}
+            className={className}
+            disabled={disabled}
+            onClick={onClick}
+            type="button"
+          >
+            <span className="selection-menu-icon">
+              {executing ? (
+                <LoadingSpinner size="sm" variant="inherit" />
+              ) : (
+                icon
+              )}
+            </span>
+            <span className="selection-menu-title">{shortLabel ?? label}</span>
+          </button>
+        </IconMotionTrigger>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>

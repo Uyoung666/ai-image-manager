@@ -5,7 +5,6 @@ import { Command } from "cmdk";
 import {
   Album,
   FileImage,
-  LayoutDashboard,
   ScanSearch,
   Search,
   Settings,
@@ -19,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AiIndexRebuildNotice } from "@/components/AiIndexRebuildNotice";
+import { ChartLineIcon } from "@/components/icons/chart-line";
 import { filterSettingsNavigationItems } from "@/components/settings/SettingsSidebar";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SmoothCaret } from "@/components/ui/smooth-input";
@@ -299,7 +299,7 @@ export function SpotlightSearch() {
       id: "nav-dashboard",
       title: t("spotlightDashboardTitle"),
       subtitle: t("spotlightDashboardSubtitle"),
-      icon: <LayoutDashboard className="h-4 w-4" />,
+      icon: <ChartLineIcon className="h-4 w-4" />,
       action: () => navigate({ to: "/dashboard" }),
       group: t("spotlightNavigationGroup"),
     },

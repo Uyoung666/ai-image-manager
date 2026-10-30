@@ -1,15 +1,13 @@
-import {
-  ArrowRight,
-  Copy,
-  FolderOpen,
-  MoreHorizontal,
-  Pencil,
-  Swords,
-  Trash2,
-} from "lucide-react";
+import { ArrowRight, MoreHorizontal } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CullArchiveButton } from "@/components/CullArchiveButton";
+import { Copy } from "@/components/icons/copy";
+import { FolderOpen } from "@/components/icons/folder-open";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Pencil } from "@/components/icons/pencil";
+import { Swords } from "@/components/icons/swords";
+import { Trash2 } from "@/components/icons/trash-2";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -179,95 +177,99 @@ export function CullTaskCard({
       >
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
-              aria-label={t("cullProject.archive.openTask", {
-                name: task.name,
-              })}
-              className="flex h-full min-h-[208px] w-full min-w-0 flex-1 flex-col gap-2 rounded-lg p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={onOpen}
-              type="button"
-            >
-              <span className="line-clamp-2 min-h-10 w-full break-words pr-16 font-medium text-foreground text-sm [overflow-wrap:anywhere]">
-                {task.name}
-              </span>
-              <span className="flex w-full min-w-0 items-start gap-1.5 text-muted-foreground text-xs">
-                <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-                <span className="min-w-0 break-words">
-                  {t(
-                    task.kind === "project"
-                      ? "cullProject.folderSource"
-                      : "cullProject.fromLibrary"
-                  )}{" "}
-                  · {t(`cullProject.workflow_${task.workflow}`)}
-                </span>
-              </span>
-              <span className="text-muted-foreground text-xs">
-                {t("cullProject.task.counts", {
-                  count: task.photoCount,
-                  kept: task.keptCount,
+            <IconMotionTrigger asChild>
+              <button
+                aria-label={t("cullProject.archive.openTask", {
+                  name: task.name,
                 })}
-              </span>
-              <span className="flex w-full min-w-0 flex-col gap-1.5">
-                {task.photoCount > 0 ? (
-                  task.stages.map((item) => (
-                    <StageSummary key={item.mode} stage={item} task={task} />
-                  ))
-                ) : (
-                  <span className="text-muted-foreground text-xs">
-                    {t("cullProject.task.noPhotos")}
-                  </span>
-                )}
-                <TaskWarnings task={task} />
-                {task.outputStatus && (
-                  <span
-                    className="text-muted-foreground text-xs"
-                    data-testid="cull-task-output-status"
-                  >
-                    {t("cullProject.outputTasks")} ·{" "}
-                    {t(`shootingProject.outputStatus_${task.outputStatus}`)}
-                  </span>
-                )}
-                {task.photoCount > 0 && stage && (
-                  <>
-                    {stage.mode === "duel" && stage.status === "active" && (
-                      <span className="text-muted-foreground text-xs">
-                        {t("cullProject.task.estimated", { percent: progress })}
-                      </span>
-                    )}
-                    <span
-                      aria-label={t("cullProject.task.progress")}
-                      aria-valuemax={100}
-                      aria-valuemin={0}
-                      aria-valuenow={progress}
-                      aria-valuetext={t(
-                        stage.mode === "duel" && stage.status === "active"
-                          ? "cullProject.task.estimated"
-                          : "cullProject.task.percent",
-                        { percent: progress }
-                      )}
-                      className="block h-1 w-full overflow-hidden rounded-full bg-muted"
-                      role="progressbar"
-                    >
-                      <span
-                        className="block h-full rounded-full bg-primary transition-all duration-300"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </span>
-                  </>
-                )}
-              </span>
-              <span className="mt-auto flex w-full min-w-0 flex-wrap items-center justify-between gap-2 pt-2 text-muted-foreground text-xs">
-                <span>{t("cullProject.task.created", { date })}</span>
-                <span className="inline-flex items-center gap-1 text-primary">
-                  {t(
-                    canViewResults
-                      ? "cullProject.task.openResults"
-                      : "cullProject.task.continue"
-                  )}
-                  <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
+                className="flex h-full min-h-[208px] w-full min-w-0 flex-1 flex-col gap-2 rounded-lg p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={onOpen}
+                type="button"
+              >
+                <span className="line-clamp-2 min-h-10 w-full break-words pr-16 font-medium text-foreground text-sm [overflow-wrap:anywhere]">
+                  {task.name}
                 </span>
-              </span>
-            </button>
+                <span className="flex w-full min-w-0 items-start gap-1.5 text-muted-foreground text-xs">
+                  <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                  <span className="min-w-0 break-words">
+                    {t(
+                      task.kind === "project"
+                        ? "cullProject.folderSource"
+                        : "cullProject.fromLibrary"
+                    )}{" "}
+                    · {t(`cullProject.workflow_${task.workflow}`)}
+                  </span>
+                </span>
+                <span className="text-muted-foreground text-xs">
+                  {t("cullProject.task.counts", {
+                    count: task.photoCount,
+                    kept: task.keptCount,
+                  })}
+                </span>
+                <span className="flex w-full min-w-0 flex-col gap-1.5">
+                  {task.photoCount > 0 ? (
+                    task.stages.map((item) => (
+                      <StageSummary key={item.mode} stage={item} task={task} />
+                    ))
+                  ) : (
+                    <span className="text-muted-foreground text-xs">
+                      {t("cullProject.task.noPhotos")}
+                    </span>
+                  )}
+                  <TaskWarnings task={task} />
+                  {task.outputStatus && (
+                    <span
+                      className="text-muted-foreground text-xs"
+                      data-testid="cull-task-output-status"
+                    >
+                      {t("cullProject.outputTasks")} ·{" "}
+                      {t(`shootingProject.outputStatus_${task.outputStatus}`)}
+                    </span>
+                  )}
+                  {task.photoCount > 0 && stage && (
+                    <>
+                      {stage.mode === "duel" && stage.status === "active" && (
+                        <span className="text-muted-foreground text-xs">
+                          {t("cullProject.task.estimated", {
+                            percent: progress,
+                          })}
+                        </span>
+                      )}
+                      <span
+                        aria-label={t("cullProject.task.progress")}
+                        aria-valuemax={100}
+                        aria-valuemin={0}
+                        aria-valuenow={progress}
+                        aria-valuetext={t(
+                          stage.mode === "duel" && stage.status === "active"
+                            ? "cullProject.task.estimated"
+                            : "cullProject.task.percent",
+                          { percent: progress }
+                        )}
+                        className="block h-1 w-full overflow-hidden rounded-full bg-muted"
+                        role="progressbar"
+                      >
+                        <span
+                          className="block h-full rounded-full bg-primary transition-all duration-300"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </span>
+                    </>
+                  )}
+                </span>
+                <span className="mt-auto flex w-full min-w-0 flex-wrap items-center justify-between gap-2 pt-2 text-muted-foreground text-xs">
+                  <span>{t("cullProject.task.created", { date })}</span>
+                  <span className="inline-flex items-center gap-1 text-primary">
+                    {t(
+                      canViewResults
+                        ? "cullProject.task.openResults"
+                        : "cullProject.task.continue"
+                    )}
+                    <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
+                  </span>
+                </span>
+              </button>
+            </IconMotionTrigger>
           </TooltipTrigger>
           <TooltipContent className="max-w-[calc(100dvw-2rem)] break-words">
             {task.name}

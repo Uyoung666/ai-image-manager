@@ -84,6 +84,7 @@
     "leaflet": "^1.9.4",
     "lru-cache": "^11.1.0",
     "lucide-react": "^1.16.0",
+    "motion": "^12.43.0",
     "onnxruntime-node": "^1.26.0",
     "p-queue": "^8.1.1",
     "pino": "^10.3.1",

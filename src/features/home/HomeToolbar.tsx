@@ -1,6 +1,8 @@
-import { ArrowLeft, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import type { ComponentProps, Ref } from "react";
 import { useTranslation } from "react-i18next";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { SlidersHorizontal } from "@/components/icons/sliders-horizontal";
 import {
   GRID_COLUMN_WIDTH_MAX,
   GRID_COLUMN_WIDTH_MIN,
@@ -222,16 +224,18 @@ export function HomeToolbar({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <PopoverTrigger asChild>
-                    <button
-                      aria-label={t("galleryViewOptions")}
-                      className="home-grid-size-trigger h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-                      type="button"
-                    >
-                      <SlidersHorizontal
-                        aria-hidden="true"
-                        className="h-4 w-4"
-                      />
-                    </button>
+                    <IconMotionTrigger asChild>
+                      <button
+                        aria-label={t("galleryViewOptions")}
+                        className="home-grid-size-trigger h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                        type="button"
+                      >
+                        <SlidersHorizontal
+                          aria-hidden="true"
+                          className="h-4 w-4"
+                        />
+                      </button>
+                    </IconMotionTrigger>
                   </PopoverTrigger>
                 </TooltipTrigger>
                 <TooltipContent>{t("galleryViewOptions")}</TooltipContent>

@@ -1,8 +1,11 @@
-import { Copy, FolderOpen, Image } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { Copy } from "@/components/icons/copy";
+import { FolderOpen } from "@/components/icons/folder-open";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Image } from "@/components/icons/image";
 
 interface PreviewMenuState {
   open: boolean;
@@ -108,64 +111,70 @@ export function PreviewContextMenu({
       ref={ref}
       style={{ ...position, zIndex: 99_999 }}
     >
-      <button
-        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
-        disabled={!menu.photoPath}
-        onClick={async () => {
-          if (menu.photoPath) {
-            try {
-              const ok = await window.electronAPI?.copyImageToClipboard?.(
-                menu.photoPath
-              );
-              if (ok) {
-                toast.success(t("imageCopiedToClipboard"));
-              } else {
+      <IconMotionTrigger asChild disabled={!menu.photoPath}>
+        <button
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
+          disabled={!menu.photoPath}
+          onClick={async () => {
+            if (menu.photoPath) {
+              try {
+                const ok = await window.electronAPI?.copyImageToClipboard?.(
+                  menu.photoPath
+                );
+                if (ok) {
+                  toast.success(t("imageCopiedToClipboard"));
+                } else {
+                  toast.error(t("copyFailed"));
+                }
+              } catch {
                 toast.error(t("copyFailed"));
               }
-            } catch {
-              toast.error(t("copyFailed"));
             }
-          }
-          onClose();
-        }}
-        type="button"
-      >
-        <Image className="h-3.5 w-3.5 flex-shrink-0" />
-        {t("copyImage")}
-      </button>
-      <button
-        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
-        disabled={!menu.photoPath}
-        onClick={async () => {
-          if (menu.photoPath) {
-            try {
-              await navigator.clipboard.writeText(menu.photoPath);
-              toast.success(t("pathCopied"));
-            } catch {
-              toast.error(t("copyFailed"));
+            onClose();
+          }}
+          type="button"
+        >
+          <Image className="h-3.5 w-3.5 flex-shrink-0" />
+          {t("copyImage")}
+        </button>
+      </IconMotionTrigger>
+      <IconMotionTrigger asChild disabled={!menu.photoPath}>
+        <button
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
+          disabled={!menu.photoPath}
+          onClick={async () => {
+            if (menu.photoPath) {
+              try {
+                await navigator.clipboard.writeText(menu.photoPath);
+                toast.success(t("pathCopied"));
+              } catch {
+                toast.error(t("copyFailed"));
+              }
             }
-          }
-          onClose();
-        }}
-        type="button"
-      >
-        <Copy className="h-3.5 w-3.5 flex-shrink-0" />
-        {t("copyPath")}
-      </button>
-      <button
-        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
-        disabled={!menu.photoPath}
-        onClick={() => {
-          if (menu.photoPath) {
-            onOpenExplorer(menu.photoPath);
-          }
-          onClose();
-        }}
-        type="button"
-      >
-        <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
-        {t("openInExplorer")}
-      </button>
+            onClose();
+          }}
+          type="button"
+        >
+          <Copy className="h-3.5 w-3.5 flex-shrink-0" />
+          {t("copyPath")}
+        </button>
+      </IconMotionTrigger>
+      <IconMotionTrigger asChild disabled={!menu.photoPath}>
+        <button
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
+          disabled={!menu.photoPath}
+          onClick={() => {
+            if (menu.photoPath) {
+              onOpenExplorer(menu.photoPath);
+            }
+            onClose();
+          }}
+          type="button"
+        >
+          <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
+          {t("openInExplorer")}
+        </button>
+      </IconMotionTrigger>
     </div>,
     document.body
   );

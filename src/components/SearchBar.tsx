@@ -4,7 +4,7 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/correctness/noUnusedFunctionParameters: scoped component lint cleanup preserves existing UI behavior
 import { useNavigate } from "@tanstack/react-router";
-import { Filter, ImageUp, Search, X } from "lucide-react";
+import { X } from "lucide-react";
 import {
   type Dispatch,
   forwardRef,
@@ -24,6 +24,10 @@ import type {
 } from "@/actions/search-presets";
 import { AiIndexRebuildNotice } from "@/components/AiIndexRebuildNotice";
 import { FilterPresets } from "@/components/FilterPresets";
+import { Filter } from "@/components/icons/funnel";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { ImageUp } from "@/components/icons/image-up";
+import { Search } from "@/components/icons/search";
 import { SmoothInput } from "@/components/ui/smooth-input";
 import {
   Tooltip,
@@ -759,43 +763,45 @@ export const SearchBar = memo(
                 {imageSearchActive && imageSearchReference ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <button
-                        aria-label={t("imageSearchReferenceHint", {
-                          filename: imageSearchFileName,
-                        })}
-                        className="home-image-search-reference home-search-input is-active flex h-9 w-full min-w-0 items-center gap-2 rounded-[6px] border border-border pr-10 pl-1.5 text-left text-[14px] text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-ring"
-                        data-surface="control"
-                        onClick={() => fileInputRef.current?.click()}
-                        type="button"
-                      >
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-[4px] bg-foreground/5 text-muted-foreground">
-                          {imageSearchReference.previewDataUrl &&
-                          failedImagePreviewUrl !==
-                            imageSearchReference.previewDataUrl ? (
-                            <img
-                              alt=""
-                              aria-hidden="true"
-                              className="h-full w-full object-cover"
-                              height={28}
-                              onError={() =>
-                                setFailedImagePreviewUrl(
-                                  imageSearchReference.previewDataUrl
-                                )
-                              }
-                              src={imageSearchReference.previewDataUrl}
-                              width={28}
-                            />
-                          ) : (
-                            <ImageUp aria-hidden="true" className="h-4 w-4" />
-                          )}
-                        </span>
-                        <span className="home-image-search-reference-label text-[11px] text-muted-foreground">
-                          {t("searchModeImage")}
-                        </span>
-                        <span className="home-image-search-reference-name min-w-0 truncate font-medium">
-                          {imageSearchFileName}
-                        </span>
-                      </button>
+                      <IconMotionTrigger asChild>
+                        <button
+                          aria-label={t("imageSearchReferenceHint", {
+                            filename: imageSearchFileName,
+                          })}
+                          className="home-image-search-reference home-search-input is-active flex h-9 w-full min-w-0 items-center gap-2 rounded-[6px] border border-border pr-10 pl-1.5 text-left text-[14px] text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-ring"
+                          data-surface="control"
+                          onClick={() => fileInputRef.current?.click()}
+                          type="button"
+                        >
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-[4px] bg-foreground/5 text-muted-foreground">
+                            {imageSearchReference.previewDataUrl &&
+                            failedImagePreviewUrl !==
+                              imageSearchReference.previewDataUrl ? (
+                              <img
+                                alt=""
+                                aria-hidden="true"
+                                className="h-full w-full object-cover"
+                                height={28}
+                                onError={() =>
+                                  setFailedImagePreviewUrl(
+                                    imageSearchReference.previewDataUrl
+                                  )
+                                }
+                                src={imageSearchReference.previewDataUrl}
+                                width={28}
+                              />
+                            ) : (
+                              <ImageUp aria-hidden="true" className="h-4 w-4" />
+                            )}
+                          </span>
+                          <span className="home-image-search-reference-label text-[11px] text-muted-foreground">
+                            {t("searchModeImage")}
+                          </span>
+                          <span className="home-image-search-reference-name min-w-0 truncate font-medium">
+                            {imageSearchFileName}
+                          </span>
+                        </button>
+                      </IconMotionTrigger>
                     </TooltipTrigger>
                     <TooltipContent>
                       {t("imageSearchReferenceHint", {
@@ -805,16 +811,18 @@ export const SearchBar = memo(
                   </Tooltip>
                 ) : (
                   <>
-                    <span
-                      aria-hidden="true"
-                      className="pointer-events-none absolute inset-y-0 left-0 z-[100] flex w-9 items-center justify-center"
-                      style={{
-                        color: "var(--muted-foreground)",
-                        zIndex: 100,
-                      }}
-                    >
-                      <Search className="h-4 w-4 shrink-0" strokeWidth={2} />
-                    </span>
+                    <IconMotionTrigger active={inputFocused} asChild>
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-y-0 left-0 z-[100] flex w-9 items-center justify-center"
+                        style={{
+                          color: "var(--muted-foreground)",
+                          zIndex: 100,
+                        }}
+                      >
+                        <Search className="h-4 w-4 shrink-0" strokeWidth={2} />
+                      </span>
+                    </IconMotionTrigger>
                     <SmoothInput
                       aria-activedescendant={
                         suggestionIndex >= 0
@@ -925,21 +933,23 @@ export const SearchBar = memo(
                   />
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <button
-                        aria-label={t("searchModeImage")}
-                        className={`flex h-9 items-center justify-center gap-1.5 rounded-[6px] px-2.5 text-[12px] transition-colors ${
-                          imageSearchActive
-                            ? "bg-primary/10 text-primary"
-                            : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-                        }`}
-                        onClick={() => fileInputRef.current?.click()}
-                        type="button"
-                      >
-                        <ImageUp className="h-4 w-4" />
-                        <span className="home-image-search-label">
-                          {t("searchModeImage")}
-                        </span>
-                      </button>
+                      <IconMotionTrigger asChild>
+                        <button
+                          aria-label={t("searchModeImage")}
+                          className={`flex h-9 items-center justify-center gap-1.5 rounded-[6px] px-2.5 text-[12px] transition-colors ${
+                            imageSearchActive
+                              ? "bg-primary/10 text-primary"
+                              : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+                          }`}
+                          onClick={() => fileInputRef.current?.click()}
+                          type="button"
+                        >
+                          <ImageUp className="h-4 w-4" />
+                          <span className="home-image-search-label">
+                            {t("searchModeImage")}
+                          </span>
+                        </button>
+                      </IconMotionTrigger>
                     </TooltipTrigger>
                     <TooltipContent>{t("imageSearchTitle")}</TooltipContent>
                   </Tooltip>
@@ -947,33 +957,35 @@ export const SearchBar = memo(
               )}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
-                    aria-expanded={showFilters}
-                    aria-label={t("exifFilterTitle")}
-                    className={`flex h-9 flex-shrink-0 items-center justify-center gap-1 rounded-[6px] px-2 transition-colors ${
-                      showFilters || hasActiveFilters
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-                    }`}
-                    onClick={() => {
-                      setShowFilters((prev) => {
-                        const next = !prev;
-                        if (next) {
-                          setShowSuggestions(false);
-                          setSuggestionIndex(-1);
-                        }
-                        return next;
-                      });
-                    }}
-                    type="button"
-                  >
-                    <Filter className="h-4 w-4" />
-                    {hasActiveFilters && (
-                      <span className="home-filter-summary whitespace-nowrap text-[10px]">
-                        {t("exifFilterTitle")} · {activeFilterCount}
-                      </span>
-                    )}
-                  </button>
+                  <IconMotionTrigger asChild>
+                    <button
+                      aria-expanded={showFilters}
+                      aria-label={t("exifFilterTitle")}
+                      className={`flex h-9 flex-shrink-0 items-center justify-center gap-1 rounded-[6px] px-2 transition-colors ${
+                        showFilters || hasActiveFilters
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+                      }`}
+                      onClick={() => {
+                        setShowFilters((prev) => {
+                          const next = !prev;
+                          if (next) {
+                            setShowSuggestions(false);
+                            setSuggestionIndex(-1);
+                          }
+                          return next;
+                        });
+                      }}
+                      type="button"
+                    >
+                      <Filter className="h-4 w-4" />
+                      {hasActiveFilters && (
+                        <span className="home-filter-summary whitespace-nowrap text-[10px]">
+                          {t("exifFilterTitle")} · {activeFilterCount}
+                        </span>
+                      )}
+                    </button>
+                  </IconMotionTrigger>
                 </TooltipTrigger>
                 <TooltipContent>{t("exifFilterTitle")}</TooltipContent>
               </Tooltip>

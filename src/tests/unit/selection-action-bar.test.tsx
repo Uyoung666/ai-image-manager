@@ -42,6 +42,33 @@ function renderSelectionActionBar(
 }
 
 describe("SelectionActionBar", () => {
+  it("uses a star for batch favorites and preserves its selected state and action", async () => {
+    const favorite = vi.fn();
+    const view = render(
+      <SelectionActionBar
+        allFavorite={false}
+        onClearSelection={vi.fn()}
+        onToggleFavorite={favorite}
+        selectedCount={2}
+      />
+    );
+    const control = screen.getByRole("button", { name: "favorite" });
+    expect(control.querySelector("[data-favorite-icon]")).toBeInTheDocument();
+    expect(control.querySelector(".lucide-heart")).toBeNull();
+    fireEvent.click(control);
+    await waitFor(() => expect(favorite).toHaveBeenCalledTimes(1));
+    view.rerender(
+      <SelectionActionBar
+        allFavorite
+        onClearSelection={vi.fn()}
+        onToggleFavorite={favorite}
+        selectedCount={2}
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: "unfavorite" }).querySelector("svg")
+    ).toHaveClass("fill-current");
+  });
   beforeEach(() => {
     resizeObserved.mockClear();
     vi.stubGlobal(

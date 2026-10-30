@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -13,6 +13,10 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DuplicateCleanupBatches } from "@/components/duplicate-cleanup-batches";
 import { FilterDropdown } from "@/components/filter-dropdown";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { RotateCcw } from "@/components/icons/rotate-ccw";
+import { Search } from "@/components/icons/search";
+import { Trash2 } from "@/components/icons/trash-2";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import { RouteError } from "@/components/RouteError";
 import {
@@ -832,111 +836,113 @@ function TrashPage() {
         ? formatBytes(photo.fileSize)
         : formatTimeAgo(photo.deletedAt);
     return (
-      <button
-        aria-label={photo.filename}
-        aria-pressed={selectedIds.has(photo.id)}
-        className={`group relative cursor-pointer overflow-hidden rounded-[10px] border bg-card text-left transition-[border-color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-          selectedIds.has(photo.id)
-            ? "border-primary bg-primary/[0.02] shadow-sm"
-            : "border-border hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-md"
-        }`}
-        data-photo-id={photo.id}
-        data-photo-path={photo.path}
-        key={photo.id}
-        onClick={(event) => toggleSelect(photo.id, event)}
-        onContextMenu={handleContextMenu}
-        onDoubleClick={() => setPreviewPhoto(photo)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            handleKeyboardSelect(photo.id);
-          }
-        }}
-        style={{
-          containIntrinsicSize: "240px",
-          contentVisibility: "auto",
-        }}
-        tabIndex={0}
-        type="button"
-      >
-        <div className="relative aspect-square bg-card">
-          <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/30">
-            <Trash2 className="h-8 w-8" />
-          </div>
-          {photo.thumbnailPath && (
-            // biome-ignore lint/a11y/noNoninteractiveElementInteractions: image error handling only swaps to a non-interactive fallback
-            <img
-              alt={photo.filename}
-              className="relative z-[1] h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.015] motion-reduce:transform-none"
-              decoding="async"
-              height={photo.height ?? 160}
-              loading="lazy"
-              onError={(event) => {
-                event.currentTarget.hidden = true;
-              }}
-              src={toLocalMediaUrl(photo.thumbnailPath)}
-              width={photo.width ?? 160}
-            />
-          )}
-          {remaining <= 3 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="absolute top-2 right-2 z-[2] rounded-full bg-destructive/90 px-2 py-0.5 font-medium text-[10px] text-white shadow-sm backdrop-blur-sm">
-                  {remaining === 0
-                    ? t("trashMoveToday")
-                    : t("trashMoveAfterDays", { count: remaining })}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {t("trashExpiresAt", { date: expiryDate(photo.deletedAt) })}
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-        <div className="min-h-[54px] px-2.5 py-2">
-          <p className="truncate font-medium text-[12px] text-foreground leading-5">
-            {photo.filename}
-          </p>
-          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/75 leading-4">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="min-w-0 truncate">
-                  {photo.folderName ?? t("originalFolderRemoved")}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {photo.folderName ?? t("originalFolderRemoved")}
-              </TooltipContent>
-            </Tooltip>
-            <span className="shrink-0">{secondaryMeta}</span>
-          </div>
-        </div>
-        <div
-          aria-hidden="true"
-          className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all ${
+      <IconMotionTrigger asChild>
+        <button
+          aria-label={photo.filename}
+          aria-pressed={selectedIds.has(photo.id)}
+          className={`group relative cursor-pointer overflow-hidden rounded-[10px] border bg-card text-left transition-[border-color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
             selectedIds.has(photo.id)
-              ? "border-primary bg-primary text-white"
-              : "border-white/80 bg-black/20 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+              ? "border-primary bg-primary/[0.02] shadow-sm"
+              : "border-border hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-md"
           }`}
+          data-photo-id={photo.id}
+          data-photo-path={photo.path}
+          key={photo.id}
+          onClick={(event) => toggleSelect(photo.id, event)}
+          onContextMenu={handleContextMenu}
+          onDoubleClick={() => setPreviewPhoto(photo)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              handleKeyboardSelect(photo.id);
+            }
+          }}
+          style={{
+            containIntrinsicSize: "240px",
+            contentVisibility: "auto",
+          }}
+          tabIndex={0}
+          type="button"
         >
-          {selectedIds.has(photo.id) && (
-            <svg
-              aria-hidden="true"
-              className="h-3 w-3"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                d="M5 13l4 4L19 7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={3}
+          <div className="relative aspect-square bg-card">
+            <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/30">
+              <Trash2 className="h-8 w-8" />
+            </div>
+            {photo.thumbnailPath && (
+              // biome-ignore lint/a11y/noNoninteractiveElementInteractions: image error handling only swaps to a non-interactive fallback
+              <img
+                alt={photo.filename}
+                className="relative z-[1] h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.015] motion-reduce:transform-none"
+                decoding="async"
+                height={photo.height ?? 160}
+                loading="lazy"
+                onError={(event) => {
+                  event.currentTarget.hidden = true;
+                }}
+                src={toLocalMediaUrl(photo.thumbnailPath)}
+                width={photo.width ?? 160}
               />
-            </svg>
-          )}
-        </div>
-      </button>
+            )}
+            {remaining <= 3 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="absolute top-2 right-2 z-[2] rounded-full bg-destructive/90 px-2 py-0.5 font-medium text-[10px] text-white shadow-sm backdrop-blur-sm">
+                    {remaining === 0
+                      ? t("trashMoveToday")
+                      : t("trashMoveAfterDays", { count: remaining })}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {t("trashExpiresAt", { date: expiryDate(photo.deletedAt) })}
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+          <div className="min-h-[54px] px-2.5 py-2">
+            <p className="truncate font-medium text-[12px] text-foreground leading-5">
+              {photo.filename}
+            </p>
+            <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/75 leading-4">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="min-w-0 truncate">
+                    {photo.folderName ?? t("originalFolderRemoved")}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {photo.folderName ?? t("originalFolderRemoved")}
+                </TooltipContent>
+              </Tooltip>
+              <span className="shrink-0">{secondaryMeta}</span>
+            </div>
+          </div>
+          <div
+            aria-hidden="true"
+            className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all ${
+              selectedIds.has(photo.id)
+                ? "border-primary bg-primary text-white"
+                : "border-white/80 bg-black/20 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+            }`}
+          >
+            {selectedIds.has(photo.id) && (
+              <svg
+                aria-hidden="true"
+                className="h-3 w-3"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  d="M5 13l4 4L19 7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={3}
+                />
+              </svg>
+            )}
+          </div>
+        </button>
+      </IconMotionTrigger>
     );
   }
 
@@ -1090,24 +1096,28 @@ function TrashPage() {
         <div className="flex flex-wrap items-center justify-end gap-2">
           {selectedIds.size > 0 && (
             <>
-              <button
-                className="flex items-center gap-1.5 rounded-[6px] bg-primary/10 px-3 py-1.5 text-[13px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
-                disabled={operationRunning}
-                onClick={handleRestore}
-                type="button"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {t("restoreCount", { count: selectedIds.size })}
-              </button>
-              <button
-                className="flex items-center gap-1.5 rounded-[6px] bg-destructive/10 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
-                disabled={operationRunning}
-                onClick={handlePermanentDelete}
-                type="button"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                {t("moveToSystemTrash")}
-              </button>
+              <IconMotionTrigger asChild disabled={operationRunning}>
+                <button
+                  className="flex items-center gap-1.5 rounded-[6px] bg-primary/10 px-3 py-1.5 text-[13px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                  disabled={operationRunning}
+                  onClick={handleRestore}
+                  type="button"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {t("restoreCount", { count: selectedIds.size })}
+                </button>
+              </IconMotionTrigger>
+              <IconMotionTrigger asChild disabled={operationRunning}>
+                <button
+                  className="flex items-center gap-1.5 rounded-[6px] bg-destructive/10 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
+                  disabled={operationRunning}
+                  onClick={handlePermanentDelete}
+                  type="button"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {t("moveToSystemTrash")}
+                </button>
+              </IconMotionTrigger>
             </>
           )}
           <DuplicateCleanupBatches
@@ -1375,35 +1385,51 @@ function TrashPage() {
             top: Math.max(8, Math.min(ctxMenu.y, window.innerHeight - 100)),
           }}
         >
-          <button
-            className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
+          <IconMotionTrigger
+            asChild
             disabled={
               operationRunning || (ctxMenu.photoId === null && !ctxMenu.isBatch)
             }
-            onClick={handleCtxRestore}
-            role="menuitem"
-            type="button"
           >
-            <RotateCcw className="h-3.5 w-3.5 flex-shrink-0" />
-            {ctxMenu.isBatch
-              ? `${t("restoreCount", { count: ctxMenu.selectionCount })}`
-              : t("restoreCount", { count: 1 })}
-          </button>
+            <button
+              className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
+              disabled={
+                operationRunning ||
+                (ctxMenu.photoId === null && !ctxMenu.isBatch)
+              }
+              onClick={handleCtxRestore}
+              role="menuitem"
+              type="button"
+            >
+              <RotateCcw className="h-3.5 w-3.5 flex-shrink-0" />
+              {ctxMenu.isBatch
+                ? `${t("restoreCount", { count: ctxMenu.selectionCount })}`
+                : t("restoreCount", { count: 1 })}
+            </button>
+          </IconMotionTrigger>
           <div className="my-1 h-px bg-border" />
-          <button
-            className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-destructive hover:bg-foreground/10"
+          <IconMotionTrigger
+            asChild
             disabled={
               operationRunning || (ctxMenu.photoId === null && !ctxMenu.isBatch)
             }
-            onClick={handleCtxDelete}
-            role="menuitem"
-            type="button"
           >
-            <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />
-            {ctxMenu.isBatch
-              ? `${t("moveToSystemTrash")} (${ctxMenu.selectionCount})`
-              : t("moveToSystemTrash")}
-          </button>
+            <button
+              className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-destructive hover:bg-foreground/10"
+              disabled={
+                operationRunning ||
+                (ctxMenu.photoId === null && !ctxMenu.isBatch)
+              }
+              onClick={handleCtxDelete}
+              role="menuitem"
+              type="button"
+            >
+              <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />
+              {ctxMenu.isBatch
+                ? `${t("moveToSystemTrash")} (${ctxMenu.selectionCount})`
+                : t("moveToSystemTrash")}
+            </button>
+          </IconMotionTrigger>
         </div>
       )}
 

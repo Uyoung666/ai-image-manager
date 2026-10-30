@@ -1,5 +1,14 @@
 # Third-party notices
 
+## Lucide Animated
+
+Selected icon animation designs are adapted from [pqoqubbw/icons](https://github.com/pqoqubbw/icons)
+at revision `4662fff2b60fdcf4751b32013606756caf7c4c26`. Most icons retain their
+Lucide geometry; selected navigation icons use the upstream SVG geometry.
+The host adds shared triggers, bounded timing, and reduced-motion
+support. See the bundled `licenses/Lucide-Animated-MIT.txt` for the MIT license
+and Lucide geometry notices. Motion is distributed under its MIT license.
+
 ## DSH Transparent UI Plugin
 
 The Aqua fluid shader recipe used by the built-in Nebula Glass theme is

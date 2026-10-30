@@ -12,11 +12,6 @@ import {
   EyeOff,
   FolderCog,
   Merge,
-  Pencil,
-  Play,
-  RefreshCw,
-  RotateCcw,
-  Search,
   User,
   X,
 } from "lucide-react";
@@ -35,6 +30,12 @@ import { faceActions } from "@/actions/faces";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { FaceCandidate } from "@/components/face-candidate-dialog";
 import { FaceScanScopeDialog } from "@/components/face-scan-scope-dialog";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Pencil } from "@/components/icons/pencil";
+import { Play } from "@/components/icons/play";
+import { RefreshCw } from "@/components/icons/refresh-cw";
+import { RotateCcw } from "@/components/icons/rotate-ccw";
+import { Search } from "@/components/icons/search";
 import { RouteError } from "@/components/RouteError";
 import { Button } from "@/components/ui/button";
 import {
@@ -295,18 +296,20 @@ const PersonCard = memo(function PersonCard({
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                aria-label={t("renamePerson")}
-                className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-black/65 text-white transition-colors hover:bg-primary"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onStartEdit(identity.id, identity.name);
-                }}
-                type="button"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
+              <IconMotionTrigger asChild>
+                <button
+                  aria-label={t("renamePerson")}
+                  className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-black/65 text-white transition-colors hover:bg-primary"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onStartEdit(identity.id, identity.name);
+                  }}
+                  type="button"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </IconMotionTrigger>
             </TooltipTrigger>
             <TooltipContent>{t("renamePerson")}</TooltipContent>
           </Tooltip>
@@ -824,15 +827,20 @@ export function PeoplePage() {
             </>
           ) : (
             <>
-              <Button
+              <IconMotionTrigger
+                asChild
                 disabled={detecting || isScanScopeLoading}
-                onClick={() => requestDetection(false)}
-                size="lg"
-                type="button"
               >
-                <Play className="h-3.5 w-3.5" />
-                {detecting ? t("faceDetecting") : t("scanNewPhotos")}
-              </Button>
+                <Button
+                  disabled={detecting || isScanScopeLoading}
+                  onClick={() => requestDetection(false)}
+                  size="lg"
+                  type="button"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  {detecting ? t("faceDetecting") : t("scanNewPhotos")}
+                </Button>
+              </IconMotionTrigger>
               <Popover onOpenChange={setMoreActionsOpen} open={moreActionsOpen}>
                 <PopoverTrigger asChild>
                   <Button
@@ -873,34 +881,38 @@ export function PeoplePage() {
                   {identities.length > 0 && (
                     <>
                       <div className="my-1 border-border border-t" />
-                      <button
-                        className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-foreground hover:bg-muted"
-                        onClick={() => {
-                          setMoreActionsOpen(false);
-                          requestDetection(true);
-                        }}
-                        type="button"
-                      >
-                        <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-                        {t("rescan")}
-                      </button>
+                      <IconMotionTrigger asChild>
+                        <button
+                          className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-foreground hover:bg-muted"
+                          onClick={() => {
+                            setMoreActionsOpen(false);
+                            requestDetection(true);
+                          }}
+                          type="button"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
+                          {t("rescan")}
+                        </button>
+                      </IconMotionTrigger>
                       <div className="my-1 border-border border-t" />
-                      <button
-                        className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-destructive hover:bg-destructive/10"
-                        onClick={() => {
-                          setMoreActionsOpen(false);
-                          setConfirmClearFaceData(true);
-                        }}
-                        type="button"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span className="min-w-0">
-                          <span className="block">{t("clearFaceData")}</span>
-                          <span className="mt-0.5 block whitespace-normal text-[10px] text-muted-foreground leading-4">
-                            {t("resetFaceDataMenuHint")}
+                      <IconMotionTrigger asChild>
+                        <button
+                          className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-destructive hover:bg-destructive/10"
+                          onClick={() => {
+                            setMoreActionsOpen(false);
+                            setConfirmClearFaceData(true);
+                          }}
+                          type="button"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span className="min-w-0">
+                            <span className="block">{t("clearFaceData")}</span>
+                            <span className="mt-0.5 block whitespace-normal text-[10px] text-muted-foreground leading-4">
+                              {t("resetFaceDataMenuHint")}
+                            </span>
                           </span>
-                        </span>
-                      </button>
+                        </button>
+                      </IconMotionTrigger>
                     </>
                   )}
                 </PopoverContent>

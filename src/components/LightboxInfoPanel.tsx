@@ -1,7 +1,10 @@
-import { ChevronDown, Copy, FolderOpen, X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { Copy } from "@/components/icons/copy";
+import { FolderOpen } from "@/components/icons/folder-open";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
 import {
   Tooltip,
   TooltipContent,
@@ -395,27 +398,31 @@ export function LightboxInfoPanel({
             </TooltipContent>
           </Tooltip>
           <div className="mt-2 flex flex-wrap gap-2">
-            <button
-              className="lightbox-secondary-button"
-              onClick={() => {
-                navigator.clipboard.writeText(photo.path).then(
-                  () => toast.success(t("pathCopied")),
-                  () => toast.error(t("copyFailed"))
-                );
-              }}
-              type="button"
-            >
-              <Copy className="h-3.5 w-3.5" />
-              {t("copyPath")}
-            </button>
-            <button
-              className="lightbox-secondary-button"
-              onClick={() => onOpenExplorer(photo.path)}
-              type="button"
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
-              {t("openInExplorer")}
-            </button>
+            <IconMotionTrigger asChild>
+              <button
+                className="lightbox-secondary-button"
+                onClick={() => {
+                  navigator.clipboard.writeText(photo.path).then(
+                    () => toast.success(t("pathCopied")),
+                    () => toast.error(t("copyFailed"))
+                  );
+                }}
+                type="button"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {t("copyPath")}
+              </button>
+            </IconMotionTrigger>
+            <IconMotionTrigger asChild>
+              <button
+                className="lightbox-secondary-button"
+                onClick={() => onOpenExplorer(photo.path)}
+                type="button"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                {t("openInExplorer")}
+              </button>
+            </IconMotionTrigger>
           </div>
         </InfoSection>
       </div>

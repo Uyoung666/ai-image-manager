@@ -1,5 +1,7 @@
-import { Archive, ArchiveRestore } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Archive } from "@/components/icons/archive";
+import { ArchiveRestore } from "@/components/icons/archive-restore";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -29,19 +31,21 @@ export function CullArchiveButton({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            aria-label={label}
-            data-testid={`cull-archive-${task.kind}-${task.id}`}
-            disabled={pending}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggle(task, onChanged);
-            }}
-            size="icon"
-            variant="ghost"
-          >
-            <Icon className="h-4 w-4" />
-          </Button>
+          <IconMotionTrigger asChild disabled={pending}>
+            <Button
+              aria-label={label}
+              data-testid={`cull-archive-${task.kind}-${task.id}`}
+              disabled={pending}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggle(task, onChanged);
+              }}
+              size="icon"
+              variant="ghost"
+            >
+              <Icon className="h-4 w-4" />
+            </Button>
+          </IconMotionTrigger>
         </TooltipTrigger>
         <TooltipContent>{label}</TooltipContent>
       </Tooltip>

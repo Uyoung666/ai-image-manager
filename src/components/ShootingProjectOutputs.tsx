@@ -1,8 +1,12 @@
-import { Copy, FolderOpen, Library, RefreshCw, Square } from "lucide-react";
+import { Library, Square } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openFolderDialog } from "@/actions/shell";
 import { shootingProjectActions } from "@/actions/shooting-projects";
+import { Copy } from "@/components/icons/copy";
+import { FolderOpen } from "@/components/icons/folder-open";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { RefreshCw } from "@/components/icons/refresh-cw";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -106,16 +110,18 @@ export function ShootingProjectOutputDialog({
             {t("shootingProject.outputDescription")}
           </DialogDescription>
         </DialogHeader>
-        <Button
-          data-testid="shooting-output-choose"
-          disabled={busy}
-          onClick={choose}
-          type="button"
-          variant="outline"
-        >
-          <FolderOpen />
-          {t("shootingProject.chooseOutput")}
-        </Button>
+        <IconMotionTrigger asChild disabled={busy}>
+          <Button
+            data-testid="shooting-output-choose"
+            disabled={busy}
+            onClick={choose}
+            type="button"
+            variant="outline"
+          >
+            <FolderOpen />
+            {t("shootingProject.chooseOutput")}
+          </Button>
+        </IconMotionTrigger>
         {inspection && (
           <div className="min-w-0 space-y-3">
             <p className="break-all text-xs">{inspection.targetRoot}</p>
@@ -223,16 +229,18 @@ export function ShootingProjectOutputs({
     >
       <h2 className="font-medium text-sm">{t("shootingProject.handoff")}</h2>
       <div className="flex min-w-0 flex-wrap gap-2">
-        <Button
-          className="h-auto min-h-8 max-w-full whitespace-normal"
-          data-testid="shooting-output"
-          disabled={keptCount === 0}
-          onClick={() => setOutputIds(undefined)}
-          type="button"
-        >
-          <Copy />
-          {t("shootingProject.copyKept")}
-        </Button>
+        <IconMotionTrigger asChild disabled={keptCount === 0}>
+          <Button
+            className="h-auto min-h-8 max-w-full whitespace-normal"
+            data-testid="shooting-output"
+            disabled={keptCount === 0}
+            onClick={() => setOutputIds(undefined)}
+            type="button"
+          >
+            <Copy />
+            {t("shootingProject.copyKept")}
+          </Button>
+        </IconMotionTrigger>
         <Button
           className="h-auto min-h-8 max-w-full whitespace-normal"
           data-testid="shooting-output-selected"
@@ -318,31 +326,35 @@ export function ShootingProjectOutputs({
                     {t("cancel")}
                   </Button>
                 ) : (
+                  <IconMotionTrigger asChild disabled={busyTask === task.id}>
+                    <Button
+                      data-testid="shooting-output-retry"
+                      disabled={busyTask === task.id}
+                      onClick={() => retry(task)}
+                      type="button"
+                      variant="outline"
+                    >
+                      <RefreshCw />
+                      {t(
+                        task.status === "interrupted" ||
+                          task.status === "cancelled"
+                          ? "shootingProject.resumeCopy"
+                          : "shootingProject.retryCopy"
+                      )}
+                    </Button>
+                  </IconMotionTrigger>
+                )}
+                <IconMotionTrigger asChild>
                   <Button
-                    data-testid="shooting-output-retry"
-                    disabled={busyTask === task.id}
-                    onClick={() => retry(task)}
+                    data-testid="shooting-output-open"
+                    onClick={() => openOutput(task.id)}
                     type="button"
                     variant="outline"
                   >
-                    <RefreshCw />
-                    {t(
-                      task.status === "interrupted" ||
-                        task.status === "cancelled"
-                        ? "shootingProject.resumeCopy"
-                        : "shootingProject.retryCopy"
-                    )}
+                    <FolderOpen />
+                    {t("shootingProject.openOutput")}
                   </Button>
-                )}
-                <Button
-                  data-testid="shooting-output-open"
-                  onClick={() => openOutput(task.id)}
-                  type="button"
-                  variant="outline"
-                >
-                  <FolderOpen />
-                  {t("shootingProject.openOutput")}
-                </Button>
+                </IconMotionTrigger>
               </div>
             </div>
             <progress

@@ -8,14 +8,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   CheckCircle2,
-  Download,
-  FolderPlus,
   Heart,
   LayoutGrid,
   LayoutList,
-  Star,
-  Swords,
-  Trash2,
   Undo2,
   XCircle,
 } from "lucide-react";
@@ -27,6 +22,12 @@ import { shootingProjectActions } from "@/actions/shooting-projects";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FilterDropdown } from "@/components/filter-dropdown";
+import { Download } from "@/components/icons/download";
+import { FavoriteIcon as Star } from "@/components/icons/favorite-icon";
+import { FolderPlus } from "@/components/icons/folder-plus";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Swords } from "@/components/icons/swords";
+import { Trash2 } from "@/components/icons/trash-2";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import {
   Dialog,
@@ -235,18 +236,20 @@ const CullResultCard = memo(
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
-                      aria-label={t("cullReject")}
-                      className="rounded-[4px] bg-destructive/10 p-1 text-[10px] text-destructive hover:bg-destructive/20"
-                      disabled={isUpdating}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onStatusChange(item.id, "rejected");
-                      }}
-                      type="button"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
+                    <IconMotionTrigger asChild disabled={isUpdating}>
+                      <button
+                        aria-label={t("cullReject")}
+                        className="rounded-[4px] bg-destructive/10 p-1 text-[10px] text-destructive hover:bg-destructive/20"
+                        disabled={isUpdating}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onStatusChange(item.id, "rejected");
+                        }}
+                        type="button"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </IconMotionTrigger>
                   </TooltipTrigger>
                   <TooltipContent>{t("cullReject")}</TooltipContent>
                 </Tooltip>
@@ -411,17 +414,19 @@ const CullResultRow = memo(function CullResultRow({
             >
               <Heart className="inline h-3 w-3" /> {t("cullKeep")}
             </button>
-            <button
-              className="rounded-[4px] bg-destructive/10 px-2 py-1 text-[10px] text-destructive transition-colors hover:bg-destructive/20"
-              disabled={isUpdating}
-              onClick={(e) => {
-                e.stopPropagation();
-                onStatusChange(item.id, "rejected");
-              }}
-              type="button"
-            >
-              <Trash2 className="inline h-3 w-3" /> {t("cullReject")}
-            </button>
+            <IconMotionTrigger asChild disabled={isUpdating}>
+              <button
+                className="rounded-[4px] bg-destructive/10 px-2 py-1 text-[10px] text-destructive transition-colors hover:bg-destructive/20"
+                disabled={isUpdating}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStatusChange(item.id, "rejected");
+                }}
+                type="button"
+              >
+                <Trash2 className="inline h-3 w-3" /> {t("cullReject")}
+              </button>
+            </IconMotionTrigger>
           </>
         ) : (
           <button
@@ -1050,22 +1055,24 @@ export function CullResult({
             value={resultSort}
           />
           {!project && (
-            <button
-              aria-pressed={favoriteOnly}
-              className={`shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
-                favoriteOnly
-                  ? "bg-amber-500/15 text-amber-500"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              onClick={() => {
-                setFavoriteOnly((value) => !value);
-                setSelected(new Set());
-              }}
-              type="button"
-            >
-              <Star className="mr-1 inline h-3 w-3" />
-              {t("favorites")}
-            </button>
+            <IconMotionTrigger asChild>
+              <button
+                aria-pressed={favoriteOnly}
+                className={`shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
+                  favoriteOnly
+                    ? "bg-amber-500/15 text-amber-500"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => {
+                  setFavoriteOnly((value) => !value);
+                  setSelected(new Set());
+                }}
+                type="button"
+              >
+                <Star className="mr-1 inline h-3 w-3" />
+                {t("favorites")}
+              </button>
+            </IconMotionTrigger>
           )}
           <button
             aria-label={t("cullUndo")}
@@ -1119,29 +1126,36 @@ export function CullResult({
           )}
           <span className="h-3 w-px bg-border/50" />
           {!project && (
-            <button
-              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-              disabled={kept.length === 0}
-              onClick={() => {
-                setExportIds(kept.map((item) => item.photo.id));
-                setExportOpen(true);
-              }}
-              type="button"
-            >
-              <Download className="h-3 w-3" />
-              {t("cullExportKept")}
-            </button>
+            <IconMotionTrigger asChild disabled={kept.length === 0}>
+              <button
+                className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                disabled={kept.length === 0}
+                onClick={() => {
+                  setExportIds(kept.map((item) => item.photo.id));
+                  setExportOpen(true);
+                }}
+                type="button"
+              >
+                <Download className="h-3 w-3" />
+                {t("cullExportKept")}
+              </button>
+            </IconMotionTrigger>
           )}
           {!project && (
-            <button
-              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-40"
+            <IconMotionTrigger
+              asChild
               disabled={rejected.length === 0 || deleting}
-              onClick={() => setTrashConfirmOpen(true)}
-              type="button"
             >
-              <Trash2 className="h-3 w-3" />
-              {t("cullTrashRejected")}
-            </button>
+              <button
+                className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-40"
+                disabled={rejected.length === 0 || deleting}
+                onClick={() => setTrashConfirmOpen(true)}
+                type="button"
+              >
+                <Trash2 className="h-3 w-3" />
+                {t("cullTrashRejected")}
+              </button>
+            </IconMotionTrigger>
           )}
           <button
             className="shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground/50 transition-colors hover:text-foreground"
@@ -1182,14 +1196,16 @@ export function CullResult({
             <Heart className="mr-1 inline h-3 w-3" />
             {t("cullBatchKeep")}
           </button>
-          <button
-            className="shrink-0 whitespace-nowrap rounded-[4px] bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/20"
-            onClick={() => handleBatchStatusChange("rejected")}
-            type="button"
-          >
-            <Trash2 className="mr-1 inline h-3 w-3" />
-            {t("cullBatchReject")}
-          </button>
+          <IconMotionTrigger asChild>
+            <button
+              className="shrink-0 whitespace-nowrap rounded-[4px] bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/20"
+              onClick={() => handleBatchStatusChange("rejected")}
+              type="button"
+            >
+              <Trash2 className="mr-1 inline h-3 w-3" />
+              {t("cullBatchReject")}
+            </button>
+          </IconMotionTrigger>
           <button
             className="shrink-0 whitespace-nowrap rounded-[4px] bg-muted px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => handleBatchStatusChange("pending")}
@@ -1198,56 +1214,64 @@ export function CullResult({
             ↺ {t("cullBatchPending")}
           </button>
           <span className="h-3 w-px bg-border" />
-          <button
-            className="shrink-0 whitespace-nowrap rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => {
-              if (project) {
-                project.onCopy(
-                  sorted
-                    .filter((item) => selected.has(item.id))
-                    .map((item) => item.photo.projectPhotoId ?? "")
-                    .filter(Boolean)
-                );
-              } else {
-                setExportIds(selectedIds);
-                setExportOpen(true);
-              }
-            }}
-            type="button"
-          >
-            <Download className="mr-1 inline h-3 w-3" />
-            {t(project ? "shootingProject.copySelected" : "cullExportSelected")}
-          </button>
-          {project ? (
-            <button
-              className="shrink-0 rounded px-2 py-1 text-primary text-xs disabled:opacity-40"
-              data-testid="cull-start-selected-pk"
-              disabled={selected.size < 2}
-              onClick={() =>
-                project.onStartPk(
-                  sorted
-                    .filter((item) => selected.has(item.id))
-                    .map((item) => item.photo.projectPhotoId ?? "")
-                    .filter(Boolean)
-                )
-              }
-              type="button"
-            >
-              <Swords className="mr-1 inline h-3 w-3" />
-              {t("cullProject.pkSelected", { count: selected.size })}
-            </button>
-          ) : (
+          <IconMotionTrigger asChild>
             <button
               className="shrink-0 whitespace-nowrap rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
               onClick={() => {
-                setAlbumIds(selectedIds);
-                setAlbumOpen(true);
+                if (project) {
+                  project.onCopy(
+                    sorted
+                      .filter((item) => selected.has(item.id))
+                      .map((item) => item.photo.projectPhotoId ?? "")
+                      .filter(Boolean)
+                  );
+                } else {
+                  setExportIds(selectedIds);
+                  setExportOpen(true);
+                }
               }}
               type="button"
             >
-              <FolderPlus className="mr-1 inline h-3 w-3" />
-              {t("cullAddToAlbumSelected")}
+              <Download className="mr-1 inline h-3 w-3" />
+              {t(
+                project ? "shootingProject.copySelected" : "cullExportSelected"
+              )}
             </button>
+          </IconMotionTrigger>
+          {project ? (
+            <IconMotionTrigger asChild disabled={selected.size < 2}>
+              <button
+                className="shrink-0 rounded px-2 py-1 text-primary text-xs disabled:opacity-40"
+                data-testid="cull-start-selected-pk"
+                disabled={selected.size < 2}
+                onClick={() =>
+                  project.onStartPk(
+                    sorted
+                      .filter((item) => selected.has(item.id))
+                      .map((item) => item.photo.projectPhotoId ?? "")
+                      .filter(Boolean)
+                  )
+                }
+                type="button"
+              >
+                <Swords className="mr-1 inline h-3 w-3" />
+                {t("cullProject.pkSelected", { count: selected.size })}
+              </button>
+            </IconMotionTrigger>
+          ) : (
+            <IconMotionTrigger asChild>
+              <button
+                className="shrink-0 whitespace-nowrap rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => {
+                  setAlbumIds(selectedIds);
+                  setAlbumOpen(true);
+                }}
+                type="button"
+              >
+                <FolderPlus className="mr-1 inline h-3 w-3" />
+                {t("cullAddToAlbumSelected")}
+              </button>
+            </IconMotionTrigger>
           )}
         </div>
       )}

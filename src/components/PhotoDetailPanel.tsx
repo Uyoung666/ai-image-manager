@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
-  FolderOpen,
   Plus,
   Sparkles,
   Star,
@@ -27,6 +26,8 @@ import {
   savePhotoDetailAdvancedMetadataExpanded,
 } from "@/actions/photo-detail-panel-preferences";
 import { photoTagActions } from "@/actions/photo-tags";
+import { FolderOpen } from "@/components/icons/folder-open";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SmoothInput } from "@/components/ui/smooth-input";
 import {
@@ -1300,14 +1301,16 @@ export function PhotoDetailPanel({
             <p className="mb-2 truncate text-[11px] text-muted-foreground">
               {dirPath}
             </p>
-            <button
-              className="flex min-w-0 max-w-full items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
-              onClick={() => onOpenExplorer(displayPhoto.path)}
-              type="button"
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
-              {t("openInExplorer")}
-            </button>
+            <IconMotionTrigger asChild>
+              <button
+                className="flex min-w-0 max-w-full items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
+                onClick={() => onOpenExplorer(displayPhoto.path)}
+                type="button"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+                {t("openInExplorer")}
+              </button>
+            </IconMotionTrigger>
           </section>
         </div>
       </div>

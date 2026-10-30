@@ -1,5 +1,4 @@
 /** biome-ignore-all lint/style/useFilenamingConvention: React component naming. */
-import { Pause, Play, RotateCcw } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -8,6 +7,10 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Pause } from "@/components/icons/pause";
+import { Play } from "@/components/icons/play";
+import { RotateCcw } from "@/components/icons/rotate-ccw";
 import {
   Tooltip,
   TooltipContent,
@@ -221,36 +224,40 @@ export function WanderPresentationPreview({
           <div className="flex shrink-0 gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
-                  aria-label={pauseLabel}
-                  className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent disabled:opacity-40"
-                  disabled={phase === "finished"}
-                  onClick={() =>
-                    setPhase((current) =>
-                      current === "playing" ? "paused" : "playing"
-                    )
-                  }
-                  type="button"
-                >
-                  {phase === "playing" ? (
-                    <Pause className="h-3.5 w-3.5" />
-                  ) : (
-                    <Play className="h-3.5 w-3.5" />
-                  )}
-                </button>
+                <IconMotionTrigger asChild disabled={phase === "finished"}>
+                  <button
+                    aria-label={pauseLabel}
+                    className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent disabled:opacity-40"
+                    disabled={phase === "finished"}
+                    onClick={() =>
+                      setPhase((current) =>
+                        current === "playing" ? "paused" : "playing"
+                      )
+                    }
+                    type="button"
+                  >
+                    {phase === "playing" ? (
+                      <Pause className="h-3.5 w-3.5" />
+                    ) : (
+                      <Play className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </IconMotionTrigger>
               </TooltipTrigger>
               <TooltipContent>{pauseLabel}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
-                  aria-label={t("wander.preview.replay")}
-                  className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent"
-                  onClick={replay}
-                  type="button"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
+                <IconMotionTrigger asChild>
+                  <button
+                    aria-label={t("wander.preview.replay")}
+                    className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent"
+                    onClick={replay}
+                    type="button"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </button>
+                </IconMotionTrigger>
               </TooltipTrigger>
               <TooltipContent>{t("wander.preview.replay")}</TooltipContent>
             </Tooltip>

@@ -7,10 +7,7 @@ import {
   Check,
   CheckCircle2,
   Eye,
-  Images,
-  RefreshCw,
   ShieldCheck,
-  Trash2,
 } from "lucide-react";
 import {
   memo,
@@ -27,6 +24,10 @@ import { duplicateActions } from "@/actions/duplicates";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DuplicateCleanupBatches } from "@/components/duplicate-cleanup-batches";
 import { FilterDropdown } from "@/components/filter-dropdown";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Images } from "@/components/icons/images";
+import { RefreshCw } from "@/components/icons/refresh-cw";
+import { Trash2 } from "@/components/icons/trash-2";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import { type LightboxPhoto, PhotoLightbox } from "@/components/PhotoLightbox";
 import {
@@ -186,57 +187,59 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
     <div
       className={`group relative min-w-0 overflow-hidden rounded-[8px] border transition-colors ${tileClass}`}
     >
-      <button
-        aria-label={`${photo.filename} ${t("duplicatePreviewPhoto")}`}
-        className="block w-full text-left"
-        draggable={false}
-        onClick={onPreview}
-        type="button"
-      >
-        <div className="relative flex h-36 items-center justify-center bg-muted/30 p-2">
-          {failed ? (
-            <Images className="h-8 w-8 text-muted-foreground/30" />
-          ) : (
-            // biome-ignore lint/a11y/noNoninteractiveElementInteractions: onError only swaps in a visual fallback
-            <img
-              alt={photo.filename}
-              className={`h-full w-full object-contain transition-opacity ${decision === "DELETE" ? "opacity-60" : "opacity-100"}`}
-              decoding="async"
-              draggable={false}
-              height={144}
-              loading="lazy"
-              onError={() => setFailed(true)}
-              src={toLocalMediaUrl(src)}
-              width={240}
-            />
-          )}
-          <span
-            className={`absolute top-2 right-2 flex items-center gap-1 rounded-full px-2 py-1 font-medium text-[10px] ${badgeClass}`}
-          >
-            {decision === "KEEP" ? <Check className="h-3 w-3" /> : null}
-            {decisionLabel}
-          </span>
-          {recommended ? (
-            <span className="absolute top-2 left-10 rounded-full bg-primary/90 px-2 py-1 font-medium text-[10px] text-white">
-              {t("duplicateRecommended")}
+      <IconMotionTrigger asChild>
+        <button
+          aria-label={`${photo.filename} ${t("duplicatePreviewPhoto")}`}
+          className="block w-full text-left"
+          draggable={false}
+          onClick={onPreview}
+          type="button"
+        >
+          <div className="relative flex h-36 items-center justify-center bg-muted/30 p-2">
+            {failed ? (
+              <Images className="h-8 w-8 text-muted-foreground/30" />
+            ) : (
+              // biome-ignore lint/a11y/noNoninteractiveElementInteractions: onError only swaps in a visual fallback
+              <img
+                alt={photo.filename}
+                className={`h-full w-full object-contain transition-opacity ${decision === "DELETE" ? "opacity-60" : "opacity-100"}`}
+                decoding="async"
+                draggable={false}
+                height={144}
+                loading="lazy"
+                onError={() => setFailed(true)}
+                src={toLocalMediaUrl(src)}
+                width={240}
+              />
+            )}
+            <span
+              className={`absolute top-2 right-2 flex items-center gap-1 rounded-full px-2 py-1 font-medium text-[10px] ${badgeClass}`}
+            >
+              {decision === "KEEP" ? <Check className="h-3 w-3" /> : null}
+              {decisionLabel}
             </span>
-          ) : null}
-        </div>
-        <div className="border-border border-t p-2.5">
-          <AppTooltip>
-            <AppTooltipTrigger asChild>
-              <p className="truncate text-[11px] text-foreground">
-                {photo.filename}
-              </p>
-            </AppTooltipTrigger>
-            <AppTooltipContent>{photo.filename}</AppTooltipContent>
-          </AppTooltip>
-          <p className="mt-1 flex gap-3 text-[10px] text-muted-foreground">
-            <span>{formatFileSize(photo.fileSize ?? 0)}</span>
-            <span>{formatResolution(photo)}</span>
-          </p>
-        </div>
-      </button>
+            {recommended ? (
+              <span className="absolute top-2 left-10 rounded-full bg-primary/90 px-2 py-1 font-medium text-[10px] text-white">
+                {t("duplicateRecommended")}
+              </span>
+            ) : null}
+          </div>
+          <div className="border-border border-t p-2.5">
+            <AppTooltip>
+              <AppTooltipTrigger asChild>
+                <p className="truncate text-[11px] text-foreground">
+                  {photo.filename}
+                </p>
+              </AppTooltipTrigger>
+              <AppTooltipContent>{photo.filename}</AppTooltipContent>
+            </AppTooltip>
+            <p className="mt-1 flex gap-3 text-[10px] text-muted-foreground">
+              <span>{formatFileSize(photo.fileSize ?? 0)}</span>
+              <span>{formatResolution(photo)}</span>
+            </p>
+          </div>
+        </button>
+      </IconMotionTrigger>
       <fieldset
         aria-label={photo.filename}
         className="flex flex-wrap gap-1 border-border border-t p-2"
@@ -1240,21 +1243,22 @@ export function DuplicatesPage() {
           )}
           <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2 lg:ml-0 lg:justify-self-end">
             <DuplicateCleanupBatches />
-            <button
-              className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5"
-              disabled={scanBusy || reviewBusy}
-              onClick={() => rescan.mutate()}
-              type="button"
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${rescan.isPending ? "animate-spin" : ""}`}
-              />
-              {t("rescan")}
-            </button>
+            <IconMotionTrigger asChild disabled={scanBusy || reviewBusy}>
+              <button
+                className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5"
+                disabled={scanBusy || reviewBusy}
+                onClick={() => rescan.mutate()}
+                type="button"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${rescan.isPending ? "animate-spin" : ""}`}
+                />
+                {t("rescan")}
+              </button>
+            </IconMotionTrigger>
 
-            <button
-              className="flex items-center gap-1.5 rounded-[6px] bg-destructive px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90 data-[unavailable=true]:opacity-40"
-              data-unavailable={cleanupGroups.length === 0}
+            <IconMotionTrigger
+              asChild
               disabled={
                 cleanupGroups.length === 0 ||
                 createCleanupPlan.isPending ||
@@ -1262,12 +1266,24 @@ export function DuplicatesPage() {
                 scanBusy ||
                 reviewBusy
               }
-              onClick={() => createCleanupPlan.mutate()}
-              type="button"
             >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t("duplicateCleanupButton", { count: cleanupCount })}
-            </button>
+              <button
+                className="flex items-center gap-1.5 rounded-[6px] bg-destructive px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90 data-[unavailable=true]:opacity-40"
+                data-unavailable={cleanupGroups.length === 0}
+                disabled={
+                  cleanupGroups.length === 0 ||
+                  createCleanupPlan.isPending ||
+                  executeCleanupPlan.isPending ||
+                  scanBusy ||
+                  reviewBusy
+                }
+                onClick={() => createCleanupPlan.mutate()}
+                type="button"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t("duplicateCleanupButton", { count: cleanupCount })}
+              </button>
+            </IconMotionTrigger>
             {cleanupOutsideFilterCount > 0 ? (
               <div className="flex max-w-[14rem] flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-right text-[10px] text-muted-foreground">
                 <span className="[overflow-wrap:anywhere]">

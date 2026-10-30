@@ -103,6 +103,9 @@ describe("SpotlightSearch", () => {
     fireEvent.keyDown(document, { ctrlKey: true, key: "k" });
 
     expect(screen.getByText("设置")).toBeInTheDocument();
+    expect(
+      document.querySelector("[data-animated-icon='chart-line']")
+    ).toBeInTheDocument();
     expect(screen.queryByText("settingsStorage")).not.toBeInTheDocument();
   });
 });

@@ -1,8 +1,10 @@
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cullActions } from "@/actions/cull";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Trash2 } from "@/components/icons/trash-2";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -98,16 +100,18 @@ export function CullArchiveActions({ onBack }: { onBack: () => void }) {
         </TooltipTrigger>
         <TooltipContent>{t("cullProject.back")}</TooltipContent>
       </Tooltip>
-      <Button
-        className="h-8 text-destructive text-xs hover:bg-destructive/10 hover:text-destructive"
-        data-testid="cull-clear-archives"
-        disabled={busy}
-        onClick={inspect}
-        variant="ghost"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-        {t("cullProject.archive.clearAll")}
-      </Button>
+      <IconMotionTrigger asChild disabled={busy}>
+        <Button
+          className="h-8 text-destructive text-xs hover:bg-destructive/10 hover:text-destructive"
+          data-testid="cull-clear-archives"
+          disabled={busy}
+          onClick={inspect}
+          variant="ghost"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {t("cullProject.archive.clearAll")}
+        </Button>
+      </IconMotionTrigger>
       <Dialog
         onOpenChange={(open) => {
           if (!(open || busy)) {

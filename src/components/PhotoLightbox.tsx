@@ -1,21 +1,11 @@
 import {
   ChevronLeft,
   ChevronRight,
-  Copy,
-  FolderOpen,
-  Image as ImageIcon,
   Info,
-  Maximize,
-  Minimize,
   Minus,
   MoreHorizontal,
-  Pause,
-  Play,
   Plus,
-  RotateCcw,
-  RotateCw,
   Rows3,
-  Star,
   X,
 } from "lucide-react";
 import {
@@ -37,6 +27,17 @@ import {
 } from "@/actions/lightbox-panel-preferences";
 import { wanderActions } from "@/actions/wander";
 import { GalleryLightboxThumbnail } from "@/components/GalleryLightboxThumbnail";
+import { Copy } from "@/components/icons/copy";
+import { FavoriteIcon as Star } from "@/components/icons/favorite-icon";
+import { FolderOpen } from "@/components/icons/folder-open";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Image as ImageIcon } from "@/components/icons/image";
+import { Maximize } from "@/components/icons/maximize";
+import { Minimize } from "@/components/icons/minimize";
+import { Pause } from "@/components/icons/pause";
+import { Play } from "@/components/icons/play";
+import { RotateCcw } from "@/components/icons/rotate-ccw";
+import { RotateCw } from "@/components/icons/rotate-cw";
 import {
   LightboxInfoPanel,
   type LightboxInfoPhoto,
@@ -1133,18 +1134,20 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 >
                   {t("retry")}
                 </button>
-                <button
-                  className="lightbox-secondary-button"
-                  onClick={() => {
-                    ipc.client.shell
-                      .openInExplorer({ path: photo.path })
-                      .catch(() => undefined);
-                  }}
-                  type="button"
-                >
-                  <FolderOpen className="h-3.5 w-3.5" />
-                  {t("openInExplorer")}
-                </button>
+                <IconMotionTrigger asChild>
+                  <button
+                    className="lightbox-secondary-button"
+                    onClick={() => {
+                      ipc.client.shell
+                        .openInExplorer({ path: photo.path })
+                        .catch(() => undefined);
+                    }}
+                    type="button"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    {t("openInExplorer")}
+                  </button>
+                </IconMotionTrigger>
               </div>
             </div>
           )}
@@ -1464,16 +1467,18 @@ function ControlButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          aria-label={label}
-          aria-pressed={active || undefined}
-          className={`lightbox-control-button ${active ? "bg-white/15 text-white" : ""}`}
-          disabled={disabled}
-          onClick={onClick}
-          type="button"
-        >
-          {children}
-        </button>
+        <IconMotionTrigger asChild disabled={disabled}>
+          <button
+            aria-label={label}
+            aria-pressed={active || undefined}
+            className={`lightbox-control-button ${active ? "bg-white/15 text-white" : ""}`}
+            disabled={disabled}
+            onClick={onClick}
+            type="button"
+          >
+            {children}
+          </button>
+        </IconMotionTrigger>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -1490,13 +1495,15 @@ function MenuButton({
   onClick: () => void;
 }) {
   return (
-    <button
-      className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-      onClick={onClick}
-      type="button"
-    >
-      {icon}
-      {label}
-    </button>
+    <IconMotionTrigger asChild>
+      <button
+        className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+        onClick={onClick}
+        type="button"
+      >
+        {icon}
+        {label}
+      </button>
+    </IconMotionTrigger>
   );
 }

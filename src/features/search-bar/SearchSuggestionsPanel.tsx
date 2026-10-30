@@ -1,4 +1,4 @@
-import { Clock, EyeOff, RefreshCw, Search } from "lucide-react";
+import { Clock, EyeOff } from "lucide-react";
 import {
   type FocusEventHandler,
   type KeyboardEventHandler,
@@ -10,6 +10,9 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { RefreshCw } from "@/components/icons/refresh-cw";
+import { Search } from "@/components/icons/search";
 import type {
   getTimePresets,
   SearchSuggestion,
@@ -117,6 +120,7 @@ export function SearchSuggestionsPanel({
     </span>
   );
   const disabled = starterStatus === "color";
+  const refreshDisabled = disabled || starterLoading;
   let emptyKey = "searchStarterUi.empty";
   if (disabled) {
     emptyKey =
@@ -218,24 +222,26 @@ export function SearchSuggestionsPanel({
                 </span>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
-                      aria-label={t("searchStarterUi.refresh")}
-                      className="flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
-                      data-search-action
-                      disabled={starterStatus === "color" || starterLoading}
-                      onClick={onRefreshStarters}
-                      onMouseDown={(event) => event.preventDefault()}
-                      type="button"
-                    >
-                      <RefreshCw
-                        aria-hidden="true"
-                        className={cn(
-                          "h-3 w-3",
-                          starterLoading && "motion-safe:animate-spin"
-                        )}
-                      />
-                      {t("searchStarterUi.refresh")}
-                    </button>
+                    <IconMotionTrigger asChild disabled={refreshDisabled}>
+                      <button
+                        aria-label={t("searchStarterUi.refresh")}
+                        className="flex shrink-0 items-center gap-1 rounded-[4px] px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+                        data-search-action
+                        disabled={refreshDisabled}
+                        onClick={onRefreshStarters}
+                        onMouseDown={(event) => event.preventDefault()}
+                        type="button"
+                      >
+                        <RefreshCw
+                          aria-hidden="true"
+                          className={cn(
+                            "h-3 w-3",
+                            starterLoading && "motion-safe:animate-spin"
+                          )}
+                        />
+                        {t("searchStarterUi.refresh")}
+                      </button>
+                    </IconMotionTrigger>
                   </TooltipTrigger>
                   <TooltipContent>
                     {t("searchStarterUi.refreshHint")}

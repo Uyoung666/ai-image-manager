@@ -9,34 +9,30 @@
 // biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
 
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import {
-  Album,
-  CircleHelp,
-  Folder,
-  ImagePlay,
-  Images,
-  LayoutDashboard,
-  Paintbrush,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Pin,
-  PinOff,
-  Plus,
-  ScanSearch,
-  Search,
-  Settings,
-  Star,
-  Swords,
-  Trash2,
-  Users,
-  X,
-} from "lucide-react";
+import { Pin, PinOff, Plus, X } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Album } from "@/components/icons/album";
+import { ChartLineIcon } from "@/components/icons/chart-line";
+import { CircleHelp } from "@/components/icons/circle-help";
+import { FavoriteIcon as Star } from "@/components/icons/favorite-icon";
+import { FoldersIcon } from "@/components/icons/folders";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { ImagePlay } from "@/components/icons/image-play";
+import { Images } from "@/components/icons/images";
+import { Paintbrush } from "@/components/icons/paintbrush";
+import { PanelLeftClose } from "@/components/icons/panel-left-close";
+import { PanelLeftOpen } from "@/components/icons/panel-left-open";
+import { ScanSearch } from "@/components/icons/scan-search";
+import { Search } from "@/components/icons/search";
+import { Settings } from "@/components/icons/settings";
+import { Swords } from "@/components/icons/swords";
+import { Trash2 } from "@/components/icons/trash-2";
+import { Users } from "@/components/icons/users";
 import { ShootingProjectCreateDialog } from "@/components/ShootingProjectCreateDialog";
 import {
   Dialog,
@@ -166,25 +162,27 @@ function RailButton({
 }) {
   return (
     <SidebarTooltip content={label}>
-      <button
-        aria-label={label}
-        className={`relative flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-          active
-            ? "nav-item-active text-primary"
-            : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-        }`}
-        onClick={onClick}
-        onDragEnter={onDragEnter}
-        onDragLeave={onDragLeave}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-        type="button"
-      >
-        {icon}
-        {badge && (
-          <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-destructive ring-2 ring-sidebar" />
-        )}
-      </button>
+      <IconMotionTrigger asChild>
+        <button
+          aria-label={label}
+          className={`relative flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+            active
+              ? "nav-item-active text-primary"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
+          onClick={onClick}
+          onDragEnter={onDragEnter}
+          onDragLeave={onDragLeave}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          type="button"
+        >
+          {icon}
+          {badge && (
+            <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-destructive ring-2 ring-sidebar" />
+          )}
+        </button>
+      </IconMotionTrigger>
     </SidebarTooltip>
   );
 }
@@ -1164,18 +1162,22 @@ export function Sidebar({
           <SidebarTooltip
             content={collapsed ? t("expandSidebar") : t("collapseSidebar")}
           >
-            <button
-              aria-label={collapsed ? t("expandSidebar") : t("collapseSidebar")}
-              className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-              onClick={onToggleCollapse}
-              type="button"
-            >
-              {collapsed ? (
-                <PanelLeftOpen className="h-4 w-4" />
-              ) : (
-                <PanelLeftClose className="h-4 w-4" />
-              )}
-            </button>
+            <IconMotionTrigger asChild>
+              <button
+                aria-label={
+                  collapsed ? t("expandSidebar") : t("collapseSidebar")
+                }
+                className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+                onClick={onToggleCollapse}
+                type="button"
+              >
+                {collapsed ? (
+                  <PanelLeftOpen className="h-4 w-4" />
+                ) : (
+                  <PanelLeftClose className="h-4 w-4" />
+                )}
+              </button>
+            </IconMotionTrigger>
           </SidebarTooltip>
 
           <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5">
@@ -1198,18 +1200,20 @@ export function Sidebar({
               >
                 <SidebarTooltip content={t("folderShortcuts")}>
                   <PopoverTrigger asChild>
-                    <button
-                      aria-label={t("folderShortcuts")}
-                      aria-pressed={folderShortcutsOpen}
-                      className={`relative flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                        activeFolderId !== null || folderShortcutsOpen
-                          ? "nav-item-active text-primary"
-                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                      }`}
-                      type="button"
-                    >
-                      <Folder className="h-4 w-4" />
-                    </button>
+                    <IconMotionTrigger asChild>
+                      <button
+                        aria-label={t("folderShortcuts")}
+                        aria-pressed={folderShortcutsOpen}
+                        className={`relative flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                          activeFolderId !== null || folderShortcutsOpen
+                            ? "nav-item-active text-primary"
+                            : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                        }`}
+                        type="button"
+                      >
+                        <FoldersIcon className="h-4 w-4" />
+                      </button>
+                    </IconMotionTrigger>
                   </PopoverTrigger>
                 </SidebarTooltip>
                 <PopoverContent
@@ -1300,21 +1304,23 @@ export function Sidebar({
                     </p>
                   )}
                   <div className="border-border border-t pt-1">
-                    <button
-                      className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-                      onClick={showAllFolders}
-                      type="button"
-                    >
-                      <Search className="h-3.5 w-3.5" />
-                      {t("viewAllFolders")}
-                    </button>
+                    <IconMotionTrigger asChild>
+                      <button
+                        className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                        onClick={showAllFolders}
+                        type="button"
+                      >
+                        <Search className="h-3.5 w-3.5" />
+                        {t("viewAllFolders")}
+                      </button>
+                    </IconMotionTrigger>
                   </div>
                 </PopoverContent>
               </Popover>
             )}
             <RailButton
               active={location.pathname === "/dashboard"}
-              icon={<LayoutDashboard className="h-4 w-4" />}
+              icon={<ChartLineIcon className="h-4 w-4" />}
               label={t("sidebarDashboard")}
               onClick={() => navigate({ to: "/dashboard" })}
             />
@@ -1400,38 +1406,42 @@ export function Sidebar({
             {/* Content area — dual flex-1 sections */}
             <div className="flex min-h-0 flex-1 flex-col px-3 pt-3">
               {/* All Photos + Favorites — content filters */}
-              <button
-                className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                  activeFolderId === null && !favoriteActive
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => {
-                  onSelectAllPhotos();
-                }}
-                type="button"
-              >
-                <Images className="h-3.5 w-3.5" />
-                {t("sidebarAllPhotos")}
-              </button>
-              {onSelectFavorites && (
+              <IconMotionTrigger asChild>
                 <button
                   className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                    favoriteActive
+                    activeFolderId === null && !favoriteActive
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   }`}
                   onClick={() => {
-                    if (favoriteActive) {
-                      return;
-                    }
-                    onSelectFavorites?.();
+                    onSelectAllPhotos();
                   }}
                   type="button"
                 >
-                  <Star className="h-3.5 w-3.5" />
-                  {t("favorite")}
+                  <Images className="h-3.5 w-3.5" />
+                  {t("sidebarAllPhotos")}
                 </button>
+              </IconMotionTrigger>
+              {onSelectFavorites && (
+                <IconMotionTrigger asChild>
+                  <button
+                    className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                      favoriteActive
+                        ? "nav-item-active bg-primary/15 text-primary"
+                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    }`}
+                    onClick={() => {
+                      if (favoriteActive) {
+                        return;
+                      }
+                      onSelectFavorites?.();
+                    }}
+                    type="button"
+                  >
+                    <Star className="h-3.5 w-3.5" />
+                    {t("favorite")}
+                  </button>
+                </IconMotionTrigger>
               )}
 
               <div className="my-2 border-border border-t" />
@@ -1808,15 +1818,20 @@ export function Sidebar({
                                 {aiTagStatusText}
                               </div>
                             ) : (
-                              <button
-                                className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
+                              <IconMotionTrigger
+                                asChild
                                 disabled={batchTagLoading}
-                                onClick={handleBatchGenerateTags}
-                                type="button"
                               >
-                                <ScanSearch className="h-3.5 w-3.5" />
-                                {t("tagBatchGenerate")}
-                              </button>
+                                <button
+                                  className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
+                                  disabled={batchTagLoading}
+                                  onClick={handleBatchGenerateTags}
+                                  type="button"
+                                >
+                                  <ScanSearch className="h-3.5 w-3.5" />
+                                  {t("tagBatchGenerate")}
+                                </button>
+                              </IconMotionTrigger>
                             )}
                           </div>
                         )}
@@ -1829,15 +1844,17 @@ export function Sidebar({
                             {aiTagStatusText}
                           </div>
                         ) : (
-                          <button
-                            className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-60"
-                            disabled={batchTagLoading}
-                            onClick={handleBatchGenerateTags}
-                            type="button"
-                          >
-                            <ScanSearch className="h-3.5 w-3.5" />
-                            {t("tagBatchGenerate")}
-                          </button>
+                          <IconMotionTrigger asChild disabled={batchTagLoading}>
+                            <button
+                              className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-60"
+                              disabled={batchTagLoading}
+                              onClick={handleBatchGenerateTags}
+                              type="button"
+                            >
+                              <ScanSearch className="h-3.5 w-3.5" />
+                              {t("tagBatchGenerate")}
+                            </button>
+                          </IconMotionTrigger>
                         )}
                       </div>
                     )}
@@ -1924,28 +1941,32 @@ export function Sidebar({
                 ? t("unpinFolder")
                 : t("pinFolder")}
             </button>
-            <button
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
-              onClick={() => {
-                setAppearanceFolderId(folderCtx.folderId);
-                closeCtx();
-              }}
-              type="button"
-            >
-              <Paintbrush className="h-3.5 w-3.5" />
-              {t("customizeFolderAppearance")}
-            </button>
-            <button
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
-              onClick={() => {
-                onDeleteFolder(folderCtx.folderId, folderCtx.displayName);
-                closeCtx();
-              }}
-              type="button"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t("removeFromIndex")}
-            </button>
+            <IconMotionTrigger asChild>
+              <button
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+                onClick={() => {
+                  setAppearanceFolderId(folderCtx.folderId);
+                  closeCtx();
+                }}
+                type="button"
+              >
+                <Paintbrush className="h-3.5 w-3.5" />
+                {t("customizeFolderAppearance")}
+              </button>
+            </IconMotionTrigger>
+            <IconMotionTrigger asChild>
+              <button
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+                onClick={() => {
+                  onDeleteFolder(folderCtx.folderId, folderCtx.displayName);
+                  closeCtx();
+                }}
+                type="button"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t("removeFromIndex")}
+              </button>
+            </IconMotionTrigger>
           </div>,
           document.body
         )}
@@ -2008,17 +2029,22 @@ export function Sidebar({
               <Plus className="h-3.5 w-3.5" />
               {t("tagCreateChild")}
             </button>
-            <button
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
-              onClick={() => {
-                setDeleteTagTarget({ id: tagCtx.tagId, name: tagCtx.tagName });
-                setTagCtx(null);
-              }}
-              type="button"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t("tagDeleteTitle")}
-            </button>
+            <IconMotionTrigger asChild>
+              <button
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+                onClick={() => {
+                  setDeleteTagTarget({
+                    id: tagCtx.tagId,
+                    name: tagCtx.tagName,
+                  });
+                  setTagCtx(null);
+                }}
+                type="button"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t("tagDeleteTitle")}
+              </button>
+            </IconMotionTrigger>
           </div>,
           document.body
         )}

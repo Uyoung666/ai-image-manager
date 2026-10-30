@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { animateFavoriteIcon } from "@/components/icons/icon-motion";
 import {
   Tooltip,
   TooltipContent,
@@ -454,7 +455,6 @@ export const PhotoCard = memo(function PhotoCard({
   }, [match, semanticTopSimilarity, t]);
 
   // ── 事件处理 ──────────────────────────────────────────────────────
-  const starRef = useRef<HTMLButtonElement>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cancelPendingClick = useCallback(() => {
@@ -718,20 +718,16 @@ export const PhotoCard = memo(function PhotoCard({
               }`}
               onClick={(e) => {
                 e.stopPropagation();
-                if (starRef.current) {
-                  starRef.current.classList.remove("animate-star-bounce");
-                  starRef.current.getBoundingClientRect();
-                  starRef.current.classList.add("animate-star-bounce");
-                }
+                animateFavoriteIcon(e.currentTarget);
                 onToggleFavorite(id);
               }}
               onDoubleClick={(e) => e.stopPropagation()}
-              ref={starRef}
               type="button"
             >
               <svg
                 aria-hidden="true"
                 className={`h-4 w-4 drop-shadow-sm ${isFavorite ? "fill-yellow-400 text-yellow-400" : "fill-transparent text-white"}`}
+                data-favorite-icon=""
                 fill="currentFill"
                 stroke="currentColor"
                 strokeWidth="2"

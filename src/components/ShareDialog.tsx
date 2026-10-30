@@ -1,6 +1,6 @@
 // biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
 import { useNavigate } from "@tanstack/react-router";
-import { Cloud, Copy, ExternalLink, Share2 } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import {
   type ReactNode,
   useCallback,
@@ -11,6 +11,10 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { openExternalLink } from "@/actions/shell";
+import { Cloud } from "@/components/icons/cloud";
+import { Copy } from "@/components/icons/copy";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Share2 } from "@/components/icons/share-2";
 import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
@@ -340,14 +344,16 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
                 />
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
-                      aria-label={t("copyLink")}
-                      className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-input text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                      onClick={handleCopyUrl}
-                      type="button"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
+                    <IconMotionTrigger asChild>
+                      <button
+                        aria-label={t("copyLink")}
+                        className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-input text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                        onClick={handleCopyUrl}
+                        type="button"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </IconMotionTrigger>
                   </TooltipTrigger>
                   <TooltipContent>{t("copyLink")}</TooltipContent>
                 </Tooltip>

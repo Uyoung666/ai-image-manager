@@ -1,22 +1,20 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import {
-  Archive,
-  Brain,
-  Cloud,
-  Compass,
-  HardDrive,
-  Image,
-  Info,
-  Layers,
-  LifeBuoy,
-  Paintbrush,
-  Puzzle,
-  RefreshCw,
-  Settings,
-  Zap,
-} from "lucide-react";
+import { Info, LifeBuoy } from "lucide-react";
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
+import { Archive } from "@/components/icons/archive";
+import { Brain } from "@/components/icons/brain";
+import { Cloud } from "@/components/icons/cloud";
+import { Compass } from "@/components/icons/compass";
+import { ConnectIcon } from "@/components/icons/connect";
+import { HardDrive } from "@/components/icons/hard-drive";
+import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { Image } from "@/components/icons/image";
+import { Layers } from "@/components/icons/layers";
+import { Paintbrush } from "@/components/icons/paintbrush";
+import { RefreshCw } from "@/components/icons/refresh-cw";
+import { Settings } from "@/components/icons/settings";
+import { Zap } from "@/components/icons/zap";
 import {
   Tooltip,
   TooltipContent,
@@ -42,7 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     groupKey: "settingsGroupAppearance",
-    icon: Puzzle,
+    icon: ConnectIcon,
     keywords:
       "插件 plugin theme extension install package nebula glass wallpaper",
     labelKey: "settingsPlugins",
@@ -197,28 +195,31 @@ export function SettingsSidebar() {
             return (
               <Tooltip key={item.to}>
                 <TooltipTrigger asChild>
-                  <button
-                    aria-label={label}
-                    className={`flex w-full shrink-0 items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 max-[900px]:h-9 max-[900px]:w-9 max-[900px]:justify-center max-[900px]:px-0 ${
-                      isActive
-                        ? "bg-primary/15 text-primary"
-                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                    }`}
-                    onClick={() => {
-                      navigate({
-                        to: item.to,
-                        state: {
-                          cullSettingsReturn: location.state.cullSettingsReturn,
-                        },
-                      });
-                    }}
-                    type="button"
-                  >
-                    <item.icon className="h-4 w-4 shrink-0" />
-                    <span className="min-w-0 truncate max-[900px]:hidden">
-                      {label}
-                    </span>
-                  </button>
+                  <IconMotionTrigger asChild>
+                    <button
+                      aria-label={label}
+                      className={`flex w-full shrink-0 items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 max-[900px]:h-9 max-[900px]:w-9 max-[900px]:justify-center max-[900px]:px-0 ${
+                        isActive
+                          ? "bg-primary/15 text-primary"
+                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      }`}
+                      onClick={() => {
+                        navigate({
+                          to: item.to,
+                          state: {
+                            cullSettingsReturn:
+                              location.state.cullSettingsReturn,
+                          },
+                        });
+                      }}
+                      type="button"
+                    >
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0 truncate max-[900px]:hidden">
+                        {label}
+                      </span>
+                    </button>
+                  </IconMotionTrigger>
                 </TooltipTrigger>
                 <TooltipContent side="right">{label}</TooltipContent>
               </Tooltip>
