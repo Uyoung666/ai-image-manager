@@ -12,6 +12,8 @@ import {
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { cullActions } from "@/actions/cull";
+import { CullWaitingState } from "@/components/CullWaitingState";
 import {
   Dialog,
   DialogContent,
@@ -33,12 +35,14 @@ import {
 } from "@/components/ZoomableImage";
 import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
-import { ipc } from "@/ipc/manager";
 import type { SessionSummary } from "@/routes/cull.$sessionId";
+import type { CullAvailability } from "@/types/cull";
+import { type CullMediaPhoto, getCullProjectPreview } from "@/utils/cull-media";
+import { cullShortcutBlocked } from "@/utils/cull-shortcuts";
 
 // ── Types ──
 
-interface PhotoInfo {
+interface PhotoInfo extends CullMediaPhoto {
   duelPreviewPath?: string | null;
   fileDate: number | null;
   filename: string;
@@ -78,9 +82,11 @@ interface ExifData {
 }
 
 interface PairResult {
+  availability?: CullAvailability;
   done: boolean;
   pair?: PairItem[];
   phase?: string;
+  preparing?: boolean;
   reason?: string;
   stats: {
     total: number;
@@ -88,11 +94,15 @@ interface PairResult {
     remaining: number;
     ready?: number;
   };
+  waiting?: boolean;
 }
 
 interface CullDuelProps {
+  onCompleted?: () => void;
   /** Called after every mutation so the parent can invalidate its session query */
   onMutationSuccess: () => void;
+  onReview?: () => void;
+  onSourceDetails?: () => void;
   session: Pick<
     SessionSummary,
     "id" | "mode" | "pkMode" | "totalPhotos" | "completedComparisons" | "status"
@@ -127,11 +137,25 @@ function formatFileSize(bytes: number): string {
 // ── Component ──
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: duel state and keyboard workflow are intentionally kept together
-export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
+export function CullDuel({
+  session,
+  onMutationSuccess,
+  onSourceDetails,
+  onReview,
+  onCompleted,
+}: CullDuelProps) {
   const { t } = useTranslation();
   const requestedPreviewIdsRef = useRef(new Set<number>());
   const [previewResolutions, setPreviewResolutions] = useState<
-    Record<number, { path: string | null; useOriginal: boolean }>
+    Record<
+      number,
+      {
+        path: string | null;
+        useOriginal: boolean;
+        previewUrl?: string;
+        originalUrl?: string;
+      }
+    >
   >({});
 
   // React 19: mark pair-switch state as non-urgent transition
@@ -158,7 +182,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     queryKey: ["cull", "pair", session.id, pairFetchId],
     queryFn: async () => {
       const excludeSessionPhotoIds = Array.from(erroredPhotosRef.current);
-      const result = (await ipc.client.cull.getNextPair({
+      const result = (await cullActions.getNextPair({
         sessionId: session.id,
         excludeSessionPhotoIds:
           excludeSessionPhotoIds.length > 0
@@ -168,6 +192,15 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
       return result;
     },
     placeholderData: keepPreviousData,
+    refetchInterval: (query) => {
+      if (query.state.data?.availability) {
+        return query.state.data.waiting ? 700 : false;
+      }
+      return query.state.data?.waiting || query.state.data?.preparing
+        ? 700
+        : false;
+    },
+    refetchOnWindowFocus: false,
     // pairFetchId changes force a fresh fetch each time
     staleTime: 0,
     gcTime: 30_000,
@@ -179,6 +212,42 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   const stats = pairData?.stats ?? null;
   const isSessionCompleted = done || session.status === "completed";
 
+  useEffect(() => {
+    if (!pair) {
+      return;
+    }
+    let active = true;
+    for (const item of pair) {
+      if (item.photo.source?.kind !== "project") {
+        continue;
+      }
+      cullActions
+        .getPhotoMedia({
+          sessionId: session.id,
+          sessionPhotoId: item.sessionPhotoId,
+        })
+        .then((media) => {
+          if (active && media) {
+            setPreviewResolutions((current) => ({
+              ...current,
+              [item.photo.id]: {
+                path: null,
+                useOriginal: false,
+                previewUrl: media.previewUrl,
+                originalUrl: media.originalUrl ?? undefined,
+              },
+            }));
+          }
+        })
+        .catch(() => {
+          /* Existing prepared preview remains usable if media resolution fails. */
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [pair, session.id]);
+
   // 懒触发生成对比预览：直接更新本地资源，避免生成完成后刷新整个 PK 页面。
   useEffect(() => {
     if (!pair) {
@@ -187,13 +256,14 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     for (const item of pair) {
       if (
         !(
+          item.photo.source?.kind === "project" ||
           item.photo.duelPreviewPath ||
           requestedPreviewIdsRef.current.has(item.photo.id)
         )
       ) {
         const photoId = item.photo.id;
         requestedPreviewIdsRef.current.add(photoId);
-        ipc.client.cull
+        cullActions
           .ensureDuelPreview({ photoId })
           .then((result) => {
             const resolved = result as {
@@ -223,7 +293,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
       loserId: number;
       isDraw?: boolean;
     }) => {
-      return (await ipc.client.cull.submitComparison({
+      return (await cullActions.submitComparison({
         sessionId: session.id,
         ...params,
       })) as unknown;
@@ -244,7 +314,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
 
   const skipMutation = useMutation({
     mutationFn: async (params: { photoAId: number; photoBId: number }) => {
-      return (await ipc.client.cull.recordSkip({
+      return (await cullActions.recordSkip({
         sessionId: session.id,
         ...params,
       })) as unknown;
@@ -265,7 +335,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
 
   const undoMutation = useMutation({
     mutationFn: async () => {
-      return (await ipc.client.cull.undoLastAction({
+      return (await cullActions.undoLastAction({
         sessionId: session.id,
       })) as unknown;
     },
@@ -285,12 +355,13 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
 
   const completeMutation = useMutation({
     mutationFn: async () => {
-      return (await ipc.client.cull.completeSession({
+      return (await cullActions.completeSession({
         sessionId: session.id,
       })) as unknown;
     },
     onSuccess: () => {
       onMutationSuccess();
+      onCompleted?.();
     },
     onError: (err) => {
       console.error("[completeSession] failed:", err);
@@ -434,8 +505,18 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     async function load() {
       try {
         const [ea, eb] = await Promise.all([
-          ipc.client.photos.getPhotoExif({ id: a.photo.id }).catch(() => null),
-          ipc.client.photos.getPhotoExif({ id: b.photo.id }).catch(() => null),
+          cullActions
+            .getPhotoExif({
+              sessionId: session.id,
+              sessionPhotoId: a.sessionPhotoId,
+            })
+            .catch(() => null),
+          cullActions
+            .getPhotoExif({
+              sessionId: session.id,
+              sessionPhotoId: b.sessionPhotoId,
+            })
+            .catch(() => null),
         ]);
         if (cancelled) {
           return;
@@ -462,7 +543,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     return () => {
       cancelled = true;
     };
-  }, [pair, pairData?.reason]);
+  }, [pair, pairData?.reason, session.id]);
 
   // Keyboard shortcuts — pair data via ref to avoid stale closures.
   // Mutation functions are stable references from useMutation.
@@ -479,6 +560,9 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   useEffect(() => {
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: shortcut handler preserves the existing keyboard workflow
     function onKey(e: KeyboardEvent) {
+      if (cullShortcutBlocked(e)) {
+        return;
+      }
       // ? 键始终处理（切换面板），不受面板打开状态影响
       if (e.key === "?") {
         e.preventDefault();
@@ -609,7 +693,18 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   }
 
   if (!pair) {
-    return null;
+    return (
+      <CullWaitingState
+        availability={pairData?.availability}
+        onRetry={() => {
+          erroredPhotosRef.current.clear();
+          setPairFetchId((value) => value + 1);
+          onMutationSuccess();
+        }}
+        onReview={onReview}
+        onSourceDetails={onSourceDetails}
+      />
+    );
   }
 
   const [left, right] = pair;
@@ -631,6 +726,18 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
         {exif ? (
           <>
             {renderExifRow(t("cullFileName"), photo.filename)}
+            {photo.source?.kind === "project" &&
+              photo.previewWidth &&
+              photo.previewHeight &&
+              renderExifRow(
+                t("cullProject.previewSize", {
+                  width: photo.previewWidth,
+                  height: photo.previewHeight,
+                  originalWidth: photo.width,
+                  originalHeight: photo.height,
+                }),
+                " "
+              )}
             {renderExifRow(t("cullDateTaken"), formatExifDate(exif.dateTaken))}
             {renderExifRow(
               t("cullDimensions"),
@@ -783,6 +890,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
           </button>
           <button
             className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            data-testid="cull-duel-undo"
             disabled={isSubmitting}
             onClick={() => undoMutation.mutate()}
             type="button"
@@ -803,6 +911,8 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
         {/* Left photo */}
         <div
           className="relative flex min-h-0 min-w-0 basis-1/2 flex-col items-center justify-center overflow-hidden"
+          data-photo-id={left.photo.projectPhotoId ?? left.photo.id}
+          data-testid="cull-duel-left"
           onMouseEnter={() => setShowExifLeft(true)}
           onMouseLeave={() => setShowExifLeft(false)}
         >
@@ -822,6 +932,16 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
               key={`L-${pairFetchId}`}
               onError={handleLeftImageError}
               onSync={handleLeftZoomSync}
+              originalUrl={
+                previewResolutions[left.photo.id]?.originalUrl ??
+                left.photo.originalUrl ??
+                undefined
+              }
+              originalWidth={left.photo.width}
+              previewUrl={
+                previewResolutions[left.photo.id]?.previewUrl ??
+                getCullProjectPreview(left.photo)
+              }
               ref={leftZoomRef}
               thumbnailPath={left.photo.thumbnailPath}
               useOriginalAsPreview={
@@ -893,6 +1013,8 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
         {/* Right photo */}
         <div
           className="relative flex min-h-0 min-w-0 basis-1/2 flex-col items-center justify-center overflow-hidden"
+          data-photo-id={right.photo.projectPhotoId ?? right.photo.id}
+          data-testid="cull-duel-right"
           onMouseEnter={() => setShowExifRight(true)}
           onMouseLeave={() => setShowExifRight(false)}
         >
@@ -912,6 +1034,16 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
               key={`R-${pairFetchId}`}
               onError={handleRightImageError}
               onSync={handleRightZoomSync}
+              originalUrl={
+                previewResolutions[right.photo.id]?.originalUrl ??
+                right.photo.originalUrl ??
+                undefined
+              }
+              originalWidth={right.photo.width}
+              previewUrl={
+                previewResolutions[right.photo.id]?.previewUrl ??
+                getCullProjectPreview(right.photo)
+              }
               ref={rightZoomRef}
               thumbnailPath={right.photo.thumbnailPath}
               useOriginalAsPreview={
