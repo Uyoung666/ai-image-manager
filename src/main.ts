@@ -108,6 +108,10 @@ import {
 import { getDataPath, initDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
 import { isBenignRendererErrorMessage } from "@/utils/renderer-error-filter";
+import {
+  createWindowsAppDetails,
+  getWindowsAppId,
+} from "@/utils/windows-app-details";
 import { cleanupBrokenLegacyStartMenuShortcut } from "@/utils/windows-shortcut-cleanup";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { NEBULA_GLASS_MANIFEST } from "./plugins/builtins/nebula-glass-manifest";
@@ -310,7 +314,11 @@ function ensureDevStartupWindow() {
   const title = getMainLocaleText("tooltip");
   const createdAt = Date.now();
   devStartupWindow = createDevStartupWindow({
-    createLoadingWindow: () => createDevLoadingWindow(title),
+    createLoadingWindow: () => {
+      const window = createDevLoadingWindow(title, getIconPath());
+      applyWindowsAppDetails(window);
+      return window;
+    },
     document: devStartupDocument(
       title,
       getSetting(APP_PREFERENCE_KEYS.reduceMotion) === "true"
@@ -448,10 +456,25 @@ function tTray(key: TrayLabelKey): string {
 
 // ── Tray icon ────────────────────────────────────────────────────────
 function getIconPath(): string {
+  const filename = process.platform === "win32" ? "icon.ico" : "icon.png";
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, "icon.png");
+    return path.join(process.resourcesPath, filename);
   }
-  return path.join(app.getAppPath(), "assets", "icon.png");
+  return path.join(app.getAppPath(), "assets", filename);
+}
+
+function applyWindowsAppDetails(window: BrowserWindow): void {
+  if (process.platform !== "win32") {
+    return;
+  }
+  window.setAppDetails(
+    createWindowsAppDetails({
+      isPackaged: app.isPackaged,
+      executablePath: process.execPath,
+      appPath: app.getAppPath(),
+      iconPath: getIconPath(),
+    })
+  );
 }
 
 function buildTrayMenu(): Electron.Menu {
@@ -496,7 +519,11 @@ function createTray() {
   const iconPath = getIconPath();
   if (fs.existsSync(iconPath)) {
     const img = nativeImage.createFromPath(iconPath);
-    tray = new Tray(img.resize({ width: 16, height: 16 }));
+    tray = new Tray(
+      process.platform === "win32"
+        ? iconPath
+        : img.resize({ width: 16, height: 16 })
+    );
   } else {
     tray = new Tray(nativeImage.createEmpty());
   }
@@ -876,9 +903,7 @@ function createWindow(httpPort: number, httpAuthToken: string) {
       ? { x: savedX, y: savedY }
       : {}),
     title: "AI Image Manager",
-    icon: app.isPackaged
-      ? path.join(process.resourcesPath, "icon.png")
-      : path.join(app.getAppPath(), "assets", "icon.png"),
+    icon: getIconPath(),
     webPreferences: {
       additionalArguments: [
         `--http-port=${httpPort}`,
@@ -896,6 +921,7 @@ function createWindow(httpPort: number, httpAuthToken: string) {
       process.platform === "darwin" ? { x: 12, y: 9 } : undefined,
   });
 
+  applyWindowsAppDetails(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const parsed = new URL(url);
@@ -1533,10 +1559,9 @@ fs.writeFileSync(path.join(logDir, "startup.log"), "BEFORE_WHENREADY\n", {
 
 // Windows AUMID — 没有它 dev 模式下 Notification 会被系统静默丢弃
 if (process.platform === "win32") {
-  // Squirrel creates shortcuts with this identity.  Keeping the packaged
-  // process and both installer shortcut identities identical lets Windows
-  // associate the taskbar icon and pin state with the real app executable.
-  app.setAppUserModelId("com.squirrel.ai-image-manager.ai-image-manager");
+  // Installed shortcuts retain Squirrel's identity. Development gets a separate
+  // group so Windows cannot reuse an installed executable's cached taskbar icon.
+  app.setAppUserModelId(getWindowsAppId(app.isPackaged));
 }
 
 const BROWSER_COMPATIBLE_EXTENSIONS = new Set([

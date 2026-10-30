@@ -223,6 +223,7 @@ const config: ForgeConfig = {
       "models-release",
       "drizzle",
       "assets/icon.png",
+      "assets/icon.ico",
       "THIRD_PARTY_NOTICES.md",
       "THIRD_PARTY_MODEL_NOTICES.md",
       "licenses",
@@ -344,6 +345,9 @@ const config: ForgeConfig = {
   makers: [
     new MakerSquirrel({
       name: "ai-image-manager",
+      setupIcon: SQUIRREL_SETUP_ICON_PATH,
+      loadingGif: path.resolve("assets/installers/squirrel-loading.gif"),
+      iconUrl: "https://ai-image-manager.uyoungvision.cn/icon.ico",
       // Authenticode is intentionally not configured yet. The release
       // pipeline records hashes/provenance and documents the SmartScreen risk;
       // if signing is added later, sign only after all icon edits are done.
@@ -486,6 +490,17 @@ const config: ForgeConfig = {
           path.join(outputPath, "resources", "app.asar.unpacked")
         );
         cleanBuildNodeModules(path.join(outputPath, "resources", "app"));
+      }
+      return Promise.resolve();
+    },
+    preMake: () => {
+      if (process.platform === "win32") {
+        // Only makers use this cache: Packager cannot copy into its own source
+        // tree, and Squirrel's legacy rcedit cannot load Unicode TEMP paths.
+        const scratch = path.resolve(".test-runtime/forge-distribution");
+        fs.mkdirSync(scratch, { recursive: true });
+        process.env.TEMP = scratch;
+        process.env.TMP = scratch;
       }
       return Promise.resolve();
     },

@@ -54,6 +54,27 @@ async function preparePackage() {
 }
 
 describe("release model staging lifecycle", () => {
+  it("moves only the maker phase away from Unicode temporary paths", async () => {
+    if (process.platform !== "win32") {
+      return;
+    }
+    vi.stubEnv("TEMP", "C:\\Users\\测试\\Temp");
+    vi.stubEnv("TMP", "C:\\Users\\测试\\Temp");
+    try {
+      const config = await loadConfig();
+      expect(process.env.TEMP).toBe("C:\\Users\\测试\\Temp");
+      const hook = config.hooks?.preMake;
+      expect(typeof hook).toBe("function");
+      await (hook as () => Promise<void>)();
+      expect(process.env.TEMP).toBe(
+        path.resolve(".test-runtime/forge-distribution")
+      );
+      expect(process.env.TMP).toBe(process.env.TEMP);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();

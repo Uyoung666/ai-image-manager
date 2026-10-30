@@ -76,6 +76,11 @@ function fixture() {
   const root = createTestRuntime("dev-startup-window");
   const fixturePath = path.join(root, "app");
   fs.mkdirSync(fixturePath);
+  fs.mkdirSync(path.join(fixturePath, "assets"));
+  fs.copyFileSync(
+    path.resolve("assets/icon.ico"),
+    path.join(fixturePath, "assets/icon.ico")
+  );
   fs.writeFileSync(
     path.join(fixturePath, "package.json"),
     JSON.stringify({
@@ -92,7 +97,8 @@ function fixture() {
 app.setAppPath(${JSON.stringify(path.resolve("."))});
 for(const [key,part] of Object.entries({appData:'appdata',cache:'cache',userData:'profile',sessionData:'profile',temp:'scratch',logs:'logs',crashDumps:'crashes'})){const dir=path.join(__dirname,part);fs.mkdirSync(dir,{recursive:true});app.setPath(key,dir);}
 const setMenu=electron.Tray.prototype.setContextMenu;electron.Tray.prototype.setContextMenu=function(...args){globalThis.__devTestTray=this;return setMenu.apply(this,args);};
-const stages=[];globalThis.__devTestStages=stages;app.on('browser-window-created',(_e,win)=>{stages.push({type:'created',id:win.id,at:Date.now()});win.on('show',()=>stages.push({type:'show',id:win.id,at:Date.now()}));});`
+const stages=[];globalThis.__devTestStages=stages;app.on('browser-window-created',(_e,win)=>{stages.push({type:'created',id:win.id,at:Date.now()});win.on('show',()=>stages.push({type:'show',id:win.id,at:Date.now()}));});
+globalThis.__devTestAppDetails=[];const setDetails=electron.BrowserWindow.prototype.setAppDetails;electron.BrowserWindow.prototype.setAppDetails=function(details){globalThis.__devTestAppDetails.push(details);return setDetails.call(this,details);};`
   );
   return { root, fixturePath, hook, profile: path.join(root, "profile") };
 }
@@ -122,7 +128,7 @@ async function launch(scale = "1.5") {
 
 test("automatically shows the loader, routes tray requests and hands off without blank content", async () => {
   mode = "delayed";
-  const { app, loading } = await launch();
+  const { app, loading, fixturePath } = await launch();
   try {
     await expect
       .poll(() =>
@@ -146,6 +152,25 @@ test("automatically shows the loader, routes tray requests and hands off without
         })
       )
       .toBe(false);
+    if (process.platform === "win32") {
+      const details = await app.evaluate(
+        () =>
+          (
+            globalThis as unknown as {
+              __devTestAppDetails: { appId: string; appIconPath: string }[];
+            }
+          ).__devTestAppDetails
+      );
+      expect(details).toHaveLength(2);
+      for (const item of details) {
+        expect(item.appId).toBe(
+          "com.squirrel.ai-image-manager.ai-image-manager.development"
+        );
+        expect(item.appIconPath).toBe(
+          path.join(fixturePath, "assets/icon.ico")
+        );
+      }
+    }
     await app.evaluate(() => {
       (
         globalThis as unknown as { __devTestTray: { emit(name: string): void } }

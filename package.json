@@ -7,6 +7,8 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "assets:icons": "node scripts/generate-icons.mjs",
+    "assets:brand": "npm run assets:icons && npm run assets:wix",
     "assets:wix": "node scripts/generate-wix-branding.mjs",
     "plugin:validate": "node scripts/plugin-cli.mjs validate",
     "plugin:pack": "node scripts/plugin-cli.mjs pack",

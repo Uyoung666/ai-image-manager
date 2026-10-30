@@ -48,16 +48,9 @@ const bannerBackground = Buffer.from(`
   </svg>
 `);
 
-function createRoundedIcon(size) {
-  const radius = Math.max(8, Math.round(size * 0.16));
-  const mask = Buffer.from(`
-    <svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
-      <rect width="${size}" height="${size}" rx="${radius}" fill="#fff"/>
-    </svg>
-  `);
+function createIcon(size) {
   return sharp(sourceIcon)
-    .resize(size, size, { fit: "cover" })
-    .composite([{ blend: "dest-in", input: mask }])
+    .resize(size, size, { fit: "contain" })
     .png()
     .toBuffer();
 }
@@ -65,8 +58,8 @@ function createRoundedIcon(size) {
 await fs.mkdir(outputDirectory, { recursive: true });
 
 const [dialogIcon, bannerIcon] = await Promise.all([
-  createRoundedIcon(112),
-  createRoundedIcon(42),
+  createIcon(112),
+  createIcon(42),
 ]);
 
 await Promise.all([
@@ -78,6 +71,12 @@ await Promise.all([
     .composite([{ input: bannerIcon, left: 443, top: 8 }])
     .jpeg({ chromaSubsampling: "4:4:4", quality: 94 })
     .toFile(bannerPath),
+  sharp({
+    create: { width: 268, height: 167, channels: 3, background: "#fafafd" },
+  })
+    .composite([{ input: dialogIcon, left: 78, top: 27 }])
+    .gif()
+    .toFile(path.join(outputDirectory, "squirrel-loading.gif")),
 ]);
 
 console.log(

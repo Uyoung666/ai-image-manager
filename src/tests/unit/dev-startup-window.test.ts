@@ -82,8 +82,9 @@ afterEach(() => {
 
 describe("development startup handoff", () => {
   it("uses a sandbox without preload and stays inside a small display work area", () => {
-    const window = createDevLoadingWindow("AI 图片管理器");
+    const window = createDevLoadingWindow("AI 图片管理器", "assets/icon.ico");
     expect(native.options).toMatchObject({
+      icon: "assets/icon.ico",
       show: false,
       useContentSize: true,
       webPreferences: {

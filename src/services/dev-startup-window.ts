@@ -62,12 +62,13 @@ ${reduceMotion ? ".spinner{animation:none}" : ""}
 </style></head><body><section data-dev-startup role="status" aria-label="${name}"><div class="spinner" aria-hidden="true"></div><div>${name}</div></section></body></html>`;
 }
 
-export function createDevLoadingWindow(title: string) {
+export function createDevLoadingWindow(title: string, icon?: string) {
   const area = screen.getDisplayNearestPoint(
     screen.getCursorScreenPoint()
   ).workArea;
   const window = new BrowserWindow({
     title,
+    icon,
     useContentSize: true,
     width: Math.min(480, area.width),
     height: Math.min(300, Math.max(100, area.height - 64)),

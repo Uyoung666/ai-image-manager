@@ -14,11 +14,10 @@ if (!fs.existsSync(source)) {
   process.exit(1);
 }
 
-const sizes = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
+const sizes = [16, 20, 24, 32, 40, 48, 64, 128, 180, 256, 512, 1024];
 const generatedDir = path.join(assetsDir, "icons");
 fs.mkdirSync(generatedDir, { recursive: true });
 
-const pngPaths = [];
 for (const size of sizes) {
   const out = path.join(generatedDir, `icon-${size}.png`);
   await sharp(source)
@@ -28,11 +27,10 @@ for (const size of sizes) {
     })
     .png()
     .toFile(out);
-  pngPaths.push(out);
   console.log(`[icons] ${size}x${size} → ${path.relative(repoRoot, out)}`);
 }
 
-const icoSizes = [16, 24, 32, 48, 64, 128];
+const icoSizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
 const icoInputs = icoSizes.map((s) => path.join(generatedDir, `icon-${s}.png`));
 const icoBuf = await pngToIco(icoInputs);
 const icoOut = path.join(assetsDir, "icon.ico");
