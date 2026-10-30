@@ -1,8 +1,8 @@
-# AI Image Manager v2.2.4 User Guide
+# AI Image Manager v2.2.5 User Guide
 
 > A local-first photo manager for Windows. Build an index over your existing folders, then search, organize, curate, analyze, export, and share your library.
 
-This guide follows the normal user workflow and describes v2.2.4. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
+This guide follows the normal user workflow and describes v2.2.5. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
 
 ---
 
@@ -22,6 +22,7 @@ This guide follows the normal user workflow and describes v2.2.4. GitHub Release
 - [Wander](#wander)
 - [Dashboard](#dashboard)
 - [Photo culling](#photo-culling)
+- [Import-free culling](#import-free-culling)
 - [Duplicate detection](#duplicate-detection)
 - [Batch operations](#batch-operations)
 - [Export, sharing, and watermarks](#export-sharing-and-watermarks)
@@ -67,9 +68,9 @@ RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews r
 
 ### Upgrading from an older version
 
-This version changes image preprocessing and adds a search-data revision migration. The database schema is updated on first launch.
+When upgrading from v2.2.4, the first launch automatically migrates the database for the gallery and culling workflows. This update does not require a routine AI index rebuild. Back up the application data directory before upgrading; original photos, tags, favorites and existing culling records are preserved.
 
-If your library contains an older AI index, open **Settings → AI Index → Rebuild AI Index**. Semantic search and image search are unavailable while the existing index is incompatible; filename, tag and person searches remain available. Rebuilding preserves original images, manual tags and favorites, and does not require importing your photos again. Processing time depends on your library and hardware.
+When upgrading from v2.2.3 or earlier, rebuild the AI index in **Settings → AI Index** if the app reports an incompatible index. Semantic and image search are restricted until rebuilding finishes; filename, tag and person searches remain available. You do not need to import your photos again.
 
 ### 0. Choose an installation method
 
@@ -246,7 +247,15 @@ Global search is for fast navigation and is separate from the full semantic sear
 
 ### Search history
 
-Recent searches appear when the search field is focused. Click **Clear all** to remove them. Search history is a local interface preference and is not included in diagnostic bundles.
+Focus the search field to see recent text queries and reference images. Select an entry to search again, delete one or clear all. Image history depends on the original reference file; choose it again if it moved or is offline. History stays on this device and is excluded from diagnostic bundles.
+
+Settings let you hide history and stop recording or using it for recommendations and retain 5, 10, 20, 50 or 100 entries (default: 5). Disabling recording does not clear existing entries. Reducing the limit requires confirmation before older entries are trimmed.
+
+### Search presets and gallery exploration
+
+Save text queries and filters as presets, then rename, delete or apply them again. The preset bar supports horizontal scrolling. Returning to the gallery restores search and browsing position; tag edits and background refreshes preserve the browsing anchor.
+
+Gallery exploration offers themed recommendations that you can open or refresh. Local AI semantic and image search may return biased or incomplete results. Check originals and precise filters; relevance scores are not factual judgments.
 
 ---
 
@@ -574,6 +583,40 @@ Culling results assist decisions and do not overwrite originals automatically.
 
 ---
 
+## Import-free culling
+
+Use **Import-free culling** in the sidebar or culling page, or drop a folder onto the culling list. Select a local folder, memory card or external drive. No library import or AI indexing is required. Existing watchers and AI settings still apply if the source is already managed by the library.
+
+### Choose a workflow and review results
+
+Choose **Curate**, **Direct PK**, or **Curate then PK**. The default uses the folder name and Curate. Start after the first usable photo is discovered while scanning and previews continue in the background. PK workflows remember the quick, standard or fine comparison strategy. Projects save decisions and comparison progress automatically.
+
+The combined workflow compares only keepers; unreviewed photos are excluded when Curate ends early. With fewer than two keepers, go directly to results. Results show final selections and individual PK rounds. Start a new round from a selected subset if needed. Comparisons alone do not change the final keep list. Explicitly applying the top N changes only that round's candidates and supports undo; photos outside the round stay unchanged. Non-participants have no rank for that round.
+
+### Offline previews and source recovery
+
+Wait until all offline previews are ready before disconnecting the source. Cached previews and decisions remain available after reopening; unprepared photos show placeholders. Original detail inspection and copying require the source. RAW uses embedded previews and displays their actual resolution rather than full RAW decoding.
+
+If the drive letter or root folder changes, use **Relink source**, inspect verification results and confirm. Matching full hashes establish identity; lightweight matches require explicit confirmation. Missing, changed or insufficiently verified files keep their records and decisions. **Check for new photos** discovers additions without resetting decisions.
+
+### Copy originals, retry and add to the library
+
+Choose **Copy kept originals**, or copy selected photos from results. Confirm the destination, photo and XMP counts, total size and unavailable files. Output retains relative paths and original bytes, with matching same-name XMP sidecars copied once. It is ready for editing without ZIP extraction. SHA-256 verification checks source and destination.
+
+The destination cannot be inside the source folder. The file list is fixed when the task starts. Cancellation keeps completed files. Retry the original task after insufficient space, permission errors, source loss or interruption; completed files are checked and conflicting or modified targets are not overwritten. Relinking does not rewrite old copy task source paths; create a new task for a new source. If the destination is already watched by the library, confirm that its existing import behavior remains active.
+
+**Add to library** is separate. Choose verified output or available originals and confirm the exact list. Only those files are imported, with folder entries for navigation; this does not add automatic scanning or watching. AI processing then follows the existing library settings.
+
+### Archive, restore and clean up
+
+Folder projects and library sessions share the culling list. Archive either from its card or inside the task and use the notification to undo. Completion does not automatically archive tasks. In **Settings → Archived culling**, search, open or restore tasks. Opening an archived task does not restore it; explicit restoration returns it to the regular list.
+
+**Clear archives** confirms the total across all archived tasks, including those hidden by search. It permanently removes culling records, comparison progress and project previews while retaining originals, copied output and library photos. Tasks restored or re-archived after confirmation are skipped. Failed items remain for retry.
+
+The project menu also offers renaming, preview cleanup and deletion. Preview cleanup preserves decisions and allows later preparation. Deleting a project removes records and managed previews while retaining source files, output and photos already added to the library.
+
+---
+
 ## Duplicate detection
 
 ### Scan
@@ -612,6 +655,10 @@ After selecting multiple photos, the bottom action bar provides:
 | Batch rename | `F2` | Generate names from a template |
 | Convert | `Ctrl + Shift + C` | Convert to JPG, PNG, WebP, or AVIF |
 | Delete | `Delete` | Move to the app trash |
+
+Batch tag editing adds or removes tags from selected photos. Check the selection scope and count before applying changes. The success notification offers undo; partial failures or conflicts with later edits are reported. Batch soft deletion also offers immediate undo, and photos can still be restored from Trash.
+
+The album picker remembers the recent destination. Export remembers format, quality, maximum width and the option to open the output folder on completion; check settings before each export.
 
 ### Batch rename tokens
 

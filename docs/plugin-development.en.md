@@ -2,6 +2,8 @@
 
 Public AI Image Manager plugins are read-only, declarative theme or locale packages. They cannot run code, read host files, or initiate network requests. Authors provide JSON and optional media assets for themes; the application interprets both capabilities inside its own safety boundary.
 
+Starting with v2.2.5, each locale object may contain up to 4096 properties in both the host and CLI. Other limits remain unchanged: 1 MiB per file, 16,384 characters per string, 2048 array entries, an object nesting check depth of 32, and 50,000 string leaves in total. This capacity change preserves dangerous-content checks and official locale signature requirements.
+
 ## Security boundary
 
 A v2 theme package may contain only `plugin.json`, `theme.json`, and image/video files below `assets/`. A v3 locale package may contain only `plugin.json`, `signature.json`, and `locales/<tag>/renderer.json` plus `locales/<tag>/main.json`. JavaScript, HTML, CSS, fonts, executables, network URLs, `data:` URLs, and script-injection syntax are not part of the public API. On import, the application re-checks ZIP paths, duplicate entries, symlinks, asset extensions, media MIME, extraction limits, locale structure, and signatures. CLI validation is a developer aid, not a replacement for the host's final validation.

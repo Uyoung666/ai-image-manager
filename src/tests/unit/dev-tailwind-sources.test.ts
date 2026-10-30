@@ -60,7 +60,7 @@ describe("development Tailwind sources", () => {
     const previous = css
       .replace(' source("../")', "")
       .replace('@source "../../index.html";', "")
-      .replace('@source inline("lowercase !paused");', "");
+      .replace('@source inline("lowercase !paused zoom-out");', "");
     const current = await prepare(css);
     const baseline = await prepare(previous);
     expect(current.compiler.build(current.scanner.scan())).toBe(

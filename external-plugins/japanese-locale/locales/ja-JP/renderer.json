@@ -1,4 +1,11 @@
 {
+  "aboutCopyVersion": "バージョン情報をコピー",
+  "aboutCreatorToggle": "作者の詳細を展開・折りたたむ",
+  "aboutOpenFailed": "開けませんでした。もう一度お試しください。",
+  "aboutProductName": "AI Image Manager",
+  "aboutProductTagline": "すべての画像を、もう一度見つけよう。",
+  "aboutProductPreview": "写真の重なりをプレビュー",
+  "aboutProductPreviewHint": "クリックして写真を広げる・まとめる",
   "appName": "AI Image Manager",
   "shootingProjects": "撮影プロジェクト",
   "shootingProject": {

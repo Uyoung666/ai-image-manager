@@ -85,6 +85,26 @@ describe("plugin v3 locale CLI", () => {
     });
   });
 
+  it("accepts 4096 locale properties and rejects 4097 in the CLI", async () => {
+    const directory = await createLocaleDirectory("property-boundary");
+    const file = path.join(directory, "locales", "ja-JP", "renderer.json");
+    const bundle = Object.fromEntries(
+      Array.from({ length: 4096 }, (_, index) => [`key${index}`, "翻訳"])
+    );
+    await fs.writeFile(file, JSON.stringify(bundle), "utf8");
+    await expect(validatePluginDirectory(directory)).resolves.toMatchObject({
+      signed: false,
+    });
+    await fs.writeFile(
+      file,
+      JSON.stringify({ ...bundle, overflow: "翻訳" }),
+      "utf8"
+    );
+    await expect(validatePluginDirectory(directory)).rejects.toThrow(
+      "too many object properties"
+    );
+  });
+
   it("signs locale packages from an external Ed25519 private-key path", async () => {
     const directory = await createLocaleDirectory("signed");
     const keyPath = path.join(temporaryDirectory, "release-key.pem");

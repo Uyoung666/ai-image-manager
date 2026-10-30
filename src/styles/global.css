@@ -6,7 +6,7 @@
 
 @source "../../index.html";
 /* Preserve the previous output, including utilities detected in scripts. */
-@source inline("lowercase !paused");
+@source inline("lowercase !paused zoom-out");
 
 @custom-variant dark (&:is(.dark *));
 

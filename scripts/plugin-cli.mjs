@@ -108,7 +108,7 @@ const LOCALE_DANGEROUS_TEXT_PATTERN =
   /(?:<\/?[a-z][^>]*>|javascript\s*:|vbscript\s*:|data\s*:\s*text\/html)/i;
 const LOCALE_STRING_LIMIT = 16_384;
 const LOCALE_ARRAY_LIMIT = 2048;
-const LOCALE_OBJECT_LIMIT = 2048;
+const LOCALE_OBJECT_LIMIT = 4096;
 const LOCALE_DEPTH_LIMIT = 32;
 const LOCALE_LEAF_LIMIT = 50_000;
 

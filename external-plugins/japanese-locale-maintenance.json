@@ -1,5 +1,5 @@
 {
-  "baselineRef": "v2.2.3",
+  "baselineRef": "v2.2.4",
   "reviews": {
     "renderer.appName": {
       "sourceSha256": "68c9649a610a7a19208afbc5d595b2389ad06163b0a3d80ad850e5a377f95901",
@@ -36,6 +36,10 @@
     "main.tooltip": {
       "sourceSha256": "68c9649a610a7a19208afbc5d595b2389ad06163b0a3d80ad850e5a377f95901",
       "reason": "保留产品名称、标准缩写、模型标识、快捷键或仅含数字和插值的文案。"
+    },
+    "renderer.aboutProductName": {
+      "sourceSha256": "68c9649a610a7a19208afbc5d595b2389ad06163b0a3d80ad850e5a377f95901",
+      "reason": "关于页产品名称沿用官方英文品牌 AI Image Manager，不翻译。"
     }
   }
 }

@@ -38,6 +38,21 @@ const localeManifest = () => ({
 });
 
 describe("plugin v3 locale manifest boundary", () => {
+  it("accepts 4096 locale properties and rejects 4097 at every object level", () => {
+    const bundle = Object.fromEntries(
+      Array.from({ length: 4096 }, (_, index) => [`key${index}`, "翻訳"])
+    );
+    expect(() => validateLocaleBundle(bundle)).not.toThrow();
+    expect(() => validateLocaleBundle({ nested: bundle })).not.toThrow();
+    const oversized = { ...bundle, overflow: "翻訳" };
+    expect(() => validateLocaleBundle(oversized)).toThrow(
+      "too many object properties"
+    );
+    expect(() => validateLocaleBundle({ nested: oversized })).toThrow(
+      "too many object properties"
+    );
+  });
+
   it("parses a locale manifest without introducing theme fields", () => {
     const parsed = parsePluginManifest(localeManifest());
 

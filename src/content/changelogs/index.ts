@@ -6,12 +6,14 @@ import previousMinor from "./v2.2.0";
 import previousMinorPatch from "./v2.2.1";
 import previousRelease from "./v2.2.2";
 import previousReleasePatch from "./v2.2.3";
-import current from "./v2.2.4";
+import previousStable from "./v2.2.4";
+import current from "./v2.2.5";
 
 export type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
 
 export const changelogEntries: ChangelogEntry[] = [
   current,
+  previousStable,
   previousReleasePatch,
   previousRelease,
   previousMinorPatch,

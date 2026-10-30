@@ -948,7 +948,11 @@ for (const size of SIZES) {
         Date.now()
       );
       const fixtures = [
-        { ...saved, name: "RecentFixture-Latest", lastUsedAt: latest },
+        {
+          ...saved,
+          name: "RecentFixture-Latest-Long-search-combination-for-tooltip",
+          lastUsedAt: latest,
+        },
         { ...saved, name: "RecentFixture-Earlier", lastUsedAt: latest - 1 },
         ...Array.from({ length: 12 }, (_, index) => ({
           ...saved,
@@ -989,7 +993,7 @@ for (const size of SIZES) {
     await expect(strip).toHaveAttribute("data-right-fade", "true");
     await expect(strip.locator("[data-search-preset]").first()).toHaveAttribute(
       "data-search-preset",
-      "RecentFixture-Latest"
+      "RecentFixture-Latest-Long-search-combination-for-tooltip"
     );
     expect(
       await strip.evaluate((element) => ({
@@ -1007,13 +1011,19 @@ for (const size of SIZES) {
     await assertBounds();
     await saveWindowScreenshot("search-presets.png");
     await page.mouse.move(0, 0);
+    expect(
+      await strip
+        .locator("[data-search-preset]")
+        .first()
+        .evaluate((element) => element.scrollWidth > element.clientWidth)
+    ).toBe(true);
     await strip.locator("[data-search-preset]").first().hover();
     const presetTooltip = page
       .locator('[data-overlay-kind="search-suggestions"]')
       .locator('[data-slot="tooltip-content"]');
     await expect(presetTooltip).toBeVisible();
     await expect(presetTooltip.getByRole("tooltip")).toHaveText(
-      "RecentFixture-Latest"
+      "RecentFixture-Latest-Long-search-combination-for-tooltip"
     );
     expect(
       await presetTooltip.evaluate((element) => {

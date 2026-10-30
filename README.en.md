@@ -30,23 +30,23 @@ A local-first AI photo manager for Windows, with natural-language search, smart 
 
 AI Image Manager is designed for photographers, creators, designers, and anyone with a long-lived photo library on Windows. The workflow is built around your existing folders: index them in place, find photos with natural language, visual similarity, metadata, or folders, then organize, curate, analyze, export, or share them.
 
-## Current code version: v2.2.4
+## Current code version: v2.2.5
 
-This update improves search consistency, photo and sequence navigation, and recovery during in-app updates. GitHub Releases identifies the available stable version.
+This update introduces import-free culling and improves search, gallery browsing and batch organization. GitHub Releases identifies the available stable release.
 
-### v2.2.4 highlights
+### v2.2.5 highlights
 
-- Improves Chinese semantic queries, composed-object queries and combined filters, with more reliable pagination, request cancellation and cache invalidation.
-- Fixes missing search results after library changes or AI initialization delays, and refreshes Smart Album contents and covers after tag changes.
-- Improves photo selection positioning, navigation after closing details, sequence-member visibility and keyboard navigation within a sequence. Paused playback keeps the current frame.
-- Adds resumable update downloads and task recovery, with clearer disk-space checks, cache repair, retry and installation feedback. Update status remains accessible from the header across pages.
-- Provides an official signed Japanese language pack matched to the application version as a separate release asset.
+- Curate, compare in PK, or curate then compare directly from a card or shooting folder; save offline previews, copy kept originals with XMP, and explicitly add selected files to the library when needed.
+- Manage folder projects and library culling in one task list, with archiving, undo, restoration and confirmed archive cleanup.
+- Reuse text and image search history with configurable limits, save combined searches as presets, and explore rotating gallery themes.
+- Improve masonry loading, pagination recovery, browsing position and thumbnails; batch-edit tags with undo and remember album and export preferences.
+- Unify app icons and interaction animations, fix the Windows taskbar identity, refresh About, and provide a matching official Japanese language pack.
 
 ### Upgrading
 
-This version changes image preprocessing and adds a search-data revision migration. The database schema is updated on first launch.
+When upgrading from v2.2.4, the first launch automatically migrates the database for the gallery and culling workflows. This update does not require a routine AI index rebuild. Back up the application data directory before upgrading; original photos, tags, favorites and existing culling records are preserved.
 
-If your library contains an older AI index, open **Settings → AI Index → Rebuild AI Index**. Semantic search and image search are unavailable while the existing index is incompatible; filename, tag and person searches remain available. Rebuilding preserves original images, manual tags and favorites, and does not require importing your photos again. Processing time depends on your library and hardware.
+When upgrading from v2.2.3 or earlier, rebuild the AI index in **Settings → AI Index** if the app reports an incompatible index. Semantic and image search are restricted until rebuilding finishes; filename, tag and person searches remain available. You do not need to import your photos again.
 
 Setup and MSI installations with the updater enabled support in-app updates. ZIP installations and MSI installations with the updater disabled require manual upgrades. Updates continue to use GitHub Releases and the Windows system proxy.
 
@@ -101,6 +101,8 @@ The release package includes the model assets required by the current version, s
 3. Watch **AI Smart Index** in the sidebar. Semantic search, image search, visual duplicate detection, and some AI tagging features require their corresponding index to be ready.
 
 For detailed workflows, shortcuts, and troubleshooting, read the [User Guide](GUIDE.en.md).
+
+To cull before importing, open **Import-free culling**, choose a folder and start Curate or PK. If the source is already watched by the library, existing import and AI settings still apply.
 
 ## System requirements
 
@@ -169,6 +171,8 @@ Actual performance depends on image format, resolution, library storage, system 
 | PK comparison | Curate mode | Ranked results |
 | :---: | :---: | :---: |
 | ![PK comparison](screenshots/v2.0.0/culling-pk.png) | ![Curate mode](screenshots/v2.0.0/culling-curate.png) | ![Culling results](screenshots/v2.0.0/culling-export.png) |
+
+Import-free culling starts directly from a folder without adding library watchers or starting library AI. Cached previews support offline review; copying originals requires the source. Folder projects and library sessions support archiving and restoration. See the [guide](GUIDE.en.md#import-free-culling).
 
 ### 6. Duplicate review and photo analytics
 
@@ -264,7 +268,7 @@ The app does not take ownership of or automatically migrate your original photos
 - When WebDAV/S3 is configured and an upload or share action is initiated, the corresponding data is sent to the selected service.
 - **Settings → Help & Diagnostics** creates a strictly redacted diagnostic bundle locally. It is not uploaded automatically; it leaves the device only if the user exports it or attaches it to an Issue. Native crash dumps are off by default.
 
-These statements describe the current v2.2.4 implementation. Screenshots and performance data retain their actual measurement versions and do not replace the privacy policies of connected cloud or update services.
+These statements describe the current v2.2.5 implementation. Screenshots and performance data retain their actual measurement versions and do not replace the privacy policies of connected cloud or update services.
 
 ## Bundled AI models and licenses
 

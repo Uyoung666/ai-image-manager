@@ -2,7 +2,7 @@
   "manifestVersion": 3,
   "apiVersion": 3,
   "id": "com.aiimagemanager.japanese-locale",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "name": {
     "en": "Japanese",
     "ja-JP": "日本語"
@@ -18,7 +18,7 @@
   "homepage": "https://github.com/Uyoung666/ai-image-manager",
   "license": "MIT",
   "engine": {
-    "minAppVersion": "2.2.4"
+    "minAppVersion": "2.2.5"
   },
   "capabilities": ["locale"],
   "locale": {
