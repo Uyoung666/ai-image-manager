@@ -144,3 +144,7 @@ convert-formats.mjs
 
 # Release bodies live on release pages, never in source control.
 RELEASE_NOTES*.md
+
+# Local provenance notes for bundled about-page assets.
+/src/assets/about/website/SOURCE.md
+/src/assets/about/github-avatar-source.json

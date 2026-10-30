@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ChevronDown, Sparkles } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -9,19 +9,14 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { AboutAuthor } from "@/components/about/about-author";
 import { AboutGallery } from "@/components/about/about-gallery";
+import { AboutProductCard } from "@/components/about/about-product-card";
 import "@/components/about/about.css";
-import { AnimatedGitHubButton } from "@/components/animated-github-button";
-import { AnimatedNameLoader } from "@/components/animated-name-loader";
+import { AboutCreatorCard } from "@/components/about/about-creator-card";
+import { AboutWebsiteCard } from "@/components/about/about-website-card";
 import { ConfettiOverlay } from "@/components/ConfettiOverlay";
 import { SignatureOverlay } from "@/components/SignatureOverlay";
 import { SettingsPageShell } from "@/components/settings/settings-page-shell";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
@@ -110,56 +105,18 @@ function AboutSettingsPage() {
       <SignatureOverlay active={signatureActive} onDone={handleSignatureDone} />
 
       <div className="mx-auto w-full min-w-0 max-w-[820px] space-y-6">
-        {/* App info */}
-        <section className="space-y-3">
-          <div className="min-w-0 space-y-3 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-              <span className="text-[13px] text-muted-foreground">
-                {t("settingsVersion")}
-              </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    aria-label={t("settingsVersion")}
-                    className="group relative flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[13px] text-foreground transition-colors hover:bg-foreground/5"
-                    onClick={handleVersionClick}
-                    type="button"
-                  >
-                    <span className="select-none">{appVersion || "..."}</span>
-                    {easterEggFound && (
-                      <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-                    )}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("settingsVersion")}</TooltipContent>
-              </Tooltip>
-            </div>
-
-            {/* License */}
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-border border-t pt-3">
-              <span className="text-[13px] text-muted-foreground">
-                {t("settingsLicense")}
-              </span>
-              <span className="text-[13px] text-foreground">MIT</span>
-            </div>
-
-            {/* Author */}
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-border border-t pt-3">
-              <span className="text-[13px] text-muted-foreground">
-                {t("settingsAuthor")}
-              </span>
-              <AboutAuthor />
-            </div>
+        <div className="about-intro">
+          <div className="about-intro-grid">
+            <AboutProductCard
+              easterEggFound={easterEggFound}
+              onVersionClick={handleVersionClick}
+              version={appVersion}
+            />
+            <AboutCreatorCard />
+            <AboutWebsiteCard />
           </div>
-        </section>
-
-        <AboutGallery />
-
-        {/* GitHub — standalone 3D flip button + animated name loader */}
-        <div className="flex min-w-0 flex-wrap items-center gap-3 pt-1">
-          <AnimatedGitHubButton href="https://github.com/Uyoung666/ai-image-manager" />
-          <AnimatedNameLoader />
         </div>
+        <AboutGallery />
 
         {/* Dependencies (collapsible) */}
         <section className="space-y-3">

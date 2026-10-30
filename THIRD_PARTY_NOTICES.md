@@ -42,3 +42,7 @@ are credited on the about page. The crowd was adapted by Gurvinder Singh
 (@gurvinder-singh02) from Zadvorsky's animation and uses Open Peeps
 illustrations by Pablo Stanley (CC0 1.0). GSAP uses its Standard License.
 See the bundled licenses/About-UI.txt for source and license references.
+
+## About page: Uiverse
+
+The creator card, browser preview and copy feedback are adapted from MIT-licensed designs by Smit-Prajapati, arthur_6104 and Galahhad. Sources and full terms are bundled in licenses/About-UI.txt.

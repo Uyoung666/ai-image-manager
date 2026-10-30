@@ -22,12 +22,11 @@ vi.mock("@/components/ConfettiOverlay", () => ({
 vi.mock("@/components/SignatureOverlay", () => ({
   SignatureOverlay: () => null,
 }));
-vi.mock("@/components/animated-github-button", () => ({
-  AnimatedGitHubButton: () => null,
+vi.mock("@tanstack/react-router", async (original) => ({
+  ...(await original<typeof import("@tanstack/react-router")>()),
+  useNavigate: () => vi.fn(),
 }));
-vi.mock("@/components/animated-name-loader", () => ({
-  AnimatedNameLoader: () => null,
-}));
+vi.mock("@/actions/shell", () => ({ openExternalLink: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -142,7 +141,7 @@ it("keeps the version easter egg and accessible dependency disclosure", async ()
     throw new Error("About route is missing");
   }
   const { container } = render(<Page />);
-  expect(container.querySelector(".about-identity")).toBeNull();
+  expect(container.querySelector(".about-product")).toBeVisible();
   await screen.findByText("2.2.2");
   const version = screen.getByRole("button", { name: "settingsVersion" });
   for (let i = 0; i < 6; i++) {

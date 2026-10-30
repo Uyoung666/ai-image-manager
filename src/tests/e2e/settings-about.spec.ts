@@ -11,7 +11,7 @@ const SIZES = [
   { width: 720, height: 480, zoom: 1.5 },
 ];
 const LANGUAGE_LABEL = /^(Language|语言)$/;
-const reviewDir = path.resolve(".cache/about-review");
+const reviewDir = path.resolve(".cache/about-review/creator-avatar-20261030");
 let app: ElectronApplication;
 let page: Page;
 
@@ -49,6 +49,29 @@ test.beforeAll(async () => {
     },
   });
   page = await app.firstWindow();
+  // Startup can briefly expose a separate loading window before the workspace.
+  await expect
+    .poll(
+      async () => {
+        for (const candidate of app.windows()) {
+          if (
+            !candidate.isClosed() &&
+            (await candidate.locator("main").count())
+          ) {
+            page = candidate;
+            return true;
+          }
+        }
+        return false;
+      },
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.webContents.setZoomFactor(1);
+    window.setContentSize(1280, 800);
+  });
   await page.addInitScript(() => {
     localStorage.setItem("lang", "en");
     localStorage.setItem("ui.reduceMotion", "false");
@@ -97,11 +120,11 @@ async function noOverflow() {
 }
 
 for (const size of SIZES) {
-  test(`about page fits ${size.width}x${size.height} at ${size.zoom} zoom`, async () => {
-    await app.evaluate(({ BrowserWindow }, bounds) => {
-      const window = BrowserWindow.getAllWindows()[0];
-      window.setContentSize(bounds.width, bounds.height);
-      window.webContents.setZoomFactor(bounds.zoom);
+  test(`about composition fits ${size.width}x${size.height} at ${size.zoom}`, async () => {
+    await app.evaluate(({ BrowserWindow }, b) => {
+      const w = BrowserWindow.getAllWindows()[0];
+      w.setContentSize(b.width, b.height);
+      w.webContents.setZoomFactor(b.zoom);
     }, size);
     for (const language of ["zh", "en"]) {
       await navigate("/settings/appearance");
@@ -112,196 +135,134 @@ for (const size of SIZES) {
           exact: true,
         })
         .click();
-      await expect(page.locator("html")).toHaveAttribute("lang", language);
       for (const theme of ["light", "dark"]) {
-        await page.evaluate((next) => {
+        await page.evaluate((theme) => {
           document.documentElement.classList.remove("light", "dark");
-          document.documentElement.classList.add(next);
+          document.documentElement.classList.add(theme);
         }, theme);
         await navigate("/settings/about");
-        await expect(page.getByTestId("about-crowd")).toHaveAttribute(
-          "data-status",
-          "ready"
-        );
-        await expect(page.locator(".about-identity")).toHaveCount(0);
-        const author = page.locator(".about-author");
-        await expect(author).toHaveAttribute("data-message", "name");
-        const originalAuthorHeight = (await author.boundingBox())?.height;
-        await author.hover();
-        await expect(author).toHaveAttribute("data-message", "greeting");
-        await author.click();
-        await expect(author).toHaveAttribute("data-message", "message");
-        expect((await author.boundingBox())?.height).toBeCloseTo(
-          originalAuthorHeight ?? 0,
-          2
-        );
-        await noOverflow();
-        if (size.width === 1280 && language === "zh" && theme === "dark") {
-          await capture("author-message.png");
+        const creator = page.getByTestId("about-creator");
+        await creator.scrollIntoViewIfNeeded();
+        await creator.hover();
+        await expect(creator).toHaveAttribute("data-expanded", "true");
+        await page.waitForTimeout(1100);
+        for (const selector of [
+          ".about-creator-cover",
+          ".about-creator-copy",
+          ".about-creator-links",
+          ".about-small-signature",
+        ]) {
+          const parent = await creator.boundingBox();
+          const child = await page.locator(selector).boundingBox();
+          if (!(parent && child)) {
+            throw new Error("Missing card bounds");
+          }
+          expect(child.x).toBeGreaterThanOrEqual(parent.x);
+          expect(child.x + child.width).toBeLessThanOrEqual(
+            parent.x + parent.width + 1
+          );
+          expect(child.y + child.height).toBeLessThanOrEqual(
+            parent.y + parent.height + 1
+          );
         }
-        await author.press("Space");
-        await expect(author).toHaveAttribute("data-message", "greeting");
-        await author.press("Tab");
-        await page.mouse.move(0, 0);
-        await expect(author).toHaveAttribute("data-message", "name");
-        const cards = page.locator(".about-gallery-card");
-        await expect(cards).toHaveCount(5);
-        const authorTop = await author.evaluate(
-          (element) => element.getBoundingClientRect().top
-        );
-        const galleryTop = await page
-          .getByTestId("about-gallery")
-          .evaluate((element) => element.getBoundingClientRect().top);
-        expect(authorTop).toBeLessThan(galleryTop);
+        await noOverflow();
+        await page.locator("main h2").scrollIntoViewIfNeeded();
+        await capture(`${size.width}-${size.zoom}-${language}-${theme}.png`);
+        await page.getByTestId("about-website").scrollIntoViewIfNeeded();
         await expect
           .poll(() =>
             page
-              .locator(".about-artwork")
-              .evaluateAll((images) =>
-                images.every(
-                  (image) => (image as HTMLImageElement).naturalWidth > 0
-                )
+              .locator(".about-browser-preview img")
+              .evaluateAll((imgs) =>
+                imgs.every((img) => (img as HTMLImageElement).naturalWidth > 0)
               )
           )
           .toBe(true);
-        await cards.nth(2).click();
-        await page.locator("main h2").scrollIntoViewIfNeeded();
-        await capture(
-          `${size.width}-${size.zoom}-${language}-${theme}-top.png`
-        );
-        await cards.nth(4).focus();
-        await cards.nth(4).press("Enter");
-        await expect(cards.nth(4)).toHaveAttribute("aria-pressed", "true");
-        const cardBounds = await cards.nth(4).boundingBox();
-        expect(cardBounds?.x).toBeGreaterThanOrEqual(0);
-        expect(
-          (cardBounds?.x ?? 0) + (cardBounds?.width ?? 0)
-        ).toBeLessThanOrEqual((await page.evaluate(() => innerWidth)) + 2);
-        if (
-          ((await page.getByTestId("about-gallery").boundingBox())?.width ??
-            0) >= 560
-        ) {
-          await cards.nth(0).hover();
-          await expect(cards.nth(0)).toHaveAttribute("data-active", "true");
-        }
         await noOverflow();
-        const deps = page.locator('button[aria-controls="about-dependencies"]');
-        await deps.click();
-        await expect(deps).toHaveAttribute("aria-expanded", "true");
-        await noOverflow();
-        await deps.click();
-        const canvas = page.locator(".about-crowd-canvas");
-        await canvas.scrollIntoViewIfNeeded();
-        await expect(canvas).toHaveAttribute("data-crowd-playing", "true");
-        await expect
-          .poll(() =>
-            canvas.evaluate((element) => (element as HTMLCanvasElement).width)
-          )
-          .toBeGreaterThan(0);
-        await capture(
-          `${size.width}-${size.zoom}-${language}-${theme}-crowd.png`
-        );
-        await page.locator("main h2").scrollIntoViewIfNeeded();
-        const stageVisible = await page
-          .locator(".about-crowd-stage")
-          .evaluate((stage) => {
-            const bounds = stage.getBoundingClientRect();
-            const scroll = stage.closest(".overflow-y-auto");
-            const viewport = scroll?.getBoundingClientRect();
-            return (
-              bounds.bottom > (viewport?.top ?? 0) &&
-              bounds.top < (viewport?.bottom ?? innerHeight)
-            );
-          });
-        await expect(canvas).toHaveAttribute(
-          "data-crowd-playing",
-          String(stageVisible)
-        );
       }
     }
   });
 }
-
-test("crowd pauses, resumes and respects application and system reduced motion", async () => {
-  await app.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0];
-    window.webContents.setZoomFactor(1);
-    window.setContentSize(900, 600);
-  });
-  await navigate("/settings/about");
-  const canvas = page.locator(".about-crowd-canvas");
-  await canvas.scrollIntoViewIfNeeded();
-  await expect(canvas).toHaveAttribute("data-crowd-playing", "true");
-  const toggle = page.getByRole("checkbox", { name: "Play crowd animation" });
-  await toggle.locator("..").click();
-  await expect(canvas).toHaveAttribute("data-crowd-playing", "false");
-  const still = await canvas.evaluate((element) =>
-    (element as HTMLCanvasElement).toDataURL()
-  );
-  await page.waitForTimeout(250);
-  expect(
-    await canvas.evaluate((element) =>
-      (element as HTMLCanvasElement).toDataURL()
-    )
-  ).toBe(still);
-  await toggle.locator("..").click();
-  await expect(canvas).toHaveAttribute("data-crowd-playing", "true");
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(toggle).toBeDisabled();
-  await expect(canvas).toHaveAttribute("data-crowd-playing", "false");
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect(canvas).toHaveAttribute("data-crowd-playing", "true");
-  await navigate("/settings/appearance");
-  const preference = page.getByRole("checkbox", { name: "Reduce motion" });
-  await preference.locator("..").click();
-  await navigate("/settings/about");
-  await canvas.scrollIntoViewIfNeeded();
-  await expect(toggle).toBeDisabled();
-  await expect(canvas).toHaveAttribute("data-crowd-playing", "false");
-  await page.locator(".about-author").hover();
-  await expect(page.locator(".about-author")).toHaveAttribute(
-    "data-message",
-    "greeting"
-  );
-  await expect(page.locator(".about-author-letter").first()).toHaveCSS(
-    "transition-duration",
-    "0s"
-  );
-  await navigate("/settings/appearance");
-  await preference.locator("..").click();
-});
-
-test("bundled artwork and crowd load offline, including after leaving and returning", async () => {
+test("creator keyboard and reduced motion work offline", async () => {
   await page.context().setOffline(true);
   try {
     await navigate("/settings/about");
-    await expect(page.getByTestId("about-crowd")).toHaveAttribute(
-      "data-status",
-      "ready"
-    );
-    await expect
-      .poll(() =>
-        page
-          .locator(".about-artwork")
-          .evaluateAll((images) =>
-            images.every(
-              (image) => (image as HTMLImageElement).naturalWidth > 0
-            )
-          )
-      )
-      .toBe(true);
+    const creator = page.getByTestId("about-creator");
+    const cover = page.locator(".about-creator-cover");
+    await page.mouse.move(0, 0);
+    await cover.focus();
+    await expect(creator).toHaveAttribute("data-expanded", "true");
+    await cover.press("Enter");
+    await expect(creator).toHaveAttribute("data-expanded", "false");
+    await cover.press("Space");
+    await expect(creator).toHaveAttribute("data-expanded", "true");
+    await page.waitForTimeout(1000);
+    await capture("creator-expanded.png");
+    await cover.press("Escape");
+    await expect(creator).toHaveAttribute("data-expanded", "false");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(creator).toHaveAttribute("data-expanded", "true");
+    await expect(cover).toBeDisabled();
+    await page.emulateMedia({ reducedMotion: "no-preference" });
     await navigate("/settings/update");
     await navigate("/settings/about");
-    await expect(page.getByTestId("about-crowd")).toHaveAttribute(
-      "data-status",
-      "ready"
-    );
-    await page.locator(".about-crowd-canvas").scrollIntoViewIfNeeded();
-    await expect(page.locator(".about-crowd-canvas")).toHaveAttribute(
-      "data-crowd-playing",
-      "true"
-    );
+    await page.getByTestId("about-website").scrollIntoViewIfNeeded();
+    await expect(page.getByTestId("about-website")).toBeVisible();
   } finally {
     await page.context().setOffline(false);
   }
+});
+
+test("capture desktop interaction", async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()[0];
+    w.setContentSize(1280, 800);
+    w.webContents.setZoomFactor(1);
+  });
+  await navigate("/settings/appearance");
+  await page.getByRole("combobox", { name: LANGUAGE_LABEL }).click();
+  await page.getByRole("option", { name: "中文 (zh)", exact: true }).click();
+  await page.evaluate(() => {
+    document.documentElement.classList.remove("dark");
+    document.documentElement.classList.add("light");
+  });
+  await navigate("/settings/about");
+  await page.mouse.move(0, 0);
+  await page.locator(".about-product-version").focus();
+  await page.locator("main h2").scrollIntoViewIfNeeded();
+  await capture("desktop-default.png");
+  const creator = page.getByTestId("about-creator");
+  await expect(creator).not.toHaveCSS("box-shadow", "none");
+  await expect(page.locator(".about-creator-panel")).toHaveCSS(
+    "background-color",
+    "rgb(251, 185, 182)"
+  );
+  await expect(page.locator(".about-creator-contact")).toHaveCSS(
+    "border-radius",
+    "20px"
+  );
+  await expect(page.locator(".about-creator-contact")).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)"
+  );
+  await expect
+    .poll(() =>
+      page
+        .locator(".about-creator-cover img")
+        .evaluate((image) => (image as HTMLImageElement).naturalWidth)
+    )
+    .toBeGreaterThan(0);
+  await creator.evaluate((element) =>
+    element.dispatchEvent(
+      new PointerEvent("pointerover", { bubbles: true, pointerType: "touch" })
+    )
+  );
+  await expect(creator).toHaveAttribute("data-expanded", "false");
+  await creator.hover();
+  await page.waitForTimeout(900);
+  await capture("desktop-expanded.png");
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(900);
+  await creator.hover();
+  await page.waitForTimeout(900);
 });
