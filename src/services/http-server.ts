@@ -31,6 +31,8 @@ import { createLogger } from "@/utils/logger";
 import { resolveSafePath as resolveSecurePath } from "@/utils/path-security";
 
 const log = createLogger("http-server");
+const PROJECT_MEDIA_ID_PATTERN =
+  /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
 // ── 服务器实例与状态 ──────────────────────────────────────────────────
 
@@ -258,9 +260,25 @@ function isAuthorized(
 
 // ── 路径安全校验 ──────────────────────────────────────────────────────
 
-function resolveSafePath(targetPath: string): string | null {
+function resolveSafePath(
+  targetPath: string,
+  allowExplicitPhoto = false
+): string | null {
   const allowedRoots = [getDataPath(), ...getFolderPaths()];
-  return resolveSecurePath(targetPath, allowedRoots);
+  const managed = resolveSecurePath(targetPath, allowedRoots);
+  if (managed || !allowExplicitPhoto) {
+    return managed;
+  }
+  // An explicitly imported file grants access to that one active photo. Its
+  // containing directory remains outside the managed library/watch scope.
+  const photo = getDatabase()
+    .select({ path: photos.path })
+    .from(photos)
+    .where(
+      and(eq(photos.path, path.resolve(targetPath)), isNull(photos.deletedAt))
+    )
+    .get();
+  return photo ? resolveSecurePath(targetPath, [photo.path]) : null;
 }
 
 // ── 路由：GET /thumbnail ──────────────────────────────────────────────
@@ -870,7 +888,7 @@ async function handlePhotoThumbnail(
       safeEndError(res, 404, "Not Found");
       return;
     }
-    const safePath = resolveSafePath(photo.path);
+    const safePath = resolveSafePath(photo.path, true);
     if (!safePath) {
       safeEndError(res, 403, "Forbidden");
       return;
@@ -951,6 +969,18 @@ function handleRequest(
 
   setCorsHeaders(res, req.headers.origin);
 
+  if (pathname === "/shooting-project-preview") {
+    handleShootingProjectPreview(res, searchParams).catch(() =>
+      safeEndError(res, 500, "Project preview unavailable")
+    );
+    return;
+  }
+  if (pathname === "/shooting-project-original") {
+    handleShootingProjectOriginal(req, res, searchParams).catch(() =>
+      safeEndError(res, 500, "Project original unavailable")
+    );
+    return;
+  }
   if (pathname === "/photo-thumbnail") {
     handlePhotoThumbnail(req, res, searchParams);
     return;
@@ -963,7 +993,10 @@ function handleRequest(
     return;
   }
 
-  const safePath = resolveSafePath(filePath);
+  const safePath = resolveSafePath(
+    filePath,
+    pathname === "/image" || pathname === "/preview"
+  );
   if (!safePath) {
     setCorsHeaders(res, req.headers.origin);
     res.writeHead(403);
@@ -990,6 +1023,65 @@ function handleRequest(
       res.writeHead(501);
       res.end("Not Implemented");
   }
+}
+
+async function handleShootingProjectPreview(
+  res: http.ServerResponse,
+  searchParams: URLSearchParams
+): Promise<void> {
+  const projectId = searchParams.get("projectId") ?? "";
+  const photoId = searchParams.get("photoId") ?? "";
+  if (
+    !(
+      PROJECT_MEDIA_ID_PATTERN.test(projectId) &&
+      PROJECT_MEDIA_ID_PATTERN.test(photoId)
+    ) ||
+    searchParams.has("path")
+  ) {
+    safeEndError(res, 400, "Invalid project photo identifier");
+    return;
+  }
+  const { resolveShootingProjectPreview } = await import("./shooting-projects");
+  const previewPath = await resolveShootingProjectPreview(projectId, photoId);
+  if (!previewPath) {
+    safeEndError(res, 404, "Project preview not found");
+    return;
+  }
+  res.setHeader("cache-control", "private, no-cache");
+  serveStaticFile(
+    previewPath,
+    res,
+    getMimeType(path.extname(previewPath).toLowerCase()),
+    false
+  );
+}
+
+async function handleShootingProjectOriginal(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  searchParams: URLSearchParams
+): Promise<void> {
+  const projectId = searchParams.get("projectId") ?? "";
+  const photoId = searchParams.get("photoId") ?? "";
+  if (
+    !(
+      PROJECT_MEDIA_ID_PATTERN.test(projectId) &&
+      PROJECT_MEDIA_ID_PATTERN.test(photoId)
+    ) ||
+    searchParams.has("path")
+  ) {
+    safeEndError(res, 400, "Invalid project photo identifier");
+    return;
+  }
+  const { resolveShootingProjectOriginal } = await import(
+    "./shooting-project-media"
+  );
+  const original = await resolveShootingProjectOriginal(projectId, photoId);
+  if (!original) {
+    safeEndError(res, 404, "Project original not found");
+    return;
+  }
+  handleImage(original, res, req);
 }
 
 // ── 端口重试启动逻辑 ──────────────────────────────────────────────────
