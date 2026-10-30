@@ -865,6 +865,54 @@ describe("SearchBar", () => {
     expect(onSearch).toHaveBeenCalledWith("最后一条历史", undefined);
   });
 
+  it("clears a starter card highlight when the pointer leaves and can highlight it again", async () => {
+    const user = userEvent.setup();
+    render(<ControlledSearchBar />);
+    const input = screen.getByRole("combobox");
+    await user.click(input);
+    const card = screen.getByRole("option", { name: "去年秋天的红叶" });
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await user.hover(card);
+      expect(card).toHaveAttribute("data-active", "true");
+      expect(card).toHaveAttribute("aria-selected", "true");
+      await user.unhover(card);
+      expect(card).toHaveAttribute("data-active", "false");
+      expect(card).toHaveAttribute("aria-selected", "false");
+      expect(input).not.toHaveAttribute("aria-activedescendant");
+    }
+  });
+
+  it("keeps a keyboard-focused starter card highlighted when the pointer leaves", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(<ControlledSearchBar onSearch={onSearch} />);
+    await user.click(screen.getByRole("combobox"));
+    await user.keyboard("{ArrowDown}");
+    const card = screen.getByRole("option", { name: "去年秋天的红叶" });
+    expect(card).toHaveFocus();
+    await user.hover(card);
+    await user.unhover(card);
+    expect(card).toHaveAttribute("data-active", "true");
+    expect(card).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Enter}");
+    expect(onSearch).toHaveBeenCalledWith("去年秋天的红叶", undefined);
+  });
+
+  it("does not clear another starter card's keyboard highlight on pointer leave", async () => {
+    const user = userEvent.setup();
+    render(<ControlledSearchBar />);
+    await user.click(screen.getByRole("combobox"));
+    const card = screen.getByRole("option", { name: "海边的日落" });
+    await user.hover(card);
+    const first = screen.getByRole("option", { name: "去年秋天的红叶" });
+    act(() => first.focus());
+    expect(first).toHaveFocus();
+    await user.unhover(card);
+    expect(first).toHaveAttribute("data-active", "true");
+    expect(first).toHaveAttribute("aria-selected", "true");
+  });
+
   it("keeps search history free of redundant tooltips", async () => {
     localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["我的搜索记录"]));
     const user = userEvent.setup();

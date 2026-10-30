@@ -405,6 +405,51 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
           .poll(() => strip.evaluate((node) => node.scrollLeft))
           .toBeGreaterThan(0);
       }
+      if (!size.zoom) {
+        for (const direction of ["up", "down", "left", "right"]) {
+          await input.focus();
+          const card = direction === "right" ? cards.last() : cards.first();
+          await card.hover();
+          await expect(card).toHaveAttribute("data-active", "true");
+          // Wait for the flex animation before measuring the exit coordinates.
+          await expect
+            .poll(() => card.evaluate((node) => node.getAnimations().length))
+            .toBe(0);
+          const bounds = await card.boundingBox();
+          expect(bounds).not.toBeNull();
+          if (!bounds) {
+            throw new Error("Starter card has no bounds");
+          }
+          let x = bounds.x + bounds.width / 2;
+          let y = bounds.y + bounds.height / 2;
+          if (direction === "up") {
+            y = bounds.y - 4;
+          } else if (direction === "down") {
+            y = bounds.y + bounds.height + 4;
+          } else if (direction === "left") {
+            x = bounds.x - 4;
+          } else {
+            x = bounds.x + bounds.width + 4;
+          }
+          await page.mouse.move(x, y);
+          await expect(card).toHaveAttribute("data-active", "false");
+          await expect(
+            panel.locator('[data-search-starters] [data-active="true"]')
+          ).toHaveCount(0);
+          if (galleryWidth >= 480) {
+            await expect
+              .poll(() =>
+                cards.evaluateAll((nodes) => {
+                  const widths = nodes.map(
+                    (node) => node.getBoundingClientRect().width
+                  );
+                  return Math.max(...widths) - Math.min(...widths);
+                })
+              )
+              .toBeLessThan(1);
+          }
+        }
+      }
       const first = await cards.evaluateAll((nodes) =>
         nodes.map((node) => node.getAttribute("aria-label"))
       );

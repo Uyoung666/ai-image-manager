@@ -130,6 +130,14 @@ export function SearchStarterGallery({
             onClick={() => onSelect(example)}
             onFocus={() => onHighlight(index)}
             onMouseDown={(event) => event.preventDefault()}
+            onPointerLeave={(event) => {
+              if (
+                index === suggestionIndex &&
+                event.currentTarget !== document.activeElement
+              ) {
+                onHighlight(-1);
+              }
+            }}
             onPointerMove={() => onHighlight(index)}
             role="option"
             tabIndex={-1}
