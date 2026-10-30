@@ -32,6 +32,15 @@ export const comparedPairCaches = new Map<number, ComparedPairCache>();
 export const bkTreeCaches = new Map<number, BkTreeCache>();
 export const similarityCaches = new Map<number, SimilarityCache>();
 export const curateOrderCaches = new Map<number, CurateOrderCache>();
+/** Keep the current project view stable while background metadata is completed. */
+export const projectActiveCandidateCaches = new Map<
+  number,
+  {
+    ids: number[];
+    reason?: string;
+    phase?: string;
+  }
+>();
 
 export function setBoundedCullCache<T>(
   cache: Map<number, T>,
@@ -55,10 +64,12 @@ export function clearCullCaches(sessionId: number) {
   bkTreeCaches.delete(sessionId);
   similarityCaches.delete(sessionId);
   curateOrderCaches.delete(sessionId);
+  projectActiveCandidateCaches.delete(sessionId);
 }
 
 export function clearCullPairCaches(sessionId: number) {
   comparedPairCaches.delete(sessionId);
   bkTreeCaches.delete(sessionId);
   similarityCaches.delete(sessionId);
+  projectActiveCandidateCaches.delete(sessionId);
 }

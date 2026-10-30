@@ -38,12 +38,14 @@ interface SessionPhoto {
     isFavorite: boolean | null;
     isIndexed: boolean;
   };
+  rank?: number | null;
   rating: number;
   status: "pending" | "kept" | "rejected";
   wins: number;
 }
 
 export interface Session {
+  archivedAt?: number | null;
   completedAt: number | null;
   completedComparisons: number;
   createdAt: number;
@@ -52,6 +54,9 @@ export interface Session {
   mode: "duel" | "curate";
   name: string;
   pkMode?: string;
+  projectId?: string | null;
+  projectScopeOpen?: boolean;
+  rankingSessionId?: number | null;
   sortStrategy?: string;
   status: "active" | "completed";
   totalPhotos: number;
