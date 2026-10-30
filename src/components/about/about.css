@@ -213,6 +213,44 @@
   color: white;
   background: #f55d56;
 }
+.dark .about-creator {
+  background: var(--border-default);
+  box-shadow: var(--shadow-md-val);
+}
+.dark .about-creator-cover {
+  background: var(--card);
+  border-color: var(--card);
+}
+.dark .about-creator-cover img {
+  filter: brightness(0.82) saturate(0.85);
+}
+.dark .about-creator[data-expanded="true"] .about-creator-cover {
+  border-color: color-mix(in srgb, var(--card) 94%, #fbb9b6);
+  box-shadow: var(--shadow-sm-val);
+}
+.dark .about-creator-panel {
+  background: color-mix(in srgb, var(--card) 94%, #fbb9b6);
+  box-shadow: inset 0 1px 0 var(--border);
+}
+.dark .about-creator-copy,
+.dark .about-creator-social {
+  color: var(--card-foreground);
+}
+.dark .about-creator-social svg {
+  filter: none;
+}
+.dark .about-creator-social:hover {
+  color: #fbb9b6;
+}
+.dark .about-creator-contact {
+  color: var(--card-foreground);
+  background: color-mix(in srgb, var(--card) 84%, #fbb9b6);
+  box-shadow: var(--shadow-sm-val);
+}
+.dark .about-creator-contact:hover {
+  color: var(--card-foreground);
+  background: color-mix(in srgb, var(--card) 74%, #fbb9b6);
+}
 .about-website {
   display: flex;
   flex-direction: column;

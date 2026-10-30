@@ -11,7 +11,10 @@ const SIZES = [
   { width: 720, height: 480, zoom: 1.5 },
 ];
 const LANGUAGE_LABEL = /^(Language|语言)$/;
-const reviewDir = path.resolve(".cache/about-review/creator-avatar-20261030");
+const reviewDir = path.resolve(
+  ".test-runtime",
+  `about-dark-mode-review-${process.pid}-${Date.now()}`
+);
 let app: ElectronApplication;
 let page: Page;
 
@@ -119,6 +122,60 @@ async function noOverflow() {
   expect(overflow.every((value) => value <= 2)).toBe(true);
 }
 
+async function expectDarkCreatorPalette() {
+  const palette = await page.getByTestId("about-creator").evaluate((card) => {
+    const context = document.createElement("canvas").getContext("2d");
+    if (!context) {
+      throw new Error("Missing color sampling context");
+    }
+    function luminance(color: string) {
+      if (!context) {
+        throw new Error("Missing color sampling context");
+      }
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      const [r, g, b] = Array.from(context.getImageData(0, 0, 1, 1).data)
+        .slice(0, 3)
+        .map((channel) => {
+          const value = channel / 255;
+          return value <= 0.040_45
+            ? value / 12.92
+            : ((value + 0.055) / 1.055) ** 2.4;
+        });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+    return [
+      card,
+      ...card.querySelectorAll(".about-creator-panel, .about-creator-contact"),
+    ].map((element) => {
+      const style = getComputedStyle(element);
+      const background = luminance(style.backgroundColor);
+      const foreground = luminance(
+        element.classList.contains("about-creator-panel")
+          ? getComputedStyle(
+              card.querySelector(".about-creator-copy") ?? element
+            ).color
+          : style.color
+      );
+      return {
+        background,
+        contrast:
+          (Math.max(background, foreground) + 0.05) /
+          (Math.min(background, foreground) + 0.05),
+      };
+    });
+  });
+  for (const color of palette) {
+    expect(color.background).toBeLessThan(0.15);
+  }
+  expect(palette[1].contrast).toBeGreaterThanOrEqual(4.5);
+  expect(palette[2].contrast).toBeGreaterThanOrEqual(4.5);
+  await expect(page.locator(".about-creator-cover img")).not.toHaveCSS(
+    "filter",
+    "none"
+  );
+}
+
 for (const size of SIZES) {
   test(`about composition fits ${size.width}x${size.height} at ${size.zoom}`, async () => {
     await app.evaluate(({ BrowserWindow }, b) => {
@@ -146,6 +203,9 @@ for (const size of SIZES) {
         await creator.hover();
         await expect(creator).toHaveAttribute("data-expanded", "true");
         await page.waitForTimeout(1100);
+        if (theme === "dark") {
+          await expectDarkCreatorPalette();
+        }
         for (const selector of [
           ".about-creator-cover",
           ".about-creator-copy",
@@ -259,10 +319,29 @@ test("capture desktop interaction", async () => {
   );
   await expect(creator).toHaveAttribute("data-expanded", "false");
   await creator.hover();
+  await page.locator(".about-creator-cover").focus();
+  await expect(creator).toHaveAttribute("data-expanded", "true");
   await page.waitForTimeout(900);
   await capture("desktop-expanded.png");
+  await page.evaluate(() => {
+    document.documentElement.classList.replace("light", "dark");
+  });
+  await expectDarkCreatorPalette();
+  await capture("desktop-dark-expanded.png");
   await page.mouse.move(0, 0);
-  await page.waitForTimeout(900);
-  await creator.hover();
-  await page.waitForTimeout(900);
+  await page.locator(".about-product-version").focus();
+  await expect(creator).toHaveAttribute("data-expanded", "false");
+  await expectDarkCreatorPalette();
+  await capture("desktop-dark-default.png");
+  await page.evaluate(() => {
+    document.documentElement.classList.replace("dark", "light");
+  });
+  await expect(page.locator(".about-creator-panel")).toHaveCSS(
+    "background-color",
+    "rgb(251, 185, 182)"
+  );
+  await expect(page.locator(".about-creator-cover img")).toHaveCSS(
+    "filter",
+    "none"
+  );
 });
