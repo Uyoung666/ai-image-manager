@@ -492,7 +492,7 @@ for (const { width, height } of WINDOW_SIZES) {
         language
       );
 
-      for (const version of ["2.2.0", "2.2.1", "2.2.2", "2.2.3"]) {
+      for (const version of ["2.2.0", "2.2.1", "2.2.2", "2.2.3", "2.2.6"]) {
         await navigateTo(`/whats-new?version=${version}`);
         await expect(
           currentPage.locator(".whats-new-release-visual-version")
