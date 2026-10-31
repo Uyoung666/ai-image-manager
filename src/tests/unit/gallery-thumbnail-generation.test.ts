@@ -16,6 +16,7 @@ import {
   thumbnailGenerationSlots,
 } from "@/services/thumbnailer";
 import { TestRuntime } from "@/tests/helpers/test-runtime";
+import { makePreviewNewerThanSource } from "@/tests/helpers/thumbnail-fixture";
 
 const state = vi.hoisted(() => ({ root: "" }));
 vi.mock("@/utils/data-path", () => ({ getDataPath: () => state.root }));
@@ -96,6 +97,7 @@ describe("physical gallery thumbnail generation", () => {
       .toFile(original);
     const preview = await generateThumbnail(original, "md");
     expect(Math.max(preview.width, preview.height)).toBe(1024);
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     const selected = await generateGalleryThumbnail(
       original,
       2048,
@@ -120,6 +122,7 @@ describe("physical gallery thumbnail generation", () => {
       .webp()
       .toBuffer();
     await fs.promises.writeFile(preview.thumbnailPath, bytes);
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     const photo = { path: original, width: 1200, height: 600 };
     const stat = fs.statSync(original);
     const readStat = (file: string) =>
@@ -144,8 +147,7 @@ describe("physical gallery thumbnail generation", () => {
       original,
       "source pixels intentionally unavailable"
     );
-    const fresh = new Date(Date.now() + 1000);
-    await fs.promises.utimes(preview.thumbnailPath, fresh, fresh);
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     for (const edge of [256, 512] as const) {
       const result = await generateGalleryThumbnail(original, edge);
       expect(Math.max(result.width, result.height)).toBe(edge);
@@ -165,6 +167,7 @@ describe("physical gallery thumbnail generation", () => {
       .webp()
       .toBuffer();
     await fs.promises.writeFile(preview.thumbnailPath, bytes);
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     const result = await generateGalleryThumbnail(original, 512);
     expect(result.thumbnailPath).toBe(preview.thumbnailPath);
     expect(Math.max(result.width, result.height)).toBe(512);
@@ -179,6 +182,7 @@ describe("physical gallery thumbnail generation", () => {
         .webp()
         .toBuffer()
     );
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     const result = await generateGalleryThumbnail(original, 256);
     expect(result).toMatchObject({ width: 128, height: 256 });
   });
@@ -191,6 +195,7 @@ describe("physical gallery thumbnail generation", () => {
     expect(chunk).toBeGreaterThanOrEqual(0);
     bytes.fill(255, chunk + 18, chunk + 8 + bytes.readUInt32LE(chunk + 4));
     await fs.promises.writeFile(preview.thumbnailPath, bytes);
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     expect((await sharp(preview.thumbnailPath).metadata()).width).toBe(
       metadata.width
     );
@@ -211,6 +216,7 @@ describe("physical gallery thumbnail generation", () => {
         .toBuffer()
     );
     await damagePixels(preview.thumbnailPath);
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     const selected = await generateGalleryThumbnail(original, 512);
     expect(selected.thumbnailPath).toBe(preview.thumbnailPath);
     const repaired = await generateGalleryThumbnail(
@@ -264,7 +270,9 @@ describe("physical gallery thumbnail generation", () => {
       writes.mockRestore();
     }
   });
-  it("does not trust a legacy preview whose timestamp ties the source change", async () => {
+  it.each([
+    0, 1000,
+  ])("does not trust a legacy preview at or before the source change (source ahead by %i ms)", async (offset) => {
     const preview = await generateThumbnail(original, "md");
     const replacement = await sharp({
       create: { width: 700, height: 700, channels: 3, background: "#b68229" },
@@ -272,7 +280,7 @@ describe("physical gallery thumbnail generation", () => {
       .jpeg()
       .toBuffer();
     await fs.promises.writeFile(original, replacement);
-    const timestamp = fs.statSync(preview.thumbnailPath).mtimeMs;
+    const timestamp = fs.statSync(preview.thumbnailPath).mtimeMs + offset;
     const tiedSource = Object.assign(fs.statSync(original), {
       mtimeMs: timestamp,
       ctimeMs: timestamp,
@@ -425,6 +433,7 @@ describe("physical gallery thumbnail generation", () => {
       .jpeg()
       .toFile(original);
     const preview = await generateThumbnail(original, "md");
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     const result = await generateGalleryThumbnail(
       original,
       2048,

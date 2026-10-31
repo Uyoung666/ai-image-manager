@@ -195,13 +195,19 @@ async function findSequence() {
     .poll(
       () =>
         gallery.evaluate((scroll, id) => {
+          const maxScrollTop = Math.max(
+            0,
+            scroll.scrollHeight - scroll.clientHeight
+          );
           const element = scroll.querySelector<HTMLElement>(
             `[data-sequence-id="${id}"]`
           );
           if (!element) {
             const next = scroll.scrollTop + scroll.clientHeight * 0.65;
             scroll.scrollTop =
-              next >= scroll.scrollHeight - scroll.clientHeight ? 0 : next;
+              scroll.scrollTop >= maxScrollTop - 1
+                ? 0
+                : Math.min(next, maxScrollTop);
             return false;
           }
           const inset =
@@ -210,16 +216,26 @@ async function findSequence() {
                 ".home-gallery-toolbar-layer, .page-toolbar.absolute"
               )
               ?.getBoundingClientRect().height ?? 0;
-          const delta =
-            element.getBoundingClientRect().top -
-            scroll.getBoundingClientRect().top -
-            inset -
-            40;
-          if (Math.abs(delta) > 2) {
-            scroll.scrollTop += delta;
+          const bounds = scroll.getBoundingClientRect();
+          const rect = element.getBoundingClientRect();
+          // A short/wide gallery can reach its end before this card reaches the
+          // preferred inset. Wait for the reachable position, not an impossible one.
+          const targetTop = Math.max(
+            0,
+            Math.min(
+              maxScrollTop,
+              scroll.scrollTop + rect.top - bounds.top - inset - 40
+            )
+          );
+          if (Math.abs(scroll.scrollTop - targetTop) > 2) {
+            scroll.scrollTop = targetTop;
             return false;
           }
-          return (element.querySelector("img")?.naturalWidth ?? 0) > 0;
+          return (
+            rect.bottom > bounds.top + inset &&
+            rect.top < bounds.bottom &&
+            (element.querySelector("img")?.naturalWidth ?? 0) > 0
+          );
         }, targetSequence),
       { timeout: 30_000, intervals: [100, 150] }
     )

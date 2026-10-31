@@ -6,7 +6,15 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import sharp from "sharp";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { folders, photos } from "@/db/schema";
 import {
   getHttpServerAuthToken,
@@ -15,6 +23,7 @@ import {
 } from "@/services/http-server";
 import { thumbnailSourceIdentity } from "@/services/thumbnail-identity";
 import {
+  deletePhotoThumbnails,
   generateGalleryThumbnail,
   generateThumbnail,
   getThumbnailDir,
@@ -22,6 +31,7 @@ import {
   stopThumbnailer,
 } from "@/services/thumbnailer";
 import { TestRuntime } from "@/tests/helpers/test-runtime";
+import { makePreviewNewerThanSource } from "@/tests/helpers/thumbnail-fixture";
 import { invalidateFoldersCache } from "@/utils/folder-paths";
 
 const state = vi.hoisted(() => ({ db: undefined as unknown, data: "" }));
@@ -143,6 +153,10 @@ beforeAll(async () => {
   initThumbnailer();
   port = await startHttpServerEarly();
 });
+afterEach(async () => {
+  // Each HTTP scenario owns its cache; none relies on a preceding request.
+  await deletePhotoThumbnails(original);
+});
 afterAll(async () => {
   await stopHttpServer();
   await stopThumbnailer();
@@ -157,7 +171,8 @@ afterAll(async () => {
 });
 describe("ID thumbnail HTTP lifecycle", () => {
   it("selects an adequate preview without a second HTTP request, then prefers a prepared exact tier", async () => {
-    await generateThumbnail(original, "md");
+    const preview = await generateThumbnail(original, "md");
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     const selected = await request(1, undefined, undefined, 256, true);
     expect(selected.status).toBe(200);
     expect((await sharp(selected.body).metadata()).width).toBe(1024);
@@ -182,6 +197,7 @@ describe("ID thumbnail HTTP lifecycle", () => {
   });
   it("serves the physical small edge and validates an unchanged response", async () => {
     const preview = await generateThumbnail(original, "md");
+    await makePreviewNewerThanSource(original, preview.thumbnailPath);
     const first = await request(
       1,
       thumbnailSourceIdentity(fs.statSync(original)),
@@ -216,6 +232,7 @@ describe("ID thumbnail HTTP lifecycle", () => {
     );
   });
   it("recovers a corrupt cached variant", async () => {
+    await generateGalleryThumbnail(original, 512);
     const file = fs
       .readdirSync(getThumbnailDir())
       .find((name) => name.startsWith("g-") && name.endsWith("-512.webp"));
@@ -274,6 +291,7 @@ describe("ID thumbnail HTTP lifecycle", () => {
       .run();
     const preview = await generateThumbnail(file, "md");
     await damagePixels(preview.thumbnailPath);
+    await makePreviewNewerThanSource(file, preview.thumbnailPath);
     const selected = await request(6, undefined, undefined, 512, true);
     await expect(sharp(selected.body).raw().toBuffer()).rejects.toThrow();
     const repaired = await request(
@@ -326,11 +344,15 @@ describe("ID thumbnail HTTP lifecycle", () => {
       .run();
     const identity = thumbnailSourceIdentity(fs.statSync(file));
     const preview = await generateThumbnail(file, "md");
+    await makePreviewNewerThanSource(file, preview.thumbnailPath);
     const first = await request(5, identity);
     expect(first.headers.etag).toContain(path.basename(preview.thumbnailPath));
     expect((await request(5, identity, first.headers.etag)).status).toBe(304);
     await writeSource("#b68229");
-    await generateThumbnail(file, "md");
+    await deletePhotoThumbnails(file);
+    const rebuilt = await generateThumbnail(file, "md");
+    expect(rebuilt.thumbnailPath).toBe(preview.thumbnailPath);
+    await makePreviewNewerThanSource(file, rebuilt.thumbnailPath);
     const next = await request(5, identity, first.headers.etag);
     expect(next.status).toBe(200);
     expect(next.headers.etag).not.toBe(first.headers.etag);

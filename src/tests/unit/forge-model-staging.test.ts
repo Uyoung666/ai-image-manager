@@ -54,6 +54,7 @@ async function preparePackage() {
 }
 
 describe("release model staging lifecycle", () => {
+  // The first import loads real Forge makers and can exceed 5s on Windows.
   it("moves only the maker phase away from Unicode temporary paths", async () => {
     if (process.platform !== "win32") {
       return;
@@ -73,7 +74,7 @@ describe("release model staging lifecycle", () => {
     } finally {
       vi.unstubAllEnvs();
     }
-  });
+  }, 15_000);
 
   beforeEach(() => {
     vi.resetModules();
@@ -81,7 +82,6 @@ describe("release model staging lifecycle", () => {
     disk.existing.clear();
   });
 
-  // The first import loads Forge makers and can exceed 5s on Windows.
   it("loads the configuration without models or filesystem writes", async () => {
     await expect(loadConfig()).resolves.toHaveProperty(
       "rebuildConfig.force",
