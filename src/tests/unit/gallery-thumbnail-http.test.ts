@@ -154,6 +154,7 @@ beforeAll(async () => {
   port = await startHttpServerEarly();
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   // Each HTTP scenario owns its cache; none relies on a preceding request.
   await deletePhotoThumbnails(original);
 });
@@ -244,9 +245,26 @@ describe("ID thumbnail HTTP lifecycle", () => {
     expect(result.status).toBe(200);
     expect((await sharp(result.body).metadata()).width).toBe(512);
   });
-  it("repairs pixel-damaged exact variants without immutable caching and keeps authorization checks", async () => {
+  it.each([
+    false,
+    true,
+  ])("repairs pixel-damaged exact variants and keeps authorization checks (same timestamps: %s)", async (sameTimestamps) => {
     const variant = await generateGalleryThumbnail(original, 256);
     await damagePixels(variant.thumbnailPath);
+    if (sameTimestamps) {
+      const damagedStat = await fs.promises.stat(variant.thumbnailPath);
+      const readStat = fs.promises.stat;
+      vi.spyOn(fs.promises, "stat").mockImplementation(async (...args) => {
+        const stat = await readStat(...args);
+        if (String(args[0]) === variant.thumbnailPath) {
+          Object.assign(stat, {
+            mtimeMs: damagedStat.mtimeMs,
+            ctimeMs: damagedStat.ctimeMs,
+          });
+        }
+        return stat;
+      });
+    }
     const identity = thumbnailSourceIdentity(fs.statSync(original));
     const damaged = await request(1, identity, undefined, 256);
     await expect(sharp(damaged.body).raw().toBuffer()).rejects.toThrow();
@@ -270,6 +288,24 @@ describe("ID thumbnail HTTP lifecycle", () => {
     expect(
       (await request(3, undefined, undefined, 256, false, true)).status
     ).toBe(404);
+  });
+  it("returns repair bytes even when the client sends the previous repair ETag", async () => {
+    const first = await request(1, undefined, undefined, 256, false, true);
+    const next = await request(
+      1,
+      undefined,
+      first.headers.etag,
+      256,
+      false,
+      true
+    );
+    expect(next.status).toBe(200);
+    expect(next.headers["cache-control"]).toBe("private, no-cache");
+    expect(next.headers.etag).toBe(first.headers.etag);
+    await expect(sharp(next.body).raw().toBuffer()).resolves.toBeInstanceOf(
+      Buffer
+    );
+    expect(next.body.equals(first.body)).toBe(true);
   });
   it("repairs a pixel-damaged legacy preview even when it exactly matches the requested edge", async () => {
     const file = path.join(path.dirname(original), "repair-exact.jpg");

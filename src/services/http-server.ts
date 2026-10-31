@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -824,13 +824,26 @@ async function serveGalleryThumbnailResult(
   if (res.destroyed || res.writableEnded) {
     return;
   }
-  const etag = `"${thumbnail.sourceIdentity}-${path.basename(thumbnail.thumbnailPath)}-${stats.size}-${stats.mtimeMs}-${stats.ctimeMs}"`;
+  const repairing = params.get("repair") === "1";
+  // A same-size repair can share the damaged file's timestamps. Only this
+  // explicit recovery path needs a content validator; normal reads keep the
+  // cheap stat-based validator. Generation normally supplies the bytes.
+  const revision = repairing
+    ? `repair-${createHash("sha256")
+        .update(
+          thumbnail.buffer ??
+            (await fs.promises.readFile(thumbnail.thumbnailPath))
+        )
+        .digest("hex")}`
+    : `${stats.size}-${stats.mtimeMs}-${stats.ctimeMs}`;
+  const etag = `"${thumbnail.sourceIdentity}-${path.basename(thumbnail.thumbnailPath)}-${revision}"`;
   res.setHeader("etag", etag);
   res.setHeader(
     "cache-control",
     galleryThumbnailCachePolicy(params, thumbnail.sourceIdentity)
   );
-  if (req.headers["if-none-match"] === etag) {
+  // The client explicitly reported a decode failure: never reuse its body.
+  if (!repairing && req.headers["if-none-match"] === etag) {
     res.writeHead(304);
     res.end();
     return;
