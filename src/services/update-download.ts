@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { net } from "electron";
 import type { UpdatePackage } from "@/services/github-update";
+import { fetchUpdatePackage } from "@/services/update-package-transport";
 import { assertUpdateDownloadSpace } from "@/services/update-storage";
 import type { UpdateStatus } from "@/types/update";
 import { classifyUpdateError } from "@/utils/update-error";
@@ -291,11 +291,7 @@ async function fetchPackage(
     if (!current.startsWith("https://")) {
       throw new Error("UPDATE_TLS_ERROR");
     }
-    const response = await net.fetch(current, {
-      headers,
-      signal,
-      redirect: "manual",
-    });
+    const response = await fetchUpdatePackage(current, headers, signal);
     if (![301, 302, 303, 307, 308].includes(response.status)) {
       return response;
     }

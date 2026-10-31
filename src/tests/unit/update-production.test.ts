@@ -22,6 +22,11 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   log: vi.fn(),
 }));
+
+vi.mock("@/services/update-package-transport", () => ({
+  fetchUpdatePackage: (url: string, headers: unknown, signal: AbortSignal) =>
+    mocks.fetch(url, { headers, signal }),
+}));
 vi.mock("electron", () => ({
   app: {
     isPackaged: true,

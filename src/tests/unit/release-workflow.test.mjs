@@ -57,6 +57,20 @@ describe("stable release workflow gates", () => {
     }
   });
 
+  it("blocks release on real Electron GitHub download and resume failures", () => {
+    const steps = jobs.build.steps;
+    const gate = steps.findIndex(
+      (step) =>
+        step.name === "Gate - real Electron GitHub update download and resume"
+    );
+    const seal = steps.findIndex((step) => step.name === "Seal release bundle");
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(seal);
+    expect(steps[gate].run).toContain("scripts/test-update-download-smoke.mjs");
+    expect(steps[gate].run).toContain("$LASTEXITCODE -ne 0");
+    expect(steps[gate]["continue-on-error"]).not.toBe(true);
+  });
+
   it("publishes only after all gates and reuses one verified bundle download", () => {
     expect(jobs.github.needs).toEqual(
       expect.arrayContaining(["preflight", "unit", "smoke", "attest"])

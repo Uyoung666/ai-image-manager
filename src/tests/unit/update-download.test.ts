@@ -7,7 +7,10 @@ import { downloadUpdatePackage } from "@/services/update-download";
 import { TestRuntime } from "../helpers/test-runtime";
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn() }));
-vi.mock("electron", () => ({ net: { fetch: mocks.fetch } }));
+vi.mock("@/services/update-package-transport", () => ({
+  fetchUpdatePackage: (url: string, headers: unknown, signal: AbortSignal) =>
+    mocks.fetch(url, { headers, signal }),
+}));
 const bytes = Buffer.from("verified immutable update package");
 const info = {
   filename: "test-2.2.4-delta.nupkg",

@@ -1,8 +1,8 @@
-# AI Image Manager v2.2.5 User Guide
+# AI Image Manager v2.2.6 User Guide
 
 > A local-first photo manager for Windows. Build an index over your existing folders, then search, organize, curate, analyze, export, and share your library.
 
-This guide follows the normal user workflow and describes v2.2.5. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
+This guide follows the normal user workflow and describes v2.2.6. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
 
 ---
 
@@ -67,6 +67,8 @@ RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews r
 ## Quick start
 
 ### Upgrading from an older version
+
+**v2.2.4 / v2.2.5 users need one manual upgrade:** these versions fail at GitHub asset redirects with “Redirect was cancelled”. Download v2.2.6 from the formal Release, exit the app, then install over the existing installation using the same Setup or MSI format; ZIP users should extract into a new directory. Keep the existing application data directory and do not uninstall with data removal. v2.2.6 fixes download redirects for subsequent client updates. Compared with v2.2.5, this patch adds no database migration and requires no AI index rebuild.
 
 When upgrading from v2.2.4, the first launch automatically migrates the database for the gallery and culling workflows. This update does not require a routine AI index rebuild. Back up the application data directory before upgrading; original photos, tags, favorites and existing culling records are preserved.
 

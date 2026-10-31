@@ -240,6 +240,14 @@ jobs:
       if: inputs.source_run_id == ''
       working-directory: app
       run: npx playwright install chromium --with-deps
+    - name: Gate - real Electron GitHub update download and resume
+      if: inputs.source_run_id == ''
+      working-directory: app
+      run: |
+        New-Item -ItemType Directory -Force .test-runtime | Out-Null
+        Invoke-WebRequest -Uri 'https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.5/update-manifest.json' -OutFile .test-runtime/update-download-fixture.json -MaximumRetryCount 3
+        node --experimental-strip-types scripts/test-update-download-smoke.mjs .test-runtime/update-download-fixture.json
+        if ($LASTEXITCODE -ne 0) { throw "Real Electron GitHub update download gate failed" }
     - name: Gate - packaged Japanese locale installation
       if: inputs.source_run_id == ''
       working-directory: app
