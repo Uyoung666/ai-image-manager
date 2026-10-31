@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   normalizeLocaleTag,
@@ -6,6 +7,42 @@ import {
 } from "@/localization/catalog";
 
 describe("localization catalog boundary", () => {
+  const readCatalog = (name: string) =>
+    JSON.parse(
+      fs.readFileSync(
+        `external-plugins/japanese-locale/locales/ja-JP/${name}.json`,
+        "utf8"
+      )
+    );
+  const provider = {
+    locale: "ja-JP",
+    nativeName: "日本語",
+    providerPluginId: "com.aiimagemanager.japanese-locale",
+    main: readCatalog("main"),
+  };
+
+  it("activates the actual official Japanese catalog after installation", () => {
+    expect(
+      validateLocaleBundle({ ...provider, renderer: readCatalog("renderer") })
+    ).not.toBeNull();
+  });
+
+  it.each([
+    false,
+    true,
+  ])("enforces the object boundary (nested=%s)", (nested) => {
+    const catalog = Object.fromEntries(
+      Array.from({ length: 4096 }, (_, index) => [`key${index}`, "翻訳"])
+    );
+    const bundle = () => ({
+      ...provider,
+      renderer: nested ? { nested: catalog } : catalog,
+    });
+    expect(validateLocaleBundle(bundle())).not.toBeNull();
+    catalog.overflow = "翻訳";
+    expect(validateLocaleBundle(bundle())).toBeNull();
+  });
+
   it("canonicalizes BCP-47 tags and preserves built-in aliases", () => {
     expect(normalizeLocaleTag("zh")).toBe("zh");
     expect(normalizeLocaleTag("en-us")).toBe("en-US");

@@ -216,8 +216,14 @@ function parseMemberIds(value: string): number[] {
   }
 }
 
-function fileIdentity(stat: fs.Stats): string {
-  return stat.dev || stat.ino ? `${stat.dev}:${stat.ino}` : "";
+async function fileIdentity(filePath: string, stat: fs.Stats): Promise<string> {
+  // NTFS file IDs can exceed Number.MAX_SAFE_INTEGER. Keep the existing
+  // numeric size/timestamp representation, but never round file identities.
+  const identity =
+    Number.isSafeInteger(stat.dev) && Number.isSafeInteger(stat.ino)
+      ? stat
+      : await fs.promises.stat(filePath, { bigint: true });
+  return identity.dev || identity.ino ? `${identity.dev}:${identity.ino}` : "";
 }
 
 function sameFileSnapshot(
@@ -240,8 +246,10 @@ function sameFileSnapshot(
 
 async function captureFileSnapshot(filePath: string): Promise<FileSnapshot> {
   let before: fs.Stats;
+  let beforeIdentity: string;
   try {
     before = await fs.promises.stat(filePath);
+    beforeIdentity = await fileIdentity(filePath, before);
   } catch {
     throw new DuplicateCleanupPlanError(
       "SOURCE_MISSING",
@@ -262,8 +270,10 @@ async function captureFileSnapshot(filePath: string): Promise<FileSnapshot> {
     );
   }
   let after: fs.Stats;
+  let afterIdentity: string;
   try {
     after = await fs.promises.stat(filePath);
+    afterIdentity = await fileIdentity(filePath, after);
   } catch {
     throw new DuplicateCleanupPlanError(
       "FILE_CHANGED",
@@ -271,7 +281,7 @@ async function captureFileSnapshot(filePath: string): Promise<FileSnapshot> {
     );
   }
   const snapshot = {
-    fileIdentity: fileIdentity(before),
+    fileIdentity: beforeIdentity,
     fileSize: before.size,
     fullSha256,
     modifiedAt: before.mtimeMs,
@@ -279,7 +289,7 @@ async function captureFileSnapshot(filePath: string): Promise<FileSnapshot> {
   };
   if (
     !sameFileSnapshot(snapshot, {
-      fileIdentity: fileIdentity(after),
+      fileIdentity: afterIdentity,
       fileSize: after.size,
       modifiedAt: after.mtimeMs,
       path: filePath,

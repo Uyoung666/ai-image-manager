@@ -169,7 +169,7 @@ beforeEach(async () => {
   manager = await import("@/services/update-manager");
   // Do not setUpdateManagerTestOverrides: exercise the production GitHub path.
 });
-afterEach(() => {
+afterEach(async () => {
   manager.stopAutomaticChecks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -181,7 +181,10 @@ afterEach(() => {
     configurable: true,
     value: originalPlatform,
   });
-  runtime.cleanup();
+  // Allow pending filesystem close callbacks to run between Windows lock retries.
+  await vi.waitFor(() => expect(runtime.cleanup().status).toBe("deleted"), {
+    timeout: 5000,
+  });
 });
 
 async function download() {

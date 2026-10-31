@@ -87,7 +87,10 @@ afterEach(async () => {
   await stopShootingProjectServices();
   closeDatabase();
   vi.unstubAllEnvs();
-  expect(runtime.cleanup().status).toBe("deleted");
+  // Synchronous removal retries cannot drain pending filesystem close callbacks.
+  await vi.waitFor(() => expect(runtime.cleanup().status).toBe("deleted"), {
+    timeout: 5000,
+  });
 });
 
 async function image(relativePath: string, background: string) {

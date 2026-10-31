@@ -168,12 +168,65 @@ describe("duplicate cleanup deletion plans", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     state.db = null;
     sqlite?.close();
     const result = runtime?.cleanup();
     runtime = undefined;
     if (result?.status === "skipped") {
       throw new Error(`${result.reason}: ${result.root}`);
+    }
+  });
+
+  it.each([
+    false,
+    true,
+  ])("preserves precise file identities (same file=%s)", async (sameFile) => {
+    const originalStat = fs.promises.stat;
+    vi.spyOn(fs.promises, "stat").mockImplementation(
+      async (filePath, options) => {
+        const stat = await Reflect.apply(originalStat, fs.promises, [
+          filePath,
+          options,
+        ]);
+        const index = ["a.jpg", "b.jpg", "c.jpg"].indexOf(
+          path.basename(String(filePath))
+        );
+        if (index >= 0) {
+          const ino =
+            9_007_199_254_740_992n +
+            BigInt(sameFile && index === 1 ? 0 : index);
+          stat.ino =
+            typeof options === "object" && options?.bigint ? ino : Number(ino);
+        }
+        return stat;
+      }
+    );
+    const pending = createDuplicateCleanupPlan(
+      {
+        groups: [
+          {
+            deletePhotoIds: [3],
+            groupKey: "exact:1-2-3",
+            groupVersion: "review-version-1",
+            keepPhotoIds: [1, 2],
+            matchType: "exact",
+            reviewRevision: 4,
+          },
+        ],
+      },
+      getTestDb()
+    );
+    if (sameFile) {
+      await expect(pending).rejects.toMatchObject({
+        code: "INVALID_SELECTION",
+      });
+    } else {
+      const plan = await pending;
+      expect(plan.deleteCount).toBe(1);
+      await expect(
+        executeDuplicateCleanupPlan({ planId: plan.planId }, getTestDb())
+      ).resolves.toMatchObject({ deletedCount: 1 });
     }
   });
 

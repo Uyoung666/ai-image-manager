@@ -84,6 +84,30 @@ jobs:
         path: release-context.json
         retention-days: 90
         if-no-files-found: error
+  unit:
+    needs: preflight
+    if: inputs.source_run_id == ''
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ needs.preflight.outputs.commit }}
+        fetch-depth: 0
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+        cache: npm
+    - run: npm ci
+    - uses: actions/cache@v4
+      with:
+        path: models
+        key: ${{ runner.os }}-models-all-${{ hashFiles('src/services/model-downloader.ts') }}
+    - run: node --loader ts-node/esm scripts/prepare-models.mjs
+    - name: Gate - unit tests
+      run: |
+        npm test
+        if ($LASTEXITCODE -ne 0) { throw "Release unit gate failed" }
   build:
     needs:
     - preflight
@@ -116,6 +140,12 @@ jobs:
         ref: ${{ needs.preflight.outputs.commit }}
         path: app
         fetch-depth: 0
+    - uses: actions/setup-node@v6
+      if: inputs.source_run_id == ''
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: app/package-lock.json
     - name: Install application dependencies
       if: inputs.source_run_id == ''
       working-directory: app
@@ -153,12 +183,6 @@ jobs:
     - name: Gate - static check
       run: |-
         npm run check
-        if ($LASTEXITCODE -ne 0) { throw "Release build gate failed" }
-      if: inputs.source_run_id == ''
-      working-directory: app
-    - name: Gate - unit tests
-      run: |-
-        npm test
         if ($LASTEXITCODE -ne 0) { throw "Release build gate failed" }
       if: inputs.source_run_id == ''
       working-directory: app
@@ -216,23 +240,6 @@ jobs:
       if: inputs.source_run_id == ''
       working-directory: app
       run: npx playwright install chromium --with-deps
-    - name: Gate - complete Electron E2E against the built application
-      if: inputs.source_run_id == ''
-      working-directory: app
-      run: |
-        npm run test:e2e -- --no-build --workers=1
-        if ($LASTEXITCODE -ne 0) { throw "Complete Electron E2E release gate failed" }
-    - name: Save complete Electron E2E diagnostics
-      if: always() && inputs.source_run_id == ''
-      uses: actions/upload-artifact@v4
-      with:
-        name: release-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-        include-hidden-files: true
-        path: |
-          app/test-results/
-          app/playwright-report/
-        retention-days: 30
-        if-no-files-found: ignore
     - name: Gate - packaged Japanese locale installation
       if: inputs.source_run_id == ''
       working-directory: app
@@ -255,6 +262,23 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: japanese-locale-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        include-hidden-files: true
+        path: |
+          app/test-results/
+          app/playwright-report/
+        retention-days: 30
+        if-no-files-found: ignore
+    - name: Gate - complete Electron E2E against the built application
+      if: inputs.source_run_id == ''
+      working-directory: app
+      run: |
+        npm run test:e2e -- --no-build --workers=1
+        if ($LASTEXITCODE -ne 0) { throw "Complete Electron E2E release gate failed" }
+    - name: Save complete Electron E2E diagnostics
+      if: always() && inputs.source_run_id == ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
         include-hidden-files: true
         path: |
           app/test-results/
@@ -328,6 +352,24 @@ jobs:
         Write-Host "Verified full Squirrel package, optional delta baseline, Setup.exe, MSI rollback, and shortcut icon."
       if: inputs.source_run_id == ''
       working-directory: app
+    - name: Require successful unit gate before sealing recoverable artifacts
+      if: inputs.source_run_id == ''
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $deadline = (Get-Date).AddMinutes(25)
+        do {
+          $response = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/jobs?filter=latest&per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw "Cannot verify release unit gate" }
+          $jobs = @(($response | ConvertFrom-Json).jobs | Where-Object { ($_.name -split ' / ')[-1] -eq 'unit' })
+          if ($jobs.Count -ne 1) { throw "Expected exactly one release unit job" }
+          if ($jobs[0].status -eq 'completed') {
+            if ($jobs[0].conclusion -ne 'success') { throw "Release unit gate did not pass" }
+            break
+          }
+          if ((Get-Date) -ge $deadline) { throw "Timed out waiting for release unit gate" }
+          Start-Sleep -Seconds 10
+        } while ($true)
     - name: Seal release bundle
       if: inputs.source_run_id == ''
       working-directory: app
@@ -410,12 +452,14 @@ jobs:
         retention-days: 30
         if-no-files-found: ignore
   github:
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.smoke.result == 'success' && needs.attest.result == 'success' && (needs.unit.result == 'success' || (inputs.source_run_id != '' && needs.unit.result == 'skipped')) }}
     needs:
     - preflight
     - smoke
     - attest
+    - unit
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
     - uses: actions/checkout@v6
       with:
@@ -445,54 +489,15 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw "Bundle attestation verification failed" }
     - name: Stage GitHub release
       run: node scripts/release-pipeline.mjs github-stage
-    env:
-      GH_TOKEN: ${{ github.token }}
-    permissions:
-      contents: write
-      actions: read
-      attestations: read
-  finalize:
-    needs:
-    - preflight
-    - github
-    runs-on: windows-2022
-    timeout-minutes: 15
-    permissions:
-      contents: write
-      actions: read
-      attestations: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        fetch-depth: 0
-    - uses: actions/setup-node@v6
-      with:
-        node-version: '22'
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-context
-        path: .
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-bundle-${{ needs.preflight.outputs.version }}
-        path: release-bundle
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-smoke-${{ needs.preflight.outputs.version }}
-        path: release-evidence
-    - name: Verify immutable bundle and attestation
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |-
-        node scripts/release-pipeline.mjs verify
-        if ($LASTEXITCODE -ne 0) { throw "Bundle verification failed" }
-        gh attestation verify release-bundle/bundle.json --repo "$env:GITHUB_REPOSITORY" --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/publish.yaml" --source-digest "$env:GITHUB_SHA"
-        if ($LASTEXITCODE -ne 0) { throw "Bundle attestation verification failed" }
     - name: Publish verified GitHub release
       run: node scripts/release-pipeline.mjs github-finalize
     - name: Report release state
       if: always()
-      run: '"Release: v$env:RELEASE_VERSION. Source run: $env:GITHUB_RUN_ID. GitHub assets and update manifest were verified before publication." |
+      run: '"Release: v$env:RELEASE_VERSION. Source run: $env:GITHUB_RUN_ID. Publication job status: ${{ job.status }}." |
         Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append'
+    env:
+      GH_TOKEN: ${{ github.token }}
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
