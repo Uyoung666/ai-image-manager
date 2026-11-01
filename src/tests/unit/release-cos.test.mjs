@@ -1,3 +1,4 @@
+// @vitest-environment node
 // biome-ignore-all lint/performance/useTopLevelRegex: test assertions intentionally keep patterns next to expectations.
 // biome-ignore-all lint/suspicious/useAwait: fake store methods model async COS methods while remaining synchronous in memory.
 

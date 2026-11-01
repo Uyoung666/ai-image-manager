@@ -30,9 +30,9 @@ beforeEach(() => {
   runtime = new TestRuntime("update-storage");
   vi.clearAllMocks();
 });
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  runtime.cleanup();
+  await vi.waitFor(() => runtime.cleanup(), { timeout: 5000 });
 });
 
 function available(bytes: number) {

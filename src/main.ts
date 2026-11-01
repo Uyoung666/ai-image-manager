@@ -78,6 +78,7 @@ import {
 import { getSetting } from "@/services/settings-manager";
 import { generateThumbnail, getThumbnailDir } from "@/services/thumbnailer";
 import {
+  beginChildProcessShutdown,
   getTrackedChildProcessCount,
   terminateTrackedChildProcesses,
   terminateTrackedChildProcessesSync,
@@ -1856,6 +1857,7 @@ async function waitForQuitCleanup(
 
 async function cleanupApplicationBeforeQuit(): Promise<void> {
   log.info("quit cleanup: started");
+  beginChildProcessShutdown();
   const { suspendImportsForShutdown } = await import("@/services/import-queue");
   suspendImportsForShutdown();
   stopAutomaticChecks();

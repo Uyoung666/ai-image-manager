@@ -611,7 +611,7 @@ describe("root reassociation and filesystem boundaries", () => {
     });
     const relocated = path.join(runtime.root, "relocated");
     await stopShootingProjectServices();
-    fs.renameSync(sourceRoot, relocated);
+    await fsp.rename(sourceRoot, relocated);
     startShootingProjectServices();
     await openShootingProject(workspace.project.id);
     const inspection = await inspectShootingProjectRelink({

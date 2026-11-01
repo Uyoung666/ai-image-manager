@@ -43,6 +43,19 @@ const authToken = randomBytes(32).toString("hex");
 // 保存首次分配的端口号，重启时复用，避免 renderer 持有的
 // preload 注入端口（通过 --http-port）在迁移后失效。
 let lastUsedPort: number | null = null;
+const mediaStreams = new Map<fs.ReadStream, Promise<void>>();
+
+function openMediaStream(filePath: string): fs.ReadStream {
+  const stream = fs.createReadStream(filePath);
+  const closed = new Promise<void>((resolve) => {
+    stream.once("close", () => {
+      mediaStreams.delete(stream);
+      resolve();
+    });
+  });
+  mediaStreams.set(stream, closed);
+  return stream;
+}
 
 // ── MIME 类型映射 ─────────────────────────────────────────────────────
 
@@ -317,7 +330,7 @@ function serveStaticFile(
       res.setHeader("content-length", stats.size);
       res.writeHead(200);
 
-      const readStream = fs.createReadStream(filePath);
+      const readStream = openMediaStream(filePath);
       const started = performance.now();
       readStream.once("end", () =>
         recordGalleryMediaStat("mediaStreamReadMs", performance.now() - started)
@@ -707,7 +720,8 @@ function handleImage(
         res.setHeader("content-length", stats.size);
         res.writeHead(200);
 
-        const readStream = fs.createReadStream(safePath);
+        const readStream = openMediaStream(safePath);
+        res.once("close", () => readStream.destroy());
 
         readStream.on("error", (err) => {
           if (res.headersSent) {
@@ -1177,7 +1191,10 @@ export function stopHttpServer(): Promise<void> {
   }
 
   return new Promise<void>((resolve) => {
-    server?.close(() => {
+    server?.close(async () => {
+      // Socket closure can precede the ReadStream's asynchronous file close.
+      // Wait before callers move/remove a data directory on Windows.
+      await Promise.all(mediaStreams.values());
       console.log(
         `[HttpServer] Stopped (active conversions: ${conversionSemaphore.active}, queued: ${conversionSemaphore.queued})`
       );
@@ -1186,6 +1203,13 @@ export function stopHttpServer(): Promise<void> {
       isServerStarted = false;
       resolve();
     });
+    // Renderers may keep image responses open until the window is destroyed,
+    // while window destruction waits for quit cleanup. Break that cycle after
+    // closing the listener so no new connection can escape this shutdown.
+    server?.closeAllConnections();
+    for (const stream of mediaStreams.keys()) {
+      stream.destroy();
+    }
   });
 }
 

@@ -245,6 +245,7 @@ async function findSequence() {
 
 async function clickVisible(card: Locator, count = 1) {
   const point = { x: 0, y: 0 };
+  let hovered = false;
   await expect
     .poll(async () => {
       const result = await card.evaluate((element) => {
@@ -281,8 +282,10 @@ async function clickVisible(card: Locator, count = 1) {
         );
         const left = Math.max(rect.left + 2, bounds.left);
         const right = Math.min(rect.right - 2, bounds.right);
-        for (const yRatio of [0.5, 0.25, 0.75]) {
-          for (const xRatio of [0.5, 0.25, 0.75]) {
+        for (const yRatio of [0.5, 0.25, 0.75, 0.1, 0.9]) {
+          // Startup toasts can cover the middle of a partially visible card.
+          // Check exposed edges too, while retaining the real hit-test below.
+          for (const xRatio of [0.5, 0.25, 0.75, 0.1, 0.9]) {
             const candidate = {
               x: left + (right - left) * xRatio,
               y: top + (bottom - top) * yRatio,
@@ -302,6 +305,23 @@ async function clickVisible(card: Locator, count = 1) {
       });
       if (result) {
         Object.assign(point, result);
+        if (!hovered) {
+          // Real pointer movement starts PhotoCard's hover transform. Wait for
+          // that animation and any tray reflow before recomputing hit geometry;
+          // raw mouse.click does not provide Playwright's stability checks.
+          await page.mouse.move(point.x, point.y);
+          const handle = await card.elementHandle();
+          if (!handle) {
+            return false;
+          }
+          try {
+            await handle.waitForElementState("stable");
+          } finally {
+            await handle.dispose();
+          }
+          hovered = true;
+          return false;
+        }
       }
       return Boolean(result);
     })

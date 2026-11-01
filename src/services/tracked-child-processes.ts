@@ -1,6 +1,12 @@
 import type { ChildProcess } from "node:child_process";
 
 const trackedChildren = new Set<ChildProcess>();
+let shuttingDown = false;
+
+/** Seal worker ownership before asynchronous quit cleanup can yield. */
+export function beginChildProcessShutdown(): void {
+  shuttingDown = true;
+}
 
 /**
  * Track every worker forked from the Electron main process.
@@ -15,6 +21,16 @@ export function trackChildProcess<T extends ChildProcess>(child: T): T {
   child.on("exit", () => {
     trackedChildren.delete(child);
   });
+  // An in-flight AI warmup can fork again after its previous worker is killed.
+  // Keep late forks tracked, but terminate them rather than orphaning them when
+  // the main process exits. A failed kill remains visible to the final sweep.
+  if (shuttingDown) {
+    try {
+      child.kill();
+    } catch {
+      // Final quit cleanup retries every worker still running.
+    }
+  }
   return child;
 }
 
