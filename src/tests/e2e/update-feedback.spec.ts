@@ -2,7 +2,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { type ElectronApplication, expect, type Page } from "@playwright/test";
 import type { UpdateStatus } from "@/types/update";
-import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
+import {
+  closeTestApp,
+  createTestRuntime,
+  launchTestApp,
+  test,
+} from "./helpers/test-runtime";
 
 const LOCALES = ["zh", "en", "ja-JP"] as const;
 const WINDOWS = [
@@ -19,6 +24,14 @@ const RETRY_SPACE =
 const VIEW = /^(查看更新|View update|更新を確認)$/;
 const ACTIVE_TOAST = '[data-sonner-toast]:not([data-removed="true"])';
 const CHECKED_AT = "2026-10-03T10:45:06.000Z";
+let activeApp: ElectronApplication | undefined;
+
+test.afterEach(async () => {
+  if (activeApp) {
+    await closeTestApp(activeApp);
+    activeApp = undefined;
+  }
+});
 
 declare global {
   interface Window {
@@ -89,6 +102,7 @@ for (const locale of LOCALES) {
       ],
       env: { ...env, CI: "e2e", AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: profile },
     });
+    activeApp = app;
     const page = await app.firstWindow();
     await page.waitForLoadState("load");
     await page.waitForFunction(() => Boolean(window.__e2eNavigate));

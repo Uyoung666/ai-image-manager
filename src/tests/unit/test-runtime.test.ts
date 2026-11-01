@@ -138,6 +138,30 @@ describe("managed test runtime cleanup", () => {
     expect(runtime.cleanup().status).toBe("deleted");
   });
 
+  it("does not mistake a Windows command wrapper exit for Electron exiting", () => {
+    const runtime = createRuntime();
+    const registration = runtime.registerLaunch();
+    fs.writeFileSync(
+      registration,
+      JSON.stringify({ pid: process.pid, exited: false })
+    );
+    const wrapper = Object.assign(new EventEmitter(), {
+      pid: 12_345,
+      exitCode: 0,
+      signalCode: null,
+    });
+    runtime.trackProcess(wrapper as unknown as ChildProcess, registration);
+    expect(JSON.parse(fs.readFileSync(registration, "utf8")).exited).toBe(
+      false
+    );
+    expect(runtime.cleanup().status).toBe("skipped");
+    fs.writeFileSync(
+      registration,
+      JSON.stringify({ pid: process.pid, exited: true })
+    );
+    expect(runtime.cleanup().status).toBe("deleted");
+  });
+
   it("isolates consecutive launch records and retires only the observed child", () => {
     const runtime = createRuntime();
     const first = runtime.registerLaunch();

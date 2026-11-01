@@ -297,19 +297,28 @@ for (const [sizeIndex, size] of SIZES.entries()) {
           element.scrollHeight - element.clientHeight - 300
         );
       });
-      const selectedId = await gallery.evaluate((element) => {
-        const viewport = element.getBoundingClientRect();
-        const candidates = [
-          ...element.querySelectorAll<HTMLElement>(
-            '[data-photo-id][role="option"]'
-          ),
-        ].filter((card) => {
-          const r = card.getBoundingClientRect();
-          return r.top > viewport.top + 100 && r.bottom < viewport.bottom - 10;
-        });
-        return Number(candidates.at(-1)?.dataset.photoId);
-      });
-      expect(selectedId).toBeGreaterThan(0);
+      // scrollTop updates synchronously; the virtual window mounts on a later
+      // paint. A request being sent does not prove its cards have rendered.
+      let selectedId = 0;
+      await expect
+        .poll(async () => {
+          selectedId = await gallery.evaluate((element) => {
+            const viewport = element.getBoundingClientRect();
+            const candidates = [
+              ...element.querySelectorAll<HTMLElement>(
+                '[data-photo-id][role="option"]'
+              ),
+            ].filter((card) => {
+              const r = card.getBoundingClientRect();
+              return (
+                r.top > viewport.top + 100 && r.bottom < viewport.bottom - 10
+              );
+            });
+            return Number(candidates.at(-1)?.dataset.photoId) || 0;
+          });
+          return selectedId;
+        })
+        .toBeGreaterThan(0);
       await page
         .locator(`[data-photo-id="${selectedId}"][role="option"]`)
         .click();
