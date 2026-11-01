@@ -37,6 +37,11 @@ import {
 import { startLocalFeed } from "./release/local-feed.mjs";
 import { validateLocaleSmoke } from "./release/locale.mjs";
 import {
+  assertBuildAllowed,
+  assertPublishable,
+  validationOnly,
+} from "./release/policy.mjs";
+import {
   assertPackageLockVersion,
   parseStableVersion,
 } from "./release/semver.mjs";
@@ -85,6 +90,9 @@ async function fetchText(url) {
 }
 
 export async function preflight() {
+  const validateOnly = validationOnly();
+  const sourceRunId = process.env.SOURCE_RUN_ID || null;
+  assertBuildAllowed({ validateOnly, sourceRunId });
   const version = String(process.env.RELEASE_VERSION ?? "")
     .trim()
     .replace(VERSION_PREFIX_PATTERN, "");
@@ -107,7 +115,6 @@ export async function preflight() {
   if (assertPackageLockVersion(packageJson, lock) !== version) {
     throw new Error("Tag, package and lock versions differ");
   }
-  const sourceRunId = process.env.SOURCE_RUN_ID || null;
   const identity = {
     version,
     tag,
@@ -116,6 +123,7 @@ export async function preflight() {
     sourceDateEpoch,
     generatedAt: new Date(Number(sourceDateEpoch) * 1000).toISOString(),
     sourceRunId,
+    validateOnly,
     localeRequired: Boolean(
       (
         await command("git", [
@@ -131,15 +139,14 @@ export async function preflight() {
   const source = sourceRunId
     ? await sourceArtifacts(repo(), sourceRunId)
     : null;
-  let releaseNotes = source?.modern
-    ? undefined
-    : await loadReleaseNotes(identity);
-  const existingRelease = await findRelease(repo(), tag);
-  if (!sourceRunId && existingRelease) {
-    throw new Error(
-      "This version already has release assets; resume its source run instead of rebuilding"
-    );
+  let releaseNotes;
+  if (validateOnly) {
+    releaseNotes = `仅验证 ${tag} 的构建、测试和安装升级流程，不对外发布。`;
+  } else if (!source?.modern) {
+    releaseNotes = await loadReleaseNotes(identity);
   }
+  const existingRelease = await findRelease(repo(), tag);
+  assertBuildAllowed({ validateOnly, sourceRunId, existingRelease });
   const baseline = await resolveGitHubBaseline(version);
   const updateBaseUrl =
     process.env.GITHUB_UPDATE_BASE_URL ?? DEFAULT_UPDATE_BASE;
@@ -237,6 +244,7 @@ function context() {
 }
 
 async function recover(identity) {
+  assertPublishable(identity);
   const source = await sourceArtifacts(repo(), identity.sourceRunId);
   const recovery = path.resolve(
     "out",
@@ -275,6 +283,7 @@ async function recover(identity) {
     const smokeDirectory = path.join(recovery, "smoke");
     await download(`release-smoke-${identity.version}`, smokeDirectory);
     const original = await verifyBundle(root(), identity);
+    assertPublishable(original);
     originalManifest = original;
     const identityArtifactName = `release-artifact-${identity.version}`;
     if (!source.artifacts.some((item) => item.name === identityArtifactName)) {
@@ -495,6 +504,8 @@ export async function runPipeline(operation) {
   if (operation === "verify") {
     return manifest;
   }
+  assertPublishable(identity);
+  assertPublishable(manifest);
   const smoke = await readJson(path.join(evidenceRoot(), "smoke-status.json"));
   validateSmoke(
     smoke,

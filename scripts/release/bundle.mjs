@@ -16,6 +16,7 @@ import {
   verifyLocaleBundle,
   verifyLocaleRelease,
 } from "./locale.mjs";
+import { assertPublishable } from "./policy.mjs";
 import {
   compareVersions,
   isStableVersion,
@@ -51,6 +52,8 @@ export function assertIdentity(metadata, expected = {}) {
 }
 
 export function recoveredReleaseIdentity(requested, original) {
+  assertPublishable(requested);
+  assertPublishable(original);
   assertIdentity(original, requested);
   return {
     ...requested,

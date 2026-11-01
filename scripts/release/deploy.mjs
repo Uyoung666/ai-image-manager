@@ -5,6 +5,7 @@ import { downloadRecords, feedRecords } from "./bundle.mjs";
 import { sha256Bytes } from "./checksums.mjs";
 import { IMMUTABLE_CACHE_CONTROL, NO_CACHE_CONTROL } from "./cos.mjs";
 import { prefixForKind } from "./operations.mjs";
+import { assertPublishable } from "./policy.mjs";
 import { assertImmutableObject, compareVersions } from "./semver.mjs";
 import {
   formatGitHubTransitionReleases,
@@ -149,6 +150,7 @@ export async function stageDownloads(
   releasePrefix,
   verify
 ) {
+  assertPublishable(manifest);
   const prefix = prefixForKind("versioned", {
     version: manifest.version,
     releasePrefix,
@@ -165,6 +167,7 @@ export async function stageUpdatePackages(
   releasePrefix,
   verify = verifyPublicObject
 ) {
+  assertPublishable(manifest);
   const stable = prefixForKind("stable", { releasePrefix });
   const base = prefixForKind("build-base", { releasePrefix });
   for (const record of await feedRecords(root, manifest)) {
@@ -222,6 +225,7 @@ export async function finalizeCos(
   releasePrefix,
   verify = verifyPublicObject
 ) {
+  assertPublishable(manifest);
   const stable = prefixForKind("stable", { releasePrefix });
   const base = prefixForKind("build-base", { releasePrefix });
   const stableKey = `${stable}/RELEASES`;
@@ -275,6 +279,7 @@ export async function transitionStableFeedToGitHub(
   verifyGitHubAssets,
   verifyCosObject = verifyPublicObject
 ) {
+  assertPublishable(manifest);
   if (typeof verifyGitHubAssets !== "function") {
     throw new Error(
       "GitHub transition assets must be verified before switching COS"

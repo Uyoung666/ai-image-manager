@@ -1,5 +1,6 @@
 # Build once; downstream retries reuse the exact immutable artifact.
 name: Release
+run-name: ${{ inputs.validate_only && format('仅验证 v{0}（不发布）', inputs.version) || format('Release v{0}', inputs.version) }}
 'on':
   workflow_dispatch:
     inputs:
@@ -21,6 +22,11 @@ name: Release
         description: 中文发布标题（与说明一起固定到构建产物）
         required: false
         type: string
+      validate_only:
+        description: 仅验证构建与测试，不发布 GitHub Release
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       release_title:
@@ -37,12 +43,17 @@ name: Release
         required: false
         default: ''
         type: string
+      validate_only:
+        description: 仅验证构建与测试，不发布 GitHub Release
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
   actions: read
   attestations: read
 concurrency:
-  group: release-production
+  group: ${{ inputs.validate_only && format('release-validation-{0}', github.ref) || 'release-production' }}
   cancel-in-progress: false
 defaults:
   run:
@@ -54,6 +65,10 @@ env:
   RELEASE_CONTEXT: ${{ github.workspace }}/release-context.json
   RELEASE_BUNDLE: ${{ github.workspace }}/release-bundle
   RELEASE_EVIDENCE: ${{ github.workspace }}/release-evidence
+  VALIDATE_ONLY: ${{ inputs.validate_only }}
+  BUNDLE_ARTIFACT_NAME: ${{ inputs.validate_only && 'validation-bundle' || 'release-bundle' }}-${{ inputs.version }}
+  IDENTITY_ARTIFACT_NAME: ${{ inputs.validate_only && 'validation-artifact' || 'release-artifact' }}-${{ inputs.version }}
+  SMOKE_ARTIFACT_NAME: ${{ inputs.validate_only && 'validation-smoke' || 'release-smoke' }}-${{ inputs.version }}
 jobs:
   preflight:
     runs-on: windows-2022
@@ -70,6 +85,9 @@ jobs:
     - uses: actions/setup-node@v6
       with:
         node-version: '22'
+    - name: Mark validation-only run
+      if: inputs.validate_only
+      run: 'Write-Output "Validation-only run: artifacts cannot be published or recovered."'
     - name: Validate release and resolve baseline
       id: preflight
       env:
@@ -108,11 +126,11 @@ jobs:
       run: |
         npm test
         if ($LASTEXITCODE -ne 0) { throw "Release unit gate failed" }
-  build:
+  package:
     needs:
     - preflight
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 35
     environment: release-stable
     steps:
     - name: Preserve repository line endings
@@ -128,11 +146,6 @@ jobs:
       with:
         name: release-context
         path: .
-    - name: Recover exact existing bundle
-      if: inputs.source_run_id != ''
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: node tooling/scripts/release-pipeline.mjs recover
     - name: Checkout application tag
       if: inputs.source_run_id == ''
       uses: actions/checkout@v6
@@ -209,6 +222,8 @@ jobs:
       shell: pwsh
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        DEBUG: electron-windows-installer:*
+        DEBUG_COLORS: '0'
       run: |-
         foreach ($generatedPath in @("out", "release-feed", "release-download", "release-evidence")) {
           if (Test-Path -LiteralPath $generatedPath) {
@@ -270,23 +285,6 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: japanese-locale-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-        include-hidden-files: true
-        path: |
-          app/test-results/
-          app/playwright-report/
-        retention-days: 30
-        if-no-files-found: ignore
-    - name: Gate - complete Electron E2E against the built application
-      if: inputs.source_run_id == ''
-      working-directory: app
-      run: |
-        npm run test:e2e -- --no-build --workers=1
-        if ($LASTEXITCODE -ne 0) { throw "Complete Electron E2E release gate failed" }
-    - name: Save complete Electron E2E diagnostics
-      if: always() && inputs.source_run_id == ''
-      uses: actions/upload-artifact@v4
-      with:
-        name: release-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
         include-hidden-files: true
         path: |
           app/test-results/
@@ -360,46 +358,194 @@ jobs:
         Write-Host "Verified full Squirrel package, optional delta baseline, Setup.exe, MSI rollback, and shortcut icon."
       if: inputs.source_run_id == ''
       working-directory: app
-    - name: Require successful unit gate before sealing recoverable artifacts
-      if: inputs.source_run_id == ''
+    - name: Stage verified release inputs
+      run: |-
+        node tooling/scripts/release/parallel.mjs stage app
+        if ($LASTEXITCODE -ne 0) { throw "Release validation failed" }
+    - id: vite
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-vite-${{ github.run_id }}-${{ github.run_attempt }}
+        path: app/.vite/
+        include-hidden-files: true
+        retention-days: 7
+        compression-level: 0
+        if-no-files-found: error
+    - id: inputs
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-input-${{ github.run_id }}-${{ github.run_attempt }}
+        path: app/release-input/
+        include-hidden-files: true
+        retention-days: 7
+        compression-level: 0
+        if-no-files-found: error
+    if: inputs.source_run_id == ''
+    outputs:
+      viteArtifactId: ${{ steps.vite.outputs.artifact-id }}
+      inputArtifactId: ${{ steps.inputs.outputs.artifact-id }}
+      buildId: ${{ github.run_id }}-${{ github.run_attempt }}
+    env:
+      RELEASE_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+  e2e:
+    needs:
+    - preflight
+    - package
+    if: inputs.source_run_id == ''
+    runs-on: windows-2022
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+        - 1
+        - 2
+        - 3
+        - 4
+    env:
+      RELEASE_BUILD_ID: ${{ needs.package.outputs.buildId }}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        path: tooling
+        fetch-depth: 0
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ needs.preflight.outputs.commit }}
+        path: app
+        fetch-depth: 0
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: app/package-lock.json
+    - uses: actions/download-artifact@v4
+      with:
+        name: release-context
+        path: .
+    - name: Install test dependencies
+      run: |-
+        npm ci
+        if ($LASTEXITCODE -ne 0) { throw "Release validation failed" }
+      working-directory: app
+    - uses: actions/cache@v4
+      with:
+        path: app/models
+        key: ${{ runner.os }}-models-all-${{ hashFiles('app/src/services/model-downloader.ts') }}
+    - name: Prepare test models
+      run: |-
+        node --loader ts-node/esm scripts/prepare-models.mjs
+        if ($LASTEXITCODE -ne 0) { throw "Release validation failed" }
+      working-directory: app
+    - name: Install Playwright browsers
+      run: |-
+        npx playwright install chromium --with-deps
+        if ($LASTEXITCODE -ne 0) { throw "Release validation failed" }
+      working-directory: app
+    - uses: actions/download-artifact@v4
+      with:
+        artifact-ids: ${{ needs.package.outputs.viteArtifactId }}
+        path: app/.vite
+        merge-multiple: true
+    - name: Run Electron E2E shard
+      run: |-
+        node tooling/scripts/release/parallel.mjs test app ${{ matrix.shard }}
+        if ($LASTEXITCODE -ne 0) { throw "Release validation failed" }
+    - id: report
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-shard-${{ github.run_id }}-${{ matrix.shard }}-${{ github.run_attempt }}
+        path: app/release-shard/
+        include-hidden-files: true
+        retention-days: 30
+        compression-level: 0
+        if-no-files-found: warn
+      if: always()
+    - id: diagnostics
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-e2e-diagnostics-${{ github.run_id }}-${{ matrix.shard }}-${{ github.run_attempt }}
+        path: app/test-results/
+        include-hidden-files: true
+        retention-days: 30
+        compression-level: 0
+        if-no-files-found: warn
+      if: always()
+  build:
+    needs:
+    - preflight
+    - package
+    - unit
+    - e2e
+    runs-on: windows-2022
+    timeout-minutes: 60
+    environment: release-stable
+    steps:
+    - name: Preserve repository line endings
+      run: git config --global core.autocrlf false
+    - uses: actions/checkout@v6
+      with:
+        path: tooling
+        fetch-depth: 0
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+    - uses: actions/download-artifact@v4
+      with:
+        name: release-context
+        path: .
+    - name: Recover exact existing bundle
+      if: inputs.source_run_id != ''
       env:
         GH_TOKEN: ${{ github.token }}
-      run: |
-        $deadline = (Get-Date).AddMinutes(25)
-        do {
-          $response = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/jobs?filter=latest&per_page=100"
-          if ($LASTEXITCODE -ne 0) { throw "Cannot verify release unit gate" }
-          $jobs = @(($response | ConvertFrom-Json).jobs | Where-Object { ($_.name -split ' / ')[-1] -eq 'unit' })
-          if ($jobs.Count -ne 1) { throw "Expected exactly one release unit job" }
-          if ($jobs[0].status -eq 'completed') {
-            if ($jobs[0].conclusion -ne 'success') { throw "Release unit gate did not pass" }
-            break
-          }
-          if ((Get-Date) -ge $deadline) { throw "Timed out waiting for release unit gate" }
-          Start-Sleep -Seconds 10
-        } while ($true)
+      run: node tooling/scripts/release-pipeline.mjs recover
+    - uses: actions/download-artifact@v4
+      with:
+        artifact-ids: ${{ needs.package.outputs.viteArtifactId }}
+        path: inputs/.vite
+        merge-multiple: true
+      if: inputs.source_run_id == ''
+    - uses: actions/download-artifact@v4
+      with:
+        artifact-ids: ${{ needs.package.outputs.inputArtifactId }}
+        path: inputs/release-input
+        merge-multiple: true
+      if: inputs.source_run_id == ''
+    - uses: actions/download-artifact@v4
+      if: inputs.source_run_id == ''
+      with:
+        pattern: release-shard-${{ github.run_id }}-*
+        path: inputs/shards
+    - name: Gate - complete Electron E2E against the built application
+      run: |-
+        node tooling/scripts/release/parallel.mjs gate inputs
+        if ($LASTEXITCODE -ne 0) { throw "Release validation failed" }
+      if: inputs.source_run_id == ''
     - name: Seal release bundle
       if: inputs.source_run_id == ''
-      working-directory: app
-      run: node ../tooling/scripts/release-pipeline.mjs prepare
+      run: node tooling/scripts/release-pipeline.mjs prepare
     - name: Save immutable release bundle
       id: bundle
       uses: actions/upload-artifact@v4
       with:
-        name: release-bundle-${{ needs.preflight.outputs.version }}
+        name: ${{ env.BUNDLE_ARTIFACT_NAME }}
         path: release-bundle/
         retention-days: 7
         compression-level: 0
         if-no-files-found: error
     - name: Record source artifact identity
-      run: '@{ artifactId = "${{ steps.bundle.outputs.artifact-id }}"; digest = "${{ steps.bundle.outputs.artifact-digest }}"; runId = "${{ github.run_id }}"; commit = "${{ needs.preflight.outputs.commit
-        }}"; toolingCommit = "${{ github.sha }}" } | ConvertTo-Json | Set-Content release-artifact.json'
+      run: '@{ validateOnly = ("${{ inputs.validate_only }}" -eq "true"); artifactId = "${{ steps.bundle.outputs.artifact-id }}"; digest = "${{ steps.bundle.outputs.artifact-digest }}"; runId = "${{ github.run_id }}"; commit = "${{ needs.preflight.outputs.commit }}"; toolingCommit = "${{ github.sha }}" } | ConvertTo-Json | Set-Content release-artifact.json'
     - uses: actions/upload-artifact@v4
       with:
-        name: release-artifact-${{ needs.preflight.outputs.version }}
+        name: ${{ env.IDENTITY_ARTIFACT_NAME }}
         path: release-artifact.json
         retention-days: 90
         if-no-files-found: error
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && ((inputs.source_run_id == '' && needs.package.result == 'success' && needs.unit.result == 'success' && needs.e2e.result == 'success') || (inputs.source_run_id != '' && needs.package.result == 'skipped' && needs.unit.result == 'skipped' && needs.e2e.result == 'skipped')) }}
+    env:
+      RELEASE_BUILD_ID: ${{ needs.package.outputs.buildId }}
+      RELEASE_MAKE: ${{ github.workspace }}/inputs/release-input/make
+      RELEASE_LOCALE: ${{ github.workspace }}/inputs/release-input/plugins
   attest:
     needs:
     - preflight
@@ -415,12 +561,13 @@ jobs:
     steps:
     - uses: actions/download-artifact@v4
       with:
-        name: release-bundle-${{ needs.preflight.outputs.version }}
+        name: ${{ env.BUNDLE_ARTIFACT_NAME }}
         path: release-bundle
     - name: Attest release bundle
       uses: actions/attest@v4
       with:
         subject-path: release-bundle/**
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' }}
   smoke:
     needs:
     - preflight
@@ -440,14 +587,14 @@ jobs:
         path: .
     - uses: actions/download-artifact@v4
       with:
-        name: release-bundle-${{ needs.preflight.outputs.version }}
+        name: ${{ env.BUNDLE_ARTIFACT_NAME }}
         path: release-bundle
     - name: Test installers against local feed
       run: node scripts/release-pipeline.mjs smoke
     - name: Save installer smoke evidence
       uses: actions/upload-artifact@v4
       with:
-        name: release-smoke-${{ needs.preflight.outputs.version }}
+        name: ${{ env.SMOKE_ARTIFACT_NAME }}
         path: release-evidence/smoke-status.json
         retention-days: 90
         if-no-files-found: error
@@ -459,8 +606,9 @@ jobs:
         path: release-evidence/installer-logs/
         retention-days: 30
         if-no-files-found: ignore
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' }}
   github:
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.smoke.result == 'success' && needs.attest.result == 'success' && (needs.unit.result == 'success' || (inputs.source_run_id != '' && needs.unit.result == 'skipped')) }}
+    if: ${{ !inputs.validate_only && !cancelled() && needs.preflight.result == 'success' && needs.smoke.result == 'success' && needs.attest.result == 'success' && (needs.unit.result == 'success' || (inputs.source_run_id != '' && needs.unit.result == 'skipped')) }}
     needs:
     - preflight
     - smoke
@@ -481,11 +629,11 @@ jobs:
         path: .
     - uses: actions/download-artifact@v4
       with:
-        name: release-bundle-${{ needs.preflight.outputs.version }}
+        name: ${{ env.BUNDLE_ARTIFACT_NAME }}
         path: release-bundle
     - uses: actions/download-artifact@v4
       with:
-        name: release-smoke-${{ needs.preflight.outputs.version }}
+        name: ${{ env.SMOKE_ARTIFACT_NAME }}
         path: release-evidence
     - name: Verify immutable bundle and attestation
       env:
@@ -501,8 +649,7 @@ jobs:
       run: node scripts/release-pipeline.mjs github-finalize
     - name: Report release state
       if: always()
-      run: '"Release: v$env:RELEASE_VERSION. Source run: $env:GITHUB_RUN_ID. Publication job status: ${{ job.status }}." |
-        Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append'
+      run: '"Release: v$env:RELEASE_VERSION. Source run: $env:GITHUB_RUN_ID. Publication job status: ${{ job.status }}." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append'
     env:
       GH_TOKEN: ${{ github.token }}
     permissions:

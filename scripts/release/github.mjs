@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { assertIdentity, downloadRecords, feedRecords } from "./bundle.mjs";
 import { readFileRecord } from "./checksums.mjs";
+import { assertPublishable } from "./policy.mjs";
 import { compareVersions, isStableVersion } from "./semver.mjs";
 
 const RUN_ID_PATTERN = /^[1-9]\d*$/;
@@ -184,6 +185,15 @@ export function validateSourceRun(run, jobs) {
     throw new Error("Recovery source must be a completed release workflow run");
   }
   const steps = jobs.flatMap((job) => job.steps ?? []);
+  if (
+    steps.some(
+      (step) =>
+        step.name === "Mark validation-only run" &&
+        step.conclusion === "success"
+    )
+  ) {
+    throw new Error("Validation-only runs cannot be recovery sources");
+  }
   const modern = steps.some(
     (step) => step.name === "Save immutable release bundle"
   );
@@ -348,6 +358,7 @@ export async function verifyGitHubTransitionAssets(
 }
 
 export async function stageGitHub(repo, root, manifest) {
+  assertPublishable(manifest);
   let release = await findRelease(repo, manifest.tag);
   if (
     release?.target_commitish &&
@@ -415,6 +426,7 @@ export async function stageGitHub(repo, root, manifest) {
 }
 
 export async function finalizeGitHub(repo, root, manifest) {
+  assertPublishable(manifest);
   const latest = await api(`repos/${repo}/releases/latest`);
   const latestVersion = latest.tag_name.replace(TAG_PREFIX_PATTERN, "");
   if (
