@@ -62,6 +62,30 @@ beforeEach(() => {
 
 describe("AiProgressBar", () => {
   it.each([
+    "error",
+    "complete",
+  ] as const)("shows per-photo failures without model/network advice: %s", async (phase) => {
+    vi.mocked(ipc.client.photos.getAiProgress).mockResolvedValue({
+      ...idle,
+      phase,
+      processed: phase === "complete" ? 1 : 0,
+      failureSummary: {
+        failed: 7,
+        decodeFailed: 7,
+        modelFailed: 0,
+        inferenceFailed: 0,
+      },
+      error: "AI indexing: image decoding failed",
+    });
+    render(<AiProgressBar />);
+    expect(
+      await screen.findByText("aiPhotoFailureSummary")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("aiMirrorHint")).toBeNull();
+    expect(screen.queryByText("aiNetworkErrorHint")).toBeNull();
+  });
+
+  it.each([
     "empty",
     "matching",
   ] as const)("hides the settings migration entry for compatible status: %s", async (compatibility) => {

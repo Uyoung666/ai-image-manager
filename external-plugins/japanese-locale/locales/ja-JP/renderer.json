@@ -2500,5 +2500,7 @@
     "unavailableCount": "現在 {{count}} 枚の写真を利用できません",
     "dropFolder": "フォルダーをドロップして、インポートせずに選別を開始",
     "dropOneFolder": "撮影フォルダーを1つずつドロップして、独立した選別タスクを作成してください。"
-  }
+  },
+  "aiPhotoProcessingFailed": "AI の画像処理に失敗しました",
+  "aiPhotoFailureSummary": "{{total}} 枚中 {{failed}} 枚の処理に失敗しました：画像のデコード {{decodeFailed}} 枚、モデルの初期化 {{modelFailed}} 枚、推論または結果処理 {{inferenceFailed}} 枚。成功した結果は保存されています。失敗した写真は再試行できます。"
 }

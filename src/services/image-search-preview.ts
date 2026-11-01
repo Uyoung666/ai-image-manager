@@ -5,6 +5,7 @@ import {
   resolveImageOrientation,
 } from "@/services/image-orientation";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
+import { resolveHeifInput } from "./heif-input";
 
 const IMAGE_SEARCH_PREVIEW_SIZE = 96;
 const IMAGE_SEARCH_PREVIEW_QUALITY = 76;
@@ -28,12 +29,13 @@ export async function createImageSearchPreview(
   }
 
   try {
-    const input = isRawFile(imagePath)
+    let input = isRawFile(imagePath)
       ? await extractRawPreview(imagePath)
       : imagePath;
     if (!input) {
       return { dataUrl: null, exists: true };
     }
+    input = await resolveHeifInput(input);
     const metadata = await sharp(input, { failOn: "none" }).metadata();
     const orientation = await resolveImageOrientation(imagePath, metadata);
     const buffer = await applyExifOrientation(

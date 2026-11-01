@@ -2500,5 +2500,7 @@
     "unavailableCount": "{{count}} photos are currently unavailable",
     "dropFolder": "Drop a folder to start culling without importing",
     "dropOneFolder": "Drop one shooting folder at a time to create a separate culling task."
-  }
+  },
+  "aiPhotoProcessingFailed": "AI photo processing failed",
+  "aiPhotoFailureSummary": "{{failed}}/{{total}} photos failed: image decoding {{decodeFailed}}, model initialization {{modelFailed}}, inference or output processing {{inferenceFailed}}. Successful results are retained; failed photos can be retried."
 }

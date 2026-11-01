@@ -11,7 +11,9 @@ import { trackChildProcess } from "@/services/tracked-child-processes";
 
 interface EmbedResult {
   error?: string;
+  errorCode?: string;
   id: number;
+  stage?: string;
   vector?: number[];
 }
 

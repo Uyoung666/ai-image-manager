@@ -1,4 +1,5 @@
 import { invalidateVectorSearch } from "@/services/search-revision";
+import type { EmbeddingFailureSummary } from "./embedding-failures";
 // Shared mutable state across AI sub-modules.
 // Centralised here so that split modules can read/write the same singletons.
 
@@ -26,6 +27,7 @@ export interface EmbedProgress {
   currentFile: string;
   downloadPercent?: number;
   error?: string;
+  failureSummary?: EmbeddingFailureSummary;
   loadingStartedAt?: number | null;
   phase:
     | "idle"

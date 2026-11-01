@@ -1777,6 +1777,9 @@ i18n.use(initReactI18next).init({
           "确定要删除云存储配置「{{name}}」吗？这只会移除本地连接配置，不会删除本地照片或已上传的云端文件。此操作不可撤销。",
 
         // AI progress
+        aiPhotoProcessingFailed: "AI 图片处理失败",
+        aiPhotoFailureSummary:
+          "{{failed}}/{{total}} 张处理失败：图片解码 {{decodeFailed}} 张，模型初始化 {{modelFailed}} 张，推理或结果处理 {{inferenceFailed}} 张。成功结果已保留，失败照片可重试。",
         aiInitFailed: "AI 初始化失败",
         aiMirrorHint: "国内用户可设置 HuggingFace 镜像：启动时设置环境变量",
         aiNetworkErrorHint: "网络连接失败，可能是 HuggingFace 访问受限",

@@ -59,6 +59,7 @@ import {
 } from "@/services/diagnostics/sanitizer";
 import { cancelFaceDetection } from "@/services/face-detector";
 import { shutdownFacePool } from "@/services/face-worker-pool";
+import { resolveHeifInput } from "@/services/heif-input";
 import {
   getHttpServerAuthToken,
   getHttpServerPort,
@@ -1635,7 +1636,10 @@ async function renderLocalMedia(resolved: string): Promise<Response> {
     }
   }
   try {
-    const converted = await sharp(resolved).rotate().png().toBuffer();
+    const converted = await sharp(await resolveHeifInput(resolved))
+      .rotate()
+      .png()
+      .toBuffer();
     return new Response(new Uint8Array(converted), {
       headers: {
         "content-type": "image/png",

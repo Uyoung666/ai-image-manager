@@ -1,5 +1,6 @@
 import exifr from "exifr";
 import sharp from "sharp";
+import { resolveHeifInput } from "./heif-input.mjs";
 
 function normalizeOrientation(value) {
   const orientation = Number(value);
@@ -49,13 +50,16 @@ function applyExifOrientation(pipeline, orientation) {
  * Detection and embedding must consume this same normalized pixel buffer.
  */
 export async function normalizeImageInput(input, originalPath) {
-  const inputMetadata = await sharp(input, { failOn: "none" }).metadata();
+  const decodedInput = await resolveHeifInput(input);
+  const inputMetadata = await sharp(decodedInput, {
+    failOn: "none",
+  }).metadata();
   const orientation = await resolveImageOrientation(
     originalPath,
     inputMetadata
   );
   const { data, info } = await applyExifOrientation(
-    sharp(input, { failOn: "none" }),
+    sharp(decodedInput, { failOn: "none" }),
     orientation
   )
     .toColourspace("srgb")

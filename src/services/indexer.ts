@@ -1,3 +1,5 @@
+const HEIF_EXTENSION_RE = /\.hei[cf]$/i;
+
 import fs from "node:fs";
 import path from "node:path";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -17,6 +19,7 @@ import { extractDominantColors } from "./color-extractor";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { registerExplicitPhotoFolder } from "./explicit-library-folders";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
+import { resolveHeifInput } from "./heif-input";
 import {
   type ExifOrientation,
   getOrientedDimensions,
@@ -357,6 +360,10 @@ async function readBasicMeta(filePath: string): Promise<{
         thumbnailInput = preview;
       }
     }
+    input = await resolveHeifInput(input);
+    if (Buffer.isBuffer(input)) {
+      thumbnailInput = input;
+    }
     const meta = await sharp(input).metadata();
     const orientation = await resolveImageOrientation(filePath, meta);
     const dimensions = raw
@@ -369,9 +376,10 @@ async function readBasicMeta(filePath: string): Promise<{
       ? getOrientedDimensions(dimensions.width, dimensions.height, orientation)
       : dimensions;
     // RAW files: use file extension as format (sharp returns "jpeg" from embedded preview)
-    const format = raw
-      ? path.extname(filePath).toLowerCase().replace(".", "")
-      : meta.format || "";
+    const format =
+      raw || HEIF_EXTENSION_RE.test(filePath)
+        ? path.extname(filePath).toLowerCase().replace(".", "")
+        : meta.format || "";
     return {
       width,
       height,

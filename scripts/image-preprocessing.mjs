@@ -1,11 +1,13 @@
 import sharp from "sharp";
+import { resolveHeifInput } from "./heif-input.mjs";
 
 /** The fixed SigLIP Processor uses a bicubic affine resize, not resize's
  * Lanczos kernel. Decode orientation and RGB before resampling, and round
  * rescaling to float32 before normalization as Transformers.js does.
  */
 export async function preprocessImage(input, image) {
-  const decoder = sharp(input, { failOn: "none" });
+  const decodedInput = await resolveHeifInput(input);
+  const decoder = sharp(decodedInput, { failOn: "none" });
   const metadata = await decoder.metadata();
   const swapsAxes = (metadata.orientation ?? 1) >= 5;
   const width = swapsAxes ? metadata.height : metadata.width;

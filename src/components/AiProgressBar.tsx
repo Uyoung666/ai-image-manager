@@ -8,6 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { EmbeddingFailureSummary } from "@/services/ai/embedding-failures";
 import type { AiStatus } from "@/types/photo";
 
 interface AiProgress {
@@ -15,6 +16,7 @@ interface AiProgress {
   currentFile: string;
   downloadPercent?: number;
   error?: string;
+  failureSummary?: EmbeddingFailureSummary;
   isActive: boolean;
   isModelLoaded: boolean;
   isPaused?: boolean;
@@ -304,6 +306,17 @@ export function AiProgressBar({
     );
   }
 
+  const failureSummary = progress?.failureSummary;
+  const failureNotice =
+    failureSummary && failureSummary.failed > 0 ? (
+      <p className="mt-2 break-words text-[12px] text-muted-foreground leading-relaxed [overflow-wrap:anywhere]">
+        {t("aiPhotoFailureSummary", {
+          ...failureSummary,
+          total: progress?.total,
+        })}
+      </p>
+    ) : null;
+
   // Optional compact notices expose only incompatible-index migration.
   if (migrationOnly) {
     return mutationNotice;
@@ -321,47 +334,51 @@ export function AiProgressBar({
       lastError?.includes("fetch failed") ||
       lastError?.includes("network");
 
+    const errorTitle = failureSummary
+      ? "aiPhotoProcessingFailed"
+      : "aiInitFailed";
     return (
       <div className="min-w-0 rounded-[8px] border border-danger/30 bg-danger/5 p-3 min-[480px]:p-4">
         <p className="break-words font-medium text-[14px] text-danger">
-          {t(progress?.phase === "tag-error" ? "aiTagsFailed" : "aiInitFailed")}
+          {t(progress?.phase === "tag-error" ? "aiTagsFailed" : errorTitle)}
         </p>
         {mutationNotice}
 
-        {isNetworkError ? (
-          <div className="mt-3 space-y-3">
-            <p className="text-[12px] text-muted-foreground leading-relaxed">
-              {t("aiNetworkErrorHint")}
-            </p>
-            <div className="min-w-0 rounded-[6px] border border-border bg-card p-3">
-              <p className="mb-2 text-[12px] text-muted-foreground">
-                {t("aiMirrorRecommendation")}
+        {failureNotice ??
+          (isNetworkError ? (
+            <div className="mt-3 space-y-3">
+              <p className="text-[12px] text-muted-foreground leading-relaxed">
+                {t("aiNetworkErrorHint")}
               </p>
-              <Button
-                className="h-auto min-h-8 max-w-full whitespace-normal px-3 py-1.5"
-                onClick={async () => {
-                  try {
-                    await openExternalLink("https://hf-mirror.com");
-                  } catch {
-                    // The shell action reports its own failure to the caller.
-                  }
-                }}
-                size="lg"
-                type="button"
-                variant="outline"
-              >
-                {t("aiOpenMirrorSite")}
-              </Button>
+              <div className="min-w-0 rounded-[6px] border border-border bg-card p-3">
+                <p className="mb-2 text-[12px] text-muted-foreground">
+                  {t("aiMirrorRecommendation")}
+                </p>
+                <Button
+                  className="h-auto min-h-8 max-w-full whitespace-normal px-3 py-1.5"
+                  onClick={async () => {
+                    try {
+                      await openExternalLink("https://hf-mirror.com");
+                    } catch {
+                      // The shell action reports its own failure to the caller.
+                    }
+                  }}
+                  size="lg"
+                  type="button"
+                  variant="outline"
+                >
+                  {t("aiOpenMirrorSite")}
+                </Button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <p className="mt-2 text-[12px] text-muted-foreground leading-relaxed [overflow-wrap:anywhere]">
-            {t("aiMirrorHint")}
-            <code className="mx-0.5 rounded-[4px] bg-card px-1 text-[12px] text-muted-foreground">
-              HF_MIRROR=hf-mirror.com
-            </code>
-          </p>
-        )}
+          ) : (
+            <p className="mt-2 text-[12px] text-muted-foreground leading-relaxed [overflow-wrap:anywhere]">
+              {t("aiMirrorHint")}
+              <code className="mx-0.5 rounded-[4px] bg-card px-1 text-[12px] text-muted-foreground">
+                HF_MIRROR=hf-mirror.com
+              </code>
+            </p>
+          ))}
 
         <Button
           className="mt-3 h-auto min-h-8 max-w-full whitespace-normal px-3 py-1.5"
@@ -422,6 +439,7 @@ export function AiProgressBar({
             {!incompleteBuild && `${completePercent}%`}
           </span>
         </div>
+        {failureNotice}
         <Button
           className="mt-3 h-auto min-h-8 max-w-full whitespace-normal px-3 py-1.5"
           disabled={disabled || isMutating}

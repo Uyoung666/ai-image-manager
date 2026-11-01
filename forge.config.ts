@@ -217,7 +217,7 @@ const config: ForgeConfig = {
       : {}),
     asar: {
       unpack:
-        "**/{better-sqlite3,sharp,@lancedb,@lancedb/lancedb-win32-x64-msvc,@lancedb/lancedb-win32-arm64-msvc,@img,node-*,detect-libc,semver,scripts,@xenova,@huggingface,onnxruntime-node,onnxruntime-common,onnxruntime-web,color,color-convert,color-name,color-string,simple-swizzle,is-arrayish,exifr,exiftool-vendored,exiftool-vendored.exe}/**",
+        "**/{better-sqlite3,libheif-js,sharp,@lancedb,@lancedb/lancedb-win32-x64-msvc,@lancedb/lancedb-win32-arm64-msvc,@img,node-*,detect-libc,semver,scripts,@xenova,@huggingface,onnxruntime-node,onnxruntime-common,onnxruntime-web,color,color-convert,color-name,color-string,simple-swizzle,is-arrayish,exifr,exiftool-vendored,exiftool-vendored.exe}/**",
     },
     extraResource: [
       "models-release",
@@ -272,6 +272,7 @@ const config: ForgeConfig = {
             "chokidar",
             "readdirp",
             "sharp",
+            "libheif-js",
             "@lancedb",
             "@lancedb/lancedb-win32-x64-msvc",
             "@lancedb/lancedb-win32-arm64-msvc",

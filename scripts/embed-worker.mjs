@@ -9,6 +9,7 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import sharp from "sharp";
+import { processEmbeddingPhoto } from "./embedding-photo.mjs";
 import { preprocessImage } from "./image-preprocessing.mjs";
 import { extractRawPreview } from "./raw-preview.mjs";
 
@@ -193,7 +194,6 @@ function normalizeVector(rawVector) {
   return vector;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Embedding keeps provider failure handling and per-photo CPU error handling in one protocol transaction.
 async function handleEmbed(message) {
   const photos = Array.isArray(message.photos) ? message.photos : [];
   if (!(ortSession && activeAdapter)) {
@@ -204,6 +204,8 @@ async function handleEmbed(message) {
       results: photos.map((photo) => ({
         id: photo.id,
         error: "Model not initialized",
+        stage: "model",
+        errorCode: "MODEL_NOT_INITIALIZED",
       })),
     });
     return;
@@ -216,39 +218,49 @@ async function handleEmbed(message) {
     if (aborted) {
       break;
     }
-    try {
-      let imageInput = photo.path;
-      if (isRawFile(photo.path)) {
-        imageInput = extractRawPreview(photo.path) || photo.path;
-      }
-      const floatData = await preprocessImage(imageInput, activeAdapter.image);
-      const image = activeAdapter.image;
-      const pixelValues = new ort.Tensor("float32", floatData, [
-        1,
-        3,
-        image.imageSize,
-        image.imageSize,
-      ]);
-      const output = await ortSession.run({ [image.inputName]: pixelValues });
-      const embedding = output[image.outputName];
-      if (!embedding) {
-        throw new Error(`Output "${image.outputName}" missing`);
-      }
-      const vector = normalizeVector(Array.from(embedding.data));
-      for (const value of Object.values(output)) {
-        value?.dispose?.();
-      }
-      results.push({ id: photo.id, vector });
-    } catch (error) {
-      if (activeExecutionProvider === "directml") {
-        providerError = error instanceof Error ? error.message : String(error);
-        break;
-      }
-      results.push({
-        id: photo.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    const result = await processEmbeddingPhoto(photo.id, {
+      provider: activeExecutionProvider,
+      prepare: () => {
+        let imageInput = photo.path;
+        if (isRawFile(photo.path)) {
+          imageInput = extractRawPreview(photo.path) || photo.path;
+        }
+        return preprocessImage(imageInput, activeAdapter.image);
+      },
+      infer: async (floatData) => {
+        const image = activeAdapter.image;
+        const pixelValues = new ort.Tensor("float32", floatData, [
+          1,
+          3,
+          image.imageSize,
+          image.imageSize,
+        ]);
+        try {
+          const output = await ortSession.run({
+            [image.inputName]: pixelValues,
+          });
+          try {
+            const embedding = output[image.outputName];
+            if (!embedding) {
+              throw new Error(`Output "${image.outputName}" missing`);
+            }
+            return Array.from(embedding.data);
+          } finally {
+            for (const value of Object.values(output)) {
+              value?.dispose?.();
+            }
+          }
+        } finally {
+          pixelValues.dispose?.();
+        }
+      },
+      normalize: normalizeVector,
+    });
+    if (result.providerError) {
+      providerError = result.error;
+      break;
     }
+    results.push(result);
   }
 
   if (providerError) {

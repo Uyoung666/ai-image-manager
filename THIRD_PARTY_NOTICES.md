@@ -46,3 +46,9 @@ See the bundled licenses/About-UI.txt for source and license references.
 ## About page: Uiverse
 
 The creator card, browser preview and copy feedback are adapted from MIT-licensed designs by Smit-Prajapati, arthur_6104 and Galahhad. Sources and full terms are bundled in licenses/About-UI.txt.
+
+## HEIC/HEIF decoding
+
+The offline decoder uses the unmodified WASM distribution of [libheif-js](https://github.com/catdad-experiments/libheif-js), version 1.23.5, which includes libheif and its HEVC decoder. It is distributed under LGPL-3.0. Upstream source and build instructions are available from that repository and the package's pinned release.
+
+License texts are included in `licenses/HEIF-LGPL-3.0.txt` and `licenses/HEIF-LIBRARIES.txt`. The runtime distribution, including its upstream license files, remains separate under `resources/app.asar.unpacked/node_modules/libheif-js/`.

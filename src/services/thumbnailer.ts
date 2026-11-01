@@ -17,6 +17,7 @@ import { registerGalleryCleanup } from "@/utils/gallery-lifecycle";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { createLogger } from "@/utils/logger";
 import { PrioritySemaphore } from "@/utils/priority-semaphore";
+import { resolveHeifInput } from "./heif-input";
 import {
   applyExifOrientation,
   type ExifOrientation,
@@ -472,6 +473,7 @@ async function doGenerateDuelPreview(
       input = preview;
     }
 
+    input = await resolveHeifInput(input);
     const inputMetadata = await sharp(input, { failOn: "none" }).metadata();
     const orientation = await resolveImageOrientation(imagePath, inputMetadata);
     const pipeline = applyExifOrientation(
@@ -704,6 +706,7 @@ async function doGenerate(
       }
     }
 
+    input = await resolveHeifInput(input);
     const inputMetadata = await sharp(input, { failOn: "none" }).metadata();
     const orientation =
       options.orientation ??
@@ -827,6 +830,7 @@ async function encodeGalleryVariant(
     resource === imagePath && isRawFile(imagePath)
       ? ((await extractRawPreview(imagePath)) ?? imagePath)
       : resource;
+  preview = await resolveHeifInput(preview);
   // The managed preview was already validated and has corrected orientation.
   // Read it once; repeated sharp(path).metadata()/encode opens contend with IO.
   let orientation = knownOrientation;

@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { shootingProjectPhotos, shootingProjects } from "@/db/schema";
 import { PrioritySemaphore } from "@/utils/priority-semaphore";
+import { resolveHeifInput } from "./heif-input";
 import {
   applyExifOrientation,
   getOrientedDimensions,
@@ -150,7 +151,9 @@ async function renderProjectPreview(source: string, runtime: Runtime) {
     throw new ShootingProjectError("PREVIEW_UNAVAILABLE");
   }
   checkCancelled(runtime);
-  const metadata = await sharp(input, { failOn: "error" }).metadata();
+  const decodedInput = await resolveHeifInput(input);
+  checkCancelled(runtime);
+  const metadata = await sharp(decodedInput, { failOn: "error" }).metadata();
   const orientation = await resolveImageOrientation(source, metadata);
   const originalDimensions = isRawFile(source)
     ? await readRawDimensions(source)
@@ -161,7 +164,7 @@ async function renderProjectPreview(source: string, runtime: Runtime) {
     orientation
   );
   const buffer = await applyExifOrientation(
-    sharp(input, { failOn: "error" }),
+    sharp(decodedInput, { failOn: "error" }),
     orientation
   )
     .resize({

@@ -29,6 +29,7 @@ import {
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { createLogger } from "@/utils/logger";
 import { resolveSafePath as resolveSecurePath } from "@/utils/path-security";
+import { resolveHeifInput } from "./heif-input";
 
 const log = createLogger("http-server");
 const PROJECT_MEDIA_ID_PATTERN =
@@ -157,9 +158,13 @@ async function createOrientedPipeline(
   input: string | Buffer,
   originalPath: string
 ): Promise<ReturnType<typeof sharp>> {
-  const metadata = await sharp(input, { failOn: "none" }).metadata();
+  const decodedInput = await resolveHeifInput(input);
+  const metadata = await sharp(decodedInput, { failOn: "none" }).metadata();
   const orientation = await resolveImageOrientation(originalPath, metadata);
-  return applyExifOrientation(sharp(input, { failOn: "none" }), orientation);
+  return applyExifOrientation(
+    sharp(decodedInput, { failOn: "none" }),
+    orientation
+  );
 }
 
 async function normalizeJpegPreview(

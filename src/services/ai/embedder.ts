@@ -15,6 +15,7 @@ import { invalidateVectorSearch } from "@/services/search-revision";
 import { getSetting } from "@/services/settings-manager";
 import { trackChildProcess } from "@/services/tracked-child-processes";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
+import { summarizeEmbeddingFailures } from "./embedding-failures";
 import { getActiveEmbeddingWorkerAdapter } from "./model-config";
 import { shouldPublishVectorFingerprint } from "./model-fingerprint";
 import { ensureLocalModel } from "./model-loader";
@@ -106,7 +107,9 @@ function findWorkerScript(): string {
 
 interface EmbedResult {
   error?: string;
+  errorCode?: string;
   id: number;
+  stage?: string;
   vector?: number[];
 }
 
@@ -600,6 +603,19 @@ export async function embedAllPhotos(
     const total = unprocessed.length;
     let processed = 0;
     const successfulIds: number[] = [];
+    const photoFailures = new Map<number, EmbedResult>();
+    function recordResults(results: EmbedResult[]): void {
+      for (const result of results) {
+        if (result.error) {
+          photoFailures.set(result.id, result);
+          console.warn(
+            `[AI] Photo ${result.id} failed at ${result.stage ?? "unknown"}: ${result.error}`
+          );
+        } else {
+          photoFailures.delete(result.id);
+        }
+      }
+    }
 
     if (total === 0) {
       const indexReady = await ensureVectorIndex();
@@ -811,6 +827,7 @@ export async function embedAllPhotos(
         },
         shouldStopRun,
         async (results) => {
+          recordResults(results);
           processed += await withVectorDbOperation(() =>
             persistEmbedResults(results)
           );
@@ -925,6 +942,7 @@ export async function embedAllPhotos(
         await cleanupPartialEmbedding(runId);
         processed = 0;
         successfulIds.length = 0;
+        photoFailures.clear();
         poolReady = false;
         shutdownPool();
         try {
@@ -969,6 +987,7 @@ export async function embedAllPhotos(
 
         try {
           const results = await runEmbedBatch(batch, modelPath);
+          recordResults(results);
           if (!isRunWritable(runId)) {
             return 0;
           }
@@ -1162,6 +1181,15 @@ export async function embedAllPhotos(
       };
     }
 
+    const failureSummary = summarizeEmbeddingFailures(photoFailures.values());
+    if (failureSummary.failed > 0) {
+      finalProgress.failureSummary = failureSummary;
+      const message = `AI indexing: ${failureSummary.failed}/${total} failed; image decoding: ${failureSummary.decodeFailed}, model: ${failureSummary.modelFailed}, inference: ${failureSummary.inferenceFailed}`;
+      finalProgress.error = message;
+      if (processed === 0) {
+        diagnosticError = new Error(message);
+      }
+    }
     const autoTagIds = drainPendingAutoTagPhotoIds();
     let tagError: string | undefined;
     if (finalProgress.phase !== "error" && autoTagIds.length > 0) {

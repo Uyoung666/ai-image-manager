@@ -125,6 +125,38 @@ async function prepared() {
 }
 
 describe("shooting project preparation and persistence", () => {
+  it("prepares a full HEIC preview for direct culling without library import", async () => {
+    fs.copyFileSync(
+      path.resolve("src/tests/fixtures/heif/example.heic"),
+      path.join(sourceRoot, "HEIC.heic")
+    );
+    const workspace = await prepared();
+    const photo = workspace.photos.find(
+      (item) => item.filename === "HEIC.heic"
+    );
+    expect(photo).toMatchObject({
+      previewStatus: "ready",
+      width: 1280,
+      height: 854,
+    });
+    if (!photo) {
+      throw new Error("Missing HEIC project photo");
+    }
+    const preview = await resolveShootingProjectPreview(
+      workspace.project.id,
+      photo.id
+    );
+    if (!preview) {
+      throw new Error("Missing HEIC project preview");
+    }
+    expect(await sharp(preview).metadata()).toMatchObject({
+      format: "jpeg",
+      width: 1280,
+      height: 854,
+    });
+    expect(getDatabase().select().from(photos).all()).toHaveLength(0);
+  });
+
   it("uses the unfiltered format contract for new workspaces and upgrades legacy browse state", async () => {
     const workspace = await prepared();
     expect(workspace.photos).toHaveLength(2);

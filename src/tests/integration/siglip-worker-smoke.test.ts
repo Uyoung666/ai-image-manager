@@ -19,7 +19,12 @@ interface WorkerMessage {
   fingerprint?: string;
   provider?: "cpu" | "directml";
   requestId?: number;
-  results?: Array<{ error?: string; id: number; vector?: number[] }>;
+  results?: Array<{
+    error?: string;
+    stage?: string;
+    id: number;
+    vector?: number[];
+  }>;
   type?: string;
   vectors?: number[][];
 }
@@ -50,6 +55,7 @@ const textWorkerPath = path.join(workerRoot, "text-embed-worker.mjs");
 
 let tempRoot = "";
 let testImagePath = "";
+let corruptHeifPath = "";
 let testUserDataPath = "";
 let testVectorPath = "";
 
@@ -218,6 +224,28 @@ async function runProductionWorkerSmoke(
     const imageVector = imageResult.results?.[0]?.vector;
     expectNormalizedVector(imageVector, 768);
 
+    const heifResult = await sendAndWait(
+      imageWorker,
+      {
+        type: "embed",
+        photos: [
+          { id: 2, path: corruptHeifPath },
+          {
+            id: 3,
+            path: path.join(
+              projectRoot,
+              "src/tests/fixtures/heif/example.heic"
+            ),
+          },
+        ],
+      },
+      (message) =>
+        message.type === "result" || message.type === "provider-error"
+    );
+    expect(heifResult.type).toBe("result");
+    expect(heifResult.results?.[0]).toMatchObject({ id: 2, stage: "decode" });
+    expect(heifResult.results?.[1]?.error).toBeUndefined();
+    expectNormalizedVector(heifResult.results?.[1]?.vector, 768);
     await stopWorker(imageWorker);
     imageWorker = null;
 
@@ -321,6 +349,15 @@ describe.sequential("SigLIP v1 production worker smoke", () => {
     await fsPromises.mkdir(testUserDataPath, { recursive: true });
     await fsPromises.mkdir(testVectorPath, { recursive: true });
     testImagePath = path.join(tempRoot, "synthetic-smoke.png");
+    corruptHeifPath = path.join(tempRoot, "corrupt.heic");
+    fs.writeFileSync(
+      corruptHeifPath,
+      fs
+        .readFileSync(
+          path.join(projectRoot, "src/tests/fixtures/heif/example.heic")
+        )
+        .subarray(0, 50)
+    );
     await sharp({
       create: {
         background: { alpha: 1, b: 32, g: 64, r: 192 },

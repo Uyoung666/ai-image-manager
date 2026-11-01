@@ -36,6 +36,7 @@ export default defineConfig({
         ...builtinModules.map((m) => `node:${m}`),
         "better-sqlite3",
         "sharp",
+        "libheif-js/wasm-bundle.js",
         "@lancedb/lancedb",
         "@lancedb/lancedb-win32-x64-msvc",
         "@xenova/transformers",
