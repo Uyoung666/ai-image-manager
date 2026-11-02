@@ -97,6 +97,7 @@ let ortSession = null;
 let _ort = null;
 let aborted = false;
 let activeExecutionProvider = "cpu";
+let cacheDir;
 
 function loadOrt() {
   if (_ort) {
@@ -116,6 +117,7 @@ function loadOrt() {
 }
 
 async function handleInit(message) {
+  cacheDir = message.cacheDir;
   activeAdapter = validateAdapter(message.adapter);
   const execution = message.execution ?? {
     provider: "cpu",
@@ -199,6 +201,7 @@ async function handleEmbed(message) {
   if (!(ortSession && activeAdapter)) {
     process.send?.({
       type: "result",
+      requestId: message.requestId,
       adapterId: activeAdapter?.adapterId,
       fingerprint: activeAdapter?.fingerprint,
       results: photos.map((photo) => ({
@@ -214,20 +217,59 @@ async function handleEmbed(message) {
   const ort = loadOrt();
   const results = [];
   let providerError = null;
+  const batchStarted = performance.now();
+  const timings = { prepareMs: 0, inferenceMs: 0, cacheHits: 0 };
+  const identity = {
+    requestId: message.requestId,
+    adapterId: activeAdapter.adapterId,
+    fingerprint: activeAdapter.fingerprint,
+  };
   for (const photo of photos) {
     if (aborted) {
       break;
     }
     const result = await processEmbeddingPhoto(photo.id, {
       provider: activeExecutionProvider,
-      prepare: () => {
+      prepare: async () => {
+        process.send?.({
+          type: "photo-stage",
+          ...identity,
+          id: photo.id,
+          stage: "decode",
+        });
+        const started = performance.now();
         let imageInput = photo.path;
         if (isRawFile(photo.path)) {
           imageInput = extractRawPreview(photo.path) || photo.path;
         }
-        return preprocessImage(imageInput, activeAdapter.image);
+        const prepared = await preprocessImage(
+          imageInput,
+          activeAdapter.image,
+          {
+            cacheDir,
+            onTimings: (detail) => {
+              if (detail.cacheHit) {
+                timings.cacheHits++;
+              }
+              for (const [key, value] of Object.entries(detail)) {
+                if (typeof value === "number") {
+                  timings[key] = (timings[key] ?? 0) + value;
+                }
+              }
+            },
+          }
+        );
+        timings.prepareMs += performance.now() - started;
+        return prepared;
       },
       infer: async (floatData) => {
+        process.send?.({
+          type: "photo-stage",
+          ...identity,
+          id: photo.id,
+          stage: "inference",
+        });
+        const started = performance.now();
         const image = activeAdapter.image;
         const pixelValues = new ort.Tensor("float32", floatData, [
           1,
@@ -251,6 +293,7 @@ async function handleEmbed(message) {
             }
           }
         } finally {
+          timings.inferenceMs += performance.now() - started;
           pixelValues.dispose?.();
         }
       },
@@ -261,11 +304,19 @@ async function handleEmbed(message) {
       break;
     }
     results.push(result);
+    process.send?.({
+      type: "photo-progress",
+      completedAt: Date.now(),
+      ...identity,
+      id: photo.id,
+      stage: result.stage ?? "complete",
+    });
   }
 
   if (providerError) {
     process.send?.({
       type: "provider-error",
+      requestId: message.requestId,
       adapterId: activeAdapter.adapterId,
       fingerprint: activeAdapter.fingerprint,
       error: providerError,
@@ -276,6 +327,8 @@ async function handleEmbed(message) {
 
   process.send?.({
     type: "result",
+    requestId: message.requestId,
+    timings: { ...timings, totalMs: performance.now() - batchStarted },
     adapterId: activeAdapter.adapterId,
     fingerprint: activeAdapter.fingerprint,
     results,
@@ -299,6 +352,7 @@ process.on("message", async (message) => {
     if (message?.type === "embed") {
       process.send?.({
         type: "result",
+        requestId: message.requestId,
         adapterId: activeAdapter?.adapterId,
         fingerprint: activeAdapter?.fingerprint,
         results: (message.photos || []).map((photo) => ({

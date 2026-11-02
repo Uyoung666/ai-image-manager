@@ -5,9 +5,9 @@ process.on("disconnect", () => process.exit(0));
 const channel = parentPort ?? process;
 const send = (message) =>
   parentPort ? parentPort.postMessage(message) : process.send?.(message);
-channel.on("message", async ({ input }) => {
+channel.on("message", async ({ input, options }) => {
   try {
-    send({ result: await decodeHeif(input) });
+    send({ result: await decodeHeif(input, options) });
   } catch (error) {
     send({
       error: error instanceof Error ? error.message : String(error),

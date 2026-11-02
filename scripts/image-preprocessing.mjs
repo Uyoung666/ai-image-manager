@@ -1,63 +1,38 @@
 import sharp from "sharp";
-import { resolveHeifInput } from "./heif-input.mjs";
+import { isHeifInput } from "./heif-decoder.mjs";
+import { resolveHeifResult } from "./heif-input.mjs";
+import {
+  describeHeifModelCache,
+  readHeifModelCache,
+  writeHeifModelCache,
+} from "./heif-model-cache.mjs";
+import { normalizeModelRgb, resizeModelRgb } from "./image-rgb.mjs";
 
-/** The fixed SigLIP Processor uses a bicubic affine resize, not resize's
- * Lanczos kernel. Decode orientation and RGB before resampling, and round
- * rescaling to float32 before normalization as Transformers.js does.
- */
-export async function preprocessImage(input, image) {
-  const decodedInput = await resolveHeifInput(input);
-  const decoder = sharp(decodedInput, { failOn: "none" });
-  const metadata = await decoder.metadata();
-  const swapsAxes = (metadata.orientation ?? 1) >= 5;
-  const width = swapsAxes ? metadata.height : metadata.width;
-  const height = swapsAxes ? metadata.width : metadata.height;
-  if (!(width > 0 && height > 0)) {
-    throw new Error("Image dimensions are unavailable");
-  }
-  if (image.resizeFit !== "fill" || image.resample !== "bicubic") {
-    throw new Error("Unsupported image preprocessing resize policy");
-  }
-  let rgbInput = decoder.rotate().toColourspace("srgb").removeAlpha();
-  if (metadata.hasAlpha || metadata.space !== "srgb") {
-    // Sharp applies affine before channel removal in a single pipeline and
-    // premultiplies alpha. The Processor drops alpha first; materialize RGB
-    // for alpha/non-RGB images so interpolation sees the decoded RGB pixels.
-    const decoded = await rgbInput.raw().toBuffer({ resolveWithObject: true });
-    rgbInput = sharp(decoded.data, {
-      raw: {
-        width: decoded.info.width,
-        height: decoded.info.height,
-        channels: 3,
-      },
-    });
-  }
-  const { data, info } = await rgbInput
-    .affine([image.imageSize / width, 0, 0, image.imageSize / height], {
-      interpolator: "bicubic",
-    })
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  if (
-    info.width !== image.imageSize ||
-    info.height !== image.imageSize ||
-    info.channels !== 3
-  ) {
-    throw new Error(
-      `Image resize mismatch: ${info.width}x${info.height}x${info.channels}`
+/** The cached RGB is already resized by exactly the same bicubic processor. */
+export async function preprocessImage(input, image, options = {}) {
+  if (await isHeifInput(input)) {
+    const descriptor = await describeHeifModelCache(
+      input,
+      image,
+      options.cacheDir
     );
-  }
-  const pixelsPerChannel = image.imageSize * image.imageSize;
-  const output = new Float32Array(3 * pixelsPerChannel);
-  for (let pixel = 0; pixel < pixelsPerChannel; pixel++) {
-    for (let channel = 0; channel < 3; channel++) {
-      const rescaled = Math.fround(
-        data[pixel * 3 + channel] * image.rescaleFactor
-      );
-      output[channel * pixelsPerChannel + pixel] =
-        (rescaled - image.mean[channel]) / image.std[channel];
+    let data = await readHeifModelCache(descriptor);
+    if (data) {
+      options.onTimings?.({ cacheHit: true });
+    } else {
+      const result = await resolveHeifResult(input, {
+        output: "embedding",
+        image,
+      });
+      data = Buffer.from(result.modelRgb);
+      await writeHeifModelCache(descriptor, result.modelPng);
+      options.onTimings?.({ ...result.timings, cacheHit: false });
     }
+    return normalizeModelRgb(data, image);
   }
-  return output;
+  const decoder = sharp(input, { failOn: "none" });
+  return normalizeModelRgb(
+    await resizeModelRgb(decoder, await decoder.metadata(), image),
+    image
+  );
 }

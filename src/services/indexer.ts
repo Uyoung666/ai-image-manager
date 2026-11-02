@@ -19,7 +19,11 @@ import { extractDominantColors } from "./color-extractor";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { registerExplicitPhotoFolder } from "./explicit-library-folders";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
-import { resolveHeifInput } from "./heif-input";
+import {
+  getHeifImportMetrics,
+  prepareHeifImport,
+  resolveHeifInput,
+} from "./heif-input";
 import {
   type ExifOrientation,
   getOrientedDimensions,
@@ -28,7 +32,11 @@ import {
 import { findMissingPhotoIds } from "./orphan-photo-check";
 import { computePHash } from "./perceptual-hash";
 import { extractRawPreview, isRawFile, readRawDimensions } from "./raw-preview";
-import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
+import {
+  deletePhotoThumbnails,
+  generateThumbnail,
+  getThumbnailSize,
+} from "./thumbnailer";
 
 const log = createLogger("indexer");
 const FOCAL_RANGE_RE = /^\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?$/;
@@ -346,8 +354,22 @@ async function readBasicMeta(filePath: string): Promise<{
   hasAlpha: boolean;
   orientation: ExifOrientation;
   thumbnailInput?: Buffer;
+  thumbnailPrepared?: boolean;
 } | null> {
   try {
+    const heif = await prepareHeifImport(filePath, getThumbnailSize("md"));
+    if (heif) {
+      return {
+        width: heif.width,
+        height: heif.height,
+        format: path.extname(filePath).slice(1).toLowerCase(),
+        colorSpace: "srgb",
+        hasAlpha: true,
+        orientation: 1,
+        thumbnailInput: Buffer.from(heif.buffer),
+        thumbnailPrepared: true,
+      };
+    }
     const raw = isRawFile(filePath);
     // For RAW files, use the embedded JPEG only for decoder metadata and
     // thumbnail generation. Capture dimensions come from ExifTool below.
@@ -606,6 +628,7 @@ async function preparePhotoRecord(
   try {
     thumb = await generateThumbnail(filePath, "md", {
       input: meta.thumbnailInput,
+      prepared: meta.thumbnailPrepared,
       orientation: meta.orientation,
     });
   } catch {
@@ -926,6 +949,8 @@ export async function scanFolder(
   if (activeScanToken !== null) {
     throw new Error("A folder scan is already in progress");
   }
+  const scanStarted = performance.now();
+  const heifBefore = getHeifImportMetrics();
   const scanToken = { cancelled: false };
   activeScanToken = scanToken;
   const newPhotoIds: number[] = [];
@@ -1434,6 +1459,22 @@ export async function scanFolder(
       });
     }
 
+    const heifAfter = getHeifImportMetrics();
+    const heifMetrics = Object.fromEntries(
+      Object.entries(heifAfter).map(([key, value]) => [
+        key,
+        value - (heifBefore[key] ?? 0),
+      ])
+    );
+    log.info(
+      {
+        totalMs: performance.now() - scanStarted,
+        scanned,
+        failed,
+        heif: heifMetrics,
+      },
+      "Import performance summary"
+    );
     // Auto-tagging now runs after embedAllPhotos() completes, when all CLIP
     // vectors are available in LanceDB. This avoids expensive per-photo worker
     // embedding and prevents the scene-tag bias (every photo tagged as indoor/outdoor/city).

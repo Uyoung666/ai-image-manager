@@ -25,6 +25,50 @@ afterAll(() => stopHeifDecoder());
 const pixelHash = (buffer: Buffer) =>
   createHash("sha256").update(buffer).digest("hex");
 describe("offline HEIC decoding", () => {
+  it("keeps pixel and PNG requests for the same Buffer distinct", async () => {
+    const resolver = createHeifResolver({ useProcess: false });
+    const bytes = fs.readFileSync(heifFixturePath);
+    try {
+      const [png, pixels] = await Promise.all([
+        resolver.resolveResult(bytes),
+        resolver.resolveResult(bytes, { output: "pixels" }),
+      ]);
+      expect(png?.buffer.subarray(1, 4).toString()).toBe("PNG");
+      expect(pixels?.buffer).toHaveLength(1280 * 854 * 4);
+    } finally {
+      resolver.stop();
+    }
+  });
+
+  it("cancels queued work when its owning resolver stops", async () => {
+    const runtime = new TestRuntime("heif-cancel");
+    const exits: Promise<unknown>[] = [];
+    const resolver = createHeifResolver({
+      track: (child) => {
+        runtime.trackProcess(child);
+        exits.push(once(child, "exit"));
+        setImmediate(() => resolver.stop());
+        return child;
+      },
+    });
+    try {
+      const bytes = fs.readFileSync(heifFixturePath);
+      const outcomes = await Promise.allSettled([
+        resolver.resolveResult(bytes),
+        resolver.resolveResult(bytes, { output: "pixels" }),
+      ]);
+      expect(outcomes.map((outcome) => outcome.status)).toEqual([
+        "rejected",
+        "rejected",
+      ]);
+      expect(exits).toHaveLength(1);
+    } finally {
+      resolver.stop();
+      await Promise.all(exits);
+      runtime.cleanup();
+    }
+  });
+
   it("selects the primary image, returns display dimensions and normalized orientation", async () => {
     const result = await decodeHeif(heifFixturePath);
     expect(result).toMatchObject({

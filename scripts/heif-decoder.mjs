@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { crc32, deflateSync } from "node:zlib";
 import exifr from "exifr";
 import sharp from "sharp";
+import { orientPixels, resizeModelRgb } from "./image-rgb.mjs";
 
 const HEVC_BRANDS = new Set([
   "heic",
@@ -65,7 +66,15 @@ function attachIcc(png, profile) {
 }
 
 /** Runs only inside an isolated decoder process. libheif applies irot/imir itself. */
-export async function decodeHeif(input) {
+export async function decodeHeif(input, options = {}) {
+  const started = performance.now();
+  const timings = {};
+  let checkpoint = started;
+  const mark = (stage) => {
+    const now = performance.now();
+    timings[stage] = now - checkpoint;
+    checkpoint = now;
+  };
   const bytes =
     typeof input === "string" ? await fs.readFile(input) : Buffer.from(input);
   if (!isHeifHeader(bytes)) {
@@ -89,6 +98,7 @@ export async function decodeHeif(input) {
     const handle = image.handle.$$.ptr;
     const originalWidth = lib._heif_image_handle_get_ispe_width(handle);
     const originalHeight = lib._heif_image_handle_get_ispe_height(handle);
+    mark("readMetadataMs");
     const rgba = await new Promise((resolve, reject) => {
       image.display(
         { data: new Uint8ClampedArray(width * height * 4), width, height },
@@ -101,37 +111,78 @@ export async function decodeHeif(input) {
         }
       );
     });
-    let png = await sharp(
-      Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength),
-      { raw: { width, height, channels: 4 } }
-    )
-      .png()
-      .toBuffer();
-    png = await applyColorProfile(lib, handle, png);
-    // Container irot/imir takes precedence over redundant EXIF orientation.
-    if (!hasContainerOrientation(lib, decoder.decoder.$$.ptr)) {
-      const orientation = await readExifOrientation(lib, handle);
-      if (orientation >= 2 && orientation <= 8) {
-        png = await sharp(png).withMetadata({ orientation }).png().toBuffer();
-        png = await sharp(png)
-          .rotate()
-          .withMetadata({ orientation: 1 })
-          .png()
-          .toBuffer();
-      }
+    mark("decodeMs");
+    const raw = { width, height, channels: 4 };
+    const pixels = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
+    const profile = await readColorProfile(lib, handle);
+    let pipeline = sharp(pixels, { raw });
+    if (profile) {
+      // PNG is only an ICC carrier, never a compressed full-size transport.
+      const carrier = await pipeline.png({ compressionLevel: 0 }).toBuffer();
+      pipeline = sharp(attachIcc(carrier, profile));
     }
-    const { data: buffer, info } = await sharp(png)
-      .withMetadata({ orientation: 1 })
-      .png()
+    const orientation = hasContainerOrientation(lib, decoder.decoder.$$.ptr)
+      ? 1
+      : await readExifOrientation(lib, handle);
+    const normalized = await orientPixels(pipeline, orientation)
+      .toColourspace("srgb")
+      .ensureAlpha()
+      .raw()
       .toBuffer({ resolveWithObject: true });
-    return {
-      buffer,
-      width: info.width,
-      height: info.height,
+    mark("normalizeMs");
+    const normalizedRaw = {
+      width: normalized.info.width,
+      height: normalized.info.height,
+      channels: 4,
+    };
+    const source = () => sharp(normalized.data, { raw: normalizedRaw });
+    const result = {
+      width: normalized.info.width,
+      height: normalized.info.height,
       originalWidth,
       originalHeight,
       orientationApplied: true,
+      channels: 4,
+      timings,
     };
+    if (options.output === "import" || options.output === "embedding") {
+      if (options.image) {
+        const rgb = await resizeModelRgb(
+          source(),
+          { ...normalizedRaw, orientation: 1, hasAlpha: true, space: "srgb" },
+          options.image
+        );
+        result.modelPng = await sharp(rgb, {
+          raw: {
+            width: options.image.imageSize,
+            height: options.image.imageSize,
+            channels: 3,
+          },
+        })
+          .png()
+          .toBuffer();
+        result.modelRgb = rgb;
+      }
+      if (options.output === "import") {
+        result.buffer = await source()
+          .resize(options.thumbnailSize, options.thumbnailSize, {
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .webp({ quality: 85, effort: 1 })
+          .toBuffer();
+      }
+    } else if (options.output === "pixels") {
+      result.buffer = normalized.data;
+    } else {
+      result.buffer = await source()
+        .withMetadata({ orientation: 1 })
+        .png()
+        .toBuffer();
+    }
+    mark("deriveMs");
+    timings.totalMs = performance.now() - started;
+    return result;
   } finally {
     for (const image of images) {
       image.free();
@@ -143,8 +194,9 @@ export async function decodeHeif(input) {
   }
 }
 
-async function applyColorProfile(lib, handle, inputPng) {
-  let png = inputPng;
+let p3Profile;
+async function readColorProfile(lib, handle) {
+  let profile;
   const profileSize = lib._heif_image_handle_get_raw_color_profile_size(handle);
   if (profileSize > 4 * 1024 * 1024) {
     throw new Error("HEIC color profile exceeds decode limit");
@@ -161,9 +213,8 @@ async function applyColorProfile(lib, handle, inputPng) {
       if (lib.HEAP32[errorPointer / 4] !== 0) {
         throw new Error("HEIC color profile could not be read");
       }
-      png = attachIcc(
-        png,
-        Buffer.from(lib.HEAPU8.subarray(pointer, pointer + profileSize))
+      profile = Buffer.from(
+        lib.HEAPU8.subarray(pointer, pointer + profileSize)
       );
     } finally {
       lib._free(pointer);
@@ -184,15 +235,16 @@ async function applyColorProfile(lib, handle, inputPng) {
         const primaries = lib.HEAP32[(profilePointer + 4) / 4];
         const transfer = lib.HEAP32[(profilePointer + 8) / 4];
         if (primaries === 12 && transfer === 13) {
-          const { icc } = await sharp({
+          p3Profile ??= await sharp({
             create: { width: 1, height: 1, channels: 3, background: "black" },
           })
             .withIccProfile("p3")
             .png()
             .toBuffer()
             .then((data) => sharp(data).metadata());
+          const { icc } = p3Profile;
           if (icc) {
-            png = attachIcc(png, icc);
+            profile = icc;
           }
         }
       }
@@ -205,7 +257,7 @@ async function applyColorProfile(lib, handle, inputPng) {
     }
   }
 
-  return png;
+  return profile;
 }
 
 function hasContainerOrientation(lib, context) {

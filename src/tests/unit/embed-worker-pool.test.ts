@@ -22,6 +22,16 @@ const childProcessMock = vi.hoisted(() => {
     }
 
     emit(event: string, ...args: any[]) {
+      if (
+        event === "message" &&
+        ["result", "provider-error"].includes(args[0]?.type) &&
+        args[0].requestId === undefined
+      ) {
+        const dispatched = this.send.mock.calls
+          .filter(([message]) => message.type === "embed")
+          .at(-1)?.[0];
+        args[0] = { requestId: dispatched?.requestId, ...args[0] };
+      }
       for (const listener of this.listeners.get(event) ?? []) {
         listener(...args);
       }
@@ -71,6 +81,10 @@ vi.mock("node:child_process", () => ({
 }));
 
 vi.mock("@/services/gpu-detector", () => gpuDetectorMock);
+vi.mock("@/utils/data-path", () => ({ getDataPath: () => process.cwd() }));
+vi.mock("../../../scripts/heif-decoder.mjs", () => ({
+  isHeifInput: vi.fn().mockResolvedValue(false),
+}));
 
 vi.mock("electron", () => ({
   app: {
@@ -375,7 +389,96 @@ describe("embed worker pool lifecycle", () => {
       results: [{ id: 0, vector: normalizedVector() }],
     });
 
-    await expect(result).rejects.toThrow("Stale embedding worker result");
+    const settled = vi.fn();
+    result.then(settled);
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+    child.emit("message", {
+      type: "result",
+      ...getWorkerIdentity(child),
+      results: [{ id: 0, vector: normalizedVector() }],
+    });
+    await expect(result).resolves.toHaveLength(768);
+    shutdownPool();
+  });
+
+  it("balances HEIF work and ignores duplicate or stale per-photo progress", async () => {
+    const { isHeifInput } = await import("../../../scripts/heif-decoder.mjs");
+    vi.mocked(isHeifInput).mockResolvedValue(true);
+    const { embedWithPool, initWorkerPool, shutdownPool } = await import(
+      "@/services/embed-worker-pool"
+    );
+    const init = initWorkerPool("model-path");
+    for (const child of childProcessMock.children) {
+      emitReady(child);
+    }
+    await vi.advanceTimersByTimeAsync(50);
+    await init;
+    const progress = vi.fn();
+    const pending = embedWithPool(
+      Array.from({ length: 20 }, (_, id) => ({ id, path: `${id}.heic` })),
+      progress
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    for (let round = 0; round < 2; round++) {
+      for (const child of childProcessMock.children) {
+        const message = child.send.mock.calls
+          .filter(([msg]) => msg.type === "embed")
+          .at(-1)?.[0];
+        expect(message.photos).toHaveLength(5);
+        const event = {
+          type: "photo-progress",
+          ...getWorkerIdentity(child),
+          requestId: message.requestId,
+          id: message.photos[0].id,
+        };
+        child.emit("message", { ...event, requestId: -1 });
+        const before = progress.mock.calls.length;
+        child.emit("message", event);
+        child.emit("message", event);
+        expect(progress.mock.calls.length).toBe(before + 1);
+        child.emit("message", {
+          type: "result",
+          ...getWorkerIdentity(child),
+          requestId: message.requestId,
+          results: message.photos.map((photo: { id: number }) => ({
+            id: photo.id,
+            vector: normalizedVector(),
+          })),
+        });
+      }
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(await pending).toHaveLength(20);
+    expect(progress).toHaveBeenLastCalledWith(20, 20);
+    shutdownPool();
+    vi.mocked(isHeifInput).mockResolvedValue(false);
+  });
+
+  it("keeps the dispatch watchdog after receiving per-photo progress", async () => {
+    vi.stubEnv("AI_EMBED_WORKERS", "1");
+    const { embedSingleImage, initWorkerPool, shutdownPool } = await import(
+      "@/services/embed-worker-pool"
+    );
+    const init = initWorkerPool("model-path");
+    const child = childProcessMock.children[0];
+    emitReady(child);
+    await vi.advanceTimersByTimeAsync(50);
+    await init;
+    const pending = embedSingleImage("sample.png", "model-path");
+    const rejected = expect(pending).rejects.toThrow("timed out");
+    const request = child.send.mock.calls
+      .filter(([message]) => message.type === "embed")
+      .at(-1)?.[0];
+    child.emit("message", {
+      type: "photo-progress",
+      ...getWorkerIdentity(child),
+      requestId: request.requestId,
+      id: 0,
+    });
+    await vi.advanceTimersByTimeAsync(300_000);
+    await rejected;
+    expect(child.kill).toHaveBeenCalled();
     shutdownPool();
   });
 });

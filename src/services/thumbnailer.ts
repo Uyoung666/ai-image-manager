@@ -17,6 +17,12 @@ import { registerGalleryCleanup } from "@/utils/gallery-lifecycle";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { createLogger } from "@/utils/logger";
 import { PrioritySemaphore } from "@/utils/priority-semaphore";
+import { isHeifInput } from "../../scripts/heif-decoder.mjs";
+import {
+  HEIF_MODEL_CACHE_PATTERN,
+  heifSourcePrefix,
+  invalidateHeifModelCache,
+} from "../../scripts/heif-model-cache.mjs";
 import { resolveHeifInput } from "./heif-input";
 import {
   applyExifOrientation,
@@ -33,6 +39,8 @@ import {
 const log = createLogger("thumbnailer");
 const MANAGED_THUMBNAIL_EXTENSION =
   /^(?:[a-f0-9]{32}\.(?:webp|jpg)|g-[a-f0-9]{32}-[a-f0-9]{32}-(?:256|512|1024|2048)\.webp)$/i;
+const HEIF_FILE_EXTENSION = /\.hei[cf]$/i;
+const HEIF_SOURCE_PREFIX = /^h-[a-f0-9]{32}-/;
 const GALLERY_SOURCE_PREFIX = /^g-[a-f0-9]{32}-/;
 
 async function removeCachedThumbnail(filePath: string): Promise<void> {
@@ -106,6 +114,7 @@ interface ThumbnailResult {
 interface ThumbnailOptions {
   input?: string | Buffer;
   orientation?: ExifOrientation;
+  prepared?: boolean;
 }
 interface DuelPreviewResult {
   height: number;
@@ -311,7 +320,7 @@ function reconcileThumbnailCachePaths(): void {
   }
 }
 
-function getThumbnailSize(size: ThumbSize): number {
+export function getThumbnailSize(size: ThumbSize): number {
   return THUMBNAIL_BASE_SIZES[size] * dprScale;
 }
 
@@ -565,7 +574,11 @@ export async function checkAndCleanDiskCache(): Promise<{
         const entryPath = path.join(thumbnailDir, entry);
         try {
           const stat = await fs.promises.stat(entryPath);
-          if (stat.isFile() && MANAGED_THUMBNAIL_EXTENSION.test(entry)) {
+          if (
+            stat.isFile() &&
+            (MANAGED_THUMBNAIL_EXTENSION.test(entry) ||
+              HEIF_MODEL_CACHE_PATTERN.test(entry))
+          ) {
             const atime = diskAccessLog.get(entry) || stat.atimeMs;
             files.push({ path: entryPath, atime, size: stat.size });
           }
@@ -720,9 +733,13 @@ async function doGenerate(
         withoutEnlargement: true,
       })
       .webp({ quality: 85, effort: 1 });
-    const { data: thumbBuffer, info } = await pipeline.toBuffer({
-      resolveWithObject: true,
-    });
+    const { data: thumbBuffer, info } =
+      options.prepared && Buffer.isBuffer(input)
+        ? {
+            data: input,
+            info: { width: inputMetadata.width, height: inputMetadata.height },
+          }
+        : await pipeline.toBuffer({ resolveWithObject: true });
 
     if (!(info.width && info.height)) {
       throw new Error("Generated thumbnail is invalid (zero dimensions)");
@@ -1150,14 +1167,17 @@ export async function getThumbnailDiskUsage(): Promise<{
               if (
                 scope === thumbnailScope &&
                 st.isFile() &&
-                MANAGED_THUMBNAIL_EXTENSION.test(entry)
+                (MANAGED_THUMBNAIL_EXTENSION.test(entry) ||
+                  HEIF_MODEL_CACHE_PATTERN.test(entry))
               ) {
                 seen.add(entry);
                 knownDiskBytes += st.size - (knownDiskFiles.get(entry) ?? 0);
                 knownDiskFiles.set(entry, st.size);
                 indexGalleryVariant(entry);
               }
-              return st.isFile() && MANAGED_THUMBNAIL_EXTENSION.test(entry)
+              return st.isFile() &&
+                (MANAGED_THUMBNAIL_EXTENSION.test(entry) ||
+                  HEIF_MODEL_CACHE_PATTERN.test(entry))
                 ? st.size
                 : 0;
             } catch {
@@ -1202,6 +1222,18 @@ export async function deletePhotoThumbnails(imagePath: string): Promise<void> {
     return;
   }
 
+  if ((await isHeifInput(imagePath)) || HEIF_FILE_EXTENSION.test(imagePath)) {
+    const heifPrefix = heifSourcePrefix(imagePath);
+    for (const name of await fs.promises
+      .readdir(thumbnailDir)
+      .catch(() => [])) {
+      if (name.startsWith(heifPrefix) && HEIF_MODEL_CACHE_PATTERN.test(name)) {
+        await removeCachedThumbnail(path.join(thumbnailDir, name)).catch(
+          () => undefined
+        );
+      }
+    }
+  }
   const prefix = gallerySourcePrefix(imagePath);
   await ensureGalleryVariantIndex().catch(() => undefined);
   const variants = [...(galleryVariantNames.get(prefix) ?? [])];
@@ -1239,6 +1271,9 @@ export async function clearThumbnailDiskCache(): Promise<{
   }
 
   const clearPromise = (async () => {
+    if (thumbnailDir) {
+      await invalidateHeifModelCache(thumbnailDir);
+    }
     await waitForActiveGenerations();
 
     let fileCount = 0;
@@ -1249,7 +1284,12 @@ export async function clearThumbnailDiskCache(): Promise<{
         await fs.promises.access(thumbnailDir);
         const entries = await fs.promises.readdir(thumbnailDir);
         for (const entry of entries) {
-          if (!MANAGED_THUMBNAIL_EXTENSION.test(entry)) {
+          if (
+            !(
+              MANAGED_THUMBNAIL_EXTENSION.test(entry) ||
+              HEIF_MODEL_CACHE_PATTERN.test(entry)
+            )
+          ) {
             continue;
           }
           const entryPath = path.join(thumbnailDir, entry);
@@ -1310,6 +1350,7 @@ function buildExpectedThumbnailSet(): Set<string> | null {
       }
       if (r.path) {
         expected.add(gallerySourcePrefix(r.path));
+        expected.add(heifSourcePrefix(r.path));
         for (const size of ["sm", "md", "lg"] as ThumbSize[]) {
           expected.add(path.basename(getThumbnailPath(r.path, size)));
         }
@@ -1327,7 +1368,8 @@ function isExpectedThumbnail(expected: Set<string>, name: string): boolean {
   if (expected.has(name)) {
     return true;
   }
-  const prefix = GALLERY_SOURCE_PREFIX.exec(name)?.[0];
+  const prefix =
+    GALLERY_SOURCE_PREFIX.exec(name)?.[0] ?? HEIF_SOURCE_PREFIX.exec(name)?.[0];
   return prefix !== undefined && expected.has(prefix);
 }
 
@@ -1357,7 +1399,9 @@ export async function scanOrphanThumbnails(): Promise<{
 
   const entries = await fs.promises.readdir(thumbnailDir);
   for (const entry of entries) {
-    const isManaged = MANAGED_THUMBNAIL_EXTENSION.test(entry);
+    const isManaged =
+      MANAGED_THUMBNAIL_EXTENSION.test(entry) ||
+      HEIF_MODEL_CACHE_PATTERN.test(entry);
     if (!isManaged) {
       continue;
     }
@@ -1401,7 +1445,9 @@ export async function cleanOrphanThumbnails(): Promise<{
 
   const entries = await fs.promises.readdir(thumbnailDir);
   for (const entry of entries) {
-    const isManaged = MANAGED_THUMBNAIL_EXTENSION.test(entry);
+    const isManaged =
+      MANAGED_THUMBNAIL_EXTENSION.test(entry) ||
+      HEIF_MODEL_CACHE_PATTERN.test(entry);
     if (!isManaged) {
       continue;
     }

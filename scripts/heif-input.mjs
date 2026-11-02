@@ -1,4 +1,5 @@
 import { fork } from "node:child_process";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { isHeifInput } from "./heif-decoder.mjs";
@@ -14,7 +15,9 @@ export function createHeifResolver({
   let tail = Promise.resolve();
   let idleTimer;
   const pending = new Map();
-  function stop() {
+  const bufferKeys = new WeakMap();
+  let generation = 0;
+  function recycle() {
     clearTimeout(idleTimer);
     if (useProcess) {
       child?.kill();
@@ -23,7 +26,7 @@ export function createHeifResolver({
     }
     child = undefined;
   }
-  function decode(input) {
+  function decode(input, options) {
     clearTimeout(idleTimer);
     if (!child || (useProcess ? !child.connected : child.threadId === -1)) {
       if (useProcess) {
@@ -63,7 +66,7 @@ export function createHeifResolver({
     return new Promise((resolve, reject) => {
       let settled = false;
       const timer = setTimeout(() => {
-        stop();
+        recycle();
         finish(new Error("HEIC decoding timed out after 60 seconds"));
       }, timeoutMs);
       function finish(error, result) {
@@ -75,12 +78,18 @@ export function createHeifResolver({
         active.removeListener("message", onMessage);
         active.removeListener("error", onError);
         active.removeListener("exit", onExit);
+        if (
+          result &&
+          result.originalWidth * result.originalHeight > 24_000_000
+        ) {
+          recycle();
+        }
         if (error) {
           reject(error);
         } else {
           resolve(result);
         }
-        idleTimer = setTimeout(stop, 10_000);
+        idleTimer = setTimeout(recycle, 10_000);
         idleTimer.unref();
         active.unref();
         active.channel?.unref();
@@ -89,7 +98,7 @@ export function createHeifResolver({
         finish(message.error ? new Error(message.error) : null, message.result);
       }
       function onError(error) {
-        stop();
+        recycle();
         finish(error);
       }
       function onExit() {
@@ -104,27 +113,59 @@ export function createHeifResolver({
       active.ref();
       active.channel?.ref();
       if (!useProcess) {
-        active.postMessage({ input });
+        active.postMessage({ input, options });
         return;
       }
-      active.send({ input }, (error) => {
+      active.send({ input, options }, (error) => {
         if (error) {
           onError(error);
         }
       });
     });
   }
-  async function resolveInput(input) {
+  async function resolveResult(input, options = {}) {
     if (!(await isHeifInput(input))) {
-      return input;
+      return null;
     }
-    const key = input;
+    const policy = JSON.stringify(options);
+    let key;
+    if (typeof input === "string") {
+      const normalized = path.resolve(input);
+      key = `${process.platform === "win32" ? normalized.toLowerCase() : normalized}:${policy}`;
+    } else {
+      let policies = bufferKeys.get(input);
+      if (!policies) {
+        policies = new Map();
+        bufferKeys.set(input, policies);
+      }
+      if (!policies.has(policy)) {
+        policies.set(policy, Symbol("HEIF buffer request"));
+      }
+      key = policies.get(policy);
+    }
     if (pending.has(key)) {
       return pending.get(key);
     }
+    const queuedAt = performance.now();
+    let queueMs = 0;
+    const scheduledGeneration = generation;
     const job = tail
-      .then(() => decode(input))
-      .then((result) => Buffer.from(result.buffer));
+      .then(() => {
+        if (generation !== scheduledGeneration) {
+          throw new Error("HEIC decoding cancelled");
+        }
+        queueMs = performance.now() - queuedAt;
+        return decode(input, options);
+      })
+      .then((result) => {
+        if (result.timings) {
+          result.timings.queueMs = queueMs;
+        }
+        if (result.buffer) {
+          result.buffer = Buffer.from(result.buffer);
+        }
+        return result;
+      });
     pending.set(key, job);
     tail = job.catch(() => undefined);
     try {
@@ -133,10 +174,20 @@ export function createHeifResolver({
       pending.delete(key);
     }
   }
-  return { resolveInput, stop };
+  async function resolveInput(input) {
+    const result = await resolveResult(input);
+    return result ? result.buffer : input;
+  }
+  function stop() {
+    generation++;
+    recycle();
+  }
+  return { resolveInput, resolveResult, stop };
 }
 
 // Threads die with their owning AI process, including forced pool termination.
 const localResolver = createHeifResolver({ useProcess: false });
 export const resolveHeifInput = localResolver.resolveInput;
 export const stopHeifDecoder = localResolver.stop;
+
+export const resolveHeifResult = localResolver.resolveResult;

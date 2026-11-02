@@ -55,6 +55,7 @@ vi.mock("@/services/dedup-service", () => ({
   checkNewPhotoDuplicates: () => undefined,
 }));
 vi.mock("@/services/thumbnailer", () => ({
+  getThumbnailSize: () => 512,
   generateThumbnail: state.thumbnail,
   deletePhotoThumbnails: () => undefined,
 }));

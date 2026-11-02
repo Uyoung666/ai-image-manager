@@ -14,6 +14,7 @@ import {
 import { invalidateVectorSearch } from "@/services/search-revision";
 import { getSetting } from "@/services/settings-manager";
 import { trackChildProcess } from "@/services/tracked-child-processes";
+import { getDataPath } from "@/utils/data-path";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { summarizeEmbeddingFailures } from "./embedding-failures";
 import { getActiveEmbeddingWorkerAdapter } from "./model-config";
@@ -304,6 +305,7 @@ function runEmbedBatch(
 
     child.send({
       type: "init",
+      cacheDir: path.join(getDataPath(), "thumbnails"),
       adapter,
       execution: { provider: "cpu", intraOpNumThreads: 1 },
     });
@@ -827,9 +829,13 @@ export async function embedAllPhotos(
         },
         shouldStopRun,
         async (results) => {
+          const persistStarted = performance.now();
           recordResults(results);
           processed += await withVectorDbOperation(() =>
             persistEmbedResults(results)
+          );
+          console.log(
+            `[AI] Persisted batch of ${results.length} in ${Math.round(performance.now() - persistStarted)}ms`
           );
         }
       );
@@ -1190,6 +1196,7 @@ export async function embedAllPhotos(
         diagnosticError = new Error(message);
       }
     }
+    const tagStarted = performance.now();
     const autoTagIds = drainPendingAutoTagPhotoIds();
     let tagError: string | undefined;
     if (finalProgress.phase !== "error" && autoTagIds.length > 0) {
@@ -1217,7 +1224,7 @@ export async function embedAllPhotos(
           }
         );
         console.log(
-          `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped`
+          `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped (${Math.round(performance.now() - tagStarted)}ms)`
         );
       } catch (err: unknown) {
         diagnosticError = err;

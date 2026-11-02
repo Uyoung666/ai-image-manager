@@ -8,6 +8,8 @@ import { getActiveEmbeddingWorkerAdapter } from "@/services/ai/model-config";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { probeEmbeddingGpuCapability } from "@/services/gpu-detector";
 import { trackChildProcess } from "@/services/tracked-child-processes";
+import { getDataPath } from "@/utils/data-path";
+import { isHeifInput } from "../../scripts/heif-decoder.mjs";
 
 interface EmbedResult {
   error?: string;
@@ -40,17 +42,24 @@ export function isEmbeddingProviderError(error: unknown): boolean {
 type WorkerStatus = "initializing" | "idle" | "busy" | "dead";
 
 interface WorkerSlot {
+  completedIds?: Set<number>;
   consecutiveFailures: number;
   generation: number;
   index: number;
+  onPhotoProgress?: (id: number) => void;
   pendingReject: ((err: Error) => void) | null;
   pendingResolve: ((results: EmbedResult[]) => void) | null;
+  photoIds?: Set<number>;
   process: ChildProcess;
+  progressLatencyMaxMs?: number;
+  requestId?: number;
+  stage?: string;
   status: WorkerStatus;
   timeoutId?: ReturnType<typeof setTimeout> | null;
 }
 
 interface QueuedRequest {
+  onPhotoProgress?: (id: number) => void;
   photos: Array<{ id: number; path: string }>;
   reject: (err: Error) => void;
   resolve: (results: EmbedResult[]) => void;
@@ -84,6 +93,7 @@ let poolSize = 0;
 let poolBatchSize = DEFAULT_BATCH_SIZE;
 let poolIntraOpNumThreads = 1;
 let poolGeneration = 0;
+let nextRequestId = 0;
 let activePoolKey: string | null = null;
 let initializationKey: string | null = null;
 let initializationPromise: Promise<void> | null = null;
@@ -275,9 +285,55 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
       provider?: EmbeddingExecutionProvider;
       results?: EmbedResult[];
       type?: string;
+      requestId?: number;
+      id?: number;
+      stage?: string;
+      timings?: Record<string, number>;
+      completedAt?: number;
     };
-    // Clear any pending dispatch timeout when worker responds
-    if (slot.timeoutId) {
+    if (!isCurrentSlot(slot)) {
+      return;
+    }
+    if (
+      ["photo-progress", "photo-stage", "result", "provider-error"].includes(
+        message.type ?? ""
+      ) &&
+      (slot.status !== "busy" ||
+        message.requestId !== slot.requestId ||
+        message.adapterId !== workerAdapter?.adapterId ||
+        message.fingerprint !== workerAdapter?.fingerprint)
+    ) {
+      return;
+    }
+    if (message.type === "photo-stage") {
+      if (typeof message.id === "number" && slot.photoIds?.has(message.id)) {
+        slot.stage = message.stage;
+      }
+      return;
+    }
+    if (message.type === "photo-progress") {
+      if (
+        typeof message.id === "number" &&
+        slot.photoIds?.has(message.id) &&
+        !slot.completedIds?.has(message.id)
+      ) {
+        slot.completedIds?.add(message.id);
+        if (typeof message.completedAt === "number") {
+          slot.progressLatencyMaxMs = Math.max(
+            slot.progressLatencyMaxMs ?? 0,
+            Date.now() - message.completedAt
+          );
+        }
+        slot.onPhotoProgress?.(message.id);
+      }
+      return;
+    }
+    if (
+      ["result", "provider-error", "init-error", "ready"].includes(
+        message.type ?? ""
+      ) &&
+      slot.timeoutId
+    ) {
       clearTimeout(slot.timeoutId);
       slot.timeoutId = null;
     }
@@ -337,6 +393,12 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
       return;
     }
     if (message.type === "result" && slot.status === "busy") {
+      if (message.timings) {
+        message.timings.progressLatencyMaxMs = slot.progressLatencyMaxMs ?? 0;
+        console.log(
+          `[Pool] Worker ${index} batch timing ${JSON.stringify(message.timings)}`
+        );
+      }
       const resolve = slot.pendingResolve;
       const reject = slot.pendingReject;
       slot.pendingResolve = null;
@@ -351,7 +413,16 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
         reject?.(new Error("Stale embedding worker result discarded"));
       } else {
         try {
-          resolve?.(validateEmbedResults(message.results));
+          const results = validateEmbedResults(message.results);
+          if (
+            results.some((result) => !slot.photoIds?.has(result.id)) ||
+            new Set(results.map((result) => result.id)).size !== results.length
+          ) {
+            throw new Error(
+              "Invalid image embedding result: unexpected or duplicate photo ID"
+            );
+          }
+          resolve?.(results);
         } catch (error) {
           reject?.(error instanceof Error ? error : new Error(String(error)));
         }
@@ -416,10 +487,14 @@ function handleWorkerDeath(slot: WorkerSlot): void {
     return;
   }
 
-  // A native DirectML crash cannot be caught inside the worker. Treat any
-  // current-generation GPU worker death as a pool-level failure so callers
-  // can clean partial vectors and restart the whole run on CPU.
-  if (isCurrentSlot(slot) && poolExecutionProvider === "directml") {
+  // Only initialization/inference crashes implicate the GPU provider.
+  // Decoder crashes remain per-batch failures and retain the selected provider.
+  if (
+    isCurrentSlot(slot) &&
+    poolExecutionProvider === "directml" &&
+    (slot.status === "initializing" ||
+      (slot.status === "busy" && slot.stage === "inference"))
+  ) {
     failGpuPool(
       new EmbeddingProviderError(
         `DirectML worker ${slot.index} exited during embedding`
@@ -485,6 +560,7 @@ function handleWorkerDeath(slot: WorkerSlot): void {
       slots[slot.index] = newSlot;
       newSlot.process.send({
         type: "init",
+        cacheDir: path.join(getDataPath(), "thumbnails"),
         adapter: workerAdapter,
         execution: {
           provider: poolExecutionProvider,
@@ -510,7 +586,13 @@ function drainQueue(): void {
     if (!request) {
       break;
     }
-    dispatchToSlot(idleSlot, request.photos, request.resolve, request.reject);
+    dispatchToSlot(
+      idleSlot,
+      request.photos,
+      request.resolve,
+      request.reject,
+      request.onPhotoProgress
+    );
   }
 }
 
@@ -518,8 +600,15 @@ function dispatchToSlot(
   slot: WorkerSlot,
   photos: Array<{ id: number; path: string }>,
   resolve: (results: EmbedResult[]) => void,
-  reject: (err: Error) => void
+  reject: (err: Error) => void,
+  onPhotoProgress?: (id: number) => void
 ): void {
+  slot.requestId = ++nextRequestId;
+  slot.progressLatencyMaxMs = 0;
+  slot.photoIds = new Set(photos.map((photo) => photo.id));
+  slot.completedIds = new Set();
+  slot.onPhotoProgress = onPhotoProgress;
+  slot.stage = "decode";
   slot.status = "busy";
   slot.pendingResolve = resolve;
   slot.pendingReject = reject;
@@ -530,7 +619,7 @@ function dispatchToSlot(
 
   slot.timeoutId = setTimeout(() => {
     if (slot.status === "busy" && slot.pendingReject) {
-      if (poolExecutionProvider === "directml") {
+      if (poolExecutionProvider === "directml" && slot.stage === "inference") {
         failGpuPool(
           new EmbeddingProviderError(
             `DirectML worker ${slot.index} timed out during embedding`
@@ -549,6 +638,7 @@ function dispatchToSlot(
 
   slot.process.send({
     type: "embed",
+    requestId: slot.requestId,
     photos,
   });
 }
@@ -651,6 +741,7 @@ async function startWorkerPool(
   for (const slot of slots) {
     slot.process.send({
       type: "init",
+      cacheDir: path.join(getDataPath(), "thumbnails"),
       adapter: workerAdapter,
       execution: {
         provider: poolExecutionProvider,
@@ -775,7 +866,8 @@ export function initWorkerPool(mp: string, useGPU = false): Promise<void> {
 
 /** Send a batch of photos to an available worker for embedding. */
 function dispatchBatch(
-  photos: Array<{ id: number; path: string }>
+  photos: Array<{ id: number; path: string }>,
+  onPhotoProgress?: (id: number) => void
 ): Promise<EmbedResult[]> {
   return new Promise((resolve, reject) => {
     // Auto-reinitialize if pool is dead
@@ -788,9 +880,9 @@ function dispatchBatch(
         .then(() => {
           const idleSlot = slots.find((s) => s.status === "idle");
           if (idleSlot) {
-            dispatchToSlot(idleSlot, photos, resolve, reject);
+            dispatchToSlot(idleSlot, photos, resolve, reject, onPhotoProgress);
           } else {
-            requestQueue.push({ photos, resolve, reject });
+            requestQueue.push({ photos, resolve, reject, onPhotoProgress });
           }
         })
         .catch(reject);
@@ -799,9 +891,9 @@ function dispatchBatch(
 
     const idleSlot = slots.find((s) => s.status === "idle");
     if (idleSlot) {
-      dispatchToSlot(idleSlot, photos, resolve, reject);
+      dispatchToSlot(idleSlot, photos, resolve, reject, onPhotoProgress);
     } else {
-      requestQueue.push({ photos, resolve, reject });
+      requestQueue.push({ photos, resolve, reject, onPhotoProgress });
     }
   });
 }
@@ -939,14 +1031,34 @@ export async function embedWithPool(
     throw new Error("Worker pool has no live workers");
   }
 
+  let hasHeif = false;
+  for (const photo of photos) {
+    if (await isHeifInput(photo.path)) {
+      hasHeif = true;
+      break;
+    }
+  }
+  const batchSize = hasHeif
+    ? Math.max(
+        1,
+        Math.min(poolBatchSize, 5, Math.ceil(total / concurrency / 2))
+      )
+    : poolBatchSize;
+  const completed = new Set<number>();
+  const reportPhoto = (id: number) => {
+    if (completed.has(id)) {
+      return;
+    }
+    completed.add(id);
+    onProgress?.(Math.min(completed.size, total), total);
+  };
   // 预切批次
   const batchList: Array<Array<{ id: number; path: string }>> = [];
-  for (let i = 0; i < photos.length; i += poolBatchSize) {
-    batchList.push(photos.slice(i, i + poolBatchSize));
+  for (let i = 0; i < photos.length; i += batchSize) {
+    batchList.push(photos.slice(i, i + batchSize));
   }
 
   const allResults: EmbedResult[] = [];
-  let processed = 0;
   let cursor = 0;
   let callbackChain = Promise.resolve();
 
@@ -980,7 +1092,7 @@ export async function embedWithPool(
       }
       const batch = batchList[idx];
       try {
-        const results = await dispatchBatch(batch);
+        const results = await dispatchBatch(batch, reportPhoto);
         allResults.push(...results);
         await publishBatchResults(results, batch);
       } catch (err: unknown) {
@@ -1010,8 +1122,9 @@ export async function embedWithPool(
         allResults.push(...fallbackResults);
         await publishBatchResults(fallbackResults, batch);
       }
-      processed += batch.length;
-      onProgress?.(Math.min(processed, total), total);
+      for (const photo of batch) {
+        reportPhoto(photo.id);
+      }
     }
   }
 

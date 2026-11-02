@@ -37,6 +37,7 @@ test("HEIC import, thumbnail and full preview at three window sizes", async () =
     }).filter((entry): entry is [string, string] => entry[1] !== undefined)
   );
   const app = await launchTestApp(root, {
+    executablePath: process.env.AIM_E2E_EXECUTABLE,
     args: [
       "-r",
       preload,

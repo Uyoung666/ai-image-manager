@@ -81,6 +81,17 @@ require('node:module').syncBuiltinESMExports();`
     ],
   });
   const child = app.process();
+  // Packaged Electron ignores CLI preloads. A successful inspector handshake
+  // still supplies the real main PID, independently of the cmd.exe wrapper.
+  if (options.executablePath && !fs.existsSync(registration)) {
+    const pid = await app.evaluate(() => process.pid);
+    fs.writeFileSync(registration, JSON.stringify({ pid, exited: false }));
+    app.on("close", () => {
+      if (fs.existsSync(registration) && !isProcessAlive(pid)) {
+        fs.writeFileSync(registration, JSON.stringify({ pid, exited: true }));
+      }
+    });
+  }
   managed.runtime.trackProcess(child, registration);
   const closed = new Promise<void>((resolve) => {
     // Playwright launches through cmd.exe on Windows. The wrapper may already
