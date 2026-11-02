@@ -1,8 +1,8 @@
-# AI Image Manager v2.2.6 User Guide
+# AI Image Manager v2.2.7 User Guide
 
 > A local-first photo manager for Windows. Build an index over your existing folders, then search, organize, curate, analyze, export, and share your library.
 
-This guide follows the normal user workflow and describes v2.2.6. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
+This guide follows the normal user workflow and describes v2.2.7. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
 
 ---
 
@@ -60,6 +60,8 @@ The one-day 10,000-photo run included import, thumbnail/EXIF/hash preparation, a
 
 The app accepts JPG, JPEG, PNG, WebP, AVIF, TIFF, TIF, HEIC, HEIF, GIF, BMP, ICO, plus camera RAW formats including CR2, CR3, NEF, NRW, ARW, SRF, SR2, DNG, ORF, RW2, RAF, PEF, RWL, 3FR, and RAW: 27 extensions in total.
 
+HEIC / HEIF use built-in offline decoding without additional system codecs for imports, thumbnails, full previews, AI analysis and face processing. Primary-image selection, orientation and color are handled, and 10-bit HEIF is converted for display and analysis; not every HEIF encoding variant is supported. Imports reuse model input caches to reduce repeated decoding. AI progress updates per photo and distinguishes decoding, model and inference failures.
+
 RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews read with ExifTool. RAW files without a usable embedded preview may have limited support.
 
 ---
@@ -68,7 +70,7 @@ RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews r
 
 ### Upgrading from an older version
 
-**v2.2.4 / v2.2.5 users need one manual upgrade:** these versions fail at GitHub asset redirects with “Redirect was cancelled”. Download v2.2.6 from the formal Release, exit the app, then install over the existing installation using the same Setup or MSI format; ZIP users should extract into a new directory. Keep the existing application data directory and do not uninstall with data removal. v2.2.6 fixes download redirects for subsequent client updates. Compared with v2.2.5, this patch adds no database migration and requires no AI index rebuild.
+**v2.2.4 / v2.2.5 users need one manual upgrade:** these versions fail at GitHub asset redirects with “Redirect was cancelled”. Download v2.2.7 from the formal Release, exit the app, then install over the existing installation using the same Setup or MSI format; ZIP users should extract into a new directory. Keep the existing application data directory and do not uninstall with data removal. v2.2.6 fixed download redirects, so installed v2.2.6 copies can update to this release in the app. Compared with v2.2.6, v2.2.7 adds no database migration and requires no full AI index rebuild.
 
 When upgrading from v2.2.4, the first launch automatically migrates the database for the gallery and culling workflows. This update does not require a routine AI index rebuild. Back up the application data directory before upgrading; original photos, tags, favorites and existing culling records are preserved.
 
@@ -298,9 +300,9 @@ Import and AI indexing are separate. After adding a new folder, prefer increment
 
 ### Index upgrades and rebuilding
 
-This version changes image preprocessing and adds a search-data revision migration. The database schema is updated on first launch.
+v2.2.7 adds no database migration or full AI index rebuild requirement over v2.2.6. Database or search-data migrations introduced in earlier versions still run when needed.
 
-If your library contains an older AI index, open **Settings → AI Index → Rebuild AI Index**. Semantic search and image search are unavailable while the existing index is incompatible; filename, tag and person searches remain available. Rebuilding preserves original images, manual tags and favorites, and does not require importing your photos again. Processing time depends on your library and hardware.
+If the app reports an incompatible older AI index, open **Settings → AI Index → Rebuild AI Index**. Semantic search and image search are unavailable while the existing index is incompatible; filename, tag and person searches remain available. Rebuilding preserves original images, manual tags and favorites, and does not require importing your photos again. Processing time depends on your library and hardware.
 
 ### GPU acceleration
 

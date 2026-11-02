@@ -30,9 +30,16 @@ A local-first AI photo manager for Windows, with natural-language search, smart 
 
 AI Image Manager is designed for photographers, creators, designers, and anyone with a long-lived photo library on Windows. The workflow is built around your existing folders: index them in place, find photos with natural language, visual similarity, metadata, or folders, then organize, curate, analyze, export, or share them.
 
-## Current code version: v2.2.6
+## Current code version: v2.2.7
 
-v2.2.6 fixes GitHub redirects during update downloads and retains the import-free culling, search and gallery improvements from v2.2.5. GitHub Releases identifies the available stable release.
+v2.2.7 improves offline HEIC / HEIF decoding, imports and AI processing, retaining the earlier update download fix and import-free culling, search and gallery improvements. GitHub Releases identifies the available stable release.
+
+### v2.2.7 highlights
+
+- Built-in offline HEIC / HEIF decoding supports imports, thumbnails, full previews, AI analysis and face processing without extra system codecs.
+- Improve primary-image selection, orientation and color conversion, including converting 10-bit HEIF for display and analysis; not every HEIF encoding variant is supported.
+- Reuse model input caches, reduce repeated decoding, balance batches and update AI progress per photo.
+- Distinguish decoding, model and inference failures, isolate damaged-photo errors and improve worker cleanup.
 
 ### v2.2.5 highlights
 
@@ -44,7 +51,7 @@ v2.2.6 fixes GitHub redirects during update downloads and retains the import-fre
 
 ### Upgrading
 
-**v2.2.4 / v2.2.5 users need one manual upgrade:** these versions fail at GitHub asset redirects with “Redirect was cancelled”. Download v2.2.6 from the formal Release, exit the app, then install over the existing installation using the same Setup or MSI format; ZIP users should extract into a new directory. Keep the existing application data directory and do not uninstall with data removal. v2.2.6 fixes download redirects for subsequent client updates. Compared with v2.2.5, this patch adds no database migration and requires no AI index rebuild.
+**v2.2.4 / v2.2.5 users need one manual upgrade:** these versions fail at GitHub asset redirects with “Redirect was cancelled”. Download v2.2.7 from the formal Release, exit the app, then install over the existing installation using the same Setup or MSI format; ZIP users should extract into a new directory. Keep the existing application data directory and do not uninstall with data removal. v2.2.6 fixed download redirects, so installed v2.2.6 copies can update to this release in the app. Compared with v2.2.6, v2.2.7 adds no database migration and requires no full AI index rebuild.
 
 When upgrading from v2.2.4, the first launch automatically migrates the database for the gallery and culling workflows. This update does not require a routine AI index rebuild. Back up the application data directory before upgrading; original photos, tags, favorites and existing culling records are preserved.
 
