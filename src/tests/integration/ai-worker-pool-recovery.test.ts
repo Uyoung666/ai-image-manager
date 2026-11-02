@@ -1,8 +1,11 @@
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface SentMessage {
   adapter?: { adapterId: string; fingerprint: string };
+  cacheDir?: string;
   photos?: Array<{ id: number; path: string }>;
+  requestId?: number;
   type?: string;
 }
 
@@ -32,6 +35,7 @@ const childProcessMock = vi.hoisted(() => {
           setTimeout(() => {
             this.emit("message", {
               type: "result",
+              requestId: message.requestId,
               ...this.adapter,
               results: (message.photos ?? []).map((photo) => ({
                 id: photo.id,
@@ -87,6 +91,11 @@ vi.mock("node:child_process", () => ({
   fork: childProcessMock.fork,
 }));
 
+vi.mock("@/utils/data-path", () => ({ getDataPath: () => process.cwd() }));
+vi.mock("../../../scripts/heif-decoder.mjs", () => ({
+  isHeifInput: vi.fn().mockResolvedValue(false),
+}));
+
 vi.mock("electron", () => ({
   app: {
     getAppPath: () => process.cwd(),
@@ -134,6 +143,14 @@ describe("production image worker pool recovery and control", () => {
     await vi.advanceTimersByTimeAsync(1050);
     expect(childProcessMock.fork).toHaveBeenCalledTimes(3);
     expect(pool.getPoolHealth()).toMatchObject({ alive: 2, dead: 0 });
+    for (const child of childProcessMock.children) {
+      expect(child.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "init",
+          cacheDir: path.join(process.cwd(), "thumbnails"),
+        })
+      );
+    }
 
     pool.shutdownPool();
     await vi.advanceTimersByTimeAsync(500);

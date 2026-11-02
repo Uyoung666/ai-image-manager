@@ -1165,12 +1165,14 @@ async function terminatePackagedProcess(
     return;
   }
 
-  const initialKillError = tryTerminatePackagedChild(child);
+  // Keep the parent alive while taskkill enumerates the Electron process tree.
+  // Killing it first can race taskkill and leave descendants behind.
   const treeKillError = await tryTerminatePackagedTree(
     child,
     spawnProcess,
     forceKill
   );
+  const initialKillError = tryTerminatePackagedChild(child);
   await waitForPackagedProcessExit(
     child,
     label,

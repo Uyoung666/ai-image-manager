@@ -954,6 +954,36 @@ describe("windows installer packaged E2E launcher", () => {
     expect(child.kills).toBe(0);
   });
 
+  it.skipIf(process.platform !== "win32")(
+    "stops the packaged tree before terminating its parent",
+    async () => {
+      const child = createChild(createExecutable());
+      await terminatePackagedProcess(child, "active packaged app", {
+        forceKill: (pid) => {
+          expect(pid).toBe(child.pid);
+          expect(child.kills).toBe(0);
+        },
+      });
+      expect(child.kills).toBe(1);
+    }
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "reports a real tree cleanup failure after stopping the parent",
+    async () => {
+      const child = createChild(createExecutable());
+      await expect(
+        terminatePackagedProcess(child, "active packaged app", {
+          forceKill: () => {
+            expect(child.kills).toBe(0);
+            throw new Error("tree cleanup denied");
+          },
+        })
+      ).rejects.toThrow("process-tree cleanup failed: tree cleanup denied");
+      expect(child.kills).toBe(1);
+    }
+  );
+
   it("selects the requested MSI versioned executable instead of the root stub", () => {
     const installRoot = createMsiInstallRoot();
     expect(findInstalledExecutable(installRoot, "v2.1.0")).toBe(
