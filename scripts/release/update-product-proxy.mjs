@@ -45,6 +45,12 @@ export function selectProductRequest(host, url, manifest) {
   );
   return info ? { info } : null;
 }
+export function certificatePowerShellScript(script) {
+  // -NoProfile sessions do not reliably auto-load the Certificate provider.
+  // Use this PowerShell installation's module even when pwsh supplied PSModulePath.
+  return `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Import-Module "$PSHOME\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1" -ErrorAction Stop; $null=Get-PSDrive -Name Cert -PSProvider Certificate -ErrorAction Stop; ${script}`;
+}
+
 function powershell(script) {
   return execute(
     "powershell.exe",
@@ -52,7 +58,9 @@ function powershell(script) {
       "-NoProfile",
       "-NonInteractive",
       "-EncodedCommand",
-      Buffer.from(script, "utf16le").toString("base64"),
+      Buffer.from(certificatePowerShellScript(script), "utf16le").toString(
+        "base64"
+      ),
     ],
     { windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024 }
   );

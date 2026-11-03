@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { finished } from "node:stream/promises";
@@ -13,7 +14,11 @@ import {
   installedTargetPath,
   repackTestSuccessorArchive,
 } from "../../../scripts/release/update-product-gate.mjs";
-import { selectProductRequest } from "../../../scripts/release/update-product-proxy.mjs";
+import {
+  certificatePowerShellScript,
+  createProductUpdateProxy,
+  selectProductRequest,
+} from "../../../scripts/release/update-product-proxy.mjs";
 import { TestRuntime } from "../helpers/test-runtime";
 
 const identity = {
@@ -23,6 +28,46 @@ const identity = {
   productUpdateGateRequired: true,
 };
 const hash = "b".repeat(64);
+
+it.skipIf(process.platform !== "win32")(
+  "initializes the certificate drive in a clean no-profile shell without auto-loading",
+  () => {
+    const script = `Import-Module Microsoft.PowerShell.Management; Remove-Module Microsoft.PowerShell.Security -ErrorAction SilentlyContinue; $PSModuleAutoLoadingPreference='None'; if(Get-PSDrive -Name Cert -ErrorAction SilentlyContinue) { throw 'Certificate provider fixture was not unloaded' }; ${certificatePowerShellScript("[Console]::Write((Get-PSDrive -Name Cert).Provider.Name)")}`;
+    const result = spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      { windowsHide: true, timeout: 15_000, encoding: "utf8" }
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe("Certificate");
+  },
+  20_000
+);
+
+it.skipIf(
+  process.platform !== "win32" || process.env.GITHUB_ACTIONS !== "true"
+)(
+  "starts and closes the trusted HTTPS proxy on a disposable Windows runner",
+  async () => {
+    const runtime = new TestRuntime("product-proxy-certificate");
+    let proxy;
+    try {
+      proxy = await createProductUpdateProxy(runtime.root, identity, {});
+      const response = await fetch(proxy.url);
+      expect(response.status).toBe(403);
+    } finally {
+      await proxy?.close();
+      runtime.cleanup();
+    }
+  },
+  90_000
+);
 function direction(targetVersion) {
   const target = `C:\\Product\\app-${targetVersion}\\app.exe`;
   return {
