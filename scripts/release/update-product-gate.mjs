@@ -271,7 +271,7 @@ async function runUpgrade(
   expectConfirmation
 ) {
   await fsp.mkdir(directory, { recursive: true });
-  const { chromium } = await import("@playwright/test");
+  const { chromium, expect } = await import("@playwright/test");
   const sourceExecutableSha256 = await sha256File(executable);
   const proxy = await createProductUpdateProxy(
     path.join(directory, "tls"),
@@ -349,9 +349,16 @@ async function runUpgrade(
     }
     await page.getByText(album, { exact: true }).waitFor();
     await page.evaluate(() => window.__e2eNavigate("/settings/update"));
-    await page
-      .getByRole("checkbox", { name: AUTO_UPDATE_CHECKBOX })
-      .uncheck({ force: true });
+    const automaticUpdates = page.getByRole("checkbox", {
+      name: AUTO_UPDATE_CHECKBOX,
+    });
+    await expect(automaticUpdates).toBeEnabled();
+    if (await automaticUpdates.isChecked()) {
+      await automaticUpdates.focus();
+      await automaticUpdates.press("Space");
+    }
+    await expect(automaticUpdates).not.toBeChecked();
+    await expect(automaticUpdates).toBeEnabled();
     proxy.activate();
     await page
       .getByRole("button", {
