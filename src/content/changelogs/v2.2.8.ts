@@ -1,7 +1,7 @@
 import type { ChangelogEntry } from "./types";
 
 const changelog: ChangelogEntry = {
-  version: "2.2.9",
+  version: "2.2.8",
   date: "2026-11-03",
   title: {
     zh: "改善更新恢复与新版本启动确认。",

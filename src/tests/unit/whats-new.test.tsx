@@ -55,7 +55,7 @@ describe("WhatsNewPage", () => {
 
   it("registers the current release before previous versions", () => {
     expect(changelogEntries.map((entry) => entry.version)).toEqual([
-      "2.2.9",
+      "2.2.8",
       "2.2.7",
       "2.2.6",
       "2.2.5",

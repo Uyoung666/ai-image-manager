@@ -12,7 +12,7 @@ import { createProductUpdateProxy } from "./update-product-proxy.mjs";
 const LEADING_PATH_SEPARATOR = /^[/\\]/;
 const CONTINUE_BUTTON = /^(继续|Continue)$/;
 const SAVE_CONTINUE_BUTTON = /^(保存并继续|Save and Continue|Save & Continue)$/;
-const START_BUTTON = /^(开始使用|Get started|Start using)$/;
+const START_BUTTON = /^(开始使用|Get started|Start using)$/i;
 const CLOSE_BEHAVIOR_LABEL = /^(关闭行为|Close behavior)$/;
 const QUIT_OPTION = /^(退出应用|Quit the app)$/;
 const NEW_ALBUM_BUTTON = /^(新建相册|New Album|New album)$/;

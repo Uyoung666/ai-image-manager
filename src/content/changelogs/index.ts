@@ -10,7 +10,7 @@ import previousStable from "./v2.2.4";
 import previousStablePatch from "./v2.2.5";
 import previousHeifBaseline from "./v2.2.6";
 import previousStableRelease from "./v2.2.7";
-import current from "./v2.2.9";
+import current from "./v2.2.8";
 
 export type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
 

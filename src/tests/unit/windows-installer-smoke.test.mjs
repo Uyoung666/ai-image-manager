@@ -527,6 +527,55 @@ afterEach(() => {
 });
 
 describe("windows installer packaged E2E launcher", () => {
+  it.each([
+    0, 1,
+  ])("waits for the requested normal quit after readiness (exit=%s)", async (exitCode) => {
+    const executable = createExecutable();
+    const profile = path.join(path.dirname(executable), "profile");
+    fs.mkdirSync(path.dirname(readinessLog(profile)), { recursive: true });
+    let child;
+    let forced = false;
+    const result = runPackagedE2E(
+      executable,
+      "self-quitting probe",
+      profile,
+      "2.1.0",
+      {
+        spawnProcess: (file) => {
+          child = createChild(file);
+          queueMicrotask(() => {
+            child.emit("spawn");
+            fs.writeFileSync(readinessLog(profile), "WHENREADY fresh\n");
+            fs.writeFileSync(
+              mainLog(profile),
+              "[bg] startLevel(Critical) begin\n"
+            );
+            setTimeout(() => {
+              child.exitCode = exitCode;
+              child.emit("exit", exitCode, null);
+            }, 75);
+          });
+          return child;
+        },
+        pollIntervalMs: 5,
+        readyStabilityMs: 5,
+        startupTimeoutMs: 1000,
+        terminationTimeoutMs: 500,
+        forceKill: () => {
+          forced = true;
+          throw new Error("must not race normal shutdown");
+        },
+      }
+    );
+    if (exitCode === 0) {
+      await expect(result).resolves.toBe(profile);
+    } else {
+      await expect(result).rejects.toThrow("failed during normal quit");
+    }
+    expect(forced).toBe(false);
+    expect(child.kills).toBe(0);
+  });
+
   it("confirms alive upgrade and candidate clean exit after fresh markers", async () => {
     const executable = createExecutable();
     const userDataDirectory = fs.mkdtempSync(

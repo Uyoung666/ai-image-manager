@@ -1029,6 +1029,7 @@ function forceKillProcessTree(
     let timer;
     let killer;
     let timedOut = false;
+    let output = "";
     const finish = (error) => {
       if (settled) {
         return;
@@ -1057,15 +1058,24 @@ function forceKillProcessTree(
       if (code === 0 || code === 128) {
         finish();
       } else {
-        finish(new Error(`taskkill.exe failed with exit code ${code ?? 1}`));
+        finish(
+          new Error(
+            `taskkill.exe failed with exit code ${code ?? 1}: ${output.trim()}`
+          )
+        );
       }
     };
 
     try {
       killer = spawnProcess("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
+      const recordOutput = (chunk) => {
+        output = `${output}${chunk}`.slice(-16_384);
+      };
+      killer.stdout?.on("data", recordOutput);
+      killer.stderr?.on("data", recordOutput);
       killer.once("error", onError);
       killer.once("exit", onExit);
     } catch (error) {
@@ -1186,6 +1196,47 @@ async function terminatePackagedProcess(
     );
   }
 }
+async function waitForProbeQuit(child, label, timeoutMs) {
+  if (childHasExited(child)) {
+    return;
+  }
+  try {
+    await waitForChildExit(child, timeoutMs);
+  } catch {
+    // A hung probe still has to pass the existing process-tree cleanup.
+    return;
+  }
+  if (child.exitCode !== 0) {
+    throw new Error(
+      `${label} failed during normal quit (${describeChildExit(child)})`
+    );
+  }
+}
+
+function savePackagedFailure(userDataDirectory, details) {
+  if (!process.env.AIM_INSTALLER_SMOKE_LOG_DIR) {
+    return;
+  }
+  try {
+    const directory = createMsiLogDirectory("packaged-startup-");
+    fs.writeFileSync(
+      path.join(directory, "failure.json"),
+      JSON.stringify(details, null, 2)
+    );
+    fs.cpSync(
+      path.join(userDataDirectory, "logs"),
+      path.join(directory, "logs"),
+      {
+        recursive: true,
+      }
+    );
+  } catch (error) {
+    console.error(
+      `[installer-smoke] diagnostic warning: ${describeCleanupError(error)}`
+    );
+  }
+}
+
 async function runPackagedE2E(
   executable,
   label,
@@ -1240,6 +1291,8 @@ async function runPackagedE2E(
       label,
       { startupTimeoutMs, pollIntervalMs, readyStabilityMs }
     );
+    // The probe requests a normal quit. Do not race Electron's own teardown.
+    await waitForProbeQuit(child, label, terminationTimeoutMs);
   } catch (error) {
     failure = error instanceof Error ? error : new Error(String(error));
   }
@@ -1266,6 +1319,15 @@ async function runPackagedE2E(
   }
 
   if (failure) {
+    savePackagedFailure(userDataDirectory, {
+      label,
+      message: failure.message,
+      executable: executableInfo.path,
+      expectedVersion,
+      pid: child?.pid,
+      exitCode: child?.exitCode,
+      signalCode: child?.signalCode,
+    });
     throw failure;
   }
   console.log(`[installer-smoke] ${label} ready and process stopped`);
