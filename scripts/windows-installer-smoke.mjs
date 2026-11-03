@@ -1439,7 +1439,12 @@ async function runSetupUpgradeSmoke(setupPath, version, feed) {
       `update previous Squirrel installation ${normalizedOldVersion} from testing feed to ${version}`
     );
   }
-  assertSquirrelDeltaUsed(root, version);
+  // The product chain verifies the exact package selected from the published
+  // manifest, which uses full packages for old MSI client compatibility.
+  // The separate direct-install gate must still prove the real delta path.
+  if (process.env.AIM_PRODUCT_UPDATE_GATE !== "1") {
+    assertSquirrelDeltaUsed(root, version);
+  }
   const upgradedExecutable = path.join(
     root,
     `app-${version}`,

@@ -1,5 +1,7 @@
 // @vitest-environment node
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { finished } from "node:stream/promises";
@@ -12,8 +14,10 @@ import { expect, it, vi } from "vitest";
 import { validateSmoke } from "../../../scripts/release/bundle.mjs";
 import {
   cleanupProductSession,
+  expectRestart,
   installedTargetPath,
   repackTestSuccessorArchive,
+  verifyProductDownload,
 } from "../../../scripts/release/update-product-gate.mjs";
 import {
   certificatePowerShellScript,
@@ -30,6 +34,98 @@ const identity = {
   productUpdateGateRequired: true,
 };
 const hash = "b".repeat(64);
+
+it("reports the real installation error promptly instead of waiting for a restart", async () => {
+  vi.useFakeTimers();
+  const browser = new EventEmitter();
+  try {
+    const restart = expectRestart(
+      browser,
+      () => undefined,
+      () => ({
+        phase: "error",
+        message: "UPDATE_INSTALL_INTERRUPTED",
+        installerExitCode: 4_294_967_295,
+      })
+    );
+    const assertion = expect(restart).rejects.toThrow(
+      "UPDATE_INSTALL_INTERRUPTED"
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    await assertion;
+    expect(browser.listenerCount("disconnected")).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("tolerates an atomic state replacement and cleans observation after real restart", async () => {
+  vi.useFakeTimers();
+  const browser = new EventEmitter();
+  try {
+    const restart = expectRestart(
+      browser,
+      () => undefined,
+      () => {
+        throw new Error("temporary read failure");
+      }
+    );
+    await vi.advanceTimersByTimeAsync(250);
+    browser.emit("disconnected");
+    await restart;
+    expect(browser.listenerCount("disconnected")).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each([
+  "full",
+  "delta",
+])("verifies real %s downloads against both the published manifest and installed bytes", async (method) => {
+  const runtime = new TestRuntime("product-package-proof");
+  try {
+    const bytes = Buffer.from("verified package");
+    const filename = `ai-image-manager-2.2.8-${method}.nupkg`;
+    const info = {
+      filename,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      size: bytes.length,
+      url: `https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.8/${filename}`,
+    };
+    const manifest = { version: "2.2.8", packages: { [method]: info } };
+    const state = { version: "2.2.8", updateMethod: method };
+    const trace = [{ host: "github.com", url: new URL(info.url).pathname }];
+    await fs.mkdir(path.join(runtime.root, "packages"));
+    const file = path.join(runtime.root, "packages", filename);
+    await fs.writeFile(file, bytes);
+    await expect(
+      verifyProductDownload(state, manifest, trace, runtime.root)
+    ).resolves.toEqual({
+      updateMethod: method,
+      downloadedPackageSha256: info.sha256,
+    });
+    await expect(
+      verifyProductDownload(state, manifest, [], runtime.root)
+    ).rejects.toThrow("did not download");
+    await expect(
+      verifyProductDownload(
+        { ...state, updateMethod: method === "full" ? "delta" : "full" },
+        manifest,
+        trace,
+        runtime.root
+      )
+    ).rejects.toThrow("did not download");
+    await fs.writeFile(file, Buffer.alloc(bytes.length));
+    await expect(
+      verifyProductDownload(state, manifest, trace, runtime.root)
+    ).rejects.toThrow("differs");
+  } finally {
+    runtime.cleanup();
+  }
+});
 
 it("cleans every resource after quit fails and preserves the original upgrade error", async () => {
   const primary = new Error("real UI failure");
@@ -153,6 +249,8 @@ function direction(targetVersion) {
     sourceExecutableSha256: hash,
     targetExecutableSha256: hash,
     packageSha256: hash,
+    updateMethod: "full",
+    downloadedPackageSha256: hash,
     target,
     actualProcess: { pid: 1234, createdAt: "12345678", path: target },
   };
@@ -185,6 +283,17 @@ function smoke() {
 it("requires both installer types and both upgrade directions tied to the same candidate bytes", () => {
   expect(() => validateSmoke(smoke(), identity, hash)).not.toThrow();
   const mutations = [
+    (value) => {
+      value.productUpdateEvidence[0].first.downloadedPackageSha256 = undefined;
+    },
+    (value) => {
+      value.productUpdateEvidence[0].first.downloadedPackageSha256 = "c".repeat(
+        64
+      );
+    },
+    (value) => {
+      value.productUpdateEvidence[0].first.updateMethod = "skipped";
+    },
     (value) => {
       value.productUpdateEvidence[0].first.targetExecutableSha256 = undefined;
       value.productUpdateEvidence[0].second.sourceExecutableSha256 = undefined;

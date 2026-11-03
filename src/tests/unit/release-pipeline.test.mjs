@@ -41,6 +41,10 @@ import {
   planExpiredObjects,
 } from "../../../scripts/release-cos-maintenance.mjs";
 import { validateFeed } from "../../../scripts/windows-installer-smoke.mjs";
+import {
+  chooseUpdatePlan,
+  parseUpdateManifest,
+} from "../../services/github-update";
 
 let fixtures;
 const identity = {
@@ -71,9 +75,18 @@ async function fixture(
   const squirrel = path.join(make, "squirrel.windows", "x64");
   await fsp.mkdir(squirrel, { recursive: true });
   const entries = [
-    ["ai-image-manager-2.1.0-full.nupkg", Buffer.alloc(90, 1)],
-    ["ai-image-manager-2.2.0-full.nupkg", Buffer.alloc(100, 2)],
-    ["ai-image-manager-2.2.0-delta.nupkg", Buffer.alloc(10, 3)],
+    [
+      `ai-image-manager-${releaseIdentity.baseline?.version ?? "2.1.0"}-full.nupkg`,
+      Buffer.alloc(90, 1),
+    ],
+    [
+      `ai-image-manager-${releaseIdentity.version}-full.nupkg`,
+      Buffer.alloc(100, 2),
+    ],
+    [
+      `ai-image-manager-${releaseIdentity.version}-delta.nupkg`,
+      Buffer.alloc(10, 3),
+    ],
   ];
   for (const [file, bytes] of entries) {
     await fsp.writeFile(path.join(squirrel, file), bytes);
@@ -83,9 +96,9 @@ async function fixture(
     `${entries.map(([file, bytes]) => `${digest(bytes, "sha1")} ${file} ${bytes.length}`).join("\n")}\n`
   );
   for (const file of [
-    "AI Image Manager-2.2.0 Setup.exe",
+    `AI Image Manager-${releaseIdentity.version} Setup.exe`,
     "ai-image-manager.msi",
-    "AI Image Manager-win32-x64-2.2.0.zip",
+    `AI Image Manager-win32-x64-${releaseIdentity.version}.zip`,
   ]) {
     await fsp.writeFile(path.join(make, file), `fixture ${file}`);
   }
@@ -174,6 +187,58 @@ describe("immutable release bundle", () => {
       toVersion: "2.2.0",
     });
     await expect(verifyBundle(root, identity)).resolves.toMatchObject(identity);
+  });
+
+  it.each([
+    ["2.2.8", "2.2.7", false],
+    ["2.2.9", "2.2.7", false],
+    ["2.2.9", "2.2.8", true],
+  ])("publishes a usable MSI transition manifest for %s from %s (delta=%s)", async (version, baseline, hasDelta) => {
+    const current = {
+      ...identity,
+      version,
+      tag: `v${version}`,
+      baseline: { version: baseline },
+    };
+    const { root } = await fixture(
+      `msi-transition-${version}-${baseline}`,
+      current
+    );
+    const file = path.join(root, "download/update-manifest.json");
+    const manifest = await readJson(file);
+    expect(Boolean(manifest.packages.delta)).toBe(hasDelta);
+    // This parser/planner is unchanged from the released 2.2.7 client.
+    expect(
+      chooseUpdatePlan(baseline, parseUpdateManifest(manifest)).method
+    ).toBe(hasDelta ? "delta" : "full");
+    expect(manifest.packages.full.filename).toBe(
+      `ai-image-manager-${version}-full.nupkg`
+    );
+    // The actual immutable download is full-only, but delta artifacts and its
+    // verified baseline stay available to the independent direct-installer gate.
+    expect(
+      await fsp.readFile(path.join(root, "feed/RELEASES"), "utf8")
+    ).toContain(`-${version}-delta.nupkg`);
+    expect(
+      (
+        await fsp.stat(
+          path.join(root, "files", `ai-image-manager-${version}-delta.nupkg`)
+        )
+      ).size
+    ).toBe(10);
+    await expect(verifyBundle(root, current)).resolves.toMatchObject(current);
+    if (hasDelta) {
+      expect(manifest.packages.delta.fromVersion).toBe(baseline);
+      manifest.packages.delta = undefined;
+    } else {
+      manifest.packages.delta = { fromVersion: baseline, toVersion: version };
+    }
+    await writeJson(file, manifest);
+    await expect(sealBundle(root, current)).rejects.toThrow(
+      hasDelta
+        ? /missing the delta baseline/
+        : /Legacy MSI clients require a full-only/
+    );
   });
 
   it("rejects duplicate manifest entries that hide an omitted file", async () => {

@@ -241,8 +241,9 @@ async function waitFor(callback, label, timeout = 180_000) {
   );
 }
 
-async function expectRestart(browser, action) {
+export async function expectRestart(browser, action, readState) {
   let timeout;
+  let interval;
   let disconnected;
   const exited = new Promise((resolve, reject) => {
     disconnected = resolve;
@@ -252,13 +253,77 @@ async function expectRestart(browser, action) {
       300_000
     );
   });
+  // Observe real updater errors while waiting, rather than hiding an immediate
+  // install failure behind the five-minute restart deadline.
+  const failed = new Promise((_, reject) => {
+    if (readState) {
+      let reading = false;
+      interval = setInterval(async () => {
+        if (reading) {
+          return;
+        }
+        reading = true;
+        try {
+          const state = await readState();
+          if (state.phase === "error") {
+            reject(
+              new Error(
+                `Product updater failed before restart: ${JSON.stringify(state)}`
+              )
+            );
+          }
+        } catch {
+          // State may be atomically replaced while the installer is running.
+        } finally {
+          reading = false;
+        }
+      }, 250);
+    }
+  });
+  const outcome = Promise.race([exited, failed]);
+  // Install can fail while the UI click is still resolving.
+  outcome.catch(() => undefined);
   try {
     await action();
-    await exited;
+    await outcome;
   } finally {
     clearTimeout(timeout);
+    clearInterval(interval);
     browser.off("disconnected", disconnected);
   }
+}
+
+export async function verifyProductDownload(
+  state,
+  manifest,
+  trace,
+  installRoot
+) {
+  const method = state.updateMethod;
+  const info = manifest.packages[method];
+  if (
+    !(["delta", "full"].includes(method) && info) ||
+    state.version !== manifest.version ||
+    !trace.some(
+      (request) =>
+        request.host === "github.com" &&
+        request.url === new URL(info.url).pathname
+    )
+  ) {
+    throw new Error(
+      "Product did not download a package declared by the published manifest"
+    );
+  }
+  const installedPackage = path.join(installRoot, "packages", info.filename);
+  if (
+    (await fsp.stat(installedPackage)).size !== info.size ||
+    (await sha256File(installedPackage)) !== info.sha256
+  ) {
+    throw new Error(
+      "Installed product package differs from the verified download"
+    );
+  }
+  return { updateMethod: method, downloadedPackageSha256: info.sha256 };
 }
 
 export async function cleanupProductSession(actions, primaryError) {
@@ -435,8 +500,10 @@ async function runUpgrade(
       throw new Error("Real updater did not download target");
     }
     stage = "install and automatic restart";
-    await expectRestart(browser, () =>
-      page.getByRole("button", { name: INSTALL_BUTTON }).click()
+    await expectRestart(
+      browser,
+      () => page.getByRole("button", { name: INSTALL_BUTTON }).click(),
+      async () => JSON.parse(await fsp.readFile(stateFile, "utf8")).state
     );
     browser = await connect();
     page = browser.contexts()[0].pages()[0];
@@ -466,6 +533,12 @@ async function runUpgrade(
     if (!fs.existsSync(target)) {
       throw new Error("Target executable missing");
     }
+    const download = await verifyProductDownload(
+      before,
+      manifest,
+      proxy.trace,
+      path.dirname(path.dirname(target))
+    );
     // Exercise the ordinary restart IPC, then verify the same data after relaunch.
     stage = "second launch";
     await expectRestart(browser, () =>
@@ -504,6 +577,7 @@ async function runUpgrade(
       target,
       targetVersion: manifest.version,
       confirmed: expectConfirmation,
+      ...download,
       actualProcess: targetProcess,
       sourceExecutableSha256,
       targetExecutableSha256: await sha256File(target),

@@ -367,10 +367,14 @@ function isProductDirectionComplete(direction) {
     direction?.confirmed === true &&
     direction.dataRetained === "passed" &&
     direction.secondLaunch === "passed" &&
+    ["full", "delta"].includes(direction.updateMethod) &&
+    (direction.updateMethod !== "full" ||
+      direction.downloadedPackageSha256 === direction.packageSha256) &&
     [
       direction.sourceExecutableSha256,
       direction.targetExecutableSha256,
       direction.packageSha256,
+      direction.downloadedPackageSha256,
     ].every(
       (digest) => typeof digest === "string" && SHA256_PATTERN.test(digest)
     ) &&
@@ -438,6 +442,35 @@ export function validateSmoke(smoke, identity, bundleSha256) {
   }
 }
 
+function deltaBaselineVersion(entries, identity) {
+  return (
+    identity.baseline?.version ??
+    entries
+      .filter((entry) => entry.isFull)
+      .map((entry) => entry.filename.match(PACKAGE_VERSION_PATTERN)?.[1])
+      .filter(
+        (version) =>
+          version &&
+          isStableVersion(version) &&
+          compareVersions(version, identity.version) < 0
+      )
+      .sort(compareVersions)
+      .at(-1)
+  );
+}
+
+function needsLegacyMsiFullUpdate(identity, baselineVersion) {
+  // Pre-2.2.8 MSI installs have no Squirrel full-package baseline, but those
+  // clients still select a delta. A candidate cannot repair its source client.
+  // Advertise full in the actual published manifest until the delta source has
+  // the baseline guard. Keep building/testing deltas in the raw Squirrel feed.
+  return (
+    compareVersions(identity.version, "2.2.8") >= 0 &&
+    baselineVersion &&
+    compareVersions(baselineVersion, "2.2.8") < 0
+  );
+}
+
 function buildUpdateManifest(entries, binaryMap, identity) {
   const currentFull = entries.filter(
     (entry) =>
@@ -454,18 +487,7 @@ function buildUpdateManifest(entries, binaryMap, identity) {
     );
   }
   const repository = identity.repository ?? "Uyoung666/ai-image-manager";
-  const inferredBaselineVersion = entries
-    .filter((entry) => entry.isFull)
-    .map((entry) => entry.filename.match(PACKAGE_VERSION_PATTERN)?.[1])
-    .filter(
-      (version) =>
-        version &&
-        isStableVersion(version) &&
-        compareVersions(version, identity.version) < 0
-    )
-    .sort(compareVersions)
-    .at(-1);
-  const baselineVersion = identity.baseline?.version ?? inferredBaselineVersion;
+  const baselineVersion = deltaBaselineVersion(entries, identity);
   if (currentDelta.length === 1 && !baselineVersion) {
     throw new Error("Update manifest delta is missing a verified baseline");
   }
@@ -506,7 +528,8 @@ function buildUpdateManifest(entries, binaryMap, identity) {
     assetsBaseUrl: releaseBase,
     packages: {
       full: packageRecord(currentFull[0]),
-      ...(currentDelta.length === 1
+      ...(currentDelta.length === 1 &&
+      !needsLegacyMsiFullUpdate(identity, baselineVersion)
         ? {
             delta: packageRecord(currentDelta[0], baselineVersion),
           }
@@ -550,7 +573,14 @@ function validateUpdateManifest(updateManifest, identity, entries, binaryMap) {
     binaryMap,
     `${releaseBase}/${encodeURIComponent(currentFull.filename)}`
   );
-  if (currentDelta) {
+  if (
+    currentDelta &&
+    needsLegacyMsiFullUpdate(identity, deltaBaselineVersion(entries, identity))
+  ) {
+    if (updateManifest.packages.delta) {
+      throw new Error("Legacy MSI clients require a full-only update manifest");
+    }
+  } else if (currentDelta) {
     const delta = updateManifest.packages?.delta;
     if (
       !(
