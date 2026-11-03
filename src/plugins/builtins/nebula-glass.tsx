@@ -2,13 +2,13 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type {
   BuiltinPlugin,
   BuiltinPluginContext,
-  PluginRecord,
+  BuiltinThemeRecord,
 } from "../types";
 import { type AquaFluidHandle, attachAquaFluid } from "./aqua-fluid";
 import { NEBULA_GLASS_PLUGIN_ID } from "./nebula-glass-manifest";
 import "./nebula-glass.css";
 
-type NebulaSettings = Record<string, boolean | number | string>;
+type NebulaSettings = Record<string, boolean | number | string | null>;
 
 function numberSetting(
   settings: NebulaSettings,
@@ -83,7 +83,7 @@ function AquaFluidCanvas({
   return <canvas className="nebula-glass-fluid-canvas" ref={canvasRef} />;
 }
 
-function NebulaBackdrop({ record }: { record: PluginRecord }) {
+function NebulaBackdrop({ record }: { record: BuiltinThemeRecord }) {
   const settings = record.settings;
   const reduceMotion =
     document.documentElement.dataset.reducedMotion === "true" ||

@@ -6,6 +6,12 @@ AI Image Manager 的公开插件是只读的声明式主题包或语言包。插
 
 ## 安全边界
 
+### 官方内置主题
+
+ASCII Ocean（字符海洋）与 Nebula Glass 均由宿主内置，在设置 → 插件中预览和启用，同一时间只启用一个主题。字符海洋默认关闭，支持深浅色、鱼群与鲨鱼数量、速度、背景互动和面板材质设置。鼠标只影响明确标记的背景留白；减少动态效果时显示静态画面，窗口隐藏时暂停。
+
+字符海洋使用 v2 清单描述设置，Canvas 模拟由宿主信任的内置实现执行，不属于可导入的 `.aim-plugin` 能力，也没有新增公开主题图层类型。第三方包仍然不能运行代码。源码来自固定版本的 ascii-sharks，完整许可随应用分发。
+
 v2 主题包只允许使用 `plugin.json`、`theme.json` 和 `assets/` 下的图片/视频；v3 语言包只允许使用 `plugin.json`、`signature.json` 以及 `locales/<tag>/renderer.json` 和 `locales/<tag>/main.json`。包内不允许 JavaScript、HTML、CSS、字体、可执行文件、网络 URL、`data:` URL 或脚本注入语法。应用会在导入时重新校验 ZIP 路径、重复条目、符号链接、资源扩展名、资源 MIME、解压大小、语言资源结构和签名；CLI 的校验不能替代宿主的最终校验。
 
 正式 v3 语言包必须由官方 Ed25519 keyring 验签。应用入口已注入 `src/plugins/official-locale-public-keys.json` 中受版本控制的官方公钥；`PluginManager` 的通用默认 keyring 仍为空，不信任临时或测试公钥。不要从运行时环境变量或插件目录读取信任锚。私钥只在发布机读取，绝不进入应用。开发者目录可以没有签名，但只在开发者模式中加载，并始终标记为 `developer` 信任级别。

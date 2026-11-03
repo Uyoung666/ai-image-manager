@@ -6,6 +6,8 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AsciiOceanPlugin } from "@/plugins/builtins/ascii-ocean";
+import { ASCII_OCEAN_MANIFEST } from "@/plugins/builtins/ascii-ocean-manifest";
 import { NebulaGlassPlugin } from "@/plugins/builtins/nebula-glass";
 import { NEBULA_GLASS_PLUGIN_ID } from "@/plugins/builtins/nebula-glass-manifest";
 import {
@@ -124,6 +126,7 @@ afterEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   document.documentElement.removeAttribute("data-active-plugin");
+  document.documentElement.removeAttribute("data-ascii-ocean");
 });
 
 describe("plugin runtime preview host", () => {
@@ -266,16 +269,16 @@ describe("plugin runtime preview host", () => {
     });
   });
 
-  it("reports local activation failures and applies the returned snapshot", async () => {
+  it("disables a builtin after an activation failure", async () => {
     const failingManifest = {
       ...activeManifest,
       id: NEBULA_GLASS_PLUGIN_ID,
       name: { en: "Nebula Glass", zh: "星云玻璃" },
     };
-    const failing = record(failingManifest, "active");
+    const failing = { ...record(failingManifest, "active"), source: "builtin" };
     const failureSnapshot = { plugins: [] };
     listPlugins.mockResolvedValue({ plugins: [failing] });
-    mocks.reportPluginActivationResult.mockResolvedValueOnce(failureSnapshot);
+    setPluginEnabled.mockResolvedValueOnce(failureSnapshot);
     const activateSpy = vi
       .spyOn(NebulaGlassPlugin, "activate")
       .mockImplementation(() => {
@@ -289,18 +292,90 @@ describe("plugin runtime preview host", () => {
     );
 
     await waitFor(() =>
-      expect(mocks.reportPluginActivationResult).toHaveBeenCalledWith(
+      expect(setPluginEnabled).toHaveBeenCalledWith(
         NEBULA_GLASS_PLUGIN_ID,
-        failingManifest.version,
-        false,
-        "activation-failed",
-        "activation boom"
+        false
       )
     );
     await waitFor(() =>
       expect(screen.getByTestId("active")).toHaveTextContent("")
     );
-    expect(setPluginEnabled).not.toHaveBeenCalled();
+    expect(mocks.reportPluginActivationResult).not.toHaveBeenCalled();
     activateSpy.mockRestore();
+  });
+
+  it("restores the ocean startup cache and removes its attributes on disable", () => {
+    localStorage.setItem("plugins.active", ASCII_OCEAN_MANIFEST.id);
+    localStorage.setItem("plugins.settings", JSON.stringify({ blur: 15 }));
+    listPlugins.mockReturnValue(new Promise(() => undefined));
+    const dispose = render(
+      <PluginHostProvider>
+        <Controls />
+      </PluginHostProvider>
+    );
+    expect(screen.getByTestId("active")).toHaveTextContent(
+      ASCII_OCEAN_MANIFEST.id
+    );
+    expect(document.documentElement.dataset.asciiOcean).toBe("active");
+    expect(
+      document.documentElement.style.getPropertyValue("--ocean-panel-blur")
+    ).toBe("15px");
+    dispose.unmount();
+    expect(document.documentElement.dataset.asciiOcean).toBeUndefined();
+    expect(
+      document.documentElement.style.getPropertyValue("--ocean-panel-blur")
+    ).toBe("");
+  });
+
+  it("restores ocean styles after preview and leaves persisted settings untouched", async () => {
+    const ocean = {
+      ...record(ASCII_OCEAN_MANIFEST, "active"),
+      source: "builtin",
+      settings: { blur: 12 },
+    };
+    listPlugins.mockResolvedValue({
+      plugins: [ocean, record(previewManifest, "disabled")],
+    });
+    render(
+      <PluginHostProvider>
+        <Controls />
+      </PluginHostProvider>
+    );
+    await waitFor(() =>
+      expect(document.documentElement.dataset.asciiOcean).toBe("active")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "preview" }));
+    await waitFor(() =>
+      expect(document.documentElement.dataset.asciiOcean).toBeUndefined()
+    );
+    expect(localStorage.getItem("plugins.active")).toBe(
+      ASCII_OCEAN_MANIFEST.id
+    );
+    fireEvent.click(screen.getByRole("button", { name: "exit" }));
+    await waitFor(() =>
+      expect(document.documentElement.dataset.asciiOcean).toBe("active")
+    );
+    expect(localStorage.getItem("plugins.settings")).toBe(
+      JSON.stringify({ blur: 12 })
+    );
+  });
+
+  it("never activates builtin code for a local record claiming a builtin id", async () => {
+    const activate = vi.spyOn(AsciiOceanPlugin, "activate");
+    listPlugins.mockResolvedValue({
+      plugins: [record(ASCII_OCEAN_MANIFEST, "active")],
+    });
+    render(
+      <PluginHostProvider>
+        <Controls />
+      </PluginHostProvider>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("active")).toHaveTextContent(
+        ASCII_OCEAN_MANIFEST.id
+      )
+    );
+    expect(activate).not.toHaveBeenCalled();
+    activate.mockRestore();
   });
 });

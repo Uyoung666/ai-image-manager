@@ -3,6 +3,8 @@ import fs from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 const electronState = vi.hoisted(() => ({ userData: "" }));
+const MAIN_KEYRING_PATTERN =
+  /configurePluginManager\(\s*\[NEBULA_GLASS_MANIFEST, ASCII_OCEAN_MANIFEST\],\s*OFFICIAL_LOCALE_TRUSTED_KEYS\s*\)/;
 
 vi.mock("electron", () => ({
   app: {
@@ -51,8 +53,6 @@ describe("official locale trusted keyring", () => {
     expect(mainSource).toContain(
       'import { OFFICIAL_LOCALE_TRUSTED_KEYS } from "./plugins/trusted-locale-keys";'
     );
-    expect(mainSource).toContain(
-      "configurePluginManager([NEBULA_GLASS_MANIFEST], OFFICIAL_LOCALE_TRUSTED_KEYS);"
-    );
+    expect(mainSource).toMatch(MAIN_KEYRING_PATTERN);
   });
 });

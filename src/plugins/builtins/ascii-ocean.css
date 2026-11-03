@@ -1,0 +1,134 @@
+:root[data-ascii-ocean="active"] {
+  --background: #071c2b;
+  --background-secondary: #102b3d;
+  --surface: #123247;
+  --surface-hover: #1b4054;
+  --surface-elevated: #21495d;
+  --foreground: #e3f4fa;
+  --foreground-secondary: #adcbd8;
+  --foreground-tertiary: #87adbf;
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: #123247;
+  --popover-foreground: var(--foreground);
+  --secondary: var(--background-secondary);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--background-secondary);
+  --muted-foreground: var(--foreground-secondary);
+  --border-subtle: rgb(132 207 225 / 0.16);
+  --border-default: rgb(132 207 225 / 0.26);
+  --border: var(--border-subtle);
+  --input: var(--border-default);
+  --sidebar: transparent;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: var(--surface-hover);
+  --sidebar-accent-foreground: var(--foreground);
+  --workspace-background: transparent;
+  --gallery-canvas: transparent;
+  --ocean-panel-blur: 10px;
+  --ocean-panel-opacity: 65%;
+  --ocean-panel: color-mix(
+    in srgb,
+    var(--surface) var(--ocean-panel-opacity),
+    transparent
+  );
+}
+
+:root.light[data-ascii-ocean="active"] {
+  --background: #dceff5;
+  --background-secondary: #e6f3f7;
+  --surface: #f4fbfd;
+  --surface-hover: #e0f0f6;
+  --surface-elevated: #ffffff;
+  --foreground: #113d50;
+  --foreground-secondary: #3d6475;
+  --foreground-tertiary: #567e8f;
+  --popover: #f4fbfd;
+  --border-subtle: rgb(22 80 105 / 0.14);
+  --border-default: rgb(22 80 105 / 0.25);
+}
+
+.ascii-ocean-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--background);
+  isolation: isolate;
+}
+
+.ascii-ocean-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  pointer-events: none;
+}
+
+:root[data-ascii-ocean="active"]
+  :is(
+    body,
+    #app,
+    .home-workspace,
+    .settings-page,
+    .home-gallery-body,
+    [data-surface="app"],
+    [data-surface="content"],
+    [data-surface="gallery"],
+    [data-surface="settings"],
+    [data-surface="page"]
+  ) {
+  background: transparent !important;
+}
+
+:root[data-ascii-ocean="active"] [data-surface="app"] {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-ascii-ocean="active"]
+  :is(
+    [data-surface="sidebar"],
+    [data-surface="card"],
+    [data-surface="panel"],
+    [data-surface="inspector"],
+    [data-surface="toolbar"],
+    .home-gallery-toolbar-layer,
+    .home-unified-toolbar,
+    .glass-surface,
+    .glass-surface-heavy
+  ) {
+  background: var(--ocean-panel) !important;
+  border-color: var(--border-default);
+  backdrop-filter: blur(var(--ocean-panel-blur));
+}
+
+:root[data-ascii-ocean="active"]
+  :is(
+    .sidebar-bg,
+    .sidebar-rail,
+    [data-surface="sidebar-shell"],
+    [data-surface="sidebar-rail"],
+    [data-surface="sidebar-resources"],
+    [data-surface="resource-tree"],
+    [data-surface="toolbar-content"]
+  ) {
+  background: transparent !important;
+}
+
+:root[data-ascii-ocean="active"]
+  :is([data-surface="page"], [data-surface="settings"])
+  :is(.bg-card, .bg-secondary) {
+  background-color: var(--ocean-panel);
+}
+
+:root[data-ascii-ocean="active"]
+  :is([data-surface="overlay"], [data-sonner-toast]) {
+  color: var(--foreground);
+  background: var(--popover) !important;
+}
+
+:root[data-ascii-ocean="active"] [data-surface="media-well"] {
+  background: var(--background-secondary);
+}

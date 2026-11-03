@@ -11,7 +11,10 @@ export function Welcome({ onAddFolder, isImporting }: WelcomeProps) {
   const { t } = useTranslation();
 
   return (
-    <div className="welcome-empty-state flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-y-auto p-4 sm:p-8">
+    <div
+      className="welcome-empty-state flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-y-auto p-4 sm:p-8"
+      data-ocean-background="true"
+    >
       <EmptyStateCard
         actions={
           isImporting

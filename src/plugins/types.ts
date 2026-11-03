@@ -395,5 +395,12 @@ export interface BuiltinPlugin {
   // biome-ignore lint/suspicious/noConfusingVoidType: lifecycle activation may be side-effect-only
   activate: (context: BuiltinPluginContext) => void | (() => void);
   id: string;
-  renderBackdrop: (props: { record: PluginRecord }) => ReactNode;
+  renderBackdrop: (props: {
+    record: BuiltinThemeRecord;
+    onError?: (error: unknown) => void;
+  }) => ReactNode;
 }
+
+export type BuiltinThemeRecord = PluginRecord<
+  PluginManifestV1 | NormalizedPluginManifestV2
+>;

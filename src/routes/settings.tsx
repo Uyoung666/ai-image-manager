@@ -61,6 +61,7 @@ function SettingsLayout() {
         <SettingsSidebar />
         <div
           className="min-h-0 min-w-0 flex-1 overflow-hidden"
+          data-ocean-background="true"
           key={location.pathname}
         >
           <div className="h-full min-w-0 animate-page-enter motion-reduce:animate-none">

@@ -6,6 +6,12 @@ Starting with v2.2.5, each locale object may contain up to 4096 properties in bo
 
 ## Security boundary
 
+### Official built-in themes
+
+ASCII Ocean and Nebula Glass are bundled host implementations, available in Settings → Plugins. Only one theme is active at a time. ASCII Ocean is disabled by default and supports light/dark palettes, shark and fish populations, speed, background interaction, and panel materials. Pointer effects only respond to explicitly designated empty background areas. Reduced motion shows a still frame; hidden windows pause animation.
+
+ASCII Ocean uses a v2 settings manifest with a trusted host Canvas implementation. It does not add an importable `.aim-plugin` capability or a public layer type. Third-party packages cannot execute code. Its ascii-sharks source revision and full license are included with the application.
+
 A v2 theme package may contain only `plugin.json`, `theme.json`, and image/video files below `assets/`. A v3 locale package may contain only `plugin.json`, `signature.json`, and `locales/<tag>/renderer.json` plus `locales/<tag>/main.json`. JavaScript, HTML, CSS, fonts, executables, network URLs, `data:` URLs, and script-injection syntax are not part of the public API. On import, the application re-checks ZIP paths, duplicate entries, symlinks, asset extensions, media MIME, extraction limits, locale structure, and signatures. CLI validation is a developer aid, not a replacement for the host's final validation.
 
 Release v3 locale packages must verify against the official Ed25519 keyring. The application entry point already injects the versioned public keys from `src/plugins/official-locale-public-keys.json`. The generic PluginManager default remains empty and trusts no temporary or test key. Never read runtime environment variables or plugin directories as trust anchors. Private keys remain on the release machine and never enter the application. Unsigned directories are available only in developer mode with `developer` trust.

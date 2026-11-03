@@ -1508,6 +1508,7 @@ export const MasonryGrid = memo(
         <div
           className={className}
           data-masonry-scroll=""
+          data-ocean-background="true"
           onMouseDown={handleMarqueeStart}
           ref={scrollRef}
           style={
@@ -1522,6 +1523,7 @@ export const MasonryGrid = memo(
         >
           {layoutReady && (
             <div
+              data-ocean-background="true"
               style={{
                 position: "relative",
                 height: totalHeight,

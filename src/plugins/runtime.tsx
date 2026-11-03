@@ -29,6 +29,8 @@ import {
   uninstallPlugin,
 } from "@/actions/plugins";
 import { PluginSettingsEditor } from "@/components/plugins/plugin-settings-editor";
+import { AsciiOceanPlugin } from "./builtins/ascii-ocean";
+import { ASCII_OCEAN_MANIFEST } from "./builtins/ascii-ocean-manifest";
 import { NebulaGlassPlugin } from "./builtins/nebula-glass";
 import {
   migrateNebulaGlassSettings,
@@ -54,8 +56,15 @@ import type {
 } from "./types";
 
 const BUILTIN_PLUGINS: Record<string, BuiltinPlugin> = {
+  [AsciiOceanPlugin.id]: AsciiOceanPlugin,
   [NebulaGlassPlugin.id]: NebulaGlassPlugin,
 };
+
+function builtinFor(record: ThemePluginRecord) {
+  return record.source === "builtin"
+    ? BUILTIN_PLUGINS[record.manifest.id]
+    : undefined;
+}
 
 type ThemePluginManifest = PluginManifestV1 | NormalizedPluginManifestV2;
 type ThemePluginRecord = PluginRecord<ThemePluginManifest>;
@@ -114,14 +123,21 @@ const PluginHostContext = createContext<PluginHostValue | null>(null);
 
 function readStartupSnapshot(): AnyPluginSnapshot {
   try {
-    if (localStorage.getItem("plugins.active") !== NebulaGlassPlugin.id) {
+    const activeId = localStorage.getItem("plugins.active");
+    const manifest = [NEBULA_GLASS_MANIFEST, ASCII_OCEAN_MANIFEST].find(
+      (candidate) => candidate.id === activeId
+    );
+    if (!manifest) {
       return { plugins: [] };
     }
     const cachedSettings = localStorage.getItem("plugins.settings");
     const parsed = cachedSettings
       ? (JSON.parse(cachedSettings) as Record<string, unknown>)
       : {};
-    const migrated = migrateNebulaGlassSettings(parsed);
+    const migrated =
+      manifest.id === NebulaGlassPlugin.id
+        ? migrateNebulaGlassSettings(parsed)
+        : parsed;
     if (JSON.stringify(migrated) !== JSON.stringify(parsed)) {
       localStorage.setItem("plugins.settings", JSON.stringify(migrated));
     }
@@ -130,8 +146,11 @@ function readStartupSnapshot(): AnyPluginSnapshot {
         {
           assetUrls: {},
           enabled: true,
-          manifest: NEBULA_GLASS_MANIFEST,
-          settings: validatePluginSettings(NEBULA_GLASS_MANIFEST, migrated),
+          manifest,
+          settings:
+            manifest.manifestVersion === 1
+              ? validatePluginSettings(manifest, migrated)
+              : validatePluginSettings(manifest, migrated),
           source: "builtin",
           status: "active",
         },
@@ -250,6 +269,9 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
     if (!activePlugin && snapshotLoading) {
       return;
     }
+    if (effectiveRecord?.manifest.id !== AsciiOceanPlugin.id) {
+      root.removeAttribute("data-ascii-ocean");
+    }
     root.toggleAttribute("data-plugin-active", Boolean(activePlugin));
     if (activePlugin) {
       root.dataset.activePlugin = activePlugin.manifest.id;
@@ -276,7 +298,7 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
     } catch {
       // Startup cache is an optimization; SQLite remains authoritative.
     }
-  }, [activePlugin, snapshotLoading]);
+  }, [activePlugin, effectiveRecord, snapshotLoading]);
 
   const applySnapshot = useCallback(
     async <T,>(operation: () => Promise<T>) => {
@@ -477,7 +499,7 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
     if (!record) {
       return;
     }
-    const builtin = BUILTIN_PLUGINS[record.manifest.id];
+    const builtin = builtinFor(record);
     let dispose: (() => void) | undefined;
     try {
       if (builtin) {
@@ -624,17 +646,18 @@ function LegacyThemeHost({ record }: { record: AnyPluginRecord }) {
 }
 
 export function PluginBackdropHost() {
-  const { activePlugin, previewRecord } = usePluginHost();
+  const { activePlugin, previewRecord, reportError } = usePluginHost();
   const record = previewRecord ?? activePlugin;
   if (!record) {
     return null;
   }
-  const builtin = BUILTIN_PLUGINS[record.manifest.id];
+  const builtin = builtinFor(record);
   if (builtin) {
     return (
       <>
         {builtin.renderBackdrop({
-          record: record as unknown as PluginRecord,
+          record,
+          onError: reportError,
         })}
       </>
     );

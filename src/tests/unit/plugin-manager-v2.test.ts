@@ -20,6 +20,7 @@ import {
   pluginInstallations,
   pluginPreferences,
 } from "@/db/schema";
+import { ASCII_OCEAN_MANIFEST } from "@/plugins/builtins/ascii-ocean-manifest";
 import { NEBULA_GLASS_MANIFEST } from "@/plugins/builtins/nebula-glass-manifest";
 
 const electronState = vi.hoisted(() => ({
@@ -31,7 +32,7 @@ vi.mock("electron", () => ({
   app: {
     getLocale: () => "en-US",
     getPath: () => electronState.userData,
-    getVersion: () => "2.0.0",
+    getVersion: () => "2.2.7",
   },
   dialog: {
     showOpenDialog: electronState.showOpenDialog,
@@ -43,6 +44,8 @@ vi.mock("electron", () => ({
 
 import { PluginManager } from "@/services/plugin-manager";
 import { PluginStore } from "@/services/plugin-store";
+
+vi.mock("@/db", () => ({ getDatabase: () => database }));
 
 interface ZipLike {
   append: (data: string, options: { name: string }) => void;
@@ -146,6 +149,44 @@ afterAll(() => {
 });
 
 describe("PluginManager v2 persistence boundary", () => {
+  it("keeps ocean disabled initially, persists settings and switches themes exclusively", async () => {
+    const manager = new PluginManager(
+      [NEBULA_GLASS_MANIFEST, ASCII_OCEAN_MANIFEST],
+      store
+    );
+    const initial = await manager.list();
+    expect(
+      initial.plugins.find(
+        (plugin) => plugin.manifest.id === ASCII_OCEAN_MANIFEST.id
+      )
+    ).toMatchObject({ enabled: false, status: "disabled" });
+    await manager.setSettings(ASCII_OCEAN_MANIFEST.id, {
+      fishCount: 40,
+      blur: 15,
+    });
+    await manager.setEnabled(NEBULA_GLASS_MANIFEST.id, true);
+    const next = await manager.setEnabled(ASCII_OCEAN_MANIFEST.id, true);
+    expect(
+      next.plugins
+        .filter((plugin) => plugin.enabled)
+        .map((plugin) => plugin.manifest.id)
+    ).toEqual([ASCII_OCEAN_MANIFEST.id]);
+    const restarted = new PluginManager(
+      [NEBULA_GLASS_MANIFEST, ASCII_OCEAN_MANIFEST],
+      store
+    );
+    expect(
+      (await restarted.list()).plugins.find(
+        (plugin) => plugin.manifest.id === ASCII_OCEAN_MANIFEST.id
+      )
+    ).toMatchObject({ enabled: true, settings: { fishCount: 40, blur: 15 } });
+    const reset = await restarted.resetSettings(ASCII_OCEAN_MANIFEST.id);
+    expect(
+      reset.plugins.find(
+        (plugin) => plugin.manifest.id === ASCII_OCEAN_MANIFEST.id
+      )?.settings
+    ).toMatchObject({ fishCount: 80, blur: 10 });
+  });
   it("previews and commits a package without enabling a new plugin", async () => {
     const archivePath = path.join(testRoot, "preview.aim-plugin");
     await writePluginArchive(archivePath, {

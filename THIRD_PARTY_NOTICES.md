@@ -1,5 +1,14 @@
 # Third-party notices
 
+## ASCII Sharks
+
+The built-in ASCII Ocean theme adapts the simulation and Canvas renderer from
+[stackedlol/ascii-sharks](https://github.com/stackedlol/ascii-sharks) at revision
+`a0074c16a106f0abc665fe9712ca445f8f98ad8e`.
+Copyright (c) 2026 drewdi. Distributed under the MIT license; the complete text
+is bundled in `licenses/ASCII-Sharks-MIT.txt`. The host adds ocean palettes,
+settings, bounded rendering, background-only interaction and lifecycle handling.
+
 ## Lucide Animated
 
 Selected icon animation designs are adapted from [pqoqubbw/icons](https://github.com/pqoqubbw/icons)

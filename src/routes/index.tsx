@@ -2560,7 +2560,10 @@ function HomePage() {
           totalPhotos={totalPhotos}
         />
         {hasPhotos ? (
-          <div className="home-gallery-body relative flex min-h-0 flex-1">
+          <div
+            className="home-gallery-body relative flex min-h-0 flex-1"
+            data-ocean-background="true"
+          >
             <div
               className="relative flex min-w-0 flex-1"
               inert={
@@ -2808,6 +2811,7 @@ function HomePage() {
         ) : (
           <div
             className="home-gallery-body flex min-h-0 flex-1"
+            data-ocean-background="true"
             style={{ paddingTop: galleryToolbarHeight }}
           >
             <Welcome
