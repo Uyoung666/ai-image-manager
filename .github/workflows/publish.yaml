@@ -591,6 +591,10 @@ jobs:
         path: release-bundle
     - name: Install isolated product validation tools
       run: npm ci --ignore-scripts
+    - name: Initialize Squirrel packaging tools
+      # The package's install script selects the host 7-Zip executable and DLL.
+      # Keep application/native install scripts disabled in this validation job.
+      run: npm rebuild electron-winstaller --foreground-scripts
     - name: Test installers against local feed
       run: node scripts/release-pipeline.mjs smoke
     - name: Save installer smoke evidence

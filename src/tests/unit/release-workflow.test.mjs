@@ -1,13 +1,173 @@
 /** @vitest-environment node */
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { TestRuntime } from "../helpers/test-runtime";
 
 const { load } = createRequire(import.meta.url)("js-yaml");
 const workflow = load(
   fs.readFileSync(".github/workflows/publish.yaml", "utf8")
 );
 const { jobs } = workflow;
+
+it.skipIf(process.platform !== "win32")(
+  "initializes skipped installer scripts before real Squirrel releasification",
+  () => {
+    const runtime = new TestRuntime("product-packaging-tools");
+    try {
+      const source = path.resolve("node_modules/electron-winstaller");
+      const fixture = path.join(
+        runtime.root,
+        "node_modules/electron-winstaller"
+      );
+      const vendor = path.join(fixture, "vendor");
+      fs.mkdirSync(vendor, { recursive: true });
+      // npm's published package excludes these generated aliases. Model a fresh
+      // --ignore-scripts install without touching the workspace's working tools.
+      for (const name of fs.readdirSync(path.join(source, "vendor"))) {
+        if (["7z.exe", "7z.dll"].includes(name) || name.endsWith(".log")) {
+          continue;
+        }
+        fs.copyFileSync(
+          path.join(source, "vendor", name),
+          path.join(vendor, name)
+        );
+      }
+      fs.cpSync(path.join(source, "script"), path.join(fixture, "script"), {
+        recursive: true,
+      });
+      fs.copyFileSync(
+        path.join(source, "package.json"),
+        path.join(fixture, "package.json")
+      );
+      const installerVersion = JSON.parse(
+        fs.readFileSync(path.join(fixture, "package.json"), "utf8")
+      ).version;
+      fs.writeFileSync(
+        path.join(runtime.root, "package.json"),
+        JSON.stringify({
+          name: "isolated-product-tools",
+          version: "1.0.0",
+          private: true,
+          dependencies: { "electron-winstaller": installerVersion },
+        })
+      );
+      const scratch = path.join(runtime.root, "scratch");
+      fs.mkdirSync(scratch);
+      const options = {
+        cwd: runtime.root,
+        windowsHide: true,
+        timeout: 60_000,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TEMP: scratch,
+          TMP: scratch,
+          SQUIRREL_TEMP: scratch,
+          npm_config_cache: path.join(runtime.root, "npm-cache"),
+          npm_config_offline: "true",
+        },
+      };
+      const run = (command, args) => {
+        const result = spawnSync(command, args, options);
+        if (result.error || result.signal) {
+          // A timed-out parent does not prove all packaging children have exited.
+          runtime.retain();
+          console.error(
+            `Packaging tools did not exit normally; retained ${runtime.root}`
+          );
+        }
+        return result;
+      };
+      const assertSuccess = (result) => {
+        expect(result.error).toBeUndefined();
+        expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      };
+      const payload = path.join(runtime.root, "payload");
+      fs.mkdirSync(payload);
+      fs.writeFileSync(
+        path.join(payload, "fixture.txt"),
+        "isolated packaging regression"
+      );
+      const spec = path.join(runtime.root, "fixture.nuspec");
+      fs.writeFileSync(
+        spec,
+        '<?xml version="1.0"?><package><metadata><id>product-tools-fixture</id><version>1.0.0</version><authors>CI validation</authors><description>TEST ONLY</description></metadata><files><file src="**" target="lib\\net45" /></files></package>'
+      );
+      assertSuccess(
+        run(path.join(vendor, "nuget.exe"), [
+          "pack",
+          spec,
+          "-BasePath",
+          payload,
+          "-OutputDirectory",
+          runtime.root,
+        ])
+      );
+      const releasify = (name) =>
+        run(path.join(vendor, "Squirrel.exe"), [
+          "--releasify",
+          path.join(runtime.root, "product-tools-fixture.1.0.0.nupkg"),
+          "--releaseDir",
+          path.join(runtime.root, name),
+          "--no-msi",
+        ]);
+      const broken = releasify("before");
+      expect(broken.error).toBeUndefined();
+      expect(broken.status).not.toBe(0);
+      expect(`${broken.stdout}\n${broken.stderr}`).toContain(
+        "CreateZipFromDirectory"
+      );
+
+      const steps = jobs.smoke.steps;
+      const install = steps.findIndex(
+        (step) => step.run === "npm ci --ignore-scripts"
+      );
+      const initialize = steps.findIndex(
+        (step) => step.name === "Initialize Squirrel packaging tools"
+      );
+      const smoke = steps.findIndex(
+        (step) => step.run === "node scripts/release-pipeline.mjs smoke"
+      );
+      expect(install).toBeGreaterThan(-1);
+      expect(initialize).toBeGreaterThan(install);
+      expect(initialize).toBeLessThan(smoke);
+      expect(steps[initialize]["continue-on-error"]).not.toBe(true);
+      expect(steps[initialize].run).toBe(
+        "npm rebuild electron-winstaller --foreground-scripts"
+      );
+      // Execute the actual workflow command in the fresh, offline dependency tree.
+      assertSuccess(
+        run("powershell.exe", [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          steps[initialize].run,
+        ])
+      );
+      for (const extension of ["exe", "dll"]) {
+        expect(fs.readFileSync(path.join(vendor, `7z.${extension}`))).toEqual(
+          fs.readFileSync(path.join(vendor, `7z-${process.arch}.${extension}`))
+        );
+      }
+      assertSuccess(releasify("after"));
+      const filename = "product-tools-fixture-1.0.0-full.nupkg";
+      const bytes = fs.readFileSync(path.join(runtime.root, "after", filename));
+      const sha1 = createHash("sha1").update(bytes).digest("hex").toUpperCase();
+      expect(
+        fs
+          .readFileSync(path.join(runtime.root, "after", "RELEASES"), "utf8")
+          .trim()
+      ).toBe(`${sha1} ${filename} ${bytes.length}`);
+    } finally {
+      runtime.cleanup();
+    }
+  },
+  120_000
+);
 
 describe("stable release workflow gates", () => {
   it("runs units and build from the same resolved commit in parallel", () => {
