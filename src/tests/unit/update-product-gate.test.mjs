@@ -8,9 +8,10 @@ import {
   extractFile,
   statFile,
 } from "@electron/asar";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { validateSmoke } from "../../../scripts/release/bundle.mjs";
 import {
+  cleanupProductSession,
   installedTargetPath,
   repackTestSuccessorArchive,
 } from "../../../scripts/release/update-product-gate.mjs";
@@ -29,6 +30,66 @@ const identity = {
   productUpdateGateRequired: true,
 };
 const hash = "b".repeat(64);
+
+it("cleans every resource after quit fails and preserves the original upgrade error", async () => {
+  const primary = new Error("real UI failure");
+  const calls = [];
+  const warning = vi
+    .spyOn(console, "error")
+    .mockImplementation(() => undefined);
+  try {
+    const operation = async () => {
+      try {
+        throw primary;
+      } finally {
+        await cleanupProductSession(
+          [
+            [
+              "normal quit",
+              () => {
+                calls.push("quit");
+                throw new Error("quit timed out");
+              },
+            ],
+            [
+              "disconnect CDP",
+              () => {
+                calls.push("disconnect");
+                throw new Error("disconnect failed");
+              },
+            ],
+            ["stop owned child", () => calls.push("stop")],
+            ["close proxy", () => calls.push("proxy")],
+          ],
+          primary
+        );
+      }
+    };
+    await expect(operation()).rejects.toBe(primary);
+    expect(calls).toEqual(["quit", "disconnect", "stop", "proxy"]);
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining("quit timed out")
+    );
+  } finally {
+    warning.mockRestore();
+  }
+});
+
+it("bounds a stuck cleanup and fails the gate after releasing the remaining resources", async () => {
+  let proxyClosed = false;
+  await expect(
+    cleanupProductSession([
+      ["disconnect CDP", () => new Promise(() => undefined), 10],
+      [
+        "close proxy",
+        () => {
+          proxyClosed = true;
+        },
+      ],
+    ])
+  ).rejects.toThrow("disconnect CDP: cleanup deadline exceeded");
+  expect(proxyClosed).toBe(true);
+});
 
 it.each([
   ["win32", "true", "github-hosted", true],

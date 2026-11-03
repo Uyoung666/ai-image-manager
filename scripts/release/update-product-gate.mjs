@@ -261,6 +261,53 @@ async function expectRestart(browser, action) {
   }
 }
 
+export async function cleanupProductSession(actions, primaryError) {
+  const errors = [];
+  for (const [stage, action, timeout = 5000] of actions) {
+    let timer;
+    try {
+      await Promise.race([
+        Promise.resolve().then(action),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("cleanup deadline exceeded")),
+            timeout
+          );
+        }),
+      ]);
+    } catch (error) {
+      errors.push(`${stage}: ${error.message ?? String(error)}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (errors.length) {
+    const message = `Product session cleanup failed: ${errors.join("; ")}`;
+    if (!primaryError) {
+      throw new Error(message);
+    }
+    console.error(message);
+  }
+}
+
+async function saveProductFailure(directory, profile, page, details) {
+  const ui = await page
+    ?.locator("body")
+    .innerText({ timeout: 2000 })
+    .catch(() => undefined);
+  await fsp.writeFile(
+    path.join(directory, "failure.json"),
+    JSON.stringify({ ...details, ui }, null, 2)
+  );
+  await page
+    ?.screenshot({ path: path.join(directory, "failure.png"), timeout: 5000 })
+    .catch(() => undefined);
+  const logs = path.join(profile, "logs");
+  if (fs.existsSync(logs)) {
+    await fsp.cp(logs, path.join(directory, "logs"), { recursive: true });
+  }
+}
+
 /** Uses Chromium CDP only. Release fuses, updater code and TLS verification stay enabled. */
 async function runUpgrade(
   executable,
@@ -294,6 +341,8 @@ async function runUpgrade(
   let child;
   let page;
   let targetProcess;
+  let primaryError;
+  let stage = "launch";
   const target = installedTargetPath(executable, manifest.version);
   const connect = async () => {
     await waitFor(
@@ -318,13 +367,20 @@ async function runUpgrade(
     if (await page.evaluate(() => Boolean(window.electronAPI?.isE2E))) {
       throw new Error("Production startup bypass is enabled");
     }
+    stage = "startup router";
     await page.waitForFunction(() => Boolean(window.__e2eNavigate));
     // Complete the real onboarding, if this isolated profile has never done so.
-    await page.locator("main").first().waitFor();
+    stage = "first screen";
+    // The released baseline replaces the entire layout during onboarding.
+    await page
+      .locator("main:visible, .onboarding-overlay:visible")
+      .first()
+      .waitFor();
     await page
       .locator(".startup-splash")
       .waitFor({ state: "hidden", timeout: 30_000 });
     if (await page.locator(".onboarding-overlay").isVisible()) {
+      stage = "onboarding";
       await page.getByRole("button", { name: CONTINUE_BUTTON }).click();
       await page
         .getByRole("button", {
@@ -334,9 +390,12 @@ async function runUpgrade(
       await page.getByRole("button", { name: START_BUTTON }).click();
       await page.locator(".onboarding-overlay").waitFor({ state: "hidden" });
     }
+    await page.locator("main").first().waitFor();
+    stage = "close preference";
     await page.evaluate(() => window.__e2eNavigate("/settings/behavior"));
     await page.getByRole("combobox", { name: CLOSE_BEHAVIOR_LABEL }).click();
     await page.getByRole("option", { name: QUIT_OPTION }).click();
+    stage = "retention album";
     await page.evaluate(() => window.__e2eNavigate("/albums"));
     const album = "Product upgrade retention album";
     if ((await page.getByText(album, { exact: true }).count()) === 0) {
@@ -348,6 +407,7 @@ async function runUpgrade(
       await page.getByRole("button", { name: CREATE_BUTTON }).click();
     }
     await page.getByText(album, { exact: true }).waitFor();
+    stage = "automatic update preference";
     await page.evaluate(() => window.__e2eNavigate("/settings/update"));
     const automaticUpdates = page.getByRole("checkbox", {
       name: AUTO_UPDATE_CHECKBOX,
@@ -359,6 +419,7 @@ async function runUpgrade(
     }
     await expect(automaticUpdates).not.toBeChecked();
     await expect(automaticUpdates).toBeEnabled();
+    stage = "download";
     proxy.activate();
     await page
       .getByRole("button", {
@@ -373,6 +434,7 @@ async function runUpgrade(
     if (before.version !== manifest.version || before.phase !== "downloaded") {
       throw new Error("Real updater did not download target");
     }
+    stage = "install and automatic restart";
     await expectRestart(browser, () =>
       page.getByRole("button", { name: INSTALL_BUTTON }).click()
     );
@@ -385,6 +447,7 @@ async function runUpgrade(
     ) {
       throw new Error("Automatic restart did not run the target executable");
     }
+    stage = "target health confirmation";
     await waitFor(
       async () => {
         const state = JSON.parse(await fsp.readFile(stateFile, "utf8")).state;
@@ -404,6 +467,7 @@ async function runUpgrade(
       throw new Error("Target executable missing");
     }
     // Exercise the ordinary restart IPC, then verify the same data after relaunch.
+    stage = "second launch";
     await expectRestart(browser, () =>
       page.evaluate(() => window.electronAPI.restartApp())
     );
@@ -448,51 +512,72 @@ async function runUpgrade(
     };
     return result;
   } catch (error) {
-    await fsp.writeFile(
-      path.join(directory, "failure.json"),
-      JSON.stringify(
-        {
-          message: String(error),
-          targetVersion: manifest.version,
-          trace: proxy.trace,
-        },
-        null,
-        2
+    primaryError = error;
+    console.error(
+      `[product-update] ${stage} failed: ${error.stack ?? String(error)}`
+    );
+    await saveProductFailure(directory, profile, page, {
+      stage,
+      message: String(error),
+      stack: error.stack,
+      targetVersion: manifest.version,
+      trace: proxy.trace,
+    }).catch((diagnosticError) =>
+      console.error(
+        `[product-update] diagnostic warning: ${diagnosticError.message}`
       )
     );
-    await page
-      ?.screenshot({ path: path.join(directory, "failure.png") })
-      .catch(() => undefined);
     throw error;
   } finally {
-    try {
-      if (page && !page.isClosed()) {
-        await page
-          .getByRole("button", { name: CLOSE_BUTTON })
-          .first()
-          .click({ timeout: 5000 })
-          .catch(() => undefined);
-        await waitFor(
+    await cleanupProductSession(
+      [
+        [
+          "normal quit",
           async () => {
-            try {
-              await fetch(`http://127.0.0.1:${port}/json/version`);
-              return false;
-            } catch {
-              return true;
+            if (page && !page.isClosed()) {
+              await page
+                .getByRole("button", { name: CLOSE_BUTTON })
+                .first()
+                .click({ timeout: 5000 });
+              await waitFor(
+                async () => {
+                  try {
+                    await fetch(`http://127.0.0.1:${port}/json/version`);
+                    return false;
+                  } catch {
+                    return true;
+                  }
+                },
+                "application quit",
+                15_000
+              );
             }
           },
-          "application quit",
-          15_000
-        );
-      }
-      await browser?.close().catch(() => undefined);
-      // Fall back only to the original owned child handle if a normal quit failed.
-      if (child && child.exitCode === null) {
-        child.kill();
-      }
-    } finally {
-      await proxy.close();
-    }
+          21_000,
+        ],
+        ["disconnect CDP", () => browser?.close()],
+        [
+          "stop owned child",
+          async () => {
+            if (child && child.exitCode === null && child.signalCode === null) {
+              await new Promise((resolve, reject) => {
+                child.once("exit", resolve);
+                child.once("error", reject);
+                try {
+                  child.kill();
+                } finally {
+                  // The cleanup deadline still observes exit; failed termination
+                  // must not keep the validation helper alive indefinitely.
+                  child.unref();
+                }
+              });
+            }
+          },
+        ],
+        ["close proxy and certificate", () => proxy.close(), 35_000],
+      ],
+      primaryError
+    );
   }
 }
 

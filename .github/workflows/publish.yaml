@@ -605,6 +605,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        include-hidden-files: true
         path: |
           release-evidence/installer-logs/
           release-evidence/product-update/
