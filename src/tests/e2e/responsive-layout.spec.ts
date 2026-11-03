@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -8,6 +9,10 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+
+const { version: appVersion } = createRequire(import.meta.url)(
+  "../../../package.json"
+) as { version: string };
 
 const ROUTES = [
   "/",
@@ -499,6 +504,7 @@ for (const { width, height } of WINDOW_SIZES) {
         "2.2.3",
         "2.2.6",
         "2.2.7",
+        appVersion,
       ]) {
         await navigateTo(`/whats-new?version=${version}`);
         await expect(
