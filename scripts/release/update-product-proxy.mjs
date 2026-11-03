@@ -51,21 +51,43 @@ export function certificatePowerShellScript(script) {
   return `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Import-Module "$PSHOME\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1" -ErrorAction Stop; $null=Get-PSDrive -Name Cert -PSProvider Certificate -ErrorAction Stop; ${script}`;
 }
 
-function powershell(script) {
-  return execute(
-    "powershell.exe",
-    [
-      "-NoProfile",
-      "-NonInteractive",
-      "-EncodedCommand",
-      Buffer.from(certificatePowerShellScript(script), "utf16le").toString(
-        "base64"
-      ),
-    ],
-    { windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024 }
+async function certificateStep(stage, operation) {
+  console.log(`[product-update-proxy] certificate: ${stage}`);
+  try {
+    return await operation();
+  } catch (error) {
+    const detail = error.killed
+      ? "timed out after 30000ms"
+      : error.stderr?.trim() || `exit code ${error.code ?? "unknown"}`;
+    throw new Error(`Product test certificate ${stage} failed: ${detail}`);
+  }
+}
+
+function powershell(script, stage) {
+  return certificateStep(stage, () =>
+    execute(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(certificatePowerShellScript(script), "utf16le").toString(
+          "base64"
+        ),
+      ],
+      { windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024 }
+    )
   );
 }
 const quote = (value) => `'${value.replaceAll("'", "''")}'`;
+
+export function isDisposableWindowsRunner(platform, environment) {
+  return (
+    platform === "win32" &&
+    environment.GITHUB_ACTIONS === "true" &&
+    environment.RUNNER_ENVIRONMENT === "github-hosted"
+  );
+}
 
 async function serveProductPackage(request, response, info, file) {
   if (!file || (await fsp.stat(file)).size !== info.size) {
@@ -95,13 +117,13 @@ async function serveProductPackage(request, response, info, file) {
   stream.pipe(response);
 }
 
-/** Trust exists only in the disposable CI account; no TLS bypass flags enter the app. */
+/** Trust exists only on the disposable hosted CI machine; TLS checks stay enabled. */
 export async function createProductUpdateProxy(
   directory,
   manifest,
   packageFiles
 ) {
-  if (process.platform !== "win32" || process.env.GITHUB_ACTIONS !== "true") {
+  if (!isDisposableWindowsRunner(process.platform, process.env)) {
     throw new Error(
       "Product HTTPS proxy requires a disposable Windows Actions runner"
     );
@@ -109,6 +131,7 @@ export async function createProductUpdateProxy(
   await fsp.mkdir(directory, { recursive: true });
   const password = randomBytes(24).toString("hex");
   const pfxFile = path.join(directory, "isolated-updater.pfx");
+  const certificateFile = path.join(directory, "isolated-updater.cer");
   let thumbprint;
   let proxy;
   let origin;
@@ -126,18 +149,38 @@ export async function createProductUpdateProxy(
     );
     if (thumbprint) {
       await powershell(
-        `$ErrorActionPreference='Stop'; foreach($store in @('My','Root')) { $target="Cert:\\CurrentUser\\$store\\${thumbprint}"; if(Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target } }`
+        `$root='Cert:\\LocalMachine\\Root\\${thumbprint}'; if(Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Force }; $personal='Cert:\\CurrentUser\\My\\${thumbprint}'; if(Test-Path -LiteralPath $personal) { Remove-Item -LiteralPath $personal -DeleteKey -Force }`,
+        "remove temporary trust and key"
       );
     }
   };
   try {
     const result = await powershell(
-      `$ErrorActionPreference='Stop'; $cert=New-SelfSignedCertificate -DnsName 'github.com','api.github.com' -CertStoreLocation Cert:\\CurrentUser\\My -KeyExportPolicy Exportable -NotAfter (Get-Date).AddDays(1); [IO.File]::WriteAllBytes(${quote(pfxFile)},$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pfx,${quote(password)})); $store=[Security.Cryptography.X509Certificates.X509Store]::new('Root','CurrentUser'); $store.Open('ReadWrite'); try {$store.Add($cert)} finally {$store.Close()}; $cert.Thumbprint`
+      `$identity=[Security.Principal.WindowsIdentity]::GetCurrent(); $principal=[Security.Principal.WindowsPrincipal]::new($identity); if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'An elevated disposable hosted runner is required' }; $cert=New-SelfSignedCertificate -DnsName 'github.com','api.github.com' -CertStoreLocation Cert:\\CurrentUser\\My -Provider 'Microsoft Software Key Storage Provider' -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddDays(1); $cert.Thumbprint`,
+      "create software certificate"
     );
-    thumbprint = result.stdout.trim();
-    if (!CERTIFICATE_THUMBPRINT.test(thumbprint)) {
+    const createdThumbprint = result.stdout.trim();
+    if (!CERTIFICATE_THUMBPRINT.test(createdThumbprint)) {
       throw new Error("Invalid test certificate identity");
     }
+    thumbprint = createdThumbprint;
+    await powershell(
+      `$cert=Get-Item -LiteralPath 'Cert:\\CurrentUser\\My\\${thumbprint}'; [IO.File]::WriteAllBytes(${quote(pfxFile)},$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pfx,${quote(password)})); [IO.File]::WriteAllBytes(${quote(certificateFile)},$cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))`,
+      "export temporary certificate"
+    );
+    // CurrentUser Root can display a confirmation dialog even in a -NonInteractive shell.
+    // The hosted machine is discarded after the job; import only the public certificate.
+    await certificateStep("install hosted-machine trust", () =>
+      execute(
+        path.join(
+          process.env.SystemRoot || "C:\\Windows",
+          "System32",
+          "certutil.exe"
+        ),
+        ["-f", "-addstore", "Root", certificateFile],
+        { windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024 }
+      )
+    );
     origin = https.createServer(
       { pfx: await fsp.readFile(pfxFile), passphrase: password },
       async (request, response) => {
@@ -217,7 +260,11 @@ export async function createProductUpdateProxy(
       },
     };
   } catch (error) {
-    await close();
+    await close().catch((cleanupError) => {
+      console.error(
+        `[product-update-proxy] certificate cleanup failed: ${cleanupError.message}`
+      );
+    });
     throw error;
   }
 }

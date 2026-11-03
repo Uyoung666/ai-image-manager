@@ -17,6 +17,7 @@ import {
 import {
   certificatePowerShellScript,
   createProductUpdateProxy,
+  isDisposableWindowsRunner,
   selectProductRequest,
 } from "../../../scripts/release/update-product-proxy.mjs";
 import { TestRuntime } from "../helpers/test-runtime";
@@ -28,6 +29,21 @@ const identity = {
   productUpdateGateRequired: true,
 };
 const hash = "b".repeat(64);
+
+it.each([
+  ["win32", "true", "github-hosted", true],
+  ["win32", "true", "self-hosted", false],
+  ["win32", "true", undefined, false],
+  ["win32", undefined, "github-hosted", false],
+  ["linux", "true", "github-hosted", false],
+])("restricts test trust changes to disposable hosted Windows (%s, %s, %s)", (platform, actions, runner, allowed) => {
+  expect(
+    isDisposableWindowsRunner(platform, {
+      GITHUB_ACTIONS: actions,
+      RUNNER_ENVIRONMENT: runner,
+    })
+  ).toBe(allowed);
+});
 
 it.skipIf(process.platform !== "win32")(
   "initializes the certificate drive in a clean no-profile shell without auto-loading",
@@ -50,9 +66,7 @@ it.skipIf(process.platform !== "win32")(
   20_000
 );
 
-it.skipIf(
-  process.platform !== "win32" || process.env.GITHUB_ACTIONS !== "true"
-)(
+it.skipIf(!isDisposableWindowsRunner(process.platform, process.env))(
   "starts and closes the trusted HTTPS proxy on a disposable Windows runner",
   async () => {
     const runtime = new TestRuntime("product-proxy-certificate");
