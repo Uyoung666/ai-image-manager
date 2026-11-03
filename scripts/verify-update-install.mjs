@@ -19,6 +19,11 @@ const vendor = path.resolve("node_modules/electron-winstaller/vendor");
 const feed = path.join(root, "feed");
 await fsp.mkdir(feed);
 const releasedBaseline = process.argv.includes("--released-baseline");
+const missingBaselineOnly = process.argv.includes("--missing-baseline");
+let scenarios = releasedBaseline ? ["normal"] : ["normal", "corrupt-cache"];
+if (missingBaselineOnly) {
+  scenarios = ["missing-baseline"];
+}
 const trace = [
   {
     baseline: releasedBaseline ? "v2.2.3" : "working-tree",
@@ -80,7 +85,7 @@ await fsp.writeFile(
   `
 import fs from 'node:fs'; import path from 'node:path';
 import {app, BrowserWindow, ipcMain, net} from 'electron';
-import {startUpdateManager, checkForUpdatesManually, installUpdate} from '@/services/update-manager';
+import {startUpdateManager, checkForUpdatesManually, installUpdate, updateCriticalServicesReady, getUpdateStartupContext, acknowledgeUpdateStartup} from '@/services/update-manager';
 import {getUpdateState} from '@/services/update-state';
 if(process.argv.some(a=>a.startsWith('--squirrel-'))) { app.quit(); }
 else {
@@ -94,6 +99,9 @@ else {
    const win=new BrowserWindow({width:720,height:480,show:false,webPreferences:{nodeIntegration:true,contextIsolation:false}});
    await win.loadURL('data:text/html,<button id="install">Install</button><script>document.querySelector("button").onclick=()=>require("electron").ipcRenderer.invoke("fixture:install")</script>');
    startUpdateManager();
+   updateCriticalServicesReady(true);
+   const context=getUpdateStartupContext();
+   if(context) acknowledgeUpdateStartup(context.nonce);
    fs.writeFileSync(path.join(app.getPath('userData'),'launched-'+app.getVersion()+'.json'),JSON.stringify({version:app.getVersion(),path:process.execPath,pid:process.pid,status:getUpdateState()}));
    if(app.getVersion()==='2.2.3') checkForUpdatesManually();
  });
@@ -156,6 +164,13 @@ if (releasedBaseline) {
       })
     );
     aliases.push({ find: `@/${name}`, replacement: destination });
+    if (name === "services/update-manager") {
+      // Host-only readiness hooks did not exist in this immutable old baseline.
+      await fsp.appendFile(
+        destination,
+        "\nexport function updateCriticalServicesReady() {}\nexport function getUpdateStartupContext() { return null; }\nexport function acknowledgeUpdateStartup() {}\n"
+      );
+    }
   }
   await build(
     structuredClone({
@@ -298,11 +313,9 @@ const server = createServer(async (request, response) => {
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const serverURL = `http://127.0.0.1:${server.address().port}`;
 try {
-  for (const installer of ["squirrel", "msi"]) {
-    for (const method of ["delta", "full"]) {
-      for (const scenario of releasedBaseline
-        ? ["normal"]
-        : ["normal", "corrupt-cache"]) {
+  for (const installer of missingBaselineOnly ? ["msi"] : ["squirrel", "msi"]) {
+    for (const method of missingBaselineOnly ? ["delta"] : ["delta", "full"]) {
+      for (const scenario of scenarios) {
         mode = method;
         scenarioMode = scenario;
         const requestStart = trace.length;
@@ -323,14 +336,16 @@ try {
           path.join(installRoot, "app-2.2.3"),
           { recursive: true }
         );
-        await fsp.copyFile(
-          path.join(feed, baseline.filename),
-          path.join(installRoot, "packages", baseline.filename)
-        );
-        await fsp.writeFile(
-          path.join(installRoot, "packages", "RELEASES"),
-          `${baseline.sha1} ${baseline.filename} ${baseline.size}\n`
-        );
+        if (scenario !== "missing-baseline") {
+          await fsp.copyFile(
+            path.join(feed, baseline.filename),
+            path.join(installRoot, "packages", baseline.filename)
+          );
+          await fsp.writeFile(
+            path.join(installRoot, "packages", "RELEASES"),
+            `${baseline.sha1} ${baseline.filename} ${baseline.size}\n`
+          );
+        }
         await fsp.copyFile(
           installer === "msi"
             ? path.resolve("node_modules/electron-wix-msi/vendor/msq.exe")
@@ -395,8 +410,11 @@ try {
             if (state.phase === "error") {
               throw new Error(JSON.stringify(state));
             }
+            const expectedMethod =
+              scenario === "missing-baseline" ? "full" : method;
             return (
-              state.phase === "downloaded" && state.updateMethod === method
+              state.phase === "downloaded" &&
+              state.updateMethod === expectedMethod
             );
           }, `${installer} ${method} downloaded`);
           browser = await chromium.connectOverCDP(
@@ -414,6 +432,21 @@ try {
               "damaged update cache"
             );
           }
+          if (scenario === "missing-baseline") {
+            const requests = trace.slice(requestStart);
+            if (
+              requests.some((entry) =>
+                entry.url?.endsWith(`/${delta.filename}`)
+              ) ||
+              requests.filter((entry) =>
+                entry.url?.endsWith(`/${full.filename}`)
+              ).length !== 1
+            ) {
+              throw new Error(
+                "A fresh MSI installation must download full without requesting delta"
+              );
+            }
+          }
           await browser.contexts()[0].pages()[0].locator("#install").click();
           const target = await waitFor(
             async () => {
@@ -426,19 +459,27 @@ try {
               if (state.phase === "error") {
                 throw new Error(`Install failed: ${JSON.stringify(state)}`);
               }
-              return JSON.parse(
+              if (state.phase !== "idle") {
+                return false;
+              }
+              const launched = JSON.parse(
                 await fsp.readFile(
                   path.join(profile, "launched-2.2.4.json"),
                   "utf8"
                 )
               );
+              return {
+                ...launched,
+                initialStatus: launched.status,
+                status: state,
+              };
             },
             `${installer} ${method} target started`,
             180_000
           );
           targetPid = target.pid;
           if (
-            target.status.phase !== "idle" ||
+            !["confirming", "idle"].includes(target.status.phase) ||
             path.basename(path.dirname(target.path)) !== "app-2.2.4"
           ) {
             throw new Error(

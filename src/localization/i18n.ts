@@ -1493,6 +1493,14 @@ i18n.use(initReactI18next).init({
           "更新所需磁盘空间不足，请释放下载、安装或临时目录所在磁盘的空间后重试。",
         updateRecovering: "增量安装失败，正在切换完整包并恢复更新...",
         updateRestarting: "安装完成，正在启动新版本...",
+        updateConfirming: "正在确认新版本可正常使用…",
+        updateRestartVerify: "重启并验证",
+        updateRecheckInstaller: "重新核验安装进程",
+        updateErrorStateSave:
+          "更新状态未能保存，请检查磁盘空间和目录权限后重试。",
+        updateErrorStartup: "新版本尚未通过启动确认，请重启验证或查看诊断。",
+        updateErrorInstallerUnverified:
+          "无法确认安装进程状态。可重新核验，或退出应用后再试。",
         updateElapsed: "已耗时 {{seconds}} 秒...",
         updateDownloadedStatus: "{{version}} 已下载就绪",
         updateDeltaDownloaded: "已使用增量包下载",

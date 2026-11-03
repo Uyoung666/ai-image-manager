@@ -85,12 +85,18 @@ import {
   terminateTrackedChildProcessesSync,
 } from "@/services/tracked-child-processes";
 import {
+  failUpdateStartup,
   installUpdate,
   isUpdateInstallationActive,
   isUpdateQuitAllowed,
+  resumeUpdateConfirmation,
   startUpdateManager,
-  stopAutomaticChecks,
+  stopUpdateManager,
+  suspendUpdateConfirmation,
+  updateCriticalServicesReady,
+  updateStartupDocumentChanged,
 } from "@/services/update-manager";
+import { getUpdateState } from "@/services/update-state";
 import {
   createWanderLifecycleBridge,
   type WanderLifecycleBridge,
@@ -1085,6 +1091,14 @@ function createWindow(httpPort: number, httpAuthToken: string) {
     lifecycleBridge.publish("initial");
     applyUiZoomScale();
   });
+  mainWindow.webContents.on(
+    "did-start-navigation",
+    (_event, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) {
+        updateStartupDocumentChanged();
+      }
+    }
+  );
   mainWindow.webContents.on("console-message", (details) => {
     if (details.level !== "warning" && details.level !== "error") {
       return;
@@ -1104,7 +1118,9 @@ function createWindow(httpPort: number, httpAuthToken: string) {
       source: `${details.sourceId}:${details.lineNumber}`,
     });
   });
+  mainWindow.on("unresponsive", failUpdateStartup);
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    failUpdateStartup();
     const message = `Renderer process exited: ${details.reason} (${details.exitCode})`;
     const incident = recordDiagnosticIncident({
       source: "renderer-crash",
@@ -1160,6 +1176,7 @@ function createWindow(httpPort: number, httpAuthToken: string) {
       log.debug({ err: error }, "Renderer load ended after window teardown");
     },
     onFailure: (error) => {
+      failUpdateStartup();
       const incident = recordDiagnosticIncident({
         message: error instanceof Error ? error.message : String(error),
         source: "startup-failure",
@@ -1481,9 +1498,43 @@ async function runStartupCleanup() {
 
 // ── Bootstrap background services (non-blocking after window is shown) ──
 async function startBackgroundServices() {
+  let criticalStarted = false;
   try {
     logMain("[bg] startLevel(Critical) begin");
-    await registry.startLevel(ServiceLevel.Critical);
+    const criticalReport = await registry.startLevel(ServiceLevel.Critical);
+    updateCriticalServicesReady(
+      criticalReport.services
+        .filter((service) => service.level === ServiceLevel.Critical)
+        .every((service) => service.status === "ok")
+    );
+    criticalStarted = true;
+    const confirmationHealthTimer = setInterval(() => {
+      const confirmationState = getUpdateState();
+      if (
+        confirmationState.version !== app.getVersion() ||
+        confirmationState.phase === "idle" ||
+        (confirmationState.phase === "error" &&
+          confirmationState.operation === "startup")
+      ) {
+        clearInterval(confirmationHealthTimer);
+        return;
+      }
+      registry
+        .health(ServiceLevel.Critical)
+        .then((report) => {
+          if (
+            report.services.some(
+              (service) =>
+                service.level === ServiceLevel.Critical &&
+                service.status !== "ok"
+            )
+          ) {
+            updateCriticalServicesReady(false);
+          }
+        })
+        .catch(() => updateCriticalServicesReady(false));
+    }, 1000);
+    confirmationHealthTimer.unref();
     log.info("Critical services started");
     logMain("[bg] startLevel(Critical) done");
 
@@ -1519,6 +1570,9 @@ async function startBackgroundServices() {
     );
   } catch (err) {
     const stack = (err as Error)?.stack || String(err);
+    if (!criticalStarted) {
+      updateCriticalServicesReady(false);
+    }
     logMain(`[bg] FATAL ${stack}`);
     throw err;
   }
@@ -1687,6 +1741,8 @@ async function handleLocalMediaRequest(request: {
 }
 
 app.whenReady().then(async () => {
+  powerMonitor.on("suspend", suspendUpdateConfirmation);
+  powerMonitor.on("resume", resumeUpdateConfirmation);
   // Squirrel.Windows event (install/update/obsolete): quit immediately,
   // don't run expensive init like model copying — the process gets killed
   // and partial copies cause "AI embedding failure" on next launch.
@@ -1868,7 +1924,7 @@ async function cleanupApplicationBeforeQuit(): Promise<void> {
   beginChildProcessShutdown();
   const { suspendImportsForShutdown } = await import("@/services/import-queue");
   suspendImportsForShutdown();
-  stopAutomaticChecks();
+  stopUpdateManager();
   try {
     if (logDir) {
       fs.writeFileSync(

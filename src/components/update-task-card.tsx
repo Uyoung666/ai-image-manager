@@ -44,6 +44,10 @@ function useUpdateTaskView(appVersion?: string) {
     };
   }
   const preparingInstall = pending === "install" && !isUpdateBusy(status);
+  const cooldown =
+    status.phase === "error" && primary?.command !== "check"
+      ? updateRetrySeconds(status, now)
+      : 0;
   return {
     ...snapshot,
     primary,
@@ -51,7 +55,7 @@ function useUpdateTaskView(appVersion?: string) {
     preparingInstall,
     version:
       appVersion || snapshot.currentVersion || status.sourceVersion || "…",
-    cooldown: status.phase === "error" ? updateRetrySeconds(status, now) : 0,
+    cooldown,
     ready: isUpdateReady(status) && !preparingInstall,
     busy:
       isUpdateBusy(status) ||

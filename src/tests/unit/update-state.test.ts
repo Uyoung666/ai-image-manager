@@ -1,8 +1,17 @@
+import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), log: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  get: vi.fn(),
+  set: vi.fn(),
+  log: vi.fn(),
+  construct: vi.fn(),
+}));
 vi.mock("electron-store", () => ({
   default: class {
+    constructor(options: unknown) {
+      mocks.construct(options);
+    }
     get = mocks.get;
     set = mocks.set;
   },
@@ -16,11 +25,61 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllTimers();
   vi.useRealTimers();
 });
 
 describe("durable update state", () => {
+  it("preserves malformed JSON before resetting the store and permits a later retry", async () => {
+    mocks.construct.mockImplementationOnce(() => {
+      throw new SyntaxError("Truncated JSON");
+    });
+    mocks.get.mockReturnValue({ phase: "idle" });
+    const copy = vi
+      .spyOn(fs, "copyFileSync")
+      .mockImplementation(() => undefined);
+    const { getUpdateState, setUpdateState } = await import(
+      "@/services/update-state"
+    );
+    expect(getUpdateState().message).toBe("UPDATE_STATE_SAVE_FAILED");
+    expect(copy).toHaveBeenCalledOnce();
+    expect(mocks.construct).toHaveBeenLastCalledWith(
+      expect.objectContaining({ clearInvalidConfig: true })
+    );
+    setUpdateState({ phase: "checking" });
+    expect(getUpdateState().phase).toBe("checking");
+  });
+  it("rejects corrupt saved state without stranding startup", async () => {
+    mocks.get.mockReturnValue({
+      phase: "installing",
+      installerPid: "not-a-pid",
+    });
+    const { getUpdateState } = await import("@/services/update-state");
+    expect(getUpdateState()).toMatchObject({
+      phase: "error",
+      message: "UPDATE_STATE_SAVE_FAILED",
+    });
+  });
+  it("rolls back a failed critical write and can publish an error without another disk write", async () => {
+    const { getUpdateState, setUpdateState } = await import(
+      "@/services/update-state"
+    );
+    setUpdateState({ phase: "downloaded", version: "2.2.4" });
+    mocks.set.mockImplementationOnce(() => {
+      throw new Error("ENOSPC");
+    });
+    expect(() =>
+      setUpdateState({ phase: "installing", version: "2.2.4" })
+    ).toThrow("UPDATE_STATE_SAVE_FAILED");
+    expect(getUpdateState().phase).toBe("downloaded");
+    setUpdateState(
+      { phase: "error", message: "UPDATE_STATE_SAVE_FAILED" },
+      false
+    );
+    expect(mocks.set).toHaveBeenCalledTimes(2);
+    expect(getUpdateState().message).toBe("UPDATE_STATE_SAVE_FAILED");
+  });
   it("keeps progress live in memory and merges disk writes to two-second intervals", async () => {
     vi.useFakeTimers();
     const { setUpdateState, getUpdateState } = await import(

@@ -1,6 +1,7 @@
 const DOWNLOADED_LABEL = /updateDownloadedStatus/;
 const COMPLETE_PERCENT = /100%/;
 const OLD_NOTES = /Old notes/;
+const RETRY_COUNTDOWN = /updateRetryAvailableIn/;
 
 import {
   act,
@@ -92,7 +93,23 @@ describe("update task actions and presentation", () => {
     expect(fixture.dependencies.check).not.toHaveBeenCalled();
   });
 
-  it("disables retries during the server cooldown and unlocks them when it expires", async () => {
+  it("allows a manual check during a previous network's rate-limit cooldown", async () => {
+    const fixture = await section({
+      phase: "error",
+      operation: "check",
+      message: "UPDATE_RATE_LIMITED",
+      retryAfter: new Date(Date.now() + 2_000_000).toISOString(),
+    });
+    const retry = screen.getByRole("button", { name: "updateRetry" });
+    expect(retry).toBeEnabled();
+    expect(screen.queryByText(RETRY_COUNTDOWN)).not.toBeInTheDocument();
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(fixture.dependencies.check).toHaveBeenCalledOnce()
+    );
+  });
+
+  it("disables download retries during the server cooldown and unlocks them when it expires", async () => {
     const fixture = await section({ phase: "idle" });
     vi.useFakeTimers();
     act(() =>

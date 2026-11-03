@@ -5,8 +5,10 @@ export interface StartupOnboardingStateDetail {
   needsOnboarding: boolean;
 }
 
-export function notifyStartupHomeReady(): void {
-  window.dispatchEvent(new Event(STARTUP_HOME_READY_EVENT));
+export function notifyStartupHomeReady(healthy = true): void {
+  window.dispatchEvent(
+    new CustomEvent(STARTUP_HOME_READY_EVENT, { detail: { healthy } })
+  );
 }
 
 export function notifyStartupOnboardingState(needsOnboarding: boolean): void {

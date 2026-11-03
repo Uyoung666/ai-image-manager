@@ -9,6 +9,10 @@ import {
   test,
 } from "./helpers/test-runtime";
 
+const RESTART_VERIFY = /^(重启并验证|Restart and verify|再起動して確認)$/;
+const RECHECK_INSTALLER =
+  /^(重新核验安装进程|Check installer again|インストールプロセスを再確認)$/;
+
 const LOCALES = ["zh", "en", "ja-JP"] as const;
 const WINDOWS = [
   { width: 720, height: 480 },
@@ -21,6 +25,7 @@ const SETTINGS = /^(查看更新设置|Open update settings|更新設定を開�
 const FULL = /^(改用完整包|Use full package|完全パッケージを使用)$/;
 const RETRY_SPACE =
   /^(释放空间后重试|Retry after freeing space|空き容量を確保して再試行)$/;
+const RETRY = /^(重试|Retry|再試行)$/;
 const VIEW = /^(查看更新|View update|更新を確認)$/;
 const ACTIVE_TOAST = '[data-sonner-toast]:not([data-removed="true"])';
 const CHECKED_AT = "2026-10-03T10:45:06.000Z";
@@ -261,6 +266,7 @@ for (const locale of LOCALES) {
           "recovering",
           "installing",
           "restarting",
+          "confirming",
         ] as const) {
           await emit(page, {
             phase,
@@ -277,6 +283,21 @@ for (const locale of LOCALES) {
           if (phase !== "retry-wait") {
             await expect(details.getByRole("progressbar")).toHaveCount(0);
           }
+        }
+        for (const [operation, message, label] of [
+          ["startup", "UPDATE_STARTUP_FAILED", RESTART_VERIFY],
+          ["install", "UPDATE_INSTALLER_UNVERIFIED", RECHECK_INSTALLER],
+        ] as const) {
+          await emit(page, {
+            phase: "error",
+            operation,
+            message,
+            installerPid: operation === "install" ? 123_456 : undefined,
+          });
+          await expect(
+            details.getByRole("button", { name: label })
+          ).toBeEnabled();
+          await assertBounds(page);
         }
         await emit(page, {
           phase: "error",
@@ -295,6 +316,16 @@ for (const locale of LOCALES) {
         );
         await assertBounds(page);
         await screenshot(app, `${locale}-${size.width}-${theme}-space.png`);
+        await emit(page, {
+          phase: "error",
+          operation: "check",
+          message: "UPDATE_RATE_LIMITED",
+          retryAfter: new Date(Date.now() + 2_000_000).toISOString(),
+        });
+        await expect(
+          details.getByRole("button", { name: RETRY })
+        ).toBeEnabled();
+        await assertBounds(page);
         await page.keyboard.press("Escape");
         await expect(details).toBeHidden();
         await expect(trigger).toBeFocused();
@@ -302,6 +333,13 @@ for (const locale of LOCALES) {
         await details.getByRole("button", { name: SETTINGS }).click();
         await expect(details).toBeHidden();
         const task = page.getByTestId("update-task-card");
+        await emit(page, {
+          phase: "error",
+          message: "UPDATE_DISK_SPACE",
+          operation: "download",
+          canResume: true,
+          lastCheckedAt: CHECKED_AT,
+        });
         await expect(task).toContainText(checkedTime);
         await expect(task).not.toContainText("&#x2F;");
         await expect(
@@ -309,6 +347,32 @@ for (const locale of LOCALES) {
         ).toBeVisible();
         await expect(page.locator("main")).toHaveCount(1);
         await assertBounds(page);
+        await emit(page, {
+          phase: "error",
+          operation: "check",
+          message: "UPDATE_RATE_LIMITED",
+          retryAfter: new Date(Date.now() + 2_000_000).toISOString(),
+        });
+        const retry = task.getByRole("button", { name: RETRY });
+        await expect(retry).toBeEnabled();
+        await assertBounds(page);
+        const checks = await page.evaluate(
+          () =>
+            window.updateUiRequests.filter((name) =>
+              name.includes("checkForUpdates")
+            ).length
+        );
+        await retry.click();
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                window.updateUiRequests.filter((name) =>
+                  name.includes("checkForUpdates")
+                ).length
+            )
+          )
+          .toBeGreaterThan(checks);
         await emit(page, { phase: "idle" });
         await expect(trigger).toBeHidden();
       }

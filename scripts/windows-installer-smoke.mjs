@@ -1359,11 +1359,24 @@ async function runSetupUpgradeSmoke(setupPath, version, feed) {
   const markerContents = `preserve-${normalizedOldVersion}\n`;
   fs.writeFileSync(retentionMarker, markerContents, "utf8");
 
-  run(
-    updateExecutable,
-    ["--update", feed],
-    `update previous Squirrel installation ${normalizedOldVersion} from testing feed to ${version}`
-  );
+  if (process.env.AIM_PRODUCT_UPDATE_GATE === "1") {
+    const { runProductUpgradeChain } = await import(
+      "./release/update-product-gate.mjs"
+    );
+    await runProductUpgradeChain(
+      oldExecutable,
+      sharedUserData,
+      version,
+      "setup",
+      "first"
+    );
+  } else {
+    run(
+      updateExecutable,
+      ["--update", feed],
+      `update previous Squirrel installation ${normalizedOldVersion} from testing feed to ${version}`
+    );
+  }
   assertSquirrelDeltaUsed(root, version);
   const upgradedExecutable = path.join(
     root,
@@ -1386,6 +1399,18 @@ async function runSetupUpgradeSmoke(setupPath, version, feed) {
     version
   );
 
+  if (process.env.AIM_PRODUCT_UPDATE_GATE === "1") {
+    const { runProductUpgradeChain } = await import(
+      "./release/update-product-gate.mjs"
+    );
+    await runProductUpgradeChain(
+      upgradedExecutable,
+      sharedUserData,
+      version,
+      "setup",
+      "second"
+    );
+  }
   // Keep the runner clean and make uninstallation part of the gate. Do not
   // delete the runner's Temp files; Squirrel owns its install cleanup.
   run(
@@ -1702,14 +1727,27 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
       normalizedOldVersion
     );
 
-    await runInstallerProcess(
-      updateExecutable,
-      ["--update", feed],
-      `auto-update MSI installation ${normalizedOldVersion} to ${version} from testing feed`,
-      SQUIRREL_EXIT_CODES,
-      process.env,
-      { outputPath: path.join(logDirectory, "auto-update.log") }
-    );
+    if (process.env.AIM_PRODUCT_UPDATE_GATE === "1") {
+      const { runProductUpgradeChain } = await import(
+        "./release/update-product-gate.mjs"
+      );
+      await runProductUpgradeChain(
+        oldExecutable,
+        sharedUserData,
+        version,
+        "msi",
+        "first"
+      );
+    } else {
+      await runInstallerProcess(
+        updateExecutable,
+        ["--update", feed],
+        `auto-update MSI installation ${normalizedOldVersion} to ${version} from testing feed`,
+        SQUIRREL_EXIT_CODES,
+        process.env,
+        { outputPath: path.join(logDirectory, "auto-update.log") }
+      );
+    }
     installedMsiPath = oldMsiPath;
     await waitForPath(
       path.join(
@@ -1744,6 +1782,18 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
       version
     );
 
+    if (process.env.AIM_PRODUCT_UPDATE_GATE === "1") {
+      const { runProductUpgradeChain } = await import(
+        "./release/update-product-gate.mjs"
+      );
+      await runProductUpgradeChain(
+        upgradedExecutable,
+        sharedUserData,
+        version,
+        "msi",
+        "second"
+      );
+    }
     await runMsi(
       [
         "/x",

@@ -7,6 +7,13 @@ import {
 } from "@/utils/startup-readiness";
 
 describe("startup readiness events", () => {
+  it("distinguishes a rendered error surface from a healthy home", () => {
+    const listener = vi.fn();
+    window.addEventListener(STARTUP_HOME_READY_EVENT, listener);
+    notifyStartupHomeReady(false);
+    expect(listener.mock.calls[0][0].detail).toEqual({ healthy: false });
+    window.removeEventListener(STARTUP_HOME_READY_EVENT, listener);
+  });
   it("notifies the startup coordinator when the home first frame is ready", () => {
     const listener = vi.fn();
     const handler = (event: Event) => {

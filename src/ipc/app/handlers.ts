@@ -2,12 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { os } from "@orpc/server";
 import { app, shell } from "electron";
+import { z } from "zod";
 import { getHttpServerPort } from "@/services/http-server";
 import {
+  acknowledgeUpdateStartup,
   checkForUpdatesManually,
+  failUpdateStartup,
   installUpdate,
   isUpdateInstallationActive,
   isUpdateQuitAllowed,
+  getUpdateStartupContext as readStartupContext,
+  recheckUpdateInstaller,
   resumeUpdateDownload,
 } from "@/services/update-manager";
 import { getUpdateState } from "@/services/update-state";
@@ -15,6 +20,21 @@ import { consumeUpdateWelcome as consumeUpdateWelcomeState } from "@/services/up
 import type { UpdateResult, UpdateStatus } from "@/types/update";
 
 const STABLE_VERSION_RE = /^\d+\.\d+\.\d+$/;
+
+export const getUpdateStartupContext = os.handler(() => readStartupContext());
+export const reportUpdateStartup = os
+  .input(z.object({ nonce: z.string().uuid(), ready: z.boolean() }).strict())
+  .handler(({ input }) => {
+    if (readStartupContext()?.nonce !== input.nonce) {
+      return { ok: false };
+    }
+    if (!input.ready) {
+      failUpdateStartup();
+      return { ok: true };
+    }
+    return { ok: acknowledgeUpdateStartup(input.nonce) };
+  });
+export const recheckInstaller = os.handler(() => recheckUpdateInstaller());
 
 export const currentPlatform = os.handler(() => {
   return process.platform;
@@ -41,12 +61,18 @@ export const restartApp = os.handler(() => {
   }
   app.relaunch({
     execPath: process.execPath,
-    args: process.argv.slice(1).filter((a) => !a.startsWith("--squirrel-")),
+    args: process.argv
+      .slice(1)
+      .filter(
+        (a) =>
+          !(a.startsWith("--squirrel-") || a.startsWith("--aim-update-token="))
+      ),
   });
   app.quit();
 });
 
 export const checkForUpdates = os.handler((): UpdateResult => {
+  // This route is user-initiated; only scheduled checks honor the old cooldown.
   return checkForUpdatesManually();
 });
 

@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { recordRendererIncident } from "@/actions/diagnostics";
 import { DiagnosticsReportDialog } from "@/components/diagnostics-report-form";
+import { reportUpdateSurfaceFailure } from "@/components/update-startup-ready";
 
 interface Props {
   children: ReactNode;
@@ -134,6 +135,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    reportUpdateSurfaceFailure();
     console.error("[ErrorBoundary]", error.message, info.componentStack);
     try {
       Promise.resolve(

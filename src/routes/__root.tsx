@@ -25,6 +25,10 @@ import { StartupSplash } from "@/components/startup-splash";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { UpdateHeaderControl } from "@/components/update-header-control";
+import {
+  reportUpdateSurfaceFailure,
+  UpdateStartupReady,
+} from "@/components/update-startup-ready";
 import { BrowseSessionProvider } from "@/contexts/BrowseSessionContext";
 import { ImportDropProvider } from "@/contexts/import-drop-context";
 import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
@@ -62,6 +66,7 @@ function Root() {
     useState(isTestEnvironment);
   const [needsOnboarding, setNeedsOnboarding] = useState(isTestEnvironment);
   const [homeReady, setHomeReady] = useState(isTestEnvironment);
+  const [homeFailed, setHomeFailed] = useState(false);
   const [startupTimedOut, setStartupTimedOut] = useState(false);
   const [renderSplash, setRenderSplash] = useState(!isTestEnvironment);
   const [splashExiting, setSplashExiting] = useState(false);
@@ -142,8 +147,13 @@ function Root() {
   }, [navigate, t]);
 
   useLayoutEffect(() => {
-    const handleHomeReady = () => {
+    const handleHomeReady = (event: Event) => {
       setHomeReady(true);
+      if (
+        (event as CustomEvent<{ healthy: boolean }>).detail?.healthy === false
+      ) {
+        setHomeFailed(true);
+      }
     };
     const handleOnboardingState = (event: Event) => {
       const detail = (event as CustomEvent<StartupOnboardingStateDetail>)
@@ -256,6 +266,11 @@ function Root() {
     <ErrorBoundary>
       <Suspense fallback={<RouteSuspense />}>
         <Outlet />
+        <UpdateStartupReady
+          ready={
+            !isTestEnvironment && startupReady && !startupWaiting && !homeFailed
+          }
+        />
       </Suspense>
     </ErrorBoundary>
   );
@@ -307,6 +322,9 @@ function StandaloneLayout({ children }: { children: React.ReactNode }) {
 }
 
 function RootError() {
+  useEffect(() => {
+    reportUpdateSurfaceFailure();
+  }, []);
   const { t } = useTranslation();
 
   return (

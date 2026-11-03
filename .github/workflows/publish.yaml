@@ -573,7 +573,7 @@ jobs:
     - preflight
     - build
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 90
     steps:
     - uses: actions/checkout@v6
       with:
@@ -589,6 +589,8 @@ jobs:
       with:
         name: ${{ env.BUNDLE_ARTIFACT_NAME }}
         path: release-bundle
+    - name: Install isolated product validation tools
+      run: npm ci --ignore-scripts
     - name: Test installers against local feed
       run: node scripts/release-pipeline.mjs smoke
     - name: Save installer smoke evidence
@@ -603,7 +605,12 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-        path: release-evidence/installer-logs/
+        path: |
+          release-evidence/installer-logs/
+          release-evidence/product-update/
+          .test-runtime/product-update-*/**/*.png
+          .test-runtime/product-update-*/**/failure.json
+          .test-runtime/product-update-*/**/logs/**
         retention-days: 30
         if-no-files-found: ignore
     if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' }}

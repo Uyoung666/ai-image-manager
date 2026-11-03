@@ -1,6 +1,13 @@
 import type { UpdateStatus } from "@/types/update";
 
-export type UpdateCommand = "check" | "resume" | "full" | "install" | "manual";
+export type UpdateCommand =
+  | "check"
+  | "resume"
+  | "full"
+  | "install"
+  | "manual"
+  | "restart"
+  | "recheck";
 
 export function isUpdateBusy(status: UpdateStatus): boolean {
   return [
@@ -10,6 +17,7 @@ export function isUpdateBusy(status: UpdateStatus): boolean {
     "recovering",
     "installing",
     "restarting",
+    "confirming",
   ].includes(status.phase);
 }
 
@@ -28,6 +36,9 @@ export function updatePercent(status: UpdateStatus): number | undefined {
 }
 
 export function updateStageKey(status: UpdateStatus): string {
+  if (status.phase === "confirming") {
+    return "updateConfirming";
+  }
   if (status.phase === "checking") {
     return "updateChecking";
   }
@@ -105,6 +116,12 @@ export function updatePrimaryAction(
     return { command: "install", label: "updateRestartNow" };
   }
   if (status.phase === "error") {
+    if (status.operation === "startup") {
+      return { command: "restart", label: "updateRestartVerify" };
+    }
+    if (status.installerPid) {
+      return { command: "recheck", label: "updateRecheckInstaller" };
+    }
     const disk =
       status.message === "UPDATE_DISK_SPACE" ||
       status.message === "UPDATE_INSTALL_DISK_FULL";

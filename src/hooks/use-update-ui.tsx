@@ -14,6 +14,8 @@ import {
   getUpdateStatus,
   installDownloadedUpdate,
   openReleasePage,
+  recheckInstaller,
+  restartForUpdate,
   resumeUpdate,
 } from "@/actions/update";
 import { ipc } from "@/ipc/manager";
@@ -62,6 +64,8 @@ const defaultDependencies = {
   full: downloadFullUpdate,
   install: installDownloadedUpdate,
   manual: openReleasePage,
+  restart: restartForUpdate,
+  recheck: recheckInstaller,
   storage: () => window.localStorage,
 };
 type UpdateUiDependencies = typeof defaultDependencies;

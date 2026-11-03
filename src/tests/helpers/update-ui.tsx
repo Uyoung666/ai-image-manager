@@ -19,6 +19,8 @@ export function updateUiFixture(initial: UpdateStatus = { phase: "idle" }) {
     full: vi.fn().mockResolvedValue({ ok: true }),
     install: vi.fn().mockResolvedValue({ ok: true }),
     manual: vi.fn().mockResolvedValue(undefined),
+    restart: vi.fn().mockResolvedValue({ ok: true }),
+    recheck: vi.fn().mockResolvedValue({ ok: true }),
     storage: vi.fn(() => window.localStorage),
   };
   const store = createUpdateUiStore(dependencies);

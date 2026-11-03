@@ -34,6 +34,8 @@ const LINES_PATTERN = /\r?\n/;
 const BINARY_PATTERN = /\.(?:exe|msi|zip|nupkg)$/i;
 const PACKAGE_VERSION_PATTERN = /-(\d+\.\d+\.\d+)-full\.nupkg$/i;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const PROCESS_CREATION_PATTERN = /^\d+$/;
 
 export function assertIdentity(metadata, expected = {}) {
   parseStableVersion(metadata.version);
@@ -60,6 +62,9 @@ export function recoveredReleaseIdentity(requested, original) {
     toolingCommit: original.toolingCommit,
     releaseTitle: original.releaseTitle ?? `AI Image Manager ${original.tag}`,
     releaseNotes: original.releaseNotes ?? requested.releaseNotes,
+    ...(original.productUpdateGateRequired
+      ? { productUpdateGateRequired: true }
+      : {}),
   };
 }
 
@@ -173,7 +178,7 @@ export async function prepareBundle(makeRoot, root, identity, localeRoot) {
     path.join(root, "github", "RELEASES"),
     formatGitHubReleases(parseReleases(feed), identity.version)
   );
-  return sealBundle(root, identity);
+  return sealBundle(root, { ...identity, productUpdateGateRequired: true });
 }
 
 export async function sealBundle(root, identity) {
@@ -357,10 +362,65 @@ export async function downloadRecords(root, manifest) {
   return records;
 }
 
+function isProductDirectionComplete(direction) {
+  return (
+    direction?.confirmed === true &&
+    direction.dataRetained === "passed" &&
+    direction.secondLaunch === "passed" &&
+    [
+      direction.sourceExecutableSha256,
+      direction.targetExecutableSha256,
+      direction.packageSha256,
+    ].every(
+      (digest) => typeof digest === "string" && SHA256_PATTERN.test(digest)
+    ) &&
+    Number.isSafeInteger(direction.actualProcess?.pid) &&
+    direction.actualProcess.pid > 0 &&
+    typeof direction.actualProcess.createdAt === "string" &&
+    PROCESS_CREATION_PATTERN.test(direction.actualProcess.createdAt) &&
+    typeof direction.actualProcess.path === "string" &&
+    typeof direction.target === "string" &&
+    path.win32.isAbsolute(direction.target) &&
+    path.win32.normalize(direction.actualProcess.path).toLowerCase() ===
+      path.win32.normalize(direction.target).toLowerCase()
+  );
+}
+
 export function validateSmoke(smoke, identity, bundleSha256) {
   validateLocaleSmoke(smoke, identity);
+  if (identity.productUpdateGateRequired) {
+    const evidence = smoke.productUpdateEvidence;
+    if (
+      smoke.schemaVersion !== 4 ||
+      smoke.productUpdate !== "passed" ||
+      !Array.isArray(evidence) ||
+      evidence.length !== 2 ||
+      !["setup", "msi"].every((kind) =>
+        evidence.some(
+          (entry) =>
+            entry.kind === kind &&
+            entry.status === "passed" &&
+            entry.version === identity.version &&
+            entry.commit === identity.commit &&
+            entry.bundleSha256 ===
+              (identity.productUpdateEvidenceBundleSha256 ?? bundleSha256) &&
+            entry.testSuccessorOnly === true &&
+            entry.first?.targetVersion === identity.version &&
+            isProductDirectionComplete(entry.first) &&
+            isProductDirectionComplete(entry.second) &&
+            compareVersions(entry.second.targetVersion, identity.version) > 0 &&
+            entry.first.targetExecutableSha256 ===
+              entry.second.sourceExecutableSha256
+        )
+      )
+    ) {
+      throw new Error(
+        "Complete product update evidence is missing or mismatched"
+      );
+    }
+  }
   if (
-    ![2, 3].includes(smoke.schemaVersion) ||
+    ![2, 3, 4].includes(smoke.schemaVersion) ||
     smoke.version !== identity.version ||
     smoke.tag !== identity.tag ||
     smoke.commit !== identity.commit ||
@@ -373,7 +433,7 @@ export function validateSmoke(smoke, identity, bundleSha256) {
       "Release installer smoke evidence is incomplete or mismatched"
     );
   }
-  if (smoke.schemaVersion === 3 && smoke.bundleSha256 !== bundleSha256) {
+  if (smoke.schemaVersion >= 3 && smoke.bundleSha256 !== bundleSha256) {
     throw new Error("Smoke evidence refers to different bundle bytes");
   }
 }

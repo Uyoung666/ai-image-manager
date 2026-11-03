@@ -37,6 +37,7 @@ import { SearchEmptyState } from "@/components/SearchEmptyState";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SequenceSuggestionsDialog } from "@/components/SequenceSuggestionsDialog";
 import { StatusBar } from "@/components/StatusBar";
+import { reportUpdateSurfaceFailure } from "@/components/update-startup-ready";
 import { Welcome } from "@/components/Welcome";
 import { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import { useImportDropContext } from "@/contexts/import-drop-context";
@@ -1783,7 +1784,10 @@ function HomePage() {
     firstFrame = window.requestAnimationFrame(() => {
       secondFrame = window.requestAnimationFrame(() => {
         startupHomeReadyRef.current = true;
-        notifyStartupHomeReady();
+        if (initialHomeQueryError) {
+          reportUpdateSurfaceFailure();
+        }
+        notifyStartupHomeReady(!initialHomeQueryError);
       });
     });
 
@@ -1791,7 +1795,13 @@ function HomePage() {
       window.cancelAnimationFrame(firstFrame);
       window.cancelAnimationFrame(secondFrame);
     };
-  }, [foldersLoading, isSearching, loading, searchResults]);
+  }, [
+    foldersLoading,
+    initialHomeQueryError,
+    isSearching,
+    loading,
+    searchResults,
+  ]);
 
   const showAiTaskStatus = Boolean(
     aiStatus?.isEmbedding || aiStatus?.lastError

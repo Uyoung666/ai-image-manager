@@ -1,4 +1,7 @@
 export const UPDATE_ERROR_KEYS = {
+  UPDATE_STATE_SAVE_FAILED: "updateErrorStateSave",
+  UPDATE_STARTUP_FAILED: "updateErrorStartup",
+  UPDATE_INSTALLER_UNVERIFIED: "updateErrorInstallerUnverified",
   DEV_MODE: "updateDevMode",
   NETWORK_ERROR: "updateErrorNetwork",
   UPDATE_NOT_FOUND: "updateErrorNotFound",
@@ -33,10 +36,13 @@ export interface UpdateStatus {
   cacheRepairs?: { delta?: boolean; full?: boolean };
   canResume?: boolean;
   canUseFull?: boolean;
+  confirmationStartedAt?: string;
+  confirmedAt?: string;
   etag?: string;
   fallbackReason?: string;
   fullFallbackAttempted?: boolean;
   installCompletedAt?: string;
+  installerCreatedAt?: string;
   installerPath?: string;
   installerPid?: number;
   installStartedAt?: string;
@@ -45,7 +51,7 @@ export interface UpdateStatus {
   maxAttempts?: number;
   message?: UpdateErrorCode;
   networkWaiting?: boolean;
-  operation?: "check" | "download" | "install";
+  operation?: "check" | "download" | "install" | "startup";
   percent?: number;
   phase:
     | "idle"
@@ -57,6 +63,7 @@ export interface UpdateStatus {
     | "installing"
     | "recovering"
     | "restarting"
+    | "confirming"
     | "error";
   phaseStartedAt?: string;
   recoveryReason?: "cache-missing" | "cache-corrupt";

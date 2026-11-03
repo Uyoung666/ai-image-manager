@@ -21,6 +21,13 @@ const mocks = vi.hoisted(() => ({
   quit: vi.fn(),
   send: vi.fn(),
   log: vi.fn(),
+  probe: vi.fn(),
+  failPersistence: "",
+}));
+
+vi.mock("@/services/update-process", () => ({
+  probeInstaller: mocks.probe,
+  readInstallerIdentity: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/services/update-package-transport", () => ({
@@ -68,7 +75,14 @@ vi.mock("@/services/update-state", () => ({
         typeof value.tag_name === "string"
     ),
   getUpdateState: () => ({ ...mocks.state }),
-  setUpdateState: (next: UpdateStatus) => {
+  setUpdateState: (next: UpdateStatus, persist = true) => {
+    if (
+      persist &&
+      (mocks.failPersistence === next.phase ||
+        (mocks.failPersistence === "pid" && next.installerPid))
+    ) {
+      throw new Error("UPDATE_STATE_SAVE_FAILED");
+    }
     mocks.state = { ...next };
   },
 }));
@@ -108,6 +122,8 @@ beforeEach(async () => {
   mocks.state = { phase: "idle" };
   mocks.releaseCache = null;
   mocks.version = "2.2.3";
+  mocks.failPersistence = "";
+  mocks.probe.mockResolvedValue("exited");
   runtime = new TestRuntime("update-production");
   mocks.profile = path.join(runtime.root, "profile");
   originalExecutable = process.execPath;
@@ -121,6 +137,16 @@ beforeEach(async () => {
     value: "win32",
   });
   await fs.writeFile(path.join(runtime.root, "Update.exe"), "test updater");
+  const baselineDirectory = path.join(runtime.root, "packages");
+  await fs.mkdir(baselineDirectory);
+  await fs.writeFile(
+    path.join(baselineDirectory, "ai-image-manager-2.2.3-full.nupkg"),
+    "baseline package"
+  );
+  await fs.writeFile(
+    path.join(baselineDirectory, "RELEASES"),
+    `${createHash("sha1").update("baseline package").digest("hex")} ai-image-manager-2.2.3-full.nupkg 16\n`
+  );
   await fs.mkdir(path.join(runtime.root, "app-2.2.4"));
   await fs.writeFile(
     path.join(runtime.root, "app-2.2.4", "ai-image-manager.exe"),
@@ -175,7 +201,7 @@ beforeEach(async () => {
   // Do not setUpdateManagerTestOverrides: exercise the production GitHub path.
 });
 afterEach(async () => {
-  manager.stopAutomaticChecks();
+  manager.stopUpdateManager();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   Object.defineProperty(process, "execPath", {
@@ -226,6 +252,60 @@ async function reloadManager() {
   vi.resetModules();
   manager = await import("@/services/update-manager");
 }
+
+describe("manual checks during a server cooldown", () => {
+  it("keeps scheduled checks on cooldown but allows a single explicit retry", async () => {
+    mocks.state = {
+      phase: "error",
+      operation: "check",
+      message: "UPDATE_RATE_LIMITED",
+      retryAfter: new Date(Date.now() + 2_000_000).toISOString(),
+    };
+    vi.useFakeTimers();
+    manager.startUpdateManager();
+    await vi.advanceTimersByTimeAsync(manager.UPDATE_INITIAL_DELAY_MS);
+    expect(mocks.request).not.toHaveBeenCalled();
+    vi.useRealTimers();
+
+    expect(manager.checkForUpdatesManually()).toEqual({ ok: true });
+    expect(mocks.state).toMatchObject({ phase: "checking" });
+    expect(mocks.state.retryAfter).toBeUndefined();
+    expect(manager.checkForUpdatesManually()).toEqual({
+      ok: true,
+      skipped: true,
+    });
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("downloaded"));
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+  });
+
+  it("records the new cooldown if the new request is still rate limited", async () => {
+    mocks.state = {
+      phase: "error",
+      operation: "check",
+      message: "UPDATE_RATE_LIMITED",
+      retryAfter: new Date(Date.now() + 2_000_000).toISOString(),
+    };
+    const reset = Math.floor(Date.now() / 1000) + 3600;
+    mocks.request.mockImplementationOnce(() =>
+      metadataResponse(
+        403,
+        { message: "API rate limit exceeded" },
+        {
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(reset),
+        }
+      )
+    );
+    expect(manager.checkForUpdatesManually()).toEqual({ ok: true });
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
+    expect(mocks.state).toMatchObject({
+      message: "UPDATE_RATE_LIMITED",
+      retryAfter: new Date(reset * 1000).toISOString(),
+    });
+    expect(mocks.request).toHaveBeenCalledOnce();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+});
 
 describe("release list cache and downloaded cache recovery", () => {
   it("compares cached releases after 304 when the update cache has disappeared", async () => {
@@ -373,7 +453,10 @@ describe("release list cache and downloaded cache recovery", () => {
       resumeInstallation: true,
     };
     manager.checkForUpdatesManually();
-    await vi.waitFor(() => expect(mocks.state.phase).toBe("restarting"));
+    await vi.waitFor(
+      () => expect(mocks.state).toMatchObject({ phase: "restarting" }),
+      { timeout: 5000 }
+    );
     expect(mocks.spawn).toHaveBeenCalledTimes(1);
     expect(mocks.state).toMatchObject({
       transactionId: "confirmed-target",
@@ -679,6 +762,221 @@ describe("release list cache and downloaded cache recovery", () => {
 });
 
 describe("GitHub download, local installer and restart transaction", () => {
+  it("does not leave an owned-child lock after the installer fails to spawn", async () => {
+    await download();
+    const child = Object.assign(new EventEmitter(), {
+      pid: undefined,
+      exitCode: null,
+      signalCode: null,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+    });
+    mocks.spawn.mockImplementation(() => {
+      queueMicrotask(() =>
+        child.emit(
+          "error",
+          Object.assign(new Error("denied"), { code: "EACCES" })
+        )
+      );
+      return child;
+    });
+    manager.installUpdate();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
+    expect(manager.isUpdateInstallationActive()).toBe(false);
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+  });
+  it("does not let a scheduled check erase a failed startup confirmation", async () => {
+    vi.useFakeTimers();
+    mocks.version = "2.2.4";
+    Object.defineProperty(process, "execPath", {
+      configurable: true,
+      value: path.join(runtime.root, "app-2.2.4", "ai-image-manager.exe"),
+    });
+    mocks.state = {
+      phase: "restarting",
+      version: "2.2.4",
+      installCompletedAt: new Date().toISOString(),
+    };
+    manager.startUpdateManager();
+    manager.failUpdateStartup();
+    await vi.advanceTimersByTimeAsync(manager.UPDATE_INITIAL_DELAY_MS + 1);
+    expect(mocks.state).toMatchObject({
+      phase: "error",
+      operation: "startup",
+      message: "UPDATE_STARTUP_FAILED",
+    });
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+  });
+  it("does not spawn an installer when persisting installation intent fails", async () => {
+    await download();
+    mocks.failPersistence = "installing";
+    expect(manager.installUpdate()).toEqual({
+      ok: false,
+      error: "UPDATE_STATE_SAVE_FAILED",
+    });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+    expect(manager.isUpdateInstallationActive()).toBe(false);
+    expect(mocks.state.message).toBe("UPDATE_STATE_SAVE_FAILED");
+  });
+  it("retains the owned child lock when saving its PID fails", async () => {
+    await download();
+    const child = Object.assign(new EventEmitter(), {
+      pid: 7654,
+      exitCode: null,
+      signalCode: null,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+    });
+    mocks.spawn.mockReturnValue(child);
+    mocks.failPersistence = "pid";
+    manager.installUpdate();
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalled());
+    expect(manager.isUpdateInstallationActive()).toBe(true);
+    expect(manager.installUpdate()).toEqual({ ok: true, skipped: true });
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+    mocks.failPersistence = "";
+    child.emit("exit", 1);
+    expect(manager.isUpdateInstallationActive()).toBe(false);
+  });
+  it("does not relaunch after a failed restart-state write", async () => {
+    await download();
+    mocks.failPersistence = "restarting";
+    manager.installUpdate();
+    await vi.waitFor(() =>
+      expect(mocks.state.message).toBe("UPDATE_STATE_SAVE_FAILED")
+    );
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+    expect(manager.isUpdateInstallationActive()).toBe(false);
+  });
+
+  it.each([
+    "downloaded",
+    "restarting",
+    "installing",
+    "error",
+  ] as const)("retires a lower target from %s without running an installer", (phase) => {
+    mocks.version = "2.2.5";
+    mocks.state = {
+      phase,
+      version: "2.2.4",
+      operation: "install",
+      installCompletedAt: new Date().toISOString(),
+      resumeInstallation: true,
+    };
+    manager.startUpdateManager();
+    expect(mocks.state).toMatchObject({ phase: "idle" });
+    expect(mocks.state.version).toBeUndefined();
+    expect(manager.isUpdateInstallationActive()).toBe(false);
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+  it("clears a reused PID before retiring the obsolete transaction", async () => {
+    mocks.version = "2.2.5";
+    mocks.probe.mockResolvedValue("mismatch");
+    mocks.state = { phase: "restarting", version: "2.2.4", installerPid: 1234 };
+    manager.startUpdateManager();
+    await manager.recheckUpdateInstaller();
+    expect(mocks.state.phase).toBe("idle");
+    expect(manager.isUpdateInstallationActive()).toBe(false);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+  });
+  it("keeps an unknown installer mutually exclusive while allowing normal quit", async () => {
+    mocks.probe.mockResolvedValue("unknown");
+    mocks.state = { phase: "installing", version: "2.2.4", installerPid: 1234 };
+    manager.startUpdateManager();
+    await manager.recheckUpdateInstaller();
+    expect(mocks.state.message).toBe("UPDATE_INSTALLER_UNVERIFIED");
+    expect(manager.isUpdateInstallationActive()).toBe(true);
+    expect(manager.isUpdateQuitAllowed()).toBe(true);
+    expect(manager.installUpdate()).toEqual({
+      ok: false,
+      error: "UPDATE_BUSY",
+    });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    mocks.probe.mockResolvedValue("exited");
+    await manager.recheckUpdateInstaller();
+    expect(manager.isUpdateInstallationActive()).toBe(false);
+  });
+  it("requires real startup signals for the running target and never reinstalls it", async () => {
+    vi.useFakeTimers();
+    mocks.version = "2.2.4";
+    Object.defineProperty(process, "execPath", {
+      configurable: true,
+      value: path.join(runtime.root, "app-2.2.4", "ai-image-manager.exe"),
+    });
+    mocks.state = {
+      phase: "restarting",
+      version: "2.2.4",
+      installCompletedAt: new Date().toISOString(),
+    };
+    manager.startUpdateManager();
+    expect(mocks.state.phase).toBe("confirming");
+    expect(manager.installUpdate().ok).toBe(false);
+    manager.updateCriticalServicesReady(true);
+    expect(
+      manager.acknowledgeUpdateStartup(
+        manager.getUpdateStartupContext()?.nonce ?? ""
+      )
+    ).toBe(true);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(mocks.state.phase).toBe("idle");
+    expect(mocks.state.confirmedAt).toBeDefined();
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+  it.each([
+    "release-list",
+    "baseline-package",
+    "baseline-size",
+  ])("downloads full when the installed %s is unavailable", async (missing) => {
+    const directory = path.join(runtime.root, "packages");
+    if (missing === "release-list") {
+      await fs.unlink(path.join(directory, "RELEASES"));
+    } else if (missing === "baseline-package") {
+      await fs.unlink(
+        path.join(directory, "ai-image-manager-2.2.3-full.nupkg")
+      );
+    } else {
+      await fs.writeFile(
+        path.join(directory, "ai-image-manager-2.2.3-full.nupkg"),
+        "truncated"
+      );
+    }
+    await download();
+    expect(mocks.state).toMatchObject({
+      updateMethod: "full",
+      fallbackReason: "baseline-missing",
+    });
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(mocks.fetch.mock.calls[0][0]).toBe(manifest.packages.full.url);
+    manager.installUpdate();
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+  });
+
+  it("switches a cached delta to full if its installed baseline disappears before installation", async () => {
+    await download();
+    await fs.unlink(path.join(runtime.root, "packages", "RELEASES"));
+    manager.installUpdate();
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+    expect(mocks.state).toMatchObject({
+      updateMethod: "full",
+      fallbackReason: "baseline-missing",
+      fullFallbackAttempted: true,
+    });
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).toEqual([
+      manifest.packages.delta.url,
+      manifest.packages.full.url,
+    ]);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+  });
+
   it("installs delta and explicitly relaunches the target executable once", async () => {
     await download();
     expect(mocks.state.updateMethod).toBe("delta");
@@ -812,7 +1110,10 @@ describe("GitHub download, local installer and restart transaction", () => {
     expect(mocks.state.updateMethod).toBe("full");
     expect(mocks.spawn).toHaveBeenCalledTimes(2);
   });
-  it("keeps a live recovered installer locked until the bounded recovery expires", async () => {
+  it.each([
+    "installStartedAt",
+    "phaseStartedAt",
+  ] as const)("keeps a verified live installer mutually exclusive after its %s deadline", async (startField) => {
     vi.useFakeTimers({
       toFake: [
         "setTimeout",
@@ -823,23 +1124,31 @@ describe("GitHub download, local installer and restart transaction", () => {
       ],
     });
     const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    mocks.probe.mockResolvedValue("matched");
     try {
       mocks.state = {
         phase: "installing",
         version: "2.2.4",
         installerPid: 123_456,
+        [startField]: new Date().toISOString(),
       };
       manager.startUpdateManager();
+      await vi.advanceTimersByTimeAsync(1);
       expect(manager.isUpdateInstallationActive()).toBe(true);
+      expect(manager.isUpdateQuitAllowed()).toBe(false);
       expect(manager.installUpdate()).toEqual({
         ok: false,
         error: "UPDATE_BUSY",
       });
-      await vi.advanceTimersByTimeAsync(15 * 60_000 + 2000);
+      await vi.advanceTimersByTimeAsync(15 * 60_000 + 10_000);
       expect(mocks.state).toMatchObject({
         phase: "error",
         message: "UPDATE_INSTALL_TIMEOUT",
       });
+      expect(manager.isUpdateQuitAllowed()).toBe(true);
+      await manager.recheckUpdateInstaller();
+      expect(mocks.state.message).toBe("UPDATE_INSTALL_TIMEOUT");
+      expect(manager.isUpdateQuitAllowed()).toBe(true);
       expect(manager.isUpdateInstallationActive()).toBe(true);
       expect(manager.resumeUpdateDownload().ok).toBe(false);
       expect(mocks.spawn).not.toHaveBeenCalled();
@@ -916,7 +1225,7 @@ describe("GitHub download, local installer and restart transaction", () => {
       installCompletedAt: new Date().toISOString(),
     };
     manager.startUpdateManager();
-    expect(mocks.state.phase).toBe("idle");
+    expect(mocks.state.phase).toBe("confirming");
     expect(mocks.relaunch).not.toHaveBeenCalled();
   });
   it("does not mistake a target directory for a completed installation", () => {

@@ -278,6 +278,7 @@ async function recover(identity) {
   let artifact;
   let sourceIdentity = null;
   let originalManifest;
+  let originalBundleSha256;
   if (source.modern) {
     artifact = await download(`release-bundle-${identity.version}`, root());
     const smokeDirectory = path.join(recovery, "smoke");
@@ -285,6 +286,7 @@ async function recover(identity) {
     const original = await verifyBundle(root(), identity);
     assertPublishable(original);
     originalManifest = original;
+    originalBundleSha256 = await sha256File(path.join(root(), "bundle.json"));
     const identityArtifactName = `release-artifact-${identity.version}`;
     if (!source.artifacts.some((item) => item.name === identityArtifactName)) {
       throw new Error(
@@ -366,7 +368,7 @@ async function recover(identity) {
   }
   await writeJson(path.join(root(), "recovered-smoke.json"), {
     ...smoke,
-    schemaVersion: 2,
+    schemaVersion: originalManifest?.productUpdateGateRequired ? 4 : 2,
     sourceRunId: identity.sourceRunId,
     sourceArtifact: artifact,
   });
@@ -374,7 +376,62 @@ async function recover(identity) {
     source.modern && originalManifest
       ? recoveredReleaseIdentity(identity, originalManifest)
       : identity;
-  await sealBundle(root(), { ...recoveredIdentity, sourceArtifact: artifact });
+  await sealBundle(root(), {
+    ...recoveredIdentity,
+    sourceArtifact: artifact,
+    ...(originalManifest?.productUpdateGateRequired
+      ? {
+          productUpdateEvidenceBundleSha256:
+            originalManifest.productUpdateEvidenceBundleSha256 ??
+            originalBundleSha256,
+          recoveredSmokeBundleSha256: originalBundleSha256,
+        }
+      : {}),
+  });
+}
+
+async function runInstallerValidation(identity, manifest, server) {
+  const script = path.join(import.meta.dirname, "windows-installer-smoke.mjs");
+  const env = {
+    ...process.env,
+    ...identity.baseline,
+    AIM_INSTALLER_LOCAL_FEED: "1",
+    RELEASE_COMMIT: identity.commit,
+    AIM_PRODUCT_UPDATE_EVIDENCE: path.join(evidenceRoot(), "product-update"),
+    AIM_INSTALLER_SMOKE_LOG_DIR: path.join(evidenceRoot(), "installer-logs"),
+  };
+  try {
+    for (const product of [false, true]) {
+      for (const [mode, option, suffix] of [
+        ["setup-upgrade", "--setup", "Setup.exe"],
+        ["msi-upgrade", "--msi", ".msi"],
+      ]) {
+        const file = manifest.files.find((record) =>
+          record.relativePath.endsWith(suffix)
+        );
+        await supervise(
+          process.execPath,
+          [
+            script,
+            mode,
+            option,
+            path.join(root(), file.relativePath),
+            "--version",
+            manifest.version,
+            "--feed",
+            server.url,
+          ],
+          {
+            timeoutMs: (product ? 25 : 8) * 60_000,
+            idleMs: (product ? 25 : 8) * 60_000,
+            env: { ...env, AIM_PRODUCT_UPDATE_GATE: product ? "1" : "0" },
+          }
+        );
+      }
+    }
+  } finally {
+    await server.close();
+  }
 }
 
 async function smokeTest(identity) {
@@ -384,7 +441,19 @@ async function smokeTest(identity) {
     manifest.files.some((file) => file.relativePath === "recovered-smoke.json")
   ) {
     smoke = await readJson(path.join(root(), "recovered-smoke.json"));
-    validateSmoke(smoke, manifest);
+    validateSmoke(
+      smoke,
+      manifest,
+      smoke.schemaVersion >= 3 ? smoke.bundleSha256 : undefined
+    );
+    if (
+      manifest.productUpdateGateRequired &&
+      smoke.bundleSha256 !== manifest.recoveredSmokeBundleSha256
+    ) {
+      throw new Error(
+        "Recovered product evidence changed its source bundle identity"
+      );
+    }
     console.log(
       `Reusing verified installer smoke from run ${smoke.sourceRunId}`
     );
@@ -411,44 +480,16 @@ async function smokeTest(identity) {
       );
     }
     const server = await startLocalFeed(feedDirectory);
-    const script = path.join(
-      import.meta.dirname,
-      "windows-installer-smoke.mjs"
+    await runInstallerValidation(identity, manifest, server);
+    const productUpdateEvidence = await Promise.all(
+      ["setup", "msi"].map(async (kind) =>
+        readJson(path.join(evidenceRoot(), "product-update", `${kind}.json`))
+      )
     );
-    const env = {
-      ...process.env,
-      ...identity.baseline,
-      AIM_INSTALLER_LOCAL_FEED: "1",
-      AIM_INSTALLER_SMOKE_LOG_DIR: path.join(evidenceRoot(), "installer-logs"),
-    };
-    try {
-      for (const [mode, option, suffix] of [
-        ["setup-upgrade", "--setup", "Setup.exe"],
-        ["msi-upgrade", "--msi", ".msi"],
-      ]) {
-        const file = manifest.files.find((record) =>
-          record.relativePath.endsWith(suffix)
-        );
-        await supervise(
-          process.execPath,
-          [
-            script,
-            mode,
-            option,
-            path.join(root(), file.relativePath),
-            "--version",
-            manifest.version,
-            "--feed",
-            server.url,
-          ],
-          { timeoutMs: 8 * 60_000, idleMs: 8 * 60_000, env }
-        );
-      }
-    } finally {
-      await server.close();
-    }
     smoke = {
       ...localeEvidence,
+      productUpdate: "passed",
+      productUpdateEvidence,
       version: manifest.version,
       tag: manifest.tag,
       commit: manifest.commit,
@@ -460,7 +501,7 @@ async function smokeTest(identity) {
   }
   await writeJson(path.join(evidenceRoot(), "smoke-status.json"), {
     ...smoke,
-    schemaVersion: 3,
+    schemaVersion: 4,
     bundleSha256: await sha256File(path.join(root(), "bundle.json")),
     runId: process.env.GITHUB_RUN_ID ?? null,
   });

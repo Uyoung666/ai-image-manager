@@ -100,7 +100,7 @@ class ServiceRegistry {
    */
   async startLevel(maxLevel: ServiceLevel): Promise<HealthReport> {
     await this.startServices({ maxLevel });
-    return this.health();
+    return this.health(maxLevel);
   }
 
   /**
@@ -178,11 +178,16 @@ class ServiceRegistry {
   }
 
   /** Run health checks on all registered services. */
-  async health(): Promise<HealthReport> {
+  async health(
+    maxLevel: ServiceLevel = ServiceLevel.Optional
+  ): Promise<HealthReport> {
     const results: ServiceHealth[] = [];
     let allHealthy = true;
 
     for (const [name, svc] of this.services) {
+      if (svc.level > maxLevel) {
+        continue;
+      }
       try {
         const h = await svc.health();
         results.push({ name, level: svc.level, ...h });

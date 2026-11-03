@@ -5,14 +5,20 @@ import {
   currentPlatform,
   downloadFullUpdate,
   getHttpPort,
+  getUpdateStartupContext,
   getUpdateStatus,
   installDownloadedUpdate,
   openReleasePage,
+  recheckInstaller,
+  reportUpdateStartup,
   restartApp,
   resumeUpdate,
 } from "./handlers";
 
 export const app = {
+  getUpdateStartupContext,
+  reportUpdateStartup,
+  recheckInstaller,
   currentPlatform,
   appVersion,
   restartApp,
