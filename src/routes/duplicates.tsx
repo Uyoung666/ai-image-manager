@@ -35,7 +35,7 @@ import {
   TooltipContent as AppTooltipContent,
   TooltipTrigger as AppTooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useReducedMotion } from "@/hooks/use-reduced-motion";
+import { useBackToTop } from "@/hooks/use-back-to-top";
 import type {
   DuplicateGroupPhotosResult,
   DuplicateGroupSummary,
@@ -688,10 +688,10 @@ function DuplicateQueryError({
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Duplicate review coordinates scan, persisted decisions, immutable plans, and responsive confirmation state.
 export function DuplicatesPage() {
   const { t } = useTranslation();
-  const reduceMotion = useReducedMotion();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const parentRef = useRef<HTMLDivElement>(null);
+  const { show: showBackToTop, onClick: backToTop } = useBackToTop(parentRef);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<GroupFilter>("all");
   const [enabledGroups, setEnabledGroups] = useState<
@@ -711,7 +711,6 @@ export function DuplicatesPage() {
     photoId: number;
   } | null>(null);
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
-  const [showBackToTop, setShowBackToTop] = useState(false);
   const [photosByGroup, setPhotosByGroup] = useState<
     Record<string, DuplicatePhoto[]>
   >({});
@@ -1364,7 +1363,6 @@ export function DuplicatesPage() {
           onScroll={(event) => {
             const isScrolled = event.currentTarget.scrollTop > 4;
             setIsToolbarScrolled(isScrolled);
-            setShowBackToTop(isScrolled);
           }}
           ref={parentRef}
           style={{
@@ -1372,6 +1370,7 @@ export function DuplicatesPage() {
               (toolbarHeight || DUPLICATES_TOOLBAR_FALLBACK_HEIGHT) +
               DUPLICATES_TOOLBAR_CONTENT_GAP,
           }}
+          tabIndex={-1}
         >
           {isLoading ? (
             <div className="space-y-4">
@@ -1410,6 +1409,7 @@ export function DuplicatesPage() {
           {queryReady && filteredGroups.length > 0 ? (
             <div
               className="relative w-full"
+              data-back-to-top-content=""
               style={{ height: `${virtualizer.getTotalSize()}px` }}
             >
               {virtualizer.getVirtualItems().map((item) => {
@@ -1498,20 +1498,7 @@ export function DuplicatesPage() {
         </main>
         <MasonryBackToTop
           label={t("backToTop")}
-          onClick={(event) => {
-            event.stopPropagation();
-            const element = parentRef.current;
-            if (!element) {
-              return;
-            }
-            element.scrollTo({
-              top: 0,
-              behavior:
-                reduceMotion || element.scrollTop > element.clientHeight * 4
-                  ? "auto"
-                  : "smooth",
-            });
-          }}
+          onClick={backToTop}
           selectionActive={false}
           show={showBackToTop}
         />

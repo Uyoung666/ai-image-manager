@@ -35,7 +35,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useReducedMotion } from "@/hooks/use-reduced-motion";
+import { useBackToTop } from "@/hooks/use-back-to-top";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
@@ -84,7 +84,6 @@ const TRASH_EXPIRY_FORMATTER = new Intl.DateTimeFormat(undefined, {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this route coordinates coupled desktop selection and batch-operation state
 function TrashPage() {
   const { t } = useTranslation();
-  const reduceMotion = useReducedMotion();
   const navigate = useNavigate();
   const routeKey = "trash";
   const [photos, setPhotos] = useState<DeletedPhoto[]>([]);
@@ -107,7 +106,6 @@ function TrashPage() {
   const [sort, setSort] = useState<"deletedAt" | "name" | "size">("deletedAt");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
-  const [showBackToTop, setShowBackToTop] = useState(false);
   const [toolbarHeight, setToolbarHeight] = useState(0);
   const {
     selectedIds,
@@ -128,6 +126,7 @@ function TrashPage() {
     y: number;
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { show: showBackToTop, onClick: backToTop } = useBackToTop(scrollRef);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const requestIdRef = useRef(0);
@@ -949,7 +948,10 @@ function TrashPage() {
   function renderTrashContent() {
     if (loading) {
       return (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,160px),1fr))] gap-3">
+        <div
+          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,160px),1fr))] gap-3"
+          data-back-to-top-content=""
+        >
           {TRASH_SKELETON_KEYS.map((key) => (
             <div
               className="overflow-hidden rounded-[10px] border border-border"
@@ -967,7 +969,10 @@ function TrashPage() {
     }
     if (loadError) {
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-3">
+        <div
+          className="flex h-full flex-col items-center justify-center gap-3"
+          data-back-to-top-content=""
+        >
           <p className="text-[14px] text-foreground">{t("trashLoadFailed")}</p>
           <button
             className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground"
@@ -981,7 +986,10 @@ function TrashPage() {
     }
     if (photos.length === 0) {
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-3">
+        <div
+          className="flex h-full flex-col items-center justify-center gap-3"
+          data-back-to-top-content=""
+        >
           <Trash2 className="h-12 w-12 text-muted-foreground/30" />
           <p className="text-[14px] text-muted-foreground">
             {query ? t("trashNoSearchResults") : t("trashEmpty")}
@@ -1016,7 +1024,7 @@ function TrashPage() {
     const displayGroups =
       sort === "deletedAt" ? groupedPhotos : [["", photos] as const];
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" data-back-to-top-content="">
         {displayGroups.map(([label, items]) => (
           <section key={label || "all"}>
             {label && (
@@ -1325,7 +1333,6 @@ function TrashPage() {
           onScroll={(event) => {
             const isScrolled = event.currentTarget.scrollTop > 4;
             setIsToolbarScrolled(isScrolled);
-            setShowBackToTop(isScrolled);
           }}
           ref={scrollRef}
           style={{
@@ -1336,6 +1343,7 @@ function TrashPage() {
                 : 0,
             userSelect: "none",
           }}
+          tabIndex={-1}
         >
           {/* Marquee selection overlay */}
           {marquee && (
@@ -1353,20 +1361,7 @@ function TrashPage() {
         </div>
         <MasonryBackToTop
           label={t("backToTop")}
-          onClick={(event) => {
-            event.stopPropagation();
-            const element = scrollRef.current;
-            if (!element) {
-              return;
-            }
-            element.scrollTo({
-              top: 0,
-              behavior:
-                reduceMotion || element.scrollTop > element.clientHeight * 4
-                  ? "auto"
-                  : "smooth",
-            });
-          }}
+          onClick={backToTop}
           selectionActive={selectedIds.size > 0}
           show={showBackToTop}
         />

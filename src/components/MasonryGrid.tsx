@@ -15,9 +15,11 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { isReducedMotionEnabled } from "@/actions/ui-preferences";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
+import { useBackToTop } from "@/hooks/use-back-to-top";
 import {
   type MasonryGridHandle,
   useMasonryAnchor,
@@ -311,14 +313,12 @@ export const MasonryGrid = memo(
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
     const [scrollHeight, setScrollHeight] = useState(0);
-    const [showScrollTop, setShowScrollTop] = useState(false);
     const [isScrolling, setIsScrolling] = useState(false);
     const [currentTimeLabel, setCurrentTimeLabel] = useState("");
     const [scrollVelocity, setScrollVelocity] = useState(0);
     const scrollTopStateRef = useRef(0);
     const viewportHeightStateRef = useRef(0);
     const scrollHeightStateRef = useRef(0);
-    const showScrollTopStateRef = useRef(false);
     const isScrollingStateRef = useRef(false);
     const currentTimeLabelRef = useRef("");
     const scrollVelocityRef = useRef(0);
@@ -557,11 +557,6 @@ export const MasonryGrid = memo(
         syncScrollMetrics(el);
         updateScrollbarThumbPosition(el);
 
-        const nextShowScrollTop = el.scrollTop > el.clientHeight * 2;
-        if (nextShowScrollTop !== showScrollTopStateRef.current) {
-          showScrollTopStateRef.current = nextShowScrollTop;
-          setShowScrollTop(nextShowScrollTop);
-        }
         if (!isScrollingStateRef.current) {
           isScrollingStateRef.current = true;
           setIsScrolling(true);
@@ -1349,25 +1344,28 @@ export const MasonryGrid = memo(
       recordGalleryPerf("masonryImageItems", requestedImageIds.size);
     });
 
-    const scrollToTop = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        const el = scrollRef.current;
-        if (!el) {
-          return;
-        }
-        const distance = el.scrollTop;
-        onBackToTop?.();
-        cancelPhotoFocus();
-        el.scrollTo({
-          top: 0,
-          behavior:
-            isReducedMotionEnabled() || distance > el.clientHeight * 4
-              ? "auto"
-              : "smooth",
-        });
-      },
-      [cancelPhotoFocus, onBackToTop]
+    const prepareBackToTop = useCallback(() => {
+      onBackToTop?.();
+      cancelPhotoFocus();
+    }, [cancelPhotoFocus, onBackToTop]);
+    const commitBackToTop = useCallback(() => {
+      // Commit the virtual window in the same task as the jump so the browser
+      // never paints the old offscreen cards at scrollTop=0.
+      flushSync(() => {
+        scrollTopStateRef.current = 0;
+        prevScrollYRef.current = 0;
+        prevScrollTimeRef.current = performance.now();
+        scrollVelocityRef.current = 0;
+        scrollOverscanMultiplierRef.current = 1;
+        setScrollTop(0);
+        setScrollVelocity(0);
+      });
+    }, []);
+    const { show: showScrollTop, onClick: scrollToTop } = useBackToTop(
+      scrollRef,
+      prepareBackToTop,
+      routeKey,
+      commitBackToTop
     );
 
     const layoutReady = containerWidth > 0 && columnCount > 0;
@@ -1520,9 +1518,11 @@ export const MasonryGrid = memo(
               paddingTop: topInset > 0 ? topInset + 8 : undefined,
             } as React.CSSProperties
           }
+          tabIndex={-1}
         >
           {layoutReady && (
             <div
+              data-back-to-top-content=""
               data-ocean-background="true"
               style={{
                 position: "relative",
