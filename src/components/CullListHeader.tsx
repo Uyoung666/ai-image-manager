@@ -69,7 +69,7 @@ export function CullListHeader({
             <TooltipContent>{title}</TooltipContent>
           </Tooltip>
         </h1>
-        <span className="shrink-0 text-[13px] text-muted-foreground/70">
+        <span className="shrink-0 text-[13px] text-muted-foreground">
           {t("cullSessionCount", { count })}
         </span>
         {archived && (
@@ -95,7 +95,7 @@ export function CullListHeader({
       >
         <SmoothInput
           aria-label={t("cullProject.archive.search")}
-          className="h-8 rounded border border-input bg-transparent px-2 text-xs"
+          className="h-8 rounded border border-input bg-transparent px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
           maxLength={200}
           onChange={(event) => onSearch(event.target.value)}
           placeholder={t("cullProject.archive.search")}

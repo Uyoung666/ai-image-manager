@@ -324,6 +324,10 @@ test.beforeAll(async () => {
     "INSERT INTO albums(id,name,created_at) VALUES(9001,'GalleryFixture',1)"
   );
   statements.push(
+    "INSERT INTO albums(id,name,created_at) VALUES(9003,'Empty toolbar fixture',1)",
+    "INSERT INTO face_identities(id,name,face_count,is_confirmed,created_at) VALUES(9003,'Empty toolbar fixture',0,1,1)"
+  );
+  statements.push(
     'INSERT INTO albums(id,name,is_smart,smart_rules,created_at) VALUES(9002,\'GallerySmartFixture\',1,\'{"rules":[{"type":"fileFormat","value":"png"}]}\',1)'
   );
   statements.push(
@@ -346,6 +350,145 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => {
   await app?.close();
+});
+
+for (const size of SIZES) {
+  test(`${size.width}x${size.height} keeps page toolbars consistent across gallery states`, async () => {
+    await app.evaluate(({ BrowserWindow }, bounds) => {
+      BrowserWindow.getAllWindows()[0].setContentSize(
+        bounds.width,
+        bounds.height
+      );
+    }, size);
+    await page.evaluate(() => {
+      document.documentElement.classList.remove("light");
+      document.documentElement.classList.add("dark");
+    });
+    for (const collection of ["albums", "people"]) {
+      await navigate("/albums");
+      await page.evaluate(() => {
+        window.gallerySequenceGate.operation = "listSequences";
+        window.gallerySequenceGate.armed = true;
+      });
+      await navigate(`/${collection}/9001`);
+      await expect
+        .poll(() => page.evaluate(() => window.gallerySequenceGate.held))
+        .toBe(1);
+      const toolbar = page.locator(".page-toolbar");
+      await expect(toolbar.locator(".animate-pulse").first()).toBeVisible();
+      await expect(toolbar).toHaveCSS("background-color", "rgb(8, 9, 10)");
+      await page.evaluate(() => window.gallerySequenceGate.release(true));
+      const retry = page.getByRole("button", { name: "Retry", exact: true });
+      await expect(retry).toBeVisible();
+      await expect(toolbar).toHaveCSS("background-color", "rgb(8, 9, 10)");
+      await retry.click();
+      await expect(page.locator("[data-photo-id]").first()).toBeVisible();
+      const scroll = page.locator("[data-masonry-scroll]");
+      await scroll.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      await expect(toolbar).toHaveCSS("background-color", "rgb(8, 9, 10)");
+      await scroll.evaluate((element) => {
+        element.scrollTop = 600;
+      });
+      await expect(toolbar).toHaveCSS("background-color", "rgb(18, 18, 20)");
+      await expect(toolbar).toHaveCSS("backdrop-filter", "none");
+      await scroll.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      await expect(toolbar).toHaveCSS("background-color", "rgb(8, 9, 10)");
+      await page.screenshot({
+        path: test.info().outputPath(`${collection}-toolbar.png`),
+      });
+      await navigate(`/${collection}/9003`);
+      await expect(page.locator("[data-photo-id]")).toHaveCount(0);
+      await expect(toolbar.locator(".animate-pulse")).toHaveCount(0);
+      await expect(toolbar).toHaveCSS("background-color", "rgb(8, 9, 10)");
+    }
+    // A trashed fixture makes the conditional selection toolbar visible.
+    query("UPDATE photos SET deleted_at=1 WHERE id=270", true);
+    try {
+      for (const route of [
+        "/people",
+        "/duplicates",
+        "/trash",
+        "/dashboard",
+        "/cull",
+      ]) {
+        await navigate(route);
+        const toolbar = page.locator(".page-toolbar");
+        await expect(toolbar).toHaveCSS("background-color", "rgb(8, 9, 10)");
+        const overflows = await page
+          .locator("html, body, main, .page-toolbar")
+          .evaluateAll((elements) =>
+            elements
+              .filter(
+                (element) => element.scrollWidth > element.clientWidth + 2
+              )
+              .map((element) => element.tagName)
+          );
+        expect(overflows).toEqual([]);
+        await page.screenshot({
+          path: test.info().outputPath(`${route.slice(1)}-toolbar.png`),
+        });
+      }
+    } finally {
+      query("UPDATE photos SET deleted_at=NULL WHERE id=270", true);
+    }
+  });
+}
+
+test("preserves light and built-in theme materials on real page toolbars", async () => {
+  await navigate("/people");
+  await page.evaluate(() =>
+    document.documentElement.classList.replace("dark", "light")
+  );
+  await expect(page.locator(".page-toolbar")).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)"
+  );
+  await page.screenshot({ path: test.info().outputPath("people-light.png") });
+  for (const name of ["Nebula Glass", "ASCII Ocean"]) {
+    await navigate("/settings/plugins");
+    await page
+      .getByRole("checkbox", { name: `Toggle plugin: ${name}` })
+      .locator("..")
+      .click();
+    for (const light of [false, true]) {
+      await page.evaluate((value) => {
+        document.documentElement.classList.toggle("light", value);
+        document.documentElement.classList.toggle("dark", !value);
+      }, light);
+      for (const route of ["/people", "/settings/cull-archive"]) {
+        await navigate(route);
+        const toolbar = page.locator(".page-toolbar");
+        await expect(toolbar).toBeVisible();
+        const material = await toolbar.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            background: style.backgroundColor,
+            color: style.color,
+            text: style.getPropertyValue("--foreground").trim(),
+          };
+        });
+        expect(material.background).not.toBe("rgba(0, 0, 0, 0)");
+        expect(material.text).not.toBe("");
+        await page.screenshot({
+          path: test
+            .info()
+            .outputPath(`${name}-${light}-${route.replaceAll("/", "_")}.png`),
+        });
+      }
+    }
+    await navigate("/settings/plugins");
+    await page
+      .getByRole("checkbox", { name: `Toggle plugin: ${name}` })
+      .locator("..")
+      .click();
+  }
+  await page.evaluate(() =>
+    document.documentElement.classList.replace("light", "dark")
+  );
 });
 
 for (const size of SIZES) {

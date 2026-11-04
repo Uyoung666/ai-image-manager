@@ -9,6 +9,7 @@ import { waitForHomeWindow } from "./helpers/home-window";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
 const electronPath = createRequire(import.meta.url)("electron") as string;
+const SCROLLED_TOOLBAR = /is-scrolled/;
 const SIZES = [
   { width: 720, height: 480 },
   { width: 900, height: 600 },
@@ -1493,7 +1494,7 @@ test("explains completed offline previews and disables redundant preparation acr
   }
 });
 
-test("keeps archives compact with the shared glass toolbar and clears all confirmed archives while preserving photos", async () => {
+test("keeps archives compact with the shared theme toolbar and clears all confirmed archives while preserving photos", async () => {
   const fixture = await createFixture("shooting-archive-clear-layout");
   const sourceBytes = fs.readFileSync(fixture.sourceFile);
   const copied = path.join(fixture.root, "delivered-original.png");
@@ -1505,7 +1506,7 @@ test("keeps archives compact with the shared glass toolbar and clears all confir
     await waitPrepared(fixture, 1);
     await page.getByTestId(`cull-archive-project-${projectId}`).click();
     const rows = Array.from(
-      { length: 24 },
+      { length: 3 },
       (_, index) =>
         `INSERT INTO cull_sessions(name,mode,created_at,archived_at) VALUES('Library archive ${index}','curate',${index + 1},10);`
     );
@@ -1515,9 +1516,35 @@ test("keeps archives compact with the shared glass toolbar and clears all confir
         `\nINSERT INTO cull_sessions(name,mode,created_at) VALUES('Active library stays','curate',1);\nINSERT INTO photos(path,filename,created_at) VALUES('${fixture.sourceFile.replaceAll("'", "''")}','original.png',1);`
     );
     await page.getByTestId("cull-archive-list-link").click();
-    await expect(page.locator("[data-task-key]")).toHaveCount(25);
+    await expect(page.locator("[data-task-key]")).toHaveCount(4);
     const header = page.getByTestId("cull-list-header");
     const scroll = page.getByTestId("cull-list-scroll");
+    await page.evaluate(() => {
+      document.documentElement.classList.remove("light");
+      document.documentElement.classList.add("dark");
+      document.documentElement.dataset.accentColor = "pink";
+    });
+    for (const size of SIZES) {
+      await resize(fixture, page, size);
+      await scroll.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      await expect(header).toHaveCSS("background-color", "rgb(8, 9, 10)");
+      await expectLayoutInsideViewport(page);
+      await screenshot(fixture, page, `archive-four-${size.width}.png`);
+    }
+    execute(
+      fixture,
+      Array.from(
+        { length: 21 },
+        (_, index) =>
+          `INSERT INTO cull_sessions(name,mode,created_at,archived_at) VALUES('Library archive ${index + 3}','curate',${index + 4},10);`
+      ).join("\n")
+    );
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("cull-archive-changed"))
+    );
+    await expect(page.locator("[data-task-key]")).toHaveCount(25);
     for (const size of SIZES) {
       await resize(fixture, page, size);
       await scroll.evaluate((element) => {
@@ -1530,6 +1557,7 @@ test("keeps archives compact with the shared glass toolbar and clears all confir
           )
         )
         .toBe(false);
+      await expect(header).toHaveCSS("background-color", "rgb(8, 9, 10)");
       const bounds = await header.boundingBox();
       expect(bounds?.height).toBeLessThanOrEqual(104);
       await scroll.evaluate((element) => {
@@ -1542,11 +1570,8 @@ test("keeps archives compact with the shared glass toolbar and clears all confir
           )
         )
         .toBe(true);
-      await expect
-        .poll(() =>
-          header.evaluate((element) => getComputedStyle(element).backdropFilter)
-        )
-        .toContain("blur");
+      await expect(header).toHaveCSS("background-color", "rgb(18, 18, 20)");
+      await expect(header).toHaveCSS("backdrop-filter", "none");
       expect(
         Math.abs(
           ((await header.boundingBox())?.y ?? -1000) - (bounds?.y ?? 1000)
@@ -1560,10 +1585,39 @@ test("keeps archives compact with the shared glass toolbar and clears all confir
         await screenshot(
           fixture,
           page,
-          `archive-glass-${size.width}x${size.height}.png`
+          `archive-scrolled-${size.width}x${size.height}.png`
         );
       }
+      await scroll.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      await expect(header).toHaveCSS("background-color", "rgb(8, 9, 10)");
+      const search = page.getByRole("searchbox");
+      await search.focus();
+      await expect(search).toBeFocused();
+      expect(
+        await search.evaluate((element) => getComputedStyle(element).boxShadow)
+      ).not.toBe("none");
     }
+    await page.evaluate(() => {
+      document.documentElement.classList.replace("dark", "light");
+    });
+    await expect(header).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    await scroll.evaluate((element) => {
+      element.scrollTop = 400;
+    });
+    await expect(header).toHaveClass(SCROLLED_TOOLBAR);
+    await expect(header).toHaveCSS(
+      "background-color",
+      "color(srgb 1 1 1 / 0.85)"
+    );
+    await expect(header).toHaveCSS(
+      "backdrop-filter",
+      "blur(12px) saturate(1.2)"
+    );
+    await page.evaluate(() => {
+      document.documentElement.classList.replace("light", "dark");
+    });
     await resize(fixture, page, SIZES[0], 1.25);
     await expectLayoutInsideViewport(page);
     await page.getByRole("searchbox").fill("Library archive 23");

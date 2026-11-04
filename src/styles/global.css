@@ -510,10 +510,10 @@
     backdrop-filter: blur(24px) saturate(1.4);
   }
 
-  /* 页面功能条始终保持不透底；滚动后增强悬浮毛玻璃层级。 */
+  /* 深色功能条融入页面；滚动后使用不透底的次级背景遮住内容。 */
   .page-toolbar {
-    background: var(--surface);
-    border-color: var(--border);
+    background: var(--background);
+    border-color: var(--border-subtle);
     transition:
       background-color 160ms ease,
       border-color 160ms ease,
@@ -522,6 +522,14 @@
   }
 
   .page-toolbar.is-scrolled {
+    background: var(--background-secondary);
+  }
+
+  .light .page-toolbar {
+    background: var(--surface);
+  }
+
+  .light .page-toolbar.is-scrolled {
     background: color-mix(in srgb, var(--surface) 85%, transparent);
     box-shadow: 0 8px 24px -20px rgb(0 0 0 / 0.75);
     -webkit-backdrop-filter: blur(12px) saturate(1.2);

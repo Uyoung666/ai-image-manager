@@ -2221,7 +2221,7 @@ export const PhotoGrid = memo(
           style={{ paddingTop: showToolbar ? undefined : topInset }}
         >
           {showToolbar && (
-            <div className="flex items-center justify-between border-border border-b px-4 py-2">
+            <div className="page-toolbar flex items-center justify-between border-b px-4 py-2">
               <Skeleton className="h-4 w-24 bg-card" />
               <div className="flex items-center gap-2">
                 {sequenceModeToggle}
@@ -2265,7 +2265,7 @@ export const PhotoGrid = memo(
           style={{ paddingTop: showToolbar ? undefined : topInset }}
         >
           {showToolbar && (
-            <div className="flex items-center justify-between border-border border-b px-4 py-2">
+            <div className="page-toolbar flex items-center justify-between border-b px-4 py-2">
               <span className="truncate text-[12px] text-muted-foreground">
                 {t("photosCount", {
                   count: sequenceError ? 0 : displayPhotos.length,
