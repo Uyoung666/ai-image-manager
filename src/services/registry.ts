@@ -3,7 +3,6 @@ import { shutdownTextWorker } from "@/services/ai/text-worker-client";
 import { shutdownTranslationWorker } from "@/services/ai/translation-worker-client";
 import {
   closeVectorDB,
-  embedAllPhotos,
   initVectorDB,
   isAiModelLoaded,
   isVectorDBInitialized,
@@ -17,18 +16,19 @@ import {
 } from "@/services/ai-embedder";
 import { shutdownPool } from "@/services/embed-worker-pool";
 import { repairUnassignedLibraryPhotos } from "@/services/explicit-library-folders";
-import { resumeInterruptedImports, stopImports } from "@/services/import-queue";
-import {
-  cleanupOrphanedRecordsAsync,
-  startWatching,
-  stopWatching,
-} from "@/services/indexer";
+import { resumeInterruptedImports } from "@/services/import-queue";
+import { cleanupOrphanedRecordsAsync } from "@/services/indexer";
 import {
   initThumbnailer,
   scheduleThumbnailMaintenance,
   stopThumbnailer,
 } from "@/services/thumbnailer";
 import { GALLERY_CONFIG } from "@/utils/gallery-config";
+import { notifyAutoIndexReady, requestAutoIndex } from "./ai-index-scheduler";
+import {
+  startLibraryReconciliation,
+  stopLibraryReconciliation,
+} from "./library-reconciliation";
 
 // ── Service lifecycle types ───────────────────────────────────────────
 
@@ -158,6 +158,9 @@ class ServiceRegistry {
 
   /** Stop all started services in reverse order. */
   async stop(): Promise<void> {
+    if (this.startOrder.includes("fileWatcher")) {
+      await stopLibraryReconciliation();
+    }
     const toStop = [...this.startOrder].reverse();
     for (const name of toStop) {
       const svc = this.services.get(name);
@@ -323,9 +326,7 @@ registry.register({
   name: "fileWatcher",
   level: ServiceLevel.Essential,
   dependencies: ["database", "thumbnailer"],
-  start: async () => {
-    const { BrowserWindow } = await import("electron");
-
+  start: () => {
     // 启动时清理孤立记录（fire-and-forget，不阻塞启动）
     orphanCleanupController = new AbortController();
     orphanCleanupTask = cleanupOrphanedRecordsAsync(
@@ -343,20 +344,15 @@ registry.register({
         console.warn("[Registry] Startup orphan cleanup failed", error);
       });
 
-    startWatching((photoId, event) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send("file-change", { type: event, photoId });
-      }
-    });
     resumeInterruptedImports();
+    startLibraryReconciliation();
   },
   stop: async () => {
     orphanCleanupController?.abort();
     await orphanCleanupTask;
     orphanCleanupController = null;
     orphanCleanupTask = null;
-    await stopImports();
-    await stopWatching();
+    await stopLibraryReconciliation();
   },
   health: () => {
     return { status: "ok" as const };
@@ -378,19 +374,7 @@ registry.register({
       for (const win of BrowserWindow.getAllWindows()) {
         win.webContents.send("ai-auto-repair-started");
       }
-      embedAllPhotos((aiProgress) => {
-        for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send("ai-progress", aiProgress);
-        }
-      })
-        .then((count) => {
-          if (count > 0) {
-            console.log(`[Registry] Auto re-index complete: ${count} photos`);
-          }
-        })
-        .catch((err) => {
-          console.warn("[Registry] Auto re-index failed:", err?.message);
-        });
+      requestAutoIndex("auto-repair");
     }
   },
   stop: async () => {
@@ -412,6 +396,7 @@ registry.register({
   level: ServiceLevel.Optional,
   start: async () => {
     await loadModel();
+    notifyAutoIndexReady();
     warmupAiSearch().catch((err) => {
       console.warn("[Registry] AI search warmup failed:", err?.message);
     });

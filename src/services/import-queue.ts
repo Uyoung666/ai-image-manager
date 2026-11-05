@@ -4,8 +4,8 @@ import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { invalidateIndexStatsCache } from "@/ipc/photos/handlers/stats";
-import { getAiControlState, isAiIndexResetting } from "@/services/ai/state";
-import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
+import { deletePhotoVectors } from "@/services/ai-embedder";
+import { requestAutoIndex } from "@/services/ai-index-scheduler";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import {
   scanFolder as scanFolderService,
@@ -15,6 +15,7 @@ import {
 import { getSetting, setSetting } from "@/services/settings-manager";
 import { deletePhotoThumbnails } from "@/services/thumbnailer";
 import { importPathKey, normalizeImportFolderPath } from "@/utils/import-path";
+import { notifyLibraryChange } from "./library-change";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ export interface ImportTask {
   position: number;
   /** Number of supported files that could not be indexed. */
   skipped?: number;
+  source?: "user" | "background";
   status: ImportTaskStatus;
 }
 
@@ -59,8 +61,6 @@ const history: ImportTask[] = [];
 let current: ImportTask | null = null;
 let running = false;
 let nextId = 1;
-let aiEmbeddingPending = false;
-let aiEmbeddingRunning = false;
 let suspending = false;
 let recoveryStarted = false;
 let activeScan: Promise<boolean> | null = null;
@@ -169,7 +169,8 @@ function broadcast(): void {
 }
 
 function dequeueTask(): ImportTask | null {
-  const task = queue.shift();
+  const userIndex = queue.findIndex((task) => task.source !== "background");
+  const [task] = queue.splice(userIndex < 0 ? 0 : userIndex, 1);
   if (!task) {
     return null;
   }
@@ -259,24 +260,32 @@ function cleanupCancelledImport(
 // ── Phase runners ───────────────────────────────────────────────────
 
 async function runScanPhase(task: ImportTask): Promise<boolean> {
-  const result = await scanFolderService(task.folderPath, (progress) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send("scan-progress", progress);
-    }
-  });
+  const result = await scanFolderService(
+    task.folderPath,
+    (progress) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send("scan-progress", progress);
+      }
+    },
+    { background: task.source === "background" }
+  );
 
   if (suspending) {
     return false;
   }
   if (result.cancelled) {
-    cleanupCancelledImport(
-      result.folderId,
-      result.newPhotoIds,
-      result.folderExisted,
-      result.createdFolderIds
-    );
+    if (task.source !== "background") {
+      cleanupCancelledImport(
+        result.folderId,
+        result.newPhotoIds,
+        result.folderExisted,
+        result.createdFolderIds
+      );
+    }
     task.status = "cancelled";
-    rememberRoot(task.folderPath, false);
+    if (task.source !== "background") {
+      rememberRoot(task.folderPath, false);
+    }
     history.push(task);
     return false;
   }
@@ -285,64 +294,18 @@ async function runScanPhase(task: ImportTask): Promise<boolean> {
   task.newPhotoCount = result.newPhotoIds.length;
   task.skipped = result.skipped;
   task.failed = result.failed ?? 0;
+  if (result.incomplete) {
+    task.error = "Directory check incomplete";
+  }
 
-  watchFolder(task.folderPath, (photoId, event) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send("file-change", { type: event, photoId });
-    }
-  });
+  watchFolder(task.folderPath, notifyLibraryChange);
 
   if (result.newPhotoIds.length > 0) {
-    aiEmbeddingPending = true;
+    notifyLibraryChange(null, "add");
+    requestAutoIndex("folder-scan");
   }
 
   return true;
-}
-
-async function runEmbedPhase(): Promise<number> {
-  try {
-    return await embedAllPhotos((aiProgress) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send("ai-progress", aiProgress);
-      }
-    });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[ImportQueue] AI embedding failed: ${message}`);
-    return 0;
-  } finally {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send("ai-embedding-done");
-      win.webContents.send("ai-status-changed");
-    }
-  }
-}
-
-function runPendingAiEmbedding(): void {
-  if (
-    suspending ||
-    running ||
-    current ||
-    queue.length > 0 ||
-    aiEmbeddingRunning ||
-    !aiEmbeddingPending
-  ) {
-    return;
-  }
-
-  // A manual/repair embedding run may already own the worker. Keep this
-  // import-triggered request pending and run it after that owner releases it.
-  if (getAiControlState() !== "idle" || isAiIndexResetting) {
-    setTimeout(runPendingAiEmbedding, 1000);
-    return;
-  }
-
-  aiEmbeddingPending = false;
-  aiEmbeddingRunning = true;
-  runEmbedPhase().then(() => {
-    aiEmbeddingRunning = false;
-    runPendingAiEmbedding();
-  });
 }
 
 // ── Consumer ───────────────────────────────────────────────────────
@@ -357,7 +320,7 @@ async function processNext(): Promise<void> {
     running = false;
     current = null;
     broadcast();
-    runPendingAiEmbedding();
+    requestAutoIndex("scan-queue-idle");
     return;
   }
 
@@ -372,8 +335,10 @@ async function processNext(): Promise<void> {
     if (!ok) {
       return;
     }
-    task.status = "done";
-    rememberRoot(task.folderPath, false);
+    task.status = task.error ? "failed" : "done";
+    if (task.source !== "background") {
+      rememberRoot(task.folderPath, false);
+    }
     import("@/services/advanced-exif")
       .then(({ scheduleAdvancedExifEnrichment }) =>
         scheduleAdvancedExifEnrichment(1000)
@@ -407,15 +372,17 @@ async function processNext(): Promise<void> {
 
 /** Explicit file imports join the normal AI scheduler without scanning folders. */
 export function requestExplicitFileEmbedding(): void {
-  aiEmbeddingPending = true;
-  runPendingAiEmbedding();
+  requestAutoIndex("explicit-files");
 }
 
 /**
  * Enqueue a folder for import.
  * Returns immediately with the queued task — the frontend is unblocked.
  */
-export function enqueueImport(folderPath: string): ImportTask {
+export function enqueueImport(
+  folderPath: string,
+  source: "user" | "background" = "user"
+): ImportTask {
   if (suspending) {
     throw new Error("Application is shutting down");
   }
@@ -426,6 +393,10 @@ export function enqueueImport(folderPath: string): ImportTask {
     (t) => importPathKey(t.folderPath) === resolvedKey
   );
   if (duplicate) {
+    if (source === "user" && duplicate.source === "background") {
+      duplicate.source = "user";
+      rememberRoot(resolved, true);
+    }
     return duplicate;
   }
   if (
@@ -438,13 +409,16 @@ export function enqueueImport(folderPath: string): ImportTask {
 
   const task: ImportTask = {
     id: nextId++,
+    source,
     folderPath: resolved,
     status: "queued",
     position: queue.length + 1,
   };
 
   // Persist before acknowledging/enqueuing, including tasks not yet started.
-  rememberRoot(resolved, true);
+  if (source === "user") {
+    rememberRoot(resolved, true);
+  }
   queue.push(task);
   broadcast();
 
@@ -460,7 +434,9 @@ export function enqueueImport(folderPath: string): ImportTask {
 export function cancelQueuedImports(): ImportTask[] {
   const cancelled = queue.splice(0, queue.length);
   for (const t of cancelled) {
-    rememberRoot(t.folderPath, false);
+    if (t.source !== "background") {
+      rememberRoot(t.folderPath, false);
+    }
     t.status = "cancelled";
     history.push(t);
   }
@@ -516,4 +492,9 @@ export function isFolderImporting(folderPath: string): boolean {
     return true;
   }
   return queue.some((t) => importPathKey(t.folderPath) === resolvedKey);
+}
+
+/** A shared scan owner keeps background reconciliation behind user imports. */
+export function isImportQueueBusy(): boolean {
+  return running || queue.length > 0;
 }

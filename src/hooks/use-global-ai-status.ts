@@ -85,6 +85,7 @@ interface QueueTask {
   photoCount?: number;
   position: number;
   skipped?: number;
+  source?: "user" | "background";
   status: "queued" | "scanning" | "embedding" | "done" | "failed" | "cancelled";
 }
 
@@ -128,7 +129,10 @@ function processQueueTask(
   state: QueueHistoryState,
   onFailure: (task: QueueTask) => void
 ): void {
-  if (state.seenTerminalTaskIdsRef.current.has(task.id)) {
+  if (
+    task.source === "background" ||
+    state.seenTerminalTaskIdsRef.current.has(task.id)
+  ) {
     return;
   }
   state.seenTerminalTaskIdsRef.current.add(task.id);
@@ -159,7 +163,9 @@ function processQueueHistory(
     processQueueTask(task, state, onFailure);
   }
   const doneIds = new Set(
-    history.filter((task) => task.status === "done").map((task) => task.id)
+    history
+      .filter((task) => task.source !== "background" && task.status === "done")
+      .map((task) => task.id)
   );
   const hasNewDoneTask = [...doneIds].some(
     (id) => !state.prevQueueDoneIdsRef.current.has(id)

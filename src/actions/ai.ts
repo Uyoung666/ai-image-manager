@@ -1,5 +1,6 @@
 import { ipc } from "@/ipc/manager";
 
+/** Status includes automatic scheduling state separately from vector coverage. */
 export const aiActions = {
   getProgress: () => ipc.client.photos.getAiProgress({}),
   getStatus: () => ipc.client.photos.getAiStatus({ loadModel: false }),

@@ -32,6 +32,7 @@ const idle = {
 };
 
 const readyStatus = {
+  autoIndex: { state: "idle" as const, failedPhotos: 0 },
   coverageState: "unavailable" as const,
   embeddingProgress: { processed: 0, total: 8, phase: "idle" },
   hasVectors: false,

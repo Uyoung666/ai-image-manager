@@ -5,7 +5,8 @@ import { Worker } from "node:worker_threads";
 
 export interface FileWatcherOptions {
   awaitWriteFinish: { stabilityThreshold: number; pollInterval: number };
-  depth: number;
+  depth?: number;
+  followSymlinks?: boolean;
   ignored: RegExp[];
   ignoreInitial: boolean;
   ignorePermissionErrors: boolean;
@@ -13,7 +14,10 @@ export interface FileWatcherOptions {
 
 export interface FileWatcherHandle {
   close(): Promise<void>;
-  on(event: "add" | "unlink", listener: (path: string) => void): this;
+  on(
+    event: "add" | "unlink" | "addDir",
+    listener: (path: string) => void
+  ): this;
   on(event: "error", listener: (error: Error) => void): this;
   on(event: "ready", listener: () => void): this;
 }
@@ -24,7 +28,12 @@ interface WireError {
   syscall?: string;
 }
 type WatchMessage =
-  | { type: "event"; id: number; event: "add" | "unlink"; path: string }
+  | {
+      type: "event";
+      id: number;
+      event: "add" | "unlink" | "addDir";
+      path: string;
+    }
   | { type: "ready"; id: number }
   | { type: "error"; id: number; error: WireError }
   | { type: "closed"; id: number; error?: WireError }
@@ -45,7 +54,7 @@ const post=message=>parentPort.postMessage(message);
     const watcher=chokidar.watch(message.path,message.options);
     watchers.set(message.id,watcher);
     watcher.on('error',error=>post({type:'error',id:message.id,error:wire(error)}));
-    for(const event of ['add','unlink'])watcher.on(event,path=>post({type:'event',id:message.id,event,path}));
+    for(const event of ['add','unlink','addDir'])watcher.on(event,path=>post({type:'event',id:message.id,event,path}));
     watcher.once('ready',()=>post({type:'ready',id:message.id}));
    }catch(error){post({type:'error',id:message.id,error:wire(error)});}
   }else if(message.type==='close'){

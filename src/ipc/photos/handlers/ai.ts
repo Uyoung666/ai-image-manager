@@ -26,11 +26,16 @@ import {
   setWasAutoRepaired,
   stopEmbedding,
 } from "@/services/ai-embedder";
+import {
+  getAutoIndexStatus,
+  setAutoIndexStopped,
+} from "@/services/ai-index-scheduler";
 
 export const startAiIndexing = os.handler(() => {
   if (aiControlState !== "idle" || isAiIndexResetting) {
     return { busy: true, started: false, state: aiControlState };
   }
+  setAutoIndexStopped(false);
   embedAllPhotos((aiProgress) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send("ai-progress", aiProgress);
@@ -49,6 +54,7 @@ export const stopAiIndexing = os.handler(() => {
   if (isAiIndexResetting) {
     return { busy: true, stopped: false };
   }
+  setAutoIndexStopped(true);
   stopEmbedding();
   return { stopped: true };
 });
@@ -57,6 +63,7 @@ export const cancelAiIndexing = os.handler(async () => {
   if (isAiIndexResetting) {
     return { busy: true, cancelled: false };
   }
+  setAutoIndexStopped(true);
   const runId = activeEmbeddingRunId;
   const stateBeforeCancel = aiControlState;
   cancelEmbedding();
@@ -87,14 +94,16 @@ export const pauseAiIndexing = os.handler(() => {
   if (isAiIndexResetting) {
     return { busy: true, paused: false };
   }
+  setAutoIndexStopped(true);
   pauseEmbedding();
   return { paused: true };
 });
 
 export const resumeAiIndexing = os.handler(() => {
-  if (isAiIndexResetting || !resumeEmbedding()) {
+  if (isAiIndexResetting || (aiControlState !== "idle" && !resumeEmbedding())) {
     return { resumed: false, state: aiControlState };
   }
+  setAutoIndexStopped(false);
   // Fire-and-forget: restart embedding
   embedAllPhotos((aiProgress) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -116,7 +125,10 @@ export const getAiProgress = os.handler(() => {
 
 export const getAiStatus = os
   .input(z.object({ loadModel: z.boolean().optional() }))
-  .handler(({ input }) => getAiReadiness(input));
+  .handler(async ({ input }) => ({
+    ...(await getAiReadiness(input)),
+    autoIndex: getAutoIndexStatus(),
+  }));
 
 export const getAiHealth = os.handler(() => {
   return checkAiHealth();

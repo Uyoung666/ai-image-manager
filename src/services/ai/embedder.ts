@@ -363,9 +363,29 @@ export async function cleanupPartialEmbedding(
   console.log(`[AI] Cleanup complete: ${ids.length} photos reverted`);
 }
 
+const embeddingTasks = new Set<Promise<number>>();
+
+export function embedAllPhotos(
+  onProgress?: EmbedProgressCallback,
+  options?: { excludePhotoIds?: ReadonlySet<number> }
+): Promise<number> {
+  const task = runEmbedding(onProgress, options);
+  embeddingTasks.add(task);
+  task.then(
+    () => embeddingTasks.delete(task),
+    () => embeddingTasks.delete(task)
+  );
+  return task;
+}
+
+export async function waitForEmbeddingTasks(): Promise<void> {
+  await Promise.allSettled([...embeddingTasks]);
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Embedding orchestration preserves cancellation, recovery, persistence, and auto-tagging lifecycle in one transaction-like flow.
-export async function embedAllPhotos(
-  onProgress?: EmbedProgressCallback
+async function runEmbedding(
+  onProgress?: EmbedProgressCallback,
+  options?: { excludePhotoIds?: ReadonlySet<number> }
 ): Promise<number> {
   // Atomically guard against concurrent calls
   if (getAiControlState() !== "idle" || isEmbedding || isAiIndexResetting) {
@@ -532,6 +552,7 @@ export async function embedAllPhotos(
 
     const needsRepair =
       processedCount > 0 &&
+      vectorCount < processedCount &&
       (vectorCount <= 1 || vectorCount < processedCount * 0.5);
 
     if (needsRepair) {
@@ -600,7 +621,8 @@ export async function embedAllPhotos(
       .select({ id: photos.id, path: photos.path })
       .from(photos)
       .where(sql`${photos.isAiProcessed} = 0 AND ${photos.deletedAt} IS NULL`)
-      .all();
+      .all()
+      .filter((photo) => !options?.excludePhotoIds?.has(photo.id));
 
     const total = unprocessed.length;
     let processed = 0;
@@ -1227,10 +1249,17 @@ export async function embedAllPhotos(
           `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped (${Math.round(performance.now() - tagStarted)}ms)`
         );
       } catch (err: unknown) {
+        if (shouldStopRun()) {
+          return await settleStoppedRun(processed);
+        }
         diagnosticError = err;
         tagError = getErrorMessage(err);
         console.error("[AI] Auto-tag failed:", tagError);
       }
+    }
+
+    if (shouldStopRun()) {
+      return await settleStoppedRun(processed);
     }
 
     // Publish the model identity only after every photo in this indexing run

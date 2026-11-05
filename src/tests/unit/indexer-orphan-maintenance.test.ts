@@ -75,6 +75,16 @@ afterEach(() => {
 });
 
 describe("asynchronous orphan maintenance", () => {
+  it("keeps all records when the registered root is offline", async () => {
+    vi.spyOn(fs.promises, "readdir").mockRejectedValue(absent());
+    vi.spyOn(fs.promises, "access").mockRejectedValue(absent());
+    expect(await cleanupOrphanedRecordsAsync()).toEqual({
+      checked: 0,
+      removed: 0,
+    });
+    expect(db.select({ id: photos.id }).from(photos).get()?.id).toBe(1);
+    expect(state.vectors).not.toHaveBeenCalled();
+  });
   it("removes only confirmed missing records and updates the folder count", async () => {
     vi.spyOn(fs.promises, "access").mockRejectedValue(absent());
     expect(await cleanupOrphanedRecordsAsync()).toEqual({

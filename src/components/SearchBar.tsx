@@ -70,6 +70,7 @@ function getFileName(filePath: string): string {
 interface SearchBarProps {
   activeTagIds?: number[];
   aiStatus?: {
+    autoIndex?: import("@/services/ai-index-scheduler").AutoIndexStatus;
     coverageState?: "ready" | "partial" | "unavailable" | "error";
     model: string;
     vectorDB: string;
@@ -991,14 +992,12 @@ export const SearchBar = memo(
               </Tooltip>
               {aiStatus?.coverageState &&
                 aiStatus.coverageState !== "ready" &&
-                aiStatus.coverageState !== "error" && (
+                (aiStatus.coverageState !== "error" ||
+                  Boolean(aiStatus.autoIndex)) && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span
-                        aria-label={t("semanticSearchPartial", {
-                          indexed: aiStatus.indexedPhotos ?? 0,
-                          total: aiStatus.totalPhotos ?? 0,
-                        })}
+                        aria-label={`${t("semanticSearchPartial", { indexed: aiStatus.indexedPhotos ?? 0, total: aiStatus.totalPhotos ?? 0 })}${aiStatus.autoIndex ? " " : ""}${aiStatus.autoIndex ? t(`autoIndex.${aiStatus.isEmbedding ? "running" : (aiStatus.autoIndex.reason ?? aiStatus.autoIndex.state)}`, { count: aiStatus.autoIndex.failedPhotos }) : ""}`}
                         className="flex h-9 w-5 items-center justify-center text-amber-500"
                         role="status"
                         // biome-ignore lint/a11y/noNoninteractiveTabindex: expose the AI-status Tooltip to keyboard users.
@@ -1011,7 +1010,12 @@ export const SearchBar = memo(
                       {t("semanticSearchPartial", {
                         indexed: aiStatus.indexedPhotos ?? 0,
                         total: aiStatus.totalPhotos ?? 0,
-                      })}
+                      })}{" "}
+                      {aiStatus.autoIndex &&
+                        t(
+                          `autoIndex.${aiStatus.isEmbedding ? "running" : (aiStatus.autoIndex.reason ?? aiStatus.autoIndex.state)}`,
+                          { count: aiStatus.autoIndex.failedPhotos }
+                        )}
                     </TooltipContent>
                   </Tooltip>
                 )}

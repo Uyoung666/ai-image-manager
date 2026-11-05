@@ -9,6 +9,7 @@ import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos } from "@/db/schema";
 import { invalidateFoldersCache } from "@/utils/folder-paths";
+import { containsLibraryPath, selectLibraryRoots } from "@/utils/library-roots";
 import { createLogger } from "@/utils/logger";
 import { deletePhotoVectors } from "./ai-embedder";
 import {
@@ -42,7 +43,6 @@ const log = createLogger("indexer");
 const FOCAL_RANGE_RE = /^\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?$/;
 const FOCAL_SPLIT_RE = /\s*-\s*/;
 const SHUTTER_FRACTION_RE = /^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/;
-const WATCHER_IGNORED_PATTERNS = [/\.thumbnails/, /\.cache/];
 
 const SUPPORTED_EXTENSIONS = new Set([
   // Common image formats
@@ -112,6 +112,7 @@ interface WatcherContext {
   folderId: number | null;
   folderPath: string;
   key: string;
+  onChange?: WatchChange;
   watcher: FileWatcherHandle;
 }
 
@@ -121,6 +122,42 @@ type WatcherStateContext = Pick<
   WatcherContext,
   "db" | "folderId" | "folderPath"
 >;
+
+type WatchChange = (photoId: number | null, event: "add" | "remove") => void;
+let onWatcherReady: ((folderPath: string) => void) | undefined;
+const retries = new Map<
+  string,
+  { timer: ReturnType<typeof setTimeout>; attempt: number }
+>();
+const retryCounts = new Map<string, number>();
+
+export function setWatcherReconciliationCallback(
+  callback?: (folderPath: string) => void
+): void {
+  onWatcherReady = callback;
+}
+
+function retryWatch(folderPath: string, onChange: WatchChange): void {
+  const key = watcherPathKey(folderPath);
+  if (retries.has(key)) {
+    return;
+  }
+  const attempt = retryCounts.get(key) ?? 0;
+  const delay = [5000, 30_000, 120_000][attempt];
+  if (delay === undefined) {
+    return;
+  }
+  retryCounts.set(key, attempt + 1);
+  const timer = setTimeout(
+    () => {
+      retries.delete(key);
+      installWatcher(folderPath, onChange);
+    },
+    delay * (0.8 + Math.random() * 0.4)
+  );
+  timer.unref?.();
+  retries.set(key, { timer, attempt });
+}
 
 type WatcherFailurePhase = "close" | "create" | "error" | "state";
 
@@ -229,6 +266,9 @@ function handleWatcherError(context: WatcherContext, error: unknown): void {
   logWatcherFailure(context, error, "error", "Watcher: File system error");
   updateWatcherState(context, false);
   closeWatcherSafely(context).catch(() => undefined);
+  if (context.onChange) {
+    retryWatch(context.folderPath, context.onChange);
+  }
 }
 
 function failWatcherSetup(
@@ -270,14 +310,15 @@ function createWatcher(
   folderId: number | null
 ): WatcherContext | null {
   const key = watcherPathKey(folderPath);
+  updateWatcherState({ db, folderId, folderPath }, false);
   let watcher: FileWatcherHandle;
   try {
     watcher = createBackgroundWatcher(folderPath, {
-      ignored: WATCHER_IGNORED_PATTERNS,
+      ignored: SKIP_PATTERNS,
       ignorePermissionErrors: true,
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
-      depth: 10,
+      followSymlinks: false,
     });
   } catch (error) {
     watcherStats.errors++;
@@ -934,8 +975,10 @@ export async function indexExplicitPhotoFiles(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Folder scanning preserves cancellation, batching, duplicate handling, and progress lifecycle in one public operation.
 export async function scanFolder(
   folderPath: string,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  options?: { background?: boolean }
 ): Promise<{
+  incomplete: boolean;
   createdFolderIds: number[];
   folderId: number;
   photoIds: number[];
@@ -953,6 +996,7 @@ export async function scanFolder(
   const heifBefore = getHeifImportMetrics();
   const scanToken = { cancelled: false };
   activeScanToken = scanToken;
+  let incomplete = false;
   const newPhotoIds: number[] = [];
   const createdFolderIds: number[] = [];
 
@@ -1012,6 +1056,10 @@ export async function scanFolder(
       .run();
     invalidateFoldersCache();
 
+    if (options?.background) {
+      await fs.promises.readdir(resolvedPath);
+    }
+
     // Async walk — avoids blocking the main process on large folders.
     // Each directory level yields the event loop via setImmediate to keep the UI responsive.
     const files: string[] = [];
@@ -1023,7 +1071,7 @@ export async function scanFolder(
       try {
         entries = await fs.promises.readdir(dir, { withFileTypes: true });
       } catch {
-        // Permission denied or directory removed — skip silently
+        incomplete = true;
         return;
       }
       // Yield the event loop after reading each directory to prevent UI jank
@@ -1039,7 +1087,10 @@ export async function scanFolder(
           return;
         }
         const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
+        if (
+          entry.isDirectory() &&
+          !SKIP_PATTERNS.some((pattern) => pattern.test(fullPath))
+        ) {
           await walk(fullPath);
         } else if (entry.isFile() && shouldIndex(fullPath)) {
           files.push(fullPath);
@@ -1154,6 +1205,26 @@ export async function scanFolder(
         existingRows.map((row) => [row.path, row])
       );
 
+      // Sample a bounded batch together, so stability checks do not add two
+      // seconds to every four new photos in a large offline addition.
+      const beforeWrite = new Map<string, fs.Stats>();
+      if (options?.background) {
+        await runWithConcurrency(
+          batchFiles.filter((file) => !existingByPath.has(file)),
+          async (file) => {
+            try {
+              beforeWrite.set(file, await fs.promises.stat(file));
+            } catch {
+              incomplete = true;
+            }
+          },
+          CONCURRENCY
+        );
+        if (beforeWrite.size > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+
       const preparedRecords = await runWithConcurrency(
         batchFiles,
         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Per-file indexing callback keeps all error and cancellation branches together for queue ordering.
@@ -1206,6 +1277,19 @@ export async function scanFolder(
               return { type: "existing" as const, photoId: existing.id };
             }
 
+            if (options?.background) {
+              const before = beforeWrite.get(file);
+              const after = await fs.promises.stat(file);
+              if (
+                !before ||
+                before.size !== after.size ||
+                before.mtimeMs !== after.mtimeMs
+              ) {
+                incomplete = true;
+                scanned++;
+                return null;
+              }
+            }
             const prepared = await preparePhotoRecord(file, fileFolderId);
             if (!prepared) {
               scanned++;
@@ -1393,7 +1477,10 @@ export async function scanFolder(
         .where(eq(photos.folderId, fid))
         .all();
       for (const p of dbPhotos) {
-        if (!fs.existsSync(p.path)) {
+        if (
+          !(options?.background || incomplete) &&
+          (await findMissingPhotoIds([p])).has(p.id)
+        ) {
           db.delete(exifData).where(eq(exifData.photoId, p.id)).run();
           db.delete(photos).where(eq(photos.id, p.id)).run();
           stalePhotoIds.push(p.id);
@@ -1440,7 +1527,9 @@ export async function scanFolder(
     for (const fid of folderIds) {
       db.update(folders)
         .set({
-          ...(scanToken.cancelled ? {} : { lastScannedAt: Date.now() }),
+          ...(scanToken.cancelled || incomplete
+            ? {}
+            : { lastScannedAt: Date.now() }),
           photoCount: folderPhotoCounts.get(fid) ?? 0,
         })
         .where(eq(folders.id, fid))
@@ -1480,6 +1569,7 @@ export async function scanFolder(
     // embedding and prevents the scene-tag bias (every photo tagged as indoor/outdoor/city).
 
     return {
+      incomplete,
       createdFolderIds: [...createdFolderIds],
       folderId,
       photoIds,
@@ -1590,158 +1680,69 @@ function resolveWatchedFileFolder(filePath: string): number | null {
   return folderId;
 }
 
-export function startWatching(
-  onChange: (photoId: number | null, event: "add" | "remove") => void
-): void {
-  const db = getDatabase();
-  const indexedFolders = db
-    .select({ id: folders.id, path: folders.path })
+export function startWatching(onChange: WatchChange): void {
+  const indexedFolders = getDatabase()
+    .select({ path: folders.path })
     .from(folders)
     .where(eq(folders.explicitOnly, false))
     .all();
+  for (const folder of [...indexedFolders].sort(
+    (a, b) => a.path.length - b.path.length
+  )) {
+    installWatcher(folder.path, onChange);
+  }
+  log.info({ count: watchers.size }, "Watcher: Started watching folders");
+}
 
-  for (const folder of indexedFolders) {
-    const watcherKey = watcherPathKey(folder.path);
-    if (watchers.has(watcherKey)) {
-      continue;
-    }
-    const context = createWatcher(db, folder.path, folder.id);
-    if (!context) {
-      continue;
-    }
-    const watcher = context.watcher;
-
-    watcher.on("add", (filePath) => {
-      if (!isCurrentWatcher(context)) {
-        return;
-      }
-      if (!shouldIndex(filePath)) {
-        return;
-      }
-      watcherStats.addEvents++;
-
-      watcherQueue.add(async () => {
-        try {
-          if (!isCurrentWatcher(context)) {
-            return;
-          }
-          const matchedFolderId = resolveWatchedFileFolder(filePath);
-
-          const alreadyIndexed = db
-            .select({ id: photos.id })
-            .from(photos)
-            .where(eq(photos.path, filePath))
-            .get();
-
-          if (alreadyIndexed) {
-            watcherStats.skipped++;
-            return;
-          }
-
-          const photoId = await indexSingleFile(filePath, matchedFolderId);
-          if (matchedFolderId && photoId) {
-            db.update(folders)
-              .set({
-                photoCount: sql`(select count(*) from photos where folder_id = ${matchedFolderId} and deleted_at is null)`,
-                lastWatcherEventAt: Date.now(),
-              })
-              .where(eq(folders.id, matchedFolderId))
-              .run();
-          }
-          watcherStats.processed++;
-          onChange(photoId, "add");
-        } catch (err) {
-          watcherStats.errors++;
-          log.error({ filePath, err }, "Watcher: Error processing add event");
-        }
-      });
-    });
-
-    watcher.on("unlink", (filePath) => {
-      if (!isCurrentWatcher(context)) {
-        return;
-      }
-      watcherStats.unlinkEvents++;
-
-      watcherQueue.add(() => {
-        try {
-          if (!isCurrentWatcher(context)) {
-            return;
-          }
-          const photo = db
-            .select({ id: photos.id, folderId: photos.folderId })
-            .from(photos)
-            .where(
-              and(eq(photos.path, filePath), sql`${photos.deletedAt} IS NULL`)
-            )
-            .get();
-          if (photo) {
-            db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
-            db.delete(photos).where(eq(photos.id, photo.id)).run();
-            deletePhotoThumbnails(filePath);
-            deletePhotoVectors([photo.id]).catch((err) =>
-              log.error(
-                { err, photoId: photo.id },
-                "Watcher: vector cleanup failed on unlink"
-              )
-            );
-
-            if (photo.folderId) {
-              db.update(folders)
-                .set({
-                  photoCount: sql`MAX(0, photo_count - 1)`,
-                  lastWatcherEventAt: Date.now(),
-                })
-                .where(eq(folders.id, photo.folderId))
-                .run();
-            }
-
-            watcherStats.processed++;
-            onChange(photo.id, "remove");
-          }
-        } catch (err) {
-          watcherStats.errors++;
-          log.error(
-            { filePath, err },
-            "Watcher: Error processing unlink event"
-          );
-        }
-      });
-    });
-
-    // 更新文件夹 watcher 状态
-    if (!isCurrentWatcher(context)) {
-      continue;
-    }
-    if (!updateWatcherState(context, true)) {
+function installWatcher(folderPath: string, onChange: WatchChange): void {
+  if (
+    [...watchers.values()].some((context) =>
+      containsLibraryPath(context.folderPath, folderPath)
+    )
+  ) {
+    return;
+  }
+  const key = watcherPathKey(folderPath);
+  const retry = retries.get(key);
+  if (retry) {
+    clearTimeout(retry.timer);
+    retries.delete(key);
+  }
+  const db = getDatabase();
+  if (findFolderId(db, folderPath) === null) {
+    return;
+  }
+  for (const context of [...watchers.values()]) {
+    if (containsLibraryPath(folderPath, context.folderPath)) {
       removeCurrentWatcher(context);
       closeWatcherSafely(context).catch(() => undefined);
     }
   }
-
-  log.info({ count: watchers.size }, "Watcher: Started watching folders");
-}
-
-export function watchFolder(
-  folderPath: string,
-  onChange: (photoId: number | null, event: "add" | "remove") => void
-): void {
-  const watcherKey = watcherPathKey(folderPath);
-  if (watchers.has(watcherKey)) {
-    return;
-  }
-  const db = getDatabase();
-  db.update(folders)
-    .set({ explicitOnly: false })
-    .where(eq(folders.path, path.resolve(folderPath)))
-    .run();
-  invalidateFoldersCache();
   const context = createWatcher(db, folderPath, findFolderId(db, folderPath));
   if (!context) {
+    retryWatch(folderPath, onChange);
     return;
   }
+  context.onChange = onChange;
   const watcher = context.watcher;
-
+  watcher.on("addDir", () => {
+    if (isCurrentWatcher(context)) {
+      onWatcherReady?.(folderPath);
+    }
+  });
+  watcher.on("ready", () => {
+    if (!isCurrentWatcher(context)) {
+      return;
+    }
+    if (!updateWatcherState(context, true)) {
+      handleWatcherError(
+        context,
+        new Error("Failed to publish watcher readiness")
+      );
+      return;
+    }
+    onWatcherReady?.(folderPath);
+  });
   watcher.on("add", (filePath) => {
     if (!isCurrentWatcher(context)) {
       return;
@@ -1757,6 +1758,9 @@ export function watchFolder(
           return;
         }
         const matchedFolderId = resolveWatchedFileFolder(filePath);
+        if (matchedFolderId === null) {
+          return;
+        }
 
         const alreadyIndexed = db
           .select({ id: photos.id })
@@ -1838,13 +1842,29 @@ export function watchFolder(
   });
 }
 
+export function watchFolder(folderPath: string, onChange: WatchChange): void {
+  const db = getDatabase();
+  db.update(folders)
+    .set({ explicitOnly: false })
+    .where(eq(folders.path, path.resolve(folderPath)))
+    .run();
+  invalidateFoldersCache();
+  installWatcher(folderPath, onChange);
+}
+
 /** Stop watchers rooted at this folder or one of its descendants. */
 export async function unwatchFolder(folderPath: string): Promise<void> {
   const root = watcherPathKey(folderPath);
-  const descendantPrefix = `${root}${path.sep}`;
   const closing: Promise<void>[] = [];
+  for (const [key, retry] of retries) {
+    if (containsLibraryPath(root, key)) {
+      clearTimeout(retry.timer);
+      retries.delete(key);
+      retryCounts.delete(key);
+    }
+  }
   for (const [key, context] of watchers) {
-    if (key === root || key.startsWith(descendantPrefix)) {
+    if (containsLibraryPath(root, key)) {
       removeCurrentWatcher(context);
       closing.push(closeWatcherSafely(context));
     }
@@ -1855,12 +1875,16 @@ export async function unwatchFolder(folderPath: string): Promise<void> {
 export async function stopWatching(): Promise<void> {
   const db = getDatabase();
 
-  // 等待队列清空
-  await watcherQueue.onIdle();
+  for (const retry of retries.values()) {
+    clearTimeout(retry.timer);
+  }
+  retries.clear();
+  retryCounts.clear();
 
   const contexts = Array.from(watchers.values());
   watchers.clear();
   await Promise.all(contexts.map((context) => closeWatcherSafely(context)));
+  await watcherQueue.onIdle();
 
   // 更新所有文件夹状态
   try {
@@ -1915,6 +1939,45 @@ async function confirmOrphanedPhoto(
     .get();
 }
 
+async function rootStillAvailable(
+  roots: { path: string }[],
+  photoPath: string
+): Promise<boolean> {
+  const root = roots.find((candidate) =>
+    containsLibraryPath(candidate.path, photoPath)
+  );
+  if (!root) {
+    return false;
+  }
+  try {
+    await fs.promises.readdir(root.path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function accessibleLibraryRoots(
+  signal?: AbortSignal
+): Promise<{ path: string }[]> {
+  const roots = selectLibraryRoots(
+    getDatabase().select({ path: folders.path }).from(folders).all()
+  );
+  const accessible: { path: string }[] = [];
+  for (const root of roots) {
+    if (signal?.aborted) {
+      break;
+    }
+    try {
+      await fs.promises.readdir(root.path);
+      accessible.push(root);
+    } catch {
+      /* unavailable does not mean deleted */
+    }
+  }
+  return accessible;
+}
+
 /**
  * Async variant of cleanupOrphanedRecords — yields the event loop every
  * BATCH_SIZE photos so the UI stays responsive during startup cleanup.
@@ -1924,11 +1987,15 @@ export async function cleanupOrphanedRecordsAsync(
   signal?: AbortSignal
 ): Promise<{ checked: number; removed: number }> {
   const db = getDatabase();
+  const roots = await accessibleLibraryRoots(signal);
   const allPhotos = db
     .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
     .from(photos)
     .where(sql`${photos.deletedAt} IS NULL`)
-    .all();
+    .all()
+    .filter((photo) =>
+      roots.some((root) => containsLibraryPath(root.path, photo.path))
+    );
 
   let removed = 0;
   const removedPhotoIds: number[] = [];
@@ -1943,26 +2010,30 @@ export async function cleanupOrphanedRecordsAsync(
       break;
     }
     for (const photo of batch) {
-      if (missing.has(photo.id)) {
-        const current = await confirmOrphanedPhoto(db, photo, signal);
-        if (!current) {
-          continue;
-        }
-        db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
-        db.delete(photos).where(eq(photos.id, photo.id)).run();
-        await deletePhotoThumbnails(photo.path).catch((err) => {
-          log.warn({ err }, "Failed to remove orphaned thumbnails");
-        });
-        removedPhotoIds.push(photo.id);
-
-        if (current.folderId) {
-          folderUpdates.set(
-            current.folderId,
-            (folderUpdates.get(current.folderId) || 0) + 1
-          );
-        }
-        removed++;
+      if (!missing.has(photo.id)) {
+        continue;
       }
+      if (!(await rootStillAvailable(roots, photo.path))) {
+        continue;
+      }
+      const current = await confirmOrphanedPhoto(db, photo, signal);
+      if (!current) {
+        continue;
+      }
+      db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
+      db.delete(photos).where(eq(photos.id, photo.id)).run();
+      await deletePhotoThumbnails(photo.path).catch((err) => {
+        log.warn({ err }, "Failed to remove orphaned thumbnails");
+      });
+      removedPhotoIds.push(photo.id);
+
+      if (current.folderId) {
+        folderUpdates.set(
+          current.folderId,
+          (folderUpdates.get(current.folderId) || 0) + 1
+        );
+      }
+      removed++;
     }
     checked = Math.min(i + BATCH_SIZE, allPhotos.length);
     // Yield the event loop every batch to keep UI responsive

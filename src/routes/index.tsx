@@ -587,6 +587,7 @@ function HomePage() {
     };
     const handler = (event: MessageEvent) => {
       if (event.data?.channel === "file-change") {
+        queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
         // refetchType: "active" — 仅重取当前视口活跃的页面，
         // 杜绝 chokidar 事件触发所有已加载页（如 50 页）同时 IPC 请求的雪崩
         queryClient.invalidateQueries({

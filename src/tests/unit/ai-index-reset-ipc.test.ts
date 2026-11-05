@@ -10,6 +10,10 @@ const fixture = vi.hoisted(() => ({
   autoTagging: false,
 }));
 
+vi.mock("@/services/settings-manager", () => ({
+  getSetting: () => null,
+  setSetting: vi.fn(),
+}));
 vi.mock("electron", () => ({
   BrowserWindow: {
     getAllWindows: () => [{ webContents: { send: fixture.send } }],
@@ -78,6 +82,19 @@ beforeEach(() => {
 });
 
 describe("AI index reset ownership", () => {
+  it("persists explicit user stopping and clears it only on a successful start", async () => {
+    const { setSetting } = await import("@/services/settings-manager");
+    await call(pauseAiIndexing, {});
+    expect(setSetting).toHaveBeenLastCalledWith("ai.autoIndexStopped", "true");
+    await call(cancelAiIndexing, {});
+    expect(setSetting).toHaveBeenLastCalledWith("ai.autoIndexStopped", "true");
+    setIsAiIndexResetting(true);
+    await call(startAiIndexing, {});
+    expect(setSetting).toHaveBeenLastCalledWith("ai.autoIndexStopped", "true");
+    setIsAiIndexResetting(false);
+    await call(startAiIndexing, {});
+    expect(setSetting).toHaveBeenLastCalledWith("ai.autoIndexStopped", "false");
+  });
   it("blocks concurrent reset, start, tag and control requests until cleanup finishes", async () => {
     let release!: (result: { success: boolean }) => void;
     fixture.rebuild.mockImplementationOnce(

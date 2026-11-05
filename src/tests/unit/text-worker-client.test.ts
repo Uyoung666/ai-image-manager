@@ -90,6 +90,21 @@ describe("text embedding worker client", () => {
     vi.unstubAllEnvs();
   });
 
+  it("does not send shutdown to a worker whose IPC channel already closed", async () => {
+    const { initTextWorker, shutdownTextWorker } = await import(
+      "@/services/ai/text-worker-client"
+    );
+    const initialization = initTextWorker("model-path");
+    const child = childProcessMock.children[0];
+    emitReady(child);
+    await initialization;
+    child.connected = false;
+    child.send.mockClear();
+    shutdownTextWorker();
+    expect(child.send).not.toHaveBeenCalled();
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
   it("shares initialization and maps batch responses by request id", async () => {
     const { embedTextsInWorker, initTextWorker, shutdownTextWorker } =
       await import("@/services/ai/text-worker-client");

@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   legacyRoots: [] as Array<{ path: string }>,
   indexResetting: false,
 }));
+vi.mock("@/services/ai-index-scheduler", () => ({ requestAutoIndex: vi.fn() }));
 vi.mock("electron", () => ({
   BrowserWindow: {
     getAllWindows: () => [{ webContents: { send: state.send } }],
@@ -107,28 +108,6 @@ describe("durable import recovery", () => {
     state.scan.mockResolvedValue(result());
   });
 
-  it("retains imported photos pending for embedding until index reset finishes", async () => {
-    vi.useFakeTimers();
-    try {
-      state.indexResetting = true;
-      state.scan.mockResolvedValue({ ...result(), newPhotoIds: [1, 2] });
-      const { embedAllPhotos } = await import("@/services/ai-embedder");
-      const queue = await import("@/services/import-queue");
-      queue.enqueueImport("photos-during-reset");
-      await vi.advanceTimersByTimeAsync(0);
-      expect(queue.getImportQueueStatus().history[0]?.status).toBe("done");
-      expect(embedAllPhotos).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(embedAllPhotos).not.toHaveBeenCalled();
-      state.indexResetting = false;
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(embedAllPhotos).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("resumes interrupted and queued roots after restart, but not completed roots", async () => {
     let release!: (value: ReturnType<typeof result>) => void;
     state.scan.mockImplementationOnce(
@@ -196,7 +175,8 @@ describe("durable import recovery", () => {
     await tick();
     expect(state.scan).toHaveBeenCalledWith(
       "legacy-partial-root",
-      expect.any(Function)
+      expect.any(Function),
+      { background: false }
     );
     vi.resetModules();
     (await import("@/services/import-queue")).resumeInterruptedImports();

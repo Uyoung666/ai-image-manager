@@ -277,7 +277,11 @@ export function shutdownTextWorker(): void {
     return;
   }
   try {
-    child.send({ type: "shutdown" });
+    if (child.connected) {
+      child.send({ type: "shutdown" }, () => undefined);
+    } else {
+      child.kill();
+    }
   } catch {
     child.kill();
   }

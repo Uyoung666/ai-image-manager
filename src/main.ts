@@ -1924,6 +1924,10 @@ async function cleanupApplicationBeforeQuit(): Promise<void> {
   beginChildProcessShutdown();
   const { suspendImportsForShutdown } = await import("@/services/import-queue");
   suspendImportsForShutdown();
+  const { stopLibraryReconciliation } = await import(
+    "@/services/library-reconciliation"
+  );
+  const libraryStop = stopLibraryReconciliation();
   stopUpdateManager();
   try {
     if (logDir) {
@@ -1958,6 +1962,8 @@ async function cleanupApplicationBeforeQuit(): Promise<void> {
   // so rejected worker promises cannot persist late results during shutdown.
   cancelFaceDetection();
   shutdownFacePool();
+
+  await waitForQuitCleanup(libraryStop, "library task suspension", 2000);
 
   // Kill forked ELECTRON_RUN_AS_NODE workers first. This both unlocks the
   // installed executable for MSI and causes pending service operations to

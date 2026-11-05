@@ -107,6 +107,7 @@ export interface SearchResponse {
 }
 
 export interface AiStatus {
+  autoIndex?: import("@/services/ai-index-scheduler").AutoIndexStatus;
   coverageState: "ready" | "partial" | "unavailable" | "error";
   embeddingProgress: { processed: number; total: number; phase: string };
   hasVectors: boolean;

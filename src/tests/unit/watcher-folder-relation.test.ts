@@ -100,6 +100,7 @@ beforeEach(async () => {
   await indexer.scanFolder(root);
 });
 afterEach(async () => {
+  indexer?.setWatcherReconciliationCallback();
   await indexer?.stopWatching();
   sqlite?.close();
   if (
@@ -113,6 +114,73 @@ afterEach(async () => {
       maxRetries: 10,
       retryDelay: 100,
     });
+  }
+});
+
+it("shares recursive roots and publishes readiness only after ready", () => {
+  const ready = vi.fn();
+  indexer.setWatcherReconciliationCallback(ready);
+  indexer.startWatching(vi.fn());
+  expect(state.watchers).toHaveLength(1);
+  expect(
+    sqlite
+      .prepare("select is_watching value from folders where path=?")
+      .get(root)
+  ).toEqual({ value: 0 });
+  state.watchers[0].emit("ready");
+  expect(ready).toHaveBeenCalledWith(root);
+  state.watchers[0].emit("addDir", path.join(root, "new-folder"));
+  expect(ready).toHaveBeenCalledTimes(2);
+  expect(
+    sqlite
+      .prepare("select is_watching value from folders where path=?")
+      .get(root)
+  ).toEqual({ value: 1 });
+  indexer.watchFolder(path.join(root, "A"), vi.fn());
+  expect(state.watchers).toHaveLength(1);
+});
+
+it("background scans find offline deep additions without reprocessing existing photos", async () => {
+  const deep = path.join(
+    root,
+    ...Array.from({ length: 12 }, (_, i) => `level-${i}`)
+  );
+  fs.mkdirSync(deep, { recursive: true });
+  fs.copyFileSync(path.join(root, "A/photo.jpg"), path.join(deep, "new.jpg"));
+  state.thumbnail.mockClear();
+  const result = await indexer.scanFolder(root, undefined, {
+    background: true,
+  });
+  expect(result.incomplete).toBe(false);
+  expect(result.newPhotoIds).toHaveLength(1);
+  expect(state.thumbnail).toHaveBeenCalledOnce();
+  const again = await indexer.scanFolder(root, undefined, { background: true });
+  expect(again.newPhotoIds).toEqual([]);
+  expect(state.thumbnail).toHaveBeenCalledOnce();
+});
+
+it("recovers a failed watcher with bounded retries and ignores retired readiness", async () => {
+  vi.useFakeTimers();
+  try {
+    const ready = vi.fn();
+    indexer.setWatcherReconciliationCallback(ready);
+    indexer.watchFolder(root, vi.fn());
+    const retired = state.watchers[0];
+    retired.emit("error", new Error("native failure"));
+    await vi.advanceTimersByTimeAsync(6001);
+    expect(state.watchers).toHaveLength(2);
+    retired.emit("ready");
+    expect(ready).not.toHaveBeenCalled();
+    for (const delay of [36_001, 144_001]) {
+      state.watchers.at(-1)?.emit("error", new Error("native failure"));
+      await vi.advanceTimersByTimeAsync(delay);
+    }
+    expect(state.watchers).toHaveLength(4);
+    state.watchers.at(-1)?.emit("error", new Error("native failure"));
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(state.watchers).toHaveLength(4);
+  } finally {
+    vi.useRealTimers();
   }
 });
 

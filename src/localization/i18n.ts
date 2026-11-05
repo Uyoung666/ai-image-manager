@@ -1923,6 +1923,19 @@ i18n.use(initReactI18next).init({
         aiNoIndexHint: "尚无 AI 索引，请先导入并索引照片",
         searchPartialResults: "当前为部分结果，可重试获取完整结果。",
         searchIncompleteTitle: "搜索尚未完成",
+        autoIndex: {
+          idle: "尚无运行中的 AI 任务。",
+          queued: "等待自动索引。",
+          running: "正在进行 AI 索引。",
+          paused: "自动索引已停止，请在设置中点击开始或继续。",
+          blocked: "自动索引正在等待。",
+          error: "索引失败，请在设置中重试。",
+          model: "等待 AI 模型就绪。",
+          "vector-db": "等待向量数据库就绪。",
+          busy: "等待当前 AI 任务结束。",
+          scan: "等待文件夹检查完成。",
+          failed: "有 {{count}} 张照片未完成索引，请在设置中重试。",
+        },
         semanticSearchPartial:
           "AI 已索引 {{indexed}}/{{total}} 张照片，当前结果可能不完整；索引完成后将自动刷新。",
         semanticSearchUnavailable:
