@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { type CSSProperties, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import type { BuiltinPlugin, BuiltinThemeRecord } from "../types";
@@ -64,7 +64,7 @@ function OceanBackdrop({
     });
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["class"],
+      attributeFilter: ["class", "data-ascii-ocean"],
     });
     return () => {
       observer.disconnect();
@@ -87,7 +87,11 @@ function OceanBackdrop({
       <canvas
         className="ascii-ocean-canvas"
         ref={canvasRef}
-        style={{ opacity: Number(settings.intensity ?? 45) / 100 }}
+        style={
+          {
+            "--ocean-intensity": Number(settings.intensity ?? 45) / 100,
+          } as CSSProperties
+        }
       />
     </div>
   );
@@ -100,7 +104,7 @@ export const AsciiOceanPlugin: BuiltinPlugin = {
     const previous = new Map<string, string>();
     for (const [name, value] of [
       ["--ocean-panel-blur", `${context.getSetting("blur") ?? 10}px`],
-      ["--ocean-panel-opacity", `${context.getSetting("opacity") ?? 65}%`],
+      ["--ocean-panel-opacity", `${context.getSetting("opacity") ?? 92}%`],
     ]) {
       previous.set(name, root.style.getPropertyValue(name));
       root.style.setProperty(name, value);

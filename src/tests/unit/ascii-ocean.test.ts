@@ -125,9 +125,15 @@ describe("ASCII Ocean", () => {
       speed: 0.75,
       intensity: 45,
       blur: 10,
-      opacity: 65,
+      opacity: 92,
       interactive: true,
     });
+    expect(
+      validatePluginSettings(ASCII_OCEAN_MANIFEST, { opacity: 65, blur: 4 })
+    ).toMatchObject({ opacity: 65, blur: 4 });
+    expect(
+      validatePluginSettings(ASCII_OCEAN_MANIFEST, { opacity: 100 })
+    ).toMatchObject({ opacity: 100 });
     expect(
       validatePluginSettings(ASCII_OCEAN_MANIFEST, {
         sharkCount: 99,
@@ -210,6 +216,18 @@ describe("ASCII Ocean", () => {
     vi.mocked(requestAnimationFrame).mockClear();
     active.setOptions(options);
     expect(requestAnimationFrame).not.toHaveBeenCalled();
+  });
+
+  it("pauses when the document is hidden and resumes after it becomes visible", () => {
+    start();
+    vi.mocked(requestAnimationFrame).mockClear();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(7);
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(requestAnimationFrame).toHaveBeenCalledOnce();
   });
 
   it("filters clicks and dragging and removes pointer listeners on disposal", () => {

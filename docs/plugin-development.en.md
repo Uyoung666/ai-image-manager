@@ -8,7 +8,7 @@ Starting with v2.2.5, each locale object may contain up to 4096 properties in bo
 
 ### Official built-in themes
 
-ASCII Ocean and Nebula Glass are bundled host implementations, available in Settings → Plugins. Only one theme is active at a time. ASCII Ocean is disabled by default and supports light/dark palettes, shark and fish populations, speed, background interaction, and panel materials. Pointer effects only respond to explicitly designated empty background areas. Reduced motion shows a still frame; hidden windows pause animation.
+ASCII Ocean and Nebula Glass are bundled host implementations, available in Settings → Plugins. Only one theme is active at a time. ASCII Ocean is disabled by default and supports light/dark palettes, shark and fish populations, speed, background interaction, and navigation materials. ASCII Ocean 1.0.1 uses opaque neutral content surfaces and softly translucent sidebars and toolbars. `blur` and `opacity` affect navigation only; content panels, inspectors, and overlays do not reveal fish. New installations and resets use 92% navigation opacity, with a 30%–100% range; existing values are preserved. Light mode renders animation at 60% of the prominence setting, while dark mode uses the original proportion. Media wells stay neutral and immersive culling retains its dark materials. Pointer effects only respond to explicitly designated empty background areas. Reduced motion shows a still frame; hidden windows pause animation.
 
 ASCII Ocean uses a v2 settings manifest with a trusted host Canvas implementation. It does not add an importable `.aim-plugin` capability or a public layer type. Third-party packages cannot execute code. Its ascii-sharks source revision and full license are included with the application.
 

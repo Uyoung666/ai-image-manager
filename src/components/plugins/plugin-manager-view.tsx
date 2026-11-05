@@ -483,6 +483,8 @@ function PluginCard({
         selected && "border-primary/60 bg-primary/5 ring-1 ring-primary/20"
       )}
       data-plugin-card-id={plugin.manifest.id}
+      data-plugin-selected={selected}
+      data-surface="card"
     >
       <div className="flex min-w-0 items-start gap-3">
         <button
@@ -620,7 +622,10 @@ function DetailView({
 
   return (
     <div className="min-w-0 space-y-4" data-plugin-detail="true">
-      <section className="min-w-0 rounded-xl border border-border/70 bg-card p-4">
+      <section
+        className="min-w-0 rounded-xl border border-border/70 bg-card p-4"
+        data-surface="panel"
+      >
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             {pluginIcon(plugin, t("pluginManagerIconFallback"), title)}
@@ -789,6 +794,7 @@ function DetailView({
       <section
         className="min-w-0 rounded-xl border border-border/70 bg-card p-4"
         data-plugin-section="configuration"
+        data-surface="panel"
       >
         <div className="flex min-w-0 items-center gap-2">
           <Settings2 aria-hidden="true" className="size-4 text-primary" />
@@ -808,6 +814,7 @@ function DetailView({
       <section
         className="min-w-0 rounded-xl border border-border/70 bg-card p-4"
         data-plugin-section="diagnostics"
+        data-surface="panel"
       >
         <div className="flex min-w-0 items-center gap-2">
           <Info aria-hidden="true" className="size-4 text-primary" />
@@ -1188,6 +1195,7 @@ export function PluginManagerView({
         <section
           className="min-w-0 rounded-xl border border-border/70 bg-card/60 p-3"
           data-plugin-list="true"
+          data-surface="panel"
         >
           <div className="flex min-w-0 items-center justify-between gap-2 px-1 pb-3">
             <div className="flex min-w-0 items-center gap-2">

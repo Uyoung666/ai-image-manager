@@ -1,22 +1,22 @@
 :root[data-ascii-ocean="active"] {
-  --background: #071c2b;
-  --background-secondary: #102b3d;
-  --surface: #123247;
-  --surface-hover: #1b4054;
-  --surface-elevated: #21495d;
-  --foreground: #e3f4fa;
-  --foreground-secondary: #adcbd8;
-  --foreground-tertiary: #87adbf;
+  --background: #0c1720;
+  --background-secondary: #21323e;
+  --surface: #182630;
+  --surface-hover: #21323e;
+  --surface-elevated: #293d49;
+  --foreground: #e8eff3;
+  --foreground-secondary: #b4c3ce;
+  --foreground-tertiary: #97aab8;
   --card: var(--surface);
   --card-foreground: var(--foreground);
-  --popover: #123247;
+  --popover: var(--surface);
   --popover-foreground: var(--foreground);
   --secondary: var(--background-secondary);
   --secondary-foreground: var(--foreground);
   --muted: var(--background-secondary);
   --muted-foreground: var(--foreground-secondary);
-  --border-subtle: rgb(132 207 225 / 0.16);
-  --border-default: rgb(132 207 225 / 0.26);
+  --border-subtle: rgb(180 195 206 / 0.14);
+  --border-default: rgb(180 195 206 / 0.24);
   --border: var(--border-subtle);
   --input: var(--border-default);
   --sidebar: transparent;
@@ -26,26 +26,43 @@
   --workspace-background: transparent;
   --gallery-canvas: transparent;
   --ocean-panel-blur: 10px;
-  --ocean-panel-opacity: 65%;
+  --ocean-panel-opacity: 92%;
+  --ocean-navigation: #14222c;
+  --ocean-motion-factor: 1;
+  --ocean-media-background: #121416;
+  --ocean-fish-rgb: 120, 223, 240;
+  --ocean-wake-rgb: 70, 205, 230;
+  --ocean-shark-edge: #63d7ea;
+  --ocean-shark-glyph: #8fe5ef;
+  --ocean-shark-eye: #9aa0ad;
+  --ocean-shark-skin-rgb: 80, 145, 160;
   --ocean-panel: color-mix(
     in srgb,
-    var(--surface) var(--ocean-panel-opacity),
+    var(--ocean-navigation) var(--ocean-panel-opacity),
     transparent
   );
 }
 
 :root.light[data-ascii-ocean="active"] {
-  --background: #dceff5;
-  --background-secondary: #e6f3f7;
-  --surface: #f4fbfd;
-  --surface-hover: #e0f0f6;
-  --surface-elevated: #ffffff;
-  --foreground: #113d50;
-  --foreground-secondary: #3d6475;
-  --foreground-tertiary: #567e8f;
-  --popover: #f4fbfd;
-  --border-subtle: rgb(22 80 105 / 0.14);
-  --border-default: rgb(22 80 105 / 0.25);
+  --background: #f6f8fa;
+  --background-secondary: #edf2f5;
+  --surface: #ffffff;
+  --surface-hover: #edf2f5;
+  --surface-elevated: #e4ebef;
+  --foreground: #202d36;
+  --foreground-secondary: #495d6a;
+  --foreground-tertiary: #586d7a;
+  --border-subtle: rgb(49 69 82 / 0.14);
+  --border-default: rgb(49 69 82 / 0.25);
+  --ocean-navigation: #eef3f6;
+  --ocean-motion-factor: 0.6;
+  --ocean-media-background: #f0f1f2;
+  --ocean-fish-rgb: 88, 114, 131;
+  --ocean-wake-rgb: 106, 134, 151;
+  --ocean-shark-edge: #718b9b;
+  --ocean-shark-glyph: #4f697b;
+  --ocean-shark-eye: #354f61;
+  --ocean-shark-skin-rgb: 116, 139, 152;
 }
 
 .ascii-ocean-backdrop {
@@ -64,6 +81,7 @@
   height: 100%;
   font-family: "JetBrains Mono Variable", ui-monospace, monospace;
   pointer-events: none;
+  opacity: calc(var(--ocean-intensity, 0.45) * var(--ocean-motion-factor));
 }
 
 :root[data-ascii-ocean="active"]
@@ -90,15 +108,10 @@
 :root[data-ascii-ocean="active"]
   :is(
     [data-surface="sidebar"],
-    [data-surface="card"],
-    [data-surface="panel"],
-    [data-surface="inspector"],
     [data-surface="toolbar"],
     .home-gallery-toolbar-layer,
-    .home-unified-toolbar,
-    .glass-surface,
-    .glass-surface-heavy
-  ) {
+    .home-unified-toolbar
+  ):not(.cull-window-chrome, [data-surface="immersive"] *) {
   background: var(--ocean-panel) !important;
   border-color: var(--border-default);
   backdrop-filter: blur(var(--ocean-panel-blur));
@@ -118,17 +131,58 @@
 }
 
 :root[data-ascii-ocean="active"]
-  :is([data-surface="page"], [data-surface="settings"])
-  :is(.bg-card, .bg-secondary) {
-  background-color: var(--ocean-panel);
+  :is(
+    [data-surface="card"],
+    [data-surface="panel"],
+    [data-surface="inspector"],
+    .glass-surface,
+    .glass-surface-heavy
+  ):not([data-surface="immersive"] *) {
+  background: var(--ocean-content-fill, var(--surface)) !important;
+  border-color: var(--border-default);
+  backdrop-filter: none;
+}
+
+/* A nested navigation shell must not composite a second translucent layer. */
+:root[data-ascii-ocean="active"]
+  :is(
+    [data-surface="sidebar"],
+    [data-surface="toolbar"],
+    .home-gallery-toolbar-layer
+  )
+  :is(
+    [data-surface="toolbar"],
+    .home-unified-toolbar,
+    .glass-surface,
+    .glass-surface-heavy
+  ):not([data-surface="immersive"] *) {
+  background: transparent !important;
+  backdrop-filter: none;
+}
+
+:root[data-ascii-ocean="active"] [data-plugin-card-id]:hover {
+  --ocean-content-fill: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border-default));
+}
+
+:root[data-ascii-ocean="active"]
+  [data-plugin-card-id][data-plugin-selected="true"] {
+  --ocean-content-fill: color-mix(in srgb, var(--surface) 93%, var(--primary));
+  border-color: color-mix(in srgb, var(--primary) 65%, var(--surface));
+}
+
+:root[data-ascii-ocean="active"]
+  [data-plugin-card-id][data-plugin-selected="true"]:hover {
+  --ocean-content-fill: color-mix(in srgb, var(--surface) 90%, var(--primary));
 }
 
 :root[data-ascii-ocean="active"]
   :is([data-surface="overlay"], [data-sonner-toast]) {
   color: var(--foreground);
   background: var(--popover) !important;
+  backdrop-filter: none;
 }
 
 :root[data-ascii-ocean="active"] [data-surface="media-well"] {
-  background: var(--background-secondary);
+  background: var(--ocean-media-background, #121416);
 }

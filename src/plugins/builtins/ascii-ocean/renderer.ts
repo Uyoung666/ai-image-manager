@@ -298,6 +298,12 @@ export function paintGrid(
 
 export class AsciiRenderer {
   private dark = true;
+  private paletteLoaded = false;
+  private background = "";
+  private sharkEdge = "";
+  private sharkGlyph = "";
+  private sharkEye = "";
+  private sharkSkin: number[] = [];
   private ctx: CanvasRenderingContext2D;
   private bg: HTMLCanvasElement;
   private dpr = 1;
@@ -376,16 +382,27 @@ export class AsciiRenderer {
   }
 
   setDark(dark: boolean) {
+    if (this.paletteLoaded && this.dark === dark) return;
     this.dark = dark;
-    this.fishStyles = FISH_ALPHAS.map((a) =>
-      dark ? `rgba(120,223,240,${a})` : `rgba(12,91,115,${a})`
+    // Read the same tokens as the host surfaces, once per appearance change.
+    const style = getComputedStyle(this.canvas);
+    const token = (name: string) => style.getPropertyValue(name).trim();
+    this.background = token("--background");
+    this.sharkEdge = token("--ocean-shark-edge");
+    this.sharkGlyph = token("--ocean-shark-glyph");
+    this.sharkEye = token("--ocean-shark-eye");
+    this.sharkSkin = token("--ocean-shark-skin-rgb").split(",").map(Number);
+    // The backdrop can mount just before the provider activates the theme.
+    this.paletteLoaded = Boolean(this.background && this.sharkGlyph);
+    this.fishStyles = FISH_ALPHAS.map(
+      (a) => `rgba(${token("--ocean-fish-rgb")},${a})`
     );
     this.dotStyles = [];
     for (let c = 0; c < DOT_RGB.length; c++) {
-      const rgb = dark ? [70, 205, 230] : [12, 112, 140];
+      const rgb = token("--ocean-wake-rgb");
       for (let l = 0; l < ALPHA_LEVELS; l++) {
         this.dotStyles.push(
-          `rgba(${rgb.join(",")},${((l + 1) / ALPHA_LEVELS).toFixed(3)})`
+          `rgba(${rgb},${((l + 1) / ALPHA_LEVELS).toFixed(3)})`
         );
       }
     }
@@ -450,7 +467,7 @@ export class AsciiRenderer {
     if (!g) return;
     const { width: W, height: H, dpr, cw, ch } = this;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = this.dark ? "#071c2b" : "#dceff5";
+    g.fillStyle = this.background;
     g.fillRect(0, 0, W, H);
     if (this.dark) paintGrid(g, W, H, cw, ch, dpr);
   }
@@ -913,12 +930,10 @@ export class AsciiRenderer {
         const g = (70 + shade * 80) * dim;
         ctx.fillStyle =
           roll < 0.07
-            ? this.dark
-              ? "#63d7ea"
-              : "#14647c"
+            ? this.sharkEdge
             : this.dark
               ? `rgb(${Math.round(g * tr)},${Math.round(g * tg)},${Math.min(255, Math.round(g * tb + 6))})`
-              : "#287a92";
+              : this.sharkEdge;
         ctx.fillText(set[(key >>> 8) % set.length], x + cw / 2, y + ch / 2 + 1);
         continue;
       }
@@ -953,7 +968,7 @@ export class AsciiRenderer {
       // Tinted per species; the classic tint is a cool blue-grey, like a back seen through deep water.
       ctx.fillStyle = this.dark
         ? `rgb(${Math.round(level * 0.5)},${Math.min(255, Math.round(level * tg))},${Math.min(255, Math.round(level * tb + 20))})`
-        : `rgb(${Math.round(80 + level * 0.3)},${Math.round(145 + level * 0.25)},${Math.round(160 + level * 0.25)})`;
+        : `rgb(${Math.round(this.sharkSkin[0] + level * 0.3)},${Math.round(this.sharkSkin[1] + level * 0.25)},${Math.round(this.sharkSkin[2] + level * 0.25)})`;
       ctx.fillRect(x + 1, y + 1, cw - 1, ch - 1);
 
       let color: string;
@@ -965,11 +980,11 @@ export class AsciiRenderer {
       else color = shade > 0.55 ? "#0e0f13" : "#1b1d24";
       ctx.fillStyle = this.dark
         ? roll < 0.13
-          ? "#8fe5ef"
+          ? this.sharkGlyph
           : color
         : flag === FLAG_EYE
-          ? "#06394f"
-          : "#155a73";
+          ? this.sharkEye
+          : this.sharkGlyph;
       ctx.fillText(glyph, x + cw / 2, y + ch / 2 + 1);
     }
   }

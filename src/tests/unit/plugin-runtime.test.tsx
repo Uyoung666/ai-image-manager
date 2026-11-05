@@ -306,7 +306,10 @@ describe("plugin runtime preview host", () => {
 
   it("restores the ocean startup cache and removes its attributes on disable", () => {
     localStorage.setItem("plugins.active", ASCII_OCEAN_MANIFEST.id);
-    localStorage.setItem("plugins.settings", JSON.stringify({ blur: 15 }));
+    localStorage.setItem(
+      "plugins.settings",
+      JSON.stringify({ blur: 15, opacity: 65 })
+    );
     listPlugins.mockReturnValue(new Promise(() => undefined));
     const dispose = render(
       <PluginHostProvider>
@@ -320,10 +323,16 @@ describe("plugin runtime preview host", () => {
     expect(
       document.documentElement.style.getPropertyValue("--ocean-panel-blur")
     ).toBe("15px");
+    expect(
+      document.documentElement.style.getPropertyValue("--ocean-panel-opacity")
+    ).toBe("65%");
     dispose.unmount();
     expect(document.documentElement.dataset.asciiOcean).toBeUndefined();
     expect(
       document.documentElement.style.getPropertyValue("--ocean-panel-blur")
+    ).toBe("");
+    expect(
+      document.documentElement.style.getPropertyValue("--ocean-panel-opacity")
     ).toBe("");
   });
 
