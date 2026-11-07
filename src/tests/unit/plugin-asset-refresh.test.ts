@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
   afterAll,
@@ -45,12 +44,14 @@ vi.mock("@/services/settings-manager", () => ({
 }));
 
 import { PluginManager } from "@/services/plugin-manager";
+import { TestRuntime } from "../helpers/test-runtime";
 
 let testRoot = "";
 let firstImage = "";
 let secondImage = "";
 let firstVideo = "";
 let secondVideo = "";
+let runtime: TestRuntime;
 
 function writePng(filePath: string, marker: number): void {
   const contents = Buffer.alloc(32, marker);
@@ -81,9 +82,8 @@ function assetUrl(
 }
 
 beforeAll(() => {
-  testRoot = fs.mkdtempSync(
-    path.join(os.tmpdir(), "ai-image-manager-plugin-assets-")
-  );
+  runtime = new TestRuntime("nebula-plugin-assets");
+  testRoot = runtime.root;
   electronState.userData = path.join(testRoot, "user-data");
   firstImage = path.join(testRoot, "first.png");
   secondImage = path.join(testRoot, "second.png");
@@ -96,9 +96,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  if (testRoot.startsWith(`${os.tmpdir()}${path.sep}`)) {
-    fs.rmSync(testRoot, { force: true, recursive: true });
-  }
+  runtime.cleanup();
 });
 
 beforeEach(() => {
@@ -107,6 +105,40 @@ beforeEach(() => {
 });
 
 describe("PluginManager user asset refresh", () => {
+  it("accepts binary WebM headers and rejects their ASCII-masked lookalike", async () => {
+    const manager = new PluginManager([NEBULA_GLASS_MANIFEST]);
+    const video = path.join(testRoot, "binary.webm");
+    fs.writeFileSync(
+      video,
+      Buffer.from([0x1a, 0x45, 0xdf, 0xa3, ...new Array(28).fill(0)])
+    );
+    electronState.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [video],
+    });
+    const selected = assetUrl(
+      await manager.selectAsset(NEBULA_GLASS_PLUGIN_ID, "wallpaperVideo"),
+      "wallpaperVideo"
+    );
+    const response = await manager.resolveUserAsset(selected, "bytes=0-3");
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-type")).toBe("video/webm");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(
+      Buffer.from([0x1a, 0x45, 0xdf, 0xa3])
+    );
+    const fake = path.join(testRoot, "lookalike.webm");
+    fs.writeFileSync(
+      fake,
+      Buffer.from([0x1a, 0x45, 0x5f, 0x23, ...new Array(28).fill(0)])
+    );
+    electronState.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [fake],
+    });
+    await expect(
+      manager.selectAsset(NEBULA_GLASS_PLUGIN_ID, "wallpaperVideo")
+    ).rejects.toThrow("MIME");
+  });
   it("changes the image URL after selecting a replacement", async () => {
     const manager = new PluginManager([NEBULA_GLASS_MANIFEST]);
     electronState.showOpenDialog.mockResolvedValueOnce({

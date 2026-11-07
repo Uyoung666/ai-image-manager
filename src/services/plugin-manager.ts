@@ -786,7 +786,7 @@ async function detectAssetKind(
       (header.subarray(8, 12).toString("ascii") === "avif" ||
         header.subarray(8, 12).toString("ascii") === "avis"));
   const isVideoSignature =
-    header.subarray(0, 4).toString("ascii") === "\x1aE\xdf\xa3" ||
+    header.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) ||
     (extension === ".mp4" &&
       header.subarray(4, 8).toString("ascii") === "ftyp");
   const isImage = IMAGE_ASSET_EXTENSIONS.has(extension) && isImageSignature;
