@@ -31,7 +31,10 @@ export function UpdateChangelogHistory() {
           {t("updateChangelogDescription")}
         </p>
       </div>
-      <div className="update-changelog-list overflow-hidden rounded-[8px] border border-border bg-secondary p-2 min-[480px]:p-3">
+      <div
+        className="update-changelog-list overflow-hidden rounded-[8px] border border-border bg-secondary p-2 min-[480px]:p-3"
+        data-surface="section-card"
+      >
         {changelogEntries.length === 0 ? (
           <p className="p-4 text-[12px] text-muted-foreground">
             {t("updateChangelogEmpty")}

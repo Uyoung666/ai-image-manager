@@ -758,7 +758,10 @@ function FaceReviewPage() {
             </div>
           </section>
 
-          <aside className="w-full min-w-0 shrink-0 overflow-y-auto rounded-[12px] border border-border bg-card p-3 sm:p-4 xl:w-[min(360px,32vw)]">
+          <aside
+            className="w-full min-w-0 shrink-0 overflow-y-auto rounded-[12px] border border-border bg-card p-3 sm:p-4 xl:w-[min(360px,32vw)]"
+            data-surface="card"
+          >
             <div className="grid grid-cols-[minmax(72px,92px)_minmax(0,1fr)] gap-3">
               <FaceCrop candidate={activeCandidate} />
               <div className="min-w-0 self-center">

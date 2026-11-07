@@ -109,6 +109,7 @@ function AlbumCard({
       className={`group overflow-hidden rounded-[10px] bg-card shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md ${
         album.isSmart ? "border border-primary/20" : "border border-border"
       }`}
+      data-surface="card"
       draggable={false}
       params={{ albumId: album.id.toString() }}
       to="/albums/$albumId"
@@ -157,6 +158,7 @@ function AlbumsContent({
         {ALBUM_SKELETON_KEYS.map((key) => (
           <div
             className="overflow-hidden rounded-[10px] border border-border bg-card"
+            data-surface="card"
             key={key}
           >
             <div className="aspect-[16/10] animate-pulse bg-muted" />

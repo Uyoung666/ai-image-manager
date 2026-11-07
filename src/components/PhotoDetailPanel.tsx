@@ -835,7 +835,10 @@ export function PhotoDetailPanel({
           className="border-border border-b bg-background p-4"
           data-surface="media-well"
         >
-          <div className="photo-detail-preview flex h-[200px] items-center justify-center overflow-hidden rounded-[6px] bg-muted">
+          <div
+            className="photo-detail-preview flex h-[200px] items-center justify-center overflow-hidden rounded-[6px] bg-muted"
+            data-surface="media-frame"
+          >
             <img
               alt={displayPhoto.filename}
               className={`max-h-full max-w-full object-contain transition-opacity duration-150 ${

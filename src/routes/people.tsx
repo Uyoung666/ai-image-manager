@@ -235,6 +235,7 @@ const PersonCard = memo(function PersonCard({
           ? "border-primary ring-2 ring-primary/30"
           : "border-border hover:border-primary/30"
       }`}
+      data-surface="card"
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       role="button"
@@ -339,7 +340,10 @@ const PersonCard = memo(function PersonCard({
 // Skeleton card placeholder
 function SkeletonCard() {
   return (
-    <div className="overflow-hidden rounded-[8px] border border-border bg-card">
+    <div
+      className="overflow-hidden rounded-[8px] border border-border bg-card"
+      data-surface="card"
+    >
       <div className="aspect-square animate-pulse bg-muted" />
       <div className="space-y-1.5 p-3">
         <div className="h-4 w-3/4 animate-pulse rounded-[3px] bg-muted" />
@@ -929,7 +933,10 @@ export function PeoplePage() {
           className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex flex-wrap items-center justify-between gap-2 overflow-x-hidden border-b px-4 py-1.5 sm:px-6 ${isToolbarScrolled ? "is-scrolled" : ""}`}
           ref={toolbarRef}
         >
-          <div className="inline-flex max-w-full shrink-0 overflow-x-auto rounded-[8px] border border-border bg-secondary p-1">
+          <div
+            className="inline-flex max-w-full shrink-0 overflow-x-auto rounded-[8px] border border-border bg-secondary p-1"
+            data-surface="segmented-control"
+          >
             {(
               [
                 ["all", t("peopleAll"), identities.length],
@@ -1066,6 +1073,7 @@ export function PeoplePage() {
               {filteredHiddenIdentities.map((hiddenIdentity) => (
                 <div
                   className="rounded-lg border border-border bg-card p-4"
+                  data-surface="card"
                   key={hiddenIdentity.id}
                 >
                   <div className="mb-3 aspect-square overflow-hidden rounded-md bg-muted">

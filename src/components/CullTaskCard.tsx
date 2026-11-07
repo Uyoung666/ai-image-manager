@@ -168,6 +168,7 @@ export function CullTaskCard({
       <article
         className="relative flex min-h-[208px] min-w-0 flex-col rounded-lg border border-border bg-secondary transition-colors hover:border-primary/30"
         data-project-id={task.kind === "project" ? task.id : undefined}
+        data-surface="card"
         data-task-key={`${task.kind}:${task.id}`}
         data-testid={
           task.kind === "project"

@@ -336,6 +336,38 @@ describe("plugin runtime preview host", () => {
     ).toBe("");
   });
 
+  it("restores nebula material after preview and clears it on plugin switch", async () => {
+    const nebula = {
+      ...record({ ...activeManifest, id: NEBULA_GLASS_PLUGIN_ID }, "active"),
+      source: "builtin",
+      settings: { blur: 31, frost: 40 },
+    };
+    listPlugins.mockResolvedValue({
+      plugins: [nebula, record(previewManifest, "disabled")],
+    });
+    setPluginEnabled.mockResolvedValue({
+      plugins: [record(previewManifest, "active")],
+    });
+    render(
+      <PluginHostProvider>
+        <Controls />
+      </PluginHostProvider>
+    );
+    const material = () =>
+      document.documentElement.style.getPropertyValue("--nebula-glass-blur");
+    await waitFor(() => expect(material()).toBe("31px"));
+    fireEvent.click(screen.getByRole("button", { name: "preview" }));
+    await waitFor(() => expect(material()).toBe(""));
+    expect(localStorage.getItem("plugins.settings")).toBe(
+      JSON.stringify(nebula.settings)
+    );
+    fireEvent.click(screen.getByRole("button", { name: "exit" }));
+    await waitFor(() => expect(material()).toBe("31px"));
+    fireEvent.click(screen.getByRole("button", { name: "enable" }));
+    await waitFor(() => expect(material()).toBe(""));
+    expect(document.documentElement.dataset.nebulaBackdrop).toBeUndefined();
+  });
+
   it("restores ocean styles after preview and leaves persisted settings untouched", async () => {
     const ocean = {
       ...record(ASCII_OCEAN_MANIFEST, "active"),

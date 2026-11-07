@@ -393,6 +393,7 @@ export function SmoothInput({
       value={value}
     >
       <input
+        data-surface="control"
         {...props}
         className={cn("block w-full min-w-0", className)}
         ref={setInputRef}

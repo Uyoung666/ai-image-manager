@@ -1,4 +1,5 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import type {
   BuiltinPlugin,
   BuiltinPluginContext,
@@ -9,6 +10,38 @@ import { NEBULA_GLASS_PLUGIN_ID } from "./nebula-glass-manifest";
 import "./nebula-glass.css";
 
 type NebulaSettings = Record<string, boolean | number | string | null>;
+
+function useBackdropPlayback() {
+  const systemReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const [reducedMotion, setReducedMotion] = useState(
+    () => document.documentElement.dataset.reducedMotion === "true"
+  );
+  const [hidden, setHidden] = useState(
+    () => document.visibilityState !== "visible"
+  );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const syncMotion = () =>
+      setReducedMotion(root.dataset.reducedMotion === "true");
+    const syncVisibility = () =>
+      setHidden(document.visibilityState !== "visible");
+    const observer = new MutationObserver(syncMotion);
+    observer.observe(root, {
+      attributeFilter: ["data-reduced-motion"],
+      attributes: true,
+    });
+    document.addEventListener("visibilitychange", syncVisibility);
+    syncMotion();
+    syncVisibility();
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", syncVisibility);
+    };
+  }, []);
+
+  return { hidden, reducedMotion: reducedMotion || systemReducedMotion };
+}
 
 function numberSetting(
   settings: NebulaSettings,
@@ -85,45 +118,33 @@ function AquaFluidCanvas({
 
 function NebulaBackdrop({ record }: { record: BuiltinThemeRecord }) {
   const settings = record.settings;
-  const reduceMotion =
-    document.documentElement.dataset.reducedMotion === "true" ||
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const { hidden, reducedMotion } = useBackdropPlayback();
+  const [failedAsset, setFailedAsset] = useState<string | null>(null);
   const backdrop = stringSetting(settings, "backdrop", "aurora");
   const wallpaper = record.assetUrls.wallpaper;
   const wallpaperVideo = record.assetUrls.wallpaperVideo;
   const hue = numberSetting(settings, "fluidHue", 320);
   const depth = numberSetting(settings, "fluidDepth", 25);
   const brightness = numberSetting(settings, "brightness", 50);
-  const glassBlur = numberSetting(settings, "blur", 20);
   const backdropBlur = numberSetting(settings, "backdropBlur", 0);
-  const frost = numberSetting(settings, "frost", 7);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const showFluid =
-    backdrop === "aurora" ||
-    (backdrop === "image" && !wallpaper) ||
-    (backdrop === "video" && (!wallpaperVideo || reduceMotion));
+  const showImage =
+    backdrop === "image" && wallpaper && failedAsset !== wallpaper;
+  const showVideo =
+    backdrop === "video" && wallpaperVideo && failedAsset !== wallpaperVideo;
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!(video && backdrop === "video" && wallpaperVideo)) {
+    if (!(video && showVideo)) {
       return;
     }
-    const syncPlayback = () => {
-      if (reduceMotion || document.visibilityState !== "visible") {
-        video.pause();
-        return;
-      }
-      video.play().catch(() => undefined);
-    };
-    document.addEventListener("visibilitychange", syncPlayback);
-    syncPlayback();
-    return () => {
-      document.removeEventListener("visibilitychange", syncPlayback);
+    if (reducedMotion || hidden) {
       video.pause();
-      video.removeAttribute("src");
-      video.load();
-    };
-  }, [backdrop, reduceMotion, wallpaperVideo]);
+    } else {
+      video.play().catch(() => undefined);
+    }
+    return () => video.pause();
+  }, [hidden, reducedMotion, showVideo]);
 
   return (
     <div
@@ -133,46 +154,44 @@ function NebulaBackdrop({ record }: { record: BuiltinThemeRecord }) {
         {
           "--nebula-backdrop-blur": `${backdropBlur}px`,
           "--nebula-backdrop-brightness": `${brightness / 50}`,
-          "--nebula-glass-blur": `${glassBlur}px`,
           "--nebula-depth": `${depth / 100}`,
-          "--nebula-frost": `${Math.min(frost / 50, 1.4)}`,
-          "--nebula-fill-dark": `${Math.min(frost / 50, 1.4) * 50}%`,
-          "--nebula-fill-light": `${Math.min(frost / 50, 1.4) * 42}%`,
           "--nebula-hue": `${(hue + 217) % 360}deg`,
         } as CSSProperties
       }
     >
-      {backdrop === "image" && wallpaper ? (
+      <div className="nebula-glass-aurora" />
+      {showImage ? (
+        // biome-ignore lint/a11y/noNoninteractiveElementInteractions: The decorative image only listens for load errors.
         <img
           alt=""
           className="nebula-glass-wallpaper"
           height={1080}
           key={wallpaper}
+          onError={() => setFailedAsset(wallpaper)}
           src={wallpaper}
           width={1920}
         />
       ) : null}
-      {backdrop === "video" && wallpaperVideo && !reduceMotion ? (
+      {showVideo ? (
         <video
-          autoPlay={!reduceMotion}
+          autoPlay={!(reducedMotion || hidden)}
           className="nebula-glass-wallpaper"
           key={wallpaperVideo}
           loop
           muted
+          onError={() => setFailedAsset(wallpaperVideo)}
           playsInline
+          preload="auto"
           ref={videoRef}
           src={wallpaperVideo}
         />
       ) : null}
-      {showFluid ? (
-        <>
-          <div className="nebula-glass-aurora" />
-          <AquaFluidCanvas
-            depth={depth}
-            hue={hue}
-            reduceMotion={reduceMotion}
-          />
-        </>
+      {backdrop === "aurora" ? (
+        <AquaFluidCanvas
+          depth={depth}
+          hue={hue}
+          reduceMotion={reducedMotion || hidden}
+        />
       ) : null}
       <div className="nebula-glass-grain" />
     </div>
@@ -181,7 +200,30 @@ function NebulaBackdrop({ record }: { record: BuiltinThemeRecord }) {
 
 export const NebulaGlassPlugin: BuiltinPlugin = {
   activate(context: BuiltinPluginContext) {
+    const readNumber = (id: string, fallback: number, max: number) => {
+      const value = context.getSetting(id);
+      return typeof value === "number" && Number.isFinite(value)
+        ? Math.max(0, Math.min(value, max))
+        : fallback;
+    };
+    const frost = readNumber("frost", 7, 100) / 100;
+    const previous = new Map<string, { value: string; priority: string }>();
+    for (const [name, value] of Object.entries({
+      "--nebula-glass-blur": `${readNumber("blur", 20, 36)}px`,
+      "--nebula-fill-dark": `${58 + frost * 42}%`,
+      "--nebula-fill-light": `${72 + frost * 28}%`,
+    })) {
+      previous.set(name, {
+        value: context.root.style.getPropertyValue(name),
+        priority: context.root.style.getPropertyPriority(name),
+      });
+      context.root.style.setProperty(name, value);
+    }
     context.setRootAttribute("data-nebula-glass", "active");
+    context.setRootAttribute(
+      "data-nebula-backdrop",
+      String(context.getSetting("backdrop") ?? "aurora")
+    );
     context.setRootAttribute(
       "data-nebula-mode",
       String(context.getSetting("mode") ?? "mica")
@@ -189,6 +231,14 @@ export const NebulaGlassPlugin: BuiltinPlugin = {
     return () => {
       context.setRootAttribute("data-nebula-glass", null);
       context.setRootAttribute("data-nebula-mode", null);
+      context.setRootAttribute("data-nebula-backdrop", null);
+      for (const [name, { value, priority }] of previous) {
+        if (value) {
+          context.root.style.setProperty(name, value, priority);
+        } else {
+          context.root.style.removeProperty(name);
+        }
+      }
     };
   },
   id: NEBULA_GLASS_PLUGIN_ID,

@@ -142,6 +142,11 @@ describe("shared culling list filters", () => {
     ).toBeInTheDocument();
     const header = screen.getByTestId("cull-list-header");
     expect(header).toHaveClass("page-toolbar", "sticky");
+    expect(header).toHaveAttribute("data-surface", "toolbar");
+    expect(screen.getAllByTestId("shooting-project-card")[0]).toHaveAttribute(
+      "data-surface",
+      "card"
+    );
     expect(header).not.toHaveClass("is-scrolled");
     fireEvent.scroll(screen.getByTestId("cull-list-scroll"), {
       target: { scrollTop: 40 },

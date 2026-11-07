@@ -1081,7 +1081,10 @@ export function PluginManagerView({
       data-plugin-manager-view="true"
       data-testid="plugin-manager-view"
     >
-      <header className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+      <header
+        className="flex min-w-0 flex-wrap items-center justify-between gap-3"
+        data-surface="page-heading"
+      >
         <div className="min-w-0">
           <h1 className="break-words font-semibold text-lg [overflow-wrap:anywhere]">
             {t("pluginManagerTitle")}

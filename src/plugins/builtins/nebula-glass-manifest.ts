@@ -73,9 +73,9 @@ export const NEBULA_GLASS_MANIFEST: PluginManifestV1 = {
       label: { en: "Material mode", zh: "材质模式" },
       order: 0,
       options: [
-        { label: { en: "Mica", zh: "Mica 浮层" }, value: "mica" },
+        { label: { en: "Floating layout", zh: "浮层布局" }, value: "mica" },
         {
-          label: { en: "Compatibility", zh: "兼容模式" },
+          label: { en: "Classic layout", zh: "经典布局" },
           value: "compatibility",
         },
       ],

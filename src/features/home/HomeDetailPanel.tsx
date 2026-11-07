@@ -33,7 +33,8 @@ export function HomeDetailPanel({
       <aside
         aria-label={t("photoDetail")}
         className="home-detail-panel-container relative shrink-0 overflow-hidden"
-        data-surface="inspector"
+        data-overlay-kind={compactDetailOverlay ? "inspector" : undefined}
+        data-surface="inspector-shell"
         ref={detailOverlayRef}
         role={compactDetailOverlay ? "dialog" : "complementary"}
         style={{ width: detailPanelWidth }}

@@ -35,6 +35,7 @@ export function SettingsPageShell({
           "mx-auto w-full min-w-0 space-y-4",
           maxWidth === "wide" ? "max-w-[1040px]" : "max-w-[820px]"
         )}
+        data-surface="settings-panel"
       >
         <header
           className={cn(

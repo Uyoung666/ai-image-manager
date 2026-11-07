@@ -520,7 +520,10 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
       "border border-warning/25 bg-warning/10 text-warning hover:bg-warning/15";
   }
   return (
-    <article className="overflow-hidden rounded-[10px] border border-border bg-secondary/70 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+    <article
+      className="overflow-hidden rounded-[10px] border border-border bg-secondary/70 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+      data-surface="card"
+    >
       <header className="flex min-h-11 flex-wrap items-center justify-between gap-3 border-border border-b px-3.5 py-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span
@@ -1310,7 +1313,10 @@ export function DuplicatesPage() {
           }`}
           ref={toolbarRef}
         >
-          <div className="inline-flex max-w-full shrink-0 overflow-x-auto rounded-[8px] border border-border bg-secondary p-1">
+          <div
+            className="inline-flex max-w-full shrink-0 overflow-x-auto rounded-[8px] border border-border bg-secondary p-1"
+            data-surface="segmented-control"
+          >
             {filters.map(([key, label, count]) => (
               <button
                 aria-pressed={filter === key}

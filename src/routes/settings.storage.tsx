@@ -203,7 +203,10 @@ function StorageSettingsPage() {
         <h2 className="font-semibold text-[14px] text-foreground">
           {t("settingsIndexing")}
         </h2>
-        <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
+        <div
+          className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4"
+          data-surface="section-card"
+        >
           <SettingRow
             action={
               <AlertDialog

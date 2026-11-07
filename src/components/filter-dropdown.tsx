@@ -257,6 +257,7 @@ export function FilterDropdown({
               !editable && "cursor-pointer pr-7",
               disabled && "cursor-not-allowed opacity-50"
             )}
+            data-surface="control"
             disabled={disabled}
             id={id}
             onBlur={() => setTimeout(() => setOpen(false), 150)}

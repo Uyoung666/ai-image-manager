@@ -846,6 +846,7 @@ function TrashPage() {
           }`}
           data-photo-id={photo.id}
           data-photo-path={photo.path}
+          data-surface="card"
           key={photo.id}
           onClick={(event) => toggleSelect(photo.id, event)}
           onContextMenu={handleContextMenu}

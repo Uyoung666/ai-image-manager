@@ -24,7 +24,10 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           {t("settingsUpdateDescription")}
         </p>
       </div>
-      <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-secondary">
+      <div
+        className="min-w-0 overflow-hidden rounded-lg border border-border bg-secondary"
+        data-surface="section-card"
+      >
         <div className="p-3 min-[480px]:p-4">
           <UpdateTaskCard appVersion={appVersion} />
         </div>

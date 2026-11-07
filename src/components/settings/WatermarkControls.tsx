@@ -123,6 +123,7 @@ export function WatermarkControls({
         "min-h-0 min-w-0 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4",
         className
       )}
+      data-surface="section-card"
     >
       <section
         aria-labelledby="watermark-content-heading"

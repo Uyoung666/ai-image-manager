@@ -36,6 +36,7 @@ export function CullListHeader({
   return (
     <header
       className={`page-toolbar sticky top-0 z-20 grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b px-3 py-3 sm:px-6 min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(9rem,16rem)_auto] ${scrolled ? "is-scrolled" : ""}`}
+      data-surface="toolbar"
       data-testid="cull-list-header"
     >
       <div
