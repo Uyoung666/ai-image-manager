@@ -201,16 +201,6 @@
   --nebula-mica-highlight: rgb(255 255 255 / 0.06);
   --nebula-mica-shadow: 0 8px 28px -12px rgb(0 0 0 / 0.2);
   --nebula-card-fill: rgb(234 242 252 / 0.04);
-  --nebula-dashboard-panel-fill: color-mix(
-    in srgb,
-    var(--surface) 88%,
-    transparent
-  );
-  --nebula-dashboard-metric-fill: color-mix(
-    in srgb,
-    var(--surface) 76%,
-    transparent
-  );
   --nebula-control-fill: rgb(234 242 252 / 0.05);
   --nebula-control-border: #a4b5ca;
   --nebula-media-fill: #171717;
@@ -224,16 +214,6 @@
   --nebula-mica-highlight: rgb(255 255 255 / 0.4);
   --nebula-mica-shadow: 0 8px 28px -12px rgb(19 36 62 / 0.12);
   --nebula-card-fill: rgb(19 36 62 / 0.04);
-  --nebula-dashboard-panel-fill: color-mix(
-    in srgb,
-    var(--surface) 90%,
-    transparent
-  );
-  --nebula-dashboard-metric-fill: color-mix(
-    in srgb,
-    var(--surface) 78%,
-    transparent
-  );
   --nebula-control-fill: rgb(19 36 62 / 0.04);
   --nebula-control-border: #586c85;
   --nebula-media-fill: #f3f3f3;
@@ -372,6 +352,16 @@
 }
 :root[data-nebula-glass="active"] [data-surface="segmented-control"] .bg-card {
   background: var(--nebula-card-fill) !important;
+}
+:root[data-nebula-glass="active"]
+  [data-dashboard]
+  [data-surface="segmented-control"]
+  [aria-pressed="true"] {
+  background: color-mix(
+    in srgb,
+    var(--primary) 18%,
+    var(--nebula-card-fill)
+  ) !important;
 }
 :root[data-nebula-glass="active"] [data-plugin-card-id]:hover {
   background: color-mix(in srgb, var(--foreground) 7%, transparent) !important;
@@ -623,35 +613,6 @@
   [data-surface="immersive"][data-immersive-kind="cull"]
   [data-surface="immersive-content"] {
   background: #000 !important;
-}
-
-/* Dashboard overview needs a calmer inner pane than the translucent defaults.
-   The animated backdrop remains visible around the cards, while their content
-   and metrics keep a stable contrast surface. */
-:root[data-nebula-glass="active"]
-  [data-surface="page"]
-  .dashboard-overview-panel {
-  background: var(--nebula-dashboard-panel-fill) !important;
-  border-color: var(--nebula-mica-border) !important;
-  box-shadow:
-    inset 0 1px 0 var(--nebula-mica-highlight),
-    0 10px 36px rgb(0 0 0 / 0.12);
-  -webkit-backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.08);
-  backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.08);
-}
-
-:root[data-nebula-glass="active"]
-  [data-surface="page"]
-  .dashboard-overview-metric,
-:root[data-nebula-glass="active"]
-  [data-surface="page"]
-  .dashboard-overview-guidance-card {
-  background: var(--nebula-dashboard-metric-fill) !important;
-  border-color: color-mix(
-    in srgb,
-    var(--nebula-mica-border) 82%,
-    transparent
-  ) !important;
 }
 
 .nebula-glass-settings-grid {

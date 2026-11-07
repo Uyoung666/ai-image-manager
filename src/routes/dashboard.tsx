@@ -6,7 +6,6 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -164,8 +163,6 @@ const TABS: DashboardTab[] = [
   "places",
 ];
 const PRESETS: DashboardRangePreset[] = ["all", "year", "last12", "custom"];
-const DASHBOARD_TOOLBAR_FALLBACK_HEIGHT = 48;
-const DASHBOARD_TOOLBAR_CONTENT_GAP = 16;
 
 function DashboardChartTooltip({
   active,
@@ -244,7 +241,6 @@ function DashboardPage() {
   const tab = search.tab ?? "overview";
   const preset = search.range ?? "all";
   const scrollRef = useRef<HTMLDivElement>(null);
-  const toolbarRef = useRef<HTMLDivElement>(null);
   const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
   const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set());
   const [startingAi, setStartingAi] = useState(false);
@@ -255,10 +251,6 @@ function DashboardPage() {
   const [isCustomRangeDialogOpen, setIsCustomRangeDialogOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState(search.from ?? "");
   const [customTo, setCustomTo] = useState(search.to ?? "");
-  const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
-  const [toolbarHeight, setToolbarHeight] = useState(
-    DASHBOARD_TOOLBAR_FALLBACK_HEIGHT
-  );
   useRouteScrollRestoration(scrollRef, {
     getRouteKey: () => `dashboard-${tab}`,
   });
@@ -310,24 +302,6 @@ function DashboardPage() {
   });
   const queryData = statsQuery.data ?? null;
   const data = useDeferredValue(queryData);
-
-  useLayoutEffect(() => {
-    const element = toolbarRef.current;
-    if (!element) {
-      return;
-    }
-    const updateHeight = () =>
-      setToolbarHeight(
-        element.offsetHeight || DASHBOARD_TOOLBAR_FALLBACK_HEIGHT
-      );
-    updateHeight();
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
 
   const heavyEnabled = tab === "places" && statsQuery.data !== undefined;
   const colorQuery = useQuery({
@@ -563,6 +537,10 @@ function DashboardPage() {
     exif: calculateCoverage(data.coverage.exif, sampleTotal),
     gps: calculateCoverage(data.coverage.gps, sampleTotal),
   };
+  const advancedExif = advancedExifQuery.data;
+  const hasPendingAdvancedExif =
+    advancedExif !== undefined && advancedExif.processed < advancedExif.total;
+  const canPauseAdvancedExif = advancedExif?.running && !advancedExif.paused;
 
   const startAi = async () => {
     setStartingAi(true);
@@ -575,7 +553,13 @@ function DashboardPage() {
   };
 
   let nextActionContent: React.ReactNode;
-  if (data.coverage.ai < sampleTotal) {
+  if (sampleTotal === 0) {
+    nextActionContent = (
+      <p className="mt-3 text-[12px] text-muted-foreground">
+        {t("dashboardEmptyForRange")}
+      </p>
+    );
+  } else if (data.coverage.ai < sampleTotal) {
     nextActionContent = (
       <div className="mt-4">
         <p className="text-[12px] text-foreground">
@@ -611,9 +595,13 @@ function DashboardPage() {
   return (
     <div
       className="flex h-full min-w-0 flex-col bg-background"
+      data-dashboard=""
       data-surface="page"
     >
-      <header className="border-border border-b px-4 py-3 sm:px-6">
+      <header
+        className="shrink-0 border-border border-b px-4 py-3 sm:px-6"
+        data-surface="toolbar"
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -642,11 +630,15 @@ function DashboardPage() {
               </p>
             </div>
           </div>
-          <fieldset className="flex max-w-full flex-wrap items-center gap-2">
+          <fieldset
+            className="flex min-w-0 max-w-full flex-wrap items-center gap-1 rounded-lg border border-border p-0.5"
+            data-surface="segmented-control"
+          >
             <legend className="sr-only">{t("dashboardRangeLabel")}</legend>
             {PRESETS.map((item) => (
               <button
-                className={`rounded-[6px] px-3 py-1.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-ring ${preset === item ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}
+                aria-pressed={preset === item}
+                className={`rounded-[5px] px-3 py-1.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-ring ${preset === item ? "bg-card font-medium text-foreground" : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"}`}
                 key={item}
                 onClick={() => {
                   if (item === "custom") {
@@ -709,13 +701,11 @@ function DashboardPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="relative flex min-h-0 min-w-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <nav
           aria-label={t("dashboardSections")}
-          className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex gap-1 overflow-x-auto border-b px-4 py-2 sm:px-6 ${
-            isToolbarScrolled ? "is-scrolled" : ""
-          }`}
-          ref={toolbarRef}
+          className="page-toolbar flex shrink-0 flex-wrap gap-1 border-b px-4 py-2 sm:px-6"
+          data-surface="toolbar"
         >
           {TABS.map((item) => (
             <button
@@ -731,16 +721,8 @@ function DashboardPage() {
         </nav>
 
         <main
-          className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-6"
-          onScroll={(event) =>
-            setIsToolbarScrolled(event.currentTarget.scrollTop > 4)
-          }
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:px-6 sm:pt-4 sm:pb-6"
           ref={scrollRef}
-          style={{
-            paddingTop:
-              (toolbarHeight || DASHBOARD_TOOLBAR_FALLBACK_HEIGHT) +
-              DASHBOARD_TOOLBAR_CONTENT_GAP,
-          }}
         >
           {aiStatus?.rebuildRequired && (
             <div className="mb-4 min-w-0">
@@ -763,20 +745,26 @@ function DashboardPage() {
           )}
 
           {tab === "overview" && (
-            <div className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-3">
-              <section className="relative order-1 min-w-0 overflow-hidden rounded-[12px] border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-secondary to-secondary p-4 shadow-sm sm:p-6 xl:col-span-2">
-                <div className="absolute top-5 right-5 sm:top-6 sm:right-6">
-                  <ChartDisplayModeToggle
-                    onChange={changeOverviewDisplayMode}
-                    value={overviewDisplayMode}
-                  />
+            <div className="grid min-w-0 grid-cols-1 items-start gap-4 sm:gap-5 xl:grid-cols-3">
+              <section
+                className="min-w-0 rounded-xl border border-border bg-secondary p-4 sm:p-5 xl:col-span-2"
+                data-surface="section-card"
+                data-testid="dashboard-overview"
+              >
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium text-[11px] text-primary uppercase tracking-[0.14em]">
+                    {t("dashboardOverviewEyebrow")}
+                  </p>
+                  {data.dailyStats.length > 0 && (
+                    <ChartDisplayModeToggle
+                      onChange={changeOverviewDisplayMode}
+                      value={overviewDisplayMode}
+                    />
+                  )}
                 </div>
-                <div className="flex flex-wrap items-end justify-between gap-4">
-                  <div>
-                    <p className="font-medium text-[11px] text-primary uppercase tracking-[0.14em]">
-                      {t("dashboardOverviewEyebrow")}
-                    </p>
-                    <p className="mt-3 text-[11px] text-muted-foreground">
+                <div className="mt-3 flex min-w-0 flex-wrap items-end justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-muted-foreground">
                       {t("dashboardScopedPhotos")}
                     </p>
                     <h2 className="mt-1 break-all font-semibold text-[clamp(2rem,8vw,2.5rem)] text-foreground tabular-nums leading-none tracking-tight">
@@ -786,7 +774,7 @@ function DashboardPage() {
                       {t("dashboardOverviewSubtitle")}
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-x-6 gap-y-2 border-primary/15 border-t pt-3 text-[11px] sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5">
+                  <div className="flex min-w-0 flex-wrap gap-x-6 gap-y-2 border-border border-t pt-3 text-[11px] sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5">
                     {sampleTotal !== data.scope.libraryTotal && (
                       <div>
                         <p className="text-muted-foreground">
@@ -809,7 +797,7 @@ function DashboardPage() {
                     </div>
                   </div>
                 </div>
-                <div className="mt-6 border-primary/10 border-t pt-3">
+                <div className="mt-5 border-border border-t pt-3">
                   <OverviewTrend
                     calendarData={data.dailyStats}
                     color="var(--primary)"
@@ -820,7 +808,95 @@ function DashboardPage() {
                   />
                 </div>
               </section>
-              <section className="dashboard-overview-panel order-3 min-w-0 rounded-[10px] border border-border bg-secondary p-4 sm:p-5 xl:col-span-3">
+              <div className="grid min-w-0 gap-4 sm:gap-5">
+                <section
+                  className="min-w-0 rounded-xl border border-border bg-secondary p-4 sm:p-5"
+                  data-surface="section-card"
+                  data-testid="dashboard-actions"
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <h2 className="font-semibold text-[15px] text-foreground">
+                      {t("dashboardNextActions")}
+                    </h2>
+                  </div>
+                  {nextActionContent}
+                  {advancedExif &&
+                    (hasPendingAdvancedExif || advancedExif.failed > 0) && (
+                      <div className="mt-4 border-border border-t pt-3">
+                        <p className="text-[11px] text-muted-foreground">
+                          {t("advancedExifProgress", {
+                            processed: advancedExif.processed,
+                            total: advancedExif.total,
+                          })}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {hasPendingAdvancedExif && (
+                            <Button
+                              className="h-7 text-[10px]"
+                              onClick={() =>
+                                canPauseAdvancedExif
+                                  ? advancedExifActions.pause()
+                                  : advancedExifActions.resume()
+                              }
+                              variant="outline"
+                            >
+                              {t(
+                                canPauseAdvancedExif
+                                  ? "pause"
+                                  : "advancedExifResume"
+                              )}
+                            </Button>
+                          )}
+                          {advancedExif.failed > 0 && (
+                            <Button
+                              className="h-7 text-[10px]"
+                              onClick={() => advancedExifActions.retry()}
+                              variant="outline"
+                            >
+                              {t("advancedExifRetry", {
+                                count: advancedExif.failed,
+                              })}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                </section>
+                {shootingGuidance.length > 0 && (
+                  <section
+                    className="min-w-0 rounded-xl border border-border bg-secondary p-4 sm:p-5"
+                    data-surface="section-card"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="rounded-full bg-primary/10 p-2 text-primary">
+                        <Lightbulb className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <h2 className="font-semibold text-[15px] text-foreground">
+                          {t("dashboardGuidanceTitle")}
+                        </h2>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {t("dashboardGuidanceSubtitle")}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                      {shootingGuidance.slice(0, 3).map((item) => (
+                        <GuidanceCard
+                          key={item.kind}
+                          kind={item.kind}
+                          value={item.value}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </div>
+              <section
+                className="min-w-0 rounded-xl border border-border bg-secondary p-4 sm:p-5 xl:col-span-3"
+                data-surface="section-card"
+              >
                 <h2 className="font-semibold text-[15px] text-foreground">
                   {t("dashboardLibraryHealth")}
                 </h2>
@@ -879,168 +955,89 @@ function DashboardPage() {
                   />
                 </div>
               </section>
-              <div className="contents">
-                <section
-                  className={`dashboard-overview-panel order-4 min-w-0 rounded-[10px] border border-border bg-secondary p-4 sm:p-5 ${shootingGuidance.length > 0 ? "xl:col-span-2" : "xl:col-span-3"}`}
-                >
-                  <h2 className="font-semibold text-[15px] text-foreground">
-                    {t("dashboardPhotographyProfile")}
-                  </h2>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    {t("dashboardPhotographyProfileSubtitle")}
-                  </p>
-                  <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border lg:grid-cols-3">
-                    <Insight
-                      detail={
-                        topCamera
-                          ? t("dashboardPhotoCount", { count: topCamera.count })
-                          : undefined
-                      }
-                      label={t("cameraUsage")}
-                      value={topCamera?.name ?? t("dashboardNoInsight")}
-                    />
-                    <Insight
-                      detail={
-                        advancedChart("captureMode")[0]?.count
-                          ? t("dashboardPhotoCount", {
-                              count: advancedChart("captureMode")[0].count,
-                            })
-                          : undefined
-                      }
-                      label={t("metadataCaptureMode")}
-                      value={
-                        advancedChart("captureMode")[0]?.name ??
-                        t("dashboardNoInsight")
-                      }
-                    />
-                    <Insight
-                      detail={
-                        advancedChart("inCameraLook")[0]?.count
-                          ? t("dashboardPhotoCount", {
-                              count: advancedChart("inCameraLook")[0].count,
-                            })
-                          : undefined
-                      }
-                      label={t("metadataInCameraLook")}
-                      value={
-                        advancedChart("inCameraLook")[0]?.name ??
-                        t("dashboardNoInsight")
-                      }
-                    />
-                    <Insight
-                      detail={
-                        topLens
-                          ? t("dashboardPhotoCount", { count: topLens.count })
-                          : undefined
-                      }
-                      label={t("lensUsage")}
-                      value={topLens?.name ?? t("dashboardNoInsight")}
-                    />
-                    <Insight
-                      detail={
-                        peakHour?.count
-                          ? t("dashboardPhotoCount", { count: peakHour.count })
-                          : undefined
-                      }
-                      label={t("dashboardPeakHour")}
-                      value={
-                        peakHour?.count
-                          ? peakHour.name
-                          : t("dashboardNoInsight")
-                      }
-                    />
-                    <Insight
-                      detail={
-                        peakMonth?.count
-                          ? t("dashboardPhotoCount", { count: peakMonth.count })
-                          : undefined
-                      }
-                      label={t("dashboardPeakMonth")}
-                      value={
-                        peakMonth?.count
-                          ? peakMonth.name
-                          : t("dashboardNoInsight")
-                      }
-                    />
-                  </div>
-                </section>
-                <section className="dashboard-overview-panel order-2 min-w-0 rounded-[12px] border border-primary/25 bg-primary/[0.05] p-4 shadow-sm sm:p-5">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    <h2 className="font-semibold text-[15px] text-foreground">
-                      {t("dashboardNextActions")}
-                    </h2>
-                  </div>
-                  {nextActionContent}
-                  {advancedExifQuery.data && (
-                    <div className="mt-4 border-border border-t pt-3">
-                      <p className="text-[11px] text-muted-foreground">
-                        {t("advancedExifProgress", {
-                          processed: advancedExifQuery.data.processed,
-                          total: advancedExifQuery.data.total,
-                        })}
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {advancedExifQuery.data.running &&
-                        !advancedExifQuery.data.paused ? (
-                          <Button
-                            className="h-7 text-[10px]"
-                            onClick={() => advancedExifActions.pause()}
-                            variant="outline"
-                          >
-                            {t("pause")}
-                          </Button>
-                        ) : (
-                          <Button
-                            className="h-7 text-[10px]"
-                            onClick={() => advancedExifActions.resume()}
-                            variant="outline"
-                          >
-                            {t("advancedExifResume")}
-                          </Button>
-                        )}
-                        {advancedExifQuery.data.failed > 0 && (
-                          <Button
-                            className="h-7 text-[10px]"
-                            onClick={() => advancedExifActions.retry()}
-                            variant="outline"
-                          >
-                            {t("advancedExifRetry", {
-                              count: advancedExifQuery.data.failed,
-                            })}
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </section>
-              </div>
-              {shootingGuidance.length > 0 && (
-                <section className="dashboard-overview-panel order-5 min-w-0 rounded-[10px] border border-primary/20 bg-primary/[0.04] p-4 sm:p-5">
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-full bg-primary/10 p-2 text-primary">
-                      <Lightbulb className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <h2 className="font-semibold text-[15px] text-foreground">
-                        {t("dashboardGuidanceTitle")}
-                      </h2>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {t("dashboardGuidanceSubtitle")}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                    {shootingGuidance.slice(0, 3).map((item) => (
-                      <GuidanceCard
-                        key={item.kind}
-                        kind={item.kind}
-                        value={item.value}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
+              <section
+                className="min-w-0 rounded-xl border border-border bg-secondary p-4 sm:p-5 xl:col-span-3"
+                data-surface="section-card"
+              >
+                <h2 className="font-semibold text-[15px] text-foreground">
+                  {t("dashboardPhotographyProfile")}
+                </h2>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {t("dashboardPhotographyProfileSubtitle")}
+                </p>
+                <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border lg:grid-cols-3">
+                  <Insight
+                    detail={
+                      topCamera
+                        ? t("dashboardPhotoCount", { count: topCamera.count })
+                        : undefined
+                    }
+                    label={t("cameraUsage")}
+                    value={topCamera?.name ?? t("dashboardNoInsight")}
+                  />
+                  <Insight
+                    detail={
+                      advancedChart("captureMode")[0]?.count
+                        ? t("dashboardPhotoCount", {
+                            count: advancedChart("captureMode")[0].count,
+                          })
+                        : undefined
+                    }
+                    label={t("metadataCaptureMode")}
+                    value={
+                      advancedChart("captureMode")[0]?.name ??
+                      t("dashboardNoInsight")
+                    }
+                  />
+                  <Insight
+                    detail={
+                      advancedChart("inCameraLook")[0]?.count
+                        ? t("dashboardPhotoCount", {
+                            count: advancedChart("inCameraLook")[0].count,
+                          })
+                        : undefined
+                    }
+                    label={t("metadataInCameraLook")}
+                    value={
+                      advancedChart("inCameraLook")[0]?.name ??
+                      t("dashboardNoInsight")
+                    }
+                  />
+                  <Insight
+                    detail={
+                      topLens
+                        ? t("dashboardPhotoCount", { count: topLens.count })
+                        : undefined
+                    }
+                    label={t("lensUsage")}
+                    value={topLens?.name ?? t("dashboardNoInsight")}
+                  />
+                  <Insight
+                    detail={
+                      peakHour?.count
+                        ? t("dashboardPhotoCount", { count: peakHour.count })
+                        : undefined
+                    }
+                    label={t("dashboardPeakHour")}
+                    value={
+                      peakHour?.count ? peakHour.name : t("dashboardNoInsight")
+                    }
+                  />
+                  <Insight
+                    detail={
+                      peakMonth?.count
+                        ? t("dashboardPhotoCount", { count: peakMonth.count })
+                        : undefined
+                    }
+                    label={t("dashboardPeakMonth")}
+                    value={
+                      peakMonth?.count
+                        ? peakMonth.name
+                        : t("dashboardNoInsight")
+                    }
+                  />
+                </div>
+              </section>
             </div>
           )}
 
@@ -1299,7 +1296,10 @@ function GuidanceCard({
 }) {
   const { t } = useTranslation();
   return (
-    <article className="dashboard-overview-guidance-card min-w-0 rounded-[8px] border border-border/80 bg-background/70 p-4">
+    <article
+      className="min-w-0 rounded-[8px] border border-border/80 bg-background/70 p-4"
+      data-surface="section-card"
+    >
       <h3 className="font-medium text-[12px] text-foreground">
         {t(`dashboardGuidance_${kind}Title`)}
       </h3>
@@ -1456,12 +1456,13 @@ function ChartDisplayModeToggle({
     <fieldset
       aria-label={t("dashboardDisplayMode")}
       className="m-0 flex min-w-0 rounded-[5px] border border-border p-0.5"
+      data-surface="segmented-control"
     >
       <button
         aria-pressed={value === "trend"}
         className={`rounded-[3px] px-2 py-1 text-[10px] focus-visible:outline-2 focus-visible:outline-ring ${
           value === "trend"
-            ? "bg-muted text-foreground"
+            ? "bg-card font-medium text-foreground"
             : "text-muted-foreground hover:text-foreground"
         }`}
         onClick={() => onChange?.("trend")}
@@ -1473,7 +1474,7 @@ function ChartDisplayModeToggle({
         aria-pressed={value === "heatmap"}
         className={`rounded-[3px] px-2 py-1 text-[10px] focus-visible:outline-2 focus-visible:outline-ring ${
           value === "heatmap"
-            ? "bg-muted text-foreground"
+            ? "bg-card font-medium text-foreground"
             : "text-muted-foreground hover:text-foreground"
         }`}
         onClick={() => onChange?.("heatmap")}
@@ -1793,8 +1794,9 @@ function HealthMetric({
 }) {
   return (
     <div
-      className="dashboard-overview-metric min-w-0 border-border/70 border-r border-b bg-background/30 p-4 xl:border-b-0"
+      className="min-w-0 bg-background/30 p-3 outline outline-border/70 sm:p-4"
       data-ai-index-coverage={aiIndexCoverage || undefined}
+      data-surface="section-card"
     >
       <div className="flex items-center gap-1.5">
         <AppTooltip>
@@ -1846,10 +1848,13 @@ function OverviewTrend({
   onDateClick: (date: string) => void;
   title: string;
 }) {
-  const noMotion = useReducedMotion();
+  const { i18n, t } = useTranslation();
   if (!(data.some((point) => point.count > 0) || calendarData.length > 0)) {
-    return null;
+    return <EmptyChart message={t("dashboardEmptyForRange")} />;
   }
+  const formatCount = new Intl.NumberFormat(i18n.language, {
+    notation: "compact",
+  });
   return (
     <section aria-label={title} className="w-full min-w-0">
       {displayMode === "heatmap" ? (
@@ -1883,15 +1888,23 @@ function OverviewTrend({
                 tick={axisTick}
                 tickLine={false}
               />
+              <YAxis
+                allowDecimals={false}
+                axisLine={false}
+                tick={axisTick}
+                tickCount={4}
+                tickFormatter={(count: number) => formatCount.format(count)}
+                tickLine={false}
+                width={38}
+              />
               <Tooltip
                 content={<DashboardChartTooltip />}
                 cursor={{ fill: "var(--muted)" }}
               />
               <Area
-                animationDuration={400}
                 dataKey="count"
                 fill="url(#overview-trend)"
-                isAnimationActive={!noMotion}
+                isAnimationActive={false}
                 stroke={color}
                 strokeWidth={2}
                 type="linear"
@@ -1913,7 +1926,10 @@ function Insight({
   value: string;
 }) {
   return (
-    <div className="dashboard-overview-metric min-w-0 border-border/70 border-r border-b bg-background/20 p-4">
+    <div
+      className="min-w-0 bg-background/20 p-3 outline outline-border/70 sm:p-4"
+      data-surface="section-card"
+    >
       <p className="text-[10px] text-muted-foreground uppercase">{label}</p>
       <AppTooltip>
         <AppTooltipTrigger asChild>

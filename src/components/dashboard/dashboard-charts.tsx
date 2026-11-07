@@ -221,6 +221,7 @@ export function ChartSection({
     <section
       aria-label={title}
       className="min-w-0 rounded-[10px] border border-border bg-secondary p-4 sm:p-5"
+      data-surface="section-card"
     >
       <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">

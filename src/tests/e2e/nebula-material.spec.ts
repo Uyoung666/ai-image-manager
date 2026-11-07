@@ -807,3 +807,164 @@ test("keeps the gallery, settings and overlays inside the full material matrix",
     }
   }
 });
+
+test("keeps the populated dashboard consistent across backdrops and window sizes", async () => {
+  const thumbnail = path.join(root, "photo.png").replaceAll("'", "''");
+  execute(`
+    WITH RECURSIVE sample(id) AS (SELECT 100 UNION ALL SELECT id + 1 FROM sample WHERE id < 117)
+    INSERT INTO photos(id,path,folder_id,filename,width,height,format,thumbnail_path,is_ai_processed,is_face_processed,created_at)
+    SELECT id, '${thumbnail}' || id, 1, 'Dashboard sample ' || id || '.png', 1586, 992, 'png', '${thumbnail}', 1, 1, 1793203200000
+    FROM sample;
+    INSERT INTO exif_data(photo_id,camera_make,camera_model,lens_model,focal_length,focal_length_num,aperture,date_taken,iso)
+    SELECT id, 'Sony', 'ILCE-6700', 'E PZ 18-105mm F4 G OSS', '22', 22, 4,
+      unixepoch(CASE
+        WHEN id < 103 THEN '2008-10-01'
+        WHEN id < 107 THEN '2021-10-01'
+        WHEN id < 112 THEN '2024-10-01'
+        ELSE '2026-10-01'
+      END) * 1000 + (id - 100) * 86400000, 200
+    FROM photos WHERE id >= 100;
+    INSERT INTO advanced_exif_data(photo_id,status,parser_version,enriched_at,capture_mode,in_camera_look)
+    SELECT id, 'complete', 3, 1793203200000, 'Standard', 'Standard'
+    FROM photos WHERE id >= 100;
+  `);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.__e2eNavigate));
+  const dashboard = page.locator("[data-dashboard]");
+  const overview = dashboard.getByTestId("dashboard-overview");
+  const actions = dashboard.getByTestId("dashboard-actions");
+  const resume = actions.getByRole("button", { name: "Resume enrichment" });
+  const retry = actions.getByRole("button", { name: "Retry failures (1)" });
+  const nav = dashboard.getByRole("navigation");
+  const main = dashboard.locator("main");
+  for (const theme of ["dark", "light"] as const) {
+    await resize(1280, 800);
+    await applyTheme(theme);
+    for (const [backdrop, source] of [
+      ["Aurora fluid", "aurora"],
+      ["Image", "image"],
+      ["Video", "video"],
+    ]) {
+      await navigate("/settings/plugins");
+      await chooseSetting("Backdrop", backdrop);
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-nebula-backdrop",
+        source
+      );
+      await navigate("/dashboard");
+      await expect(overview.getByRole("heading", { name: "19" })).toBeVisible();
+      await expect(overview.locator(".recharts-yAxis")).toBeVisible();
+      await expect(
+        dashboard.getByRole("heading", { name: "Shooting habit guide" })
+      ).toBeVisible();
+      await expect(resume).toHaveCount(0);
+      await expect(actions.getByRole("button", { name: "Pause" })).toHaveCount(
+        0
+      );
+      await expect(nav).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expect(overview).toHaveCSS("background-image", "none");
+      await expect(overview).toHaveCSS("backdrop-filter", "none");
+      const fill = await overview.evaluate(
+        (el) => getComputedStyle(el).backgroundColor
+      );
+      await expect(actions).toHaveCSS("background-color", fill);
+      for (const [width, height] of SIZES) {
+        await resize(width, height);
+        await assertBounds();
+        await expect
+          .poll(() =>
+            overview.evaluate((section) => {
+              const curve = section
+                .querySelector(".recharts-area-curve")
+                ?.getBoundingClientRect();
+              const plot = section
+                .querySelector(".recharts-cartesian-grid")
+                ?.getBoundingClientRect();
+              return Boolean(
+                curve &&
+                  plot &&
+                  curve.top >= plot.top - 1 &&
+                  curve.bottom <= plot.bottom + 1
+              );
+            })
+          )
+          .toBe(true);
+        const overviewBox = await overview.boundingBox();
+        const actionsBox = await actions.boundingBox();
+        expect(
+          overviewBox && actionsBox && actionsBox.height < overviewBox.height
+        ).toBe(true);
+        if (width === 1280) {
+          expect(
+            Math.abs((overviewBox?.y ?? 0) - (actionsBox?.y ?? 0))
+          ).toBeLessThan(2);
+          await assertTextContrast([
+            "[data-dashboard] header p",
+            "[data-dashboard] header button[aria-pressed=true]",
+            "[data-dashboard] nav button[aria-current=page]",
+            '[data-testid="dashboard-overview"] .text-muted-foreground',
+            '[data-testid="dashboard-actions"] h2',
+          ]);
+        }
+        if (width === 1280 || source === "aurora") {
+          await page.screenshot({
+            path: test
+              .info()
+              .outputPath(
+                `dashboard-${theme}-${source}-${width}x${height}.png`
+              ),
+            animations: "disabled",
+            scale: "css",
+          });
+        }
+      }
+    }
+  }
+
+  await resize(720, 480);
+  const heatmap = overview.getByRole("button", { name: "Heatmap" });
+  await heatmap.click();
+  await expect(heatmap).toHaveAttribute("aria-pressed", "true");
+  await assertBounds();
+  await overview.getByRole("button", { name: "Trend" }).click();
+  const navTop = (await nav.boundingBox())?.y;
+  await main.evaluate((element) => {
+    element.scrollTop = 450;
+  });
+  expect((await nav.boundingBox())?.y).toBe(navTop);
+  await nav.getByRole("button", { name: "Gear" }).click();
+  await expect(nav.getByRole("button", { name: "Gear" })).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
+  await assertBounds();
+  await nav.getByRole("button", { name: "Overview" }).click();
+  execute("UPDATE advanced_exif_data SET status='failed' WHERE photo_id=100");
+  await expect(retry).toBeVisible();
+  await expect(resume).toHaveCount(0);
+  execute("UPDATE advanced_exif_data SET status='pending' WHERE photo_id=101");
+  await expect(resume).toBeVisible();
+
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()
+      .find((window) => !window.isDestroyed() && window.isVisible())
+      ?.webContents.setZoomFactor(1.25);
+  });
+  try {
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(576);
+    await assertBounds();
+    await dashboard
+      .getByRole("button", { name: "Custom", exact: true })
+      .click();
+    await expect(page.getByRole("dialog", { name: "Custom" })).toBeVisible();
+    await assertBounds();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Custom" })).toHaveCount(0);
+  } finally {
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()
+        .find((window) => !window.isDestroyed() && window.isVisible())
+        ?.webContents.setZoomFactor(1);
+    });
+  }
+});
