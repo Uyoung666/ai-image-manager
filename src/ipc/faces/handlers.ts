@@ -1,5 +1,5 @@
 import { os } from "@orpc/server";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import {
@@ -15,6 +15,7 @@ import {
   cancelFaceDetection,
   cosineSimilarity,
   detectFaces,
+  getCurrentFaceIdentityCentroid,
   getFaceDetectionProgress,
   isFaceDetectionRunning,
   isFaceModelMismatch,
@@ -29,6 +30,7 @@ import {
   resolveFaceScanFolderIds,
   setFaceScanScope,
 } from "@/services/face-scan-scope";
+import { setSetting } from "@/services/settings-manager";
 
 const IdSchema = z.object({ id: z.number() });
 
@@ -65,6 +67,7 @@ function upsertReviewDecision(
   db: ReturnType<typeof getDatabase>,
   input: {
     decision: "rejected" | "removed_from_identity";
+    contentRevision: number;
     faceIndex: number;
     photoId: number;
     sourceIdentityId?: number | null;
@@ -75,13 +78,15 @@ function upsertReviewDecision(
     .where(
       and(
         eq(faceReviewDecisions.photoId, input.photoId),
-        eq(faceReviewDecisions.faceIndex, input.faceIndex)
+        eq(faceReviewDecisions.faceIndex, input.faceIndex),
+        eq(faceReviewDecisions.contentRevision, input.contentRevision)
       )
     )
     .run();
   db.insert(faceReviewDecisions)
     .values({
       decision: input.decision,
+      contentRevision: input.contentRevision,
       faceIndex: input.faceIndex,
       photoId: input.photoId,
       sourceIdentityId: input.sourceIdentityId ?? null,
@@ -94,13 +99,15 @@ function upsertReviewDecision(
 function clearReviewDecision(
   db: ReturnType<typeof getDatabase>,
   photoId: number,
-  faceIndex: number
+  faceIndex: number,
+  contentRevision: number
 ): void {
   db.delete(faceReviewDecisions)
     .where(
       and(
         eq(faceReviewDecisions.photoId, photoId),
-        eq(faceReviewDecisions.faceIndex, faceIndex)
+        eq(faceReviewDecisions.faceIndex, faceIndex),
+        eq(faceReviewDecisions.contentRevision, contentRevision)
       )
     )
     .run();
@@ -264,6 +271,20 @@ export const startFaceDetection = os
     }
 
     // Fire and forget — detection runs async with progress pushed to renderer
+    setSetting("faces.autoRefreshStopped", "false");
+    db.update(photos)
+      .set({
+        faceRefreshAttempts: 0,
+        faceRefreshRetryAt: 0,
+        faceProcessingError: null,
+      })
+      .where(
+        and(
+          inArray(photos.folderId, scopeFolderIds),
+          eq(photos.faceRefreshPending, true)
+        )
+      )
+      .run();
     detectFaces(ids, (progress) => {
       const { BrowserWindow } = require("electron");
       for (const win of BrowserWindow.getAllWindows()) {
@@ -312,7 +333,10 @@ export const listFaceIdentities = os.handler(() => {
     .from(faceIdentities)
     .where(
       and(
-        sql`${faceIdentities.faceCount} > 0`,
+        or(
+          sql`${faceIdentities.faceCount} > 0`,
+          eq(faceIdentities.isConfirmed, true)
+        ),
         eq(faceIdentities.isHidden, false)
       )
     )
@@ -360,7 +384,12 @@ export const listFaceIdentities = os.handler(() => {
       eq(faceVectors.id, faceIdentityMembers.faceVectorId)
     )
     .innerJoin(photos, eq(photos.id, faceVectors.photoId))
-    .where(isNull(photos.deletedAt))
+    .where(
+      and(
+        isNull(photos.deletedAt),
+        eq(faceVectors.contentRevision, photos.contentRevision)
+      )
+    )
     .all();
   for (const member of allMembers) {
     const members = membersByIdentity.get(member.identityId) ?? [];
@@ -488,18 +517,25 @@ export const getFaceIdentity = os.input(IdSchema).handler(({ input }) => {
 
   // Exclude faces from soft-deleted photos
   const allPhotoIds = [...new Set(faces.map((f) => f.photoId))];
-  const validPhotoSet = new Set<number>();
+  const validPhotoSet = new Map<number, number>();
   if (allPhotoIds.length > 0) {
     const rows = db
-      .select({ id: photos.id })
+      .select({ id: photos.id, version: photos.contentRevision })
       .from(photos)
       .where(and(inArray(photos.id, allPhotoIds), isNull(photos.deletedAt)))
       .all();
     for (const r of rows) {
-      validPhotoSet.add(r.id);
+      validPhotoSet.set(r.id, r.version);
     }
   }
-  const validFaces = faces.filter((f) => validPhotoSet.has(f.photoId));
+  const validFaces = faces.filter(
+    (f) => validPhotoSet.get(f.photoId) === f.contentRevision
+  );
+  const staleFaceCount = faces.filter(
+    (f) =>
+      validPhotoSet.has(f.photoId) &&
+      validPhotoSet.get(f.photoId) !== f.contentRevision
+  ).length;
 
   const photoIds = [...new Set(validFaces.map((f) => f.photoId))];
   const photoRows = photoIds.length
@@ -565,7 +601,7 @@ export const getFaceIdentity = os.input(IdSchema).handler(({ input }) => {
     };
   });
 
-  return { ...identity, faces: faceViews, photos: photoRows };
+  return { ...identity, faces: faceViews, photos: photoRows, staleFaceCount };
 });
 
 export const createFaceIdentity = os
@@ -592,6 +628,7 @@ export const createFaceIdentity = os
         const vector = db
           .select({
             faceIndex: faceVectors.faceIndex,
+            contentRevision: faceVectors.contentRevision,
             id: faceVectors.id,
             isRejected: faceVectors.isRejected,
             photoId: faceVectors.photoId,
@@ -608,7 +645,12 @@ export const createFaceIdentity = os
         db.delete(faceIdentityExclusions)
           .where(eq(faceIdentityExclusions.faceVectorId, fvId))
           .run();
-        clearReviewDecision(db, vector.photoId, vector.faceIndex);
+        clearReviewDecision(
+          db,
+          vector.photoId,
+          vector.faceIndex,
+          vector.contentRevision
+        );
         db.insert(faceIdentityMembers)
           .values({ identityId: insertedId, faceVectorId: fvId })
           .onConflictDoNothing()
@@ -835,6 +877,7 @@ export const removeFaceFromIdentity = os
       const vector = db
         .select({
           faceIndex: faceVectors.faceIndex,
+          contentRevision: faceVectors.contentRevision,
           photoId: faceVectors.photoId,
         })
         .from(faceVectors)
@@ -865,6 +908,7 @@ export const removeFaceFromIdentity = os
       upsertReviewDecision(db, {
         decision: "removed_from_identity",
         faceIndex: vector.faceIndex,
+        contentRevision: vector.contentRevision,
         photoId: vector.photoId,
         sourceIdentityId: input.identityId,
         sourceIdentityName: identity.name,
@@ -912,6 +956,7 @@ export const restoreFaceToIdentity = os
     const photo = db
       .select({
         faceIndex: faceVectors.faceIndex,
+        contentRevision: faceVectors.contentRevision,
         photoId: faceVectors.photoId,
       })
       .from(faceVectors)
@@ -927,7 +972,12 @@ export const restoreFaceToIdentity = os
       db.delete(faceIdentityExclusions)
         .where(eq(faceIdentityExclusions.faceVectorId, input.faceVectorId))
         .run();
-      clearReviewDecision(db, photo.photoId, photo.faceIndex);
+      clearReviewDecision(
+        db,
+        photo.photoId,
+        photo.faceIndex,
+        photo.contentRevision
+      );
       db.update(faceVectors)
         .set({ isRejected: false })
         .where(eq(faceVectors.id, input.faceVectorId))
@@ -962,7 +1012,7 @@ function queryFaceReviewQueue(input: {
     .where(eq(faceIdentities.isHidden, false))
     .all()
     .flatMap((identity) => {
-      const centroid = parseNumericVector(identity.centroidEmbedding);
+      const centroid = getCurrentFaceIdentityCentroid(identity.id);
       return centroid ? [{ ...identity, centroid }] : [];
     });
   const members = db
@@ -981,10 +1031,36 @@ function queryFaceReviewQueue(input: {
   const decisions = db.select().from(faceReviewDecisions).all();
   const decisionByKey = new Map<string, (typeof decisions)[number]>();
   for (const decision of decisions) {
-    decisionByKey.set(`${decision.photoId}:${decision.faceIndex}`, decision);
+    decisionByKey.set(
+      `${decision.photoId}:${decision.faceIndex}:${decision.contentRevision}`,
+      decision
+    );
   }
   const identityById = new Map(
     identities.map((identity) => [identity.id, identity])
+  );
+  const changedPhotoIds = new Set(
+    db
+      .select({ photoId: faceVectors.photoId })
+      .from(faceVectors)
+      .innerJoin(photos, eq(photos.id, faceVectors.photoId))
+      .innerJoin(
+        faceIdentityMembers,
+        eq(faceIdentityMembers.faceVectorId, faceVectors.id)
+      )
+      .innerJoin(
+        faceIdentities,
+        eq(faceIdentities.id, faceIdentityMembers.identityId)
+      )
+      .where(
+        and(
+          isNull(photos.deletedAt),
+          eq(faceIdentities.isConfirmed, true),
+          sql`${faceVectors.contentRevision} <> ${photos.contentRevision}`
+        )
+      )
+      .all()
+      .map((row) => row.photoId)
   );
   const rows = db
     .select({
@@ -995,6 +1071,7 @@ function queryFaceReviewQueue(input: {
       detectionConfidence: faceVectors.confidence,
       embedding: faceVectors.embedding,
       faceIndex: faceVectors.faceIndex,
+      contentRevision: faceVectors.contentRevision,
       id: faceVectors.id,
       isRejected: faceVectors.isRejected,
       photoHeight: photos.height,
@@ -1005,12 +1082,19 @@ function queryFaceReviewQueue(input: {
     })
     .from(faceVectors)
     .innerJoin(photos, eq(photos.id, faceVectors.photoId))
-    .where(isNull(photos.deletedAt))
+    .where(
+      and(
+        isNull(photos.deletedAt),
+        eq(faceVectors.contentRevision, photos.contentRevision)
+      )
+    )
     .all();
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Candidate construction keeps review filtering and ranking together.
   function buildCandidate(row: (typeof rows)[number]) {
-    const decision = decisionByKey.get(`${row.photoId}:${row.faceIndex}`);
+    const decision = decisionByKey.get(
+      `${row.photoId}:${row.faceIndex}:${row.contentRevision}`
+    );
     const memberIdentityId = memberByFace.get(row.id) ?? null;
     const embedding = parseNumericVector(
       row.embedding,
@@ -1077,6 +1161,7 @@ function queryFaceReviewQueue(input: {
         photoPath: row.photoPath,
         photoWidth: row.photoWidth,
         reason,
+        needsReview: changedPhotoIds.has(row.photoId),
         sourceIdentityId: decision?.sourceIdentityId ?? null,
         sourceIdentityName:
           decision?.sourceIdentityName ?? sourceIdentity?.name ?? null,
@@ -1128,12 +1213,14 @@ export const listPhotoFaces = os
         detectionConfidence: faceVectors.confidence,
         embedding: faceVectors.embedding,
         faceIndex: faceVectors.faceIndex,
+        contentRevision: faceVectors.contentRevision,
         id: faceVectors.id,
         identityId: faceIdentityMembers.identityId,
         identityName: faceIdentities.name,
         isRejected: faceVectors.isRejected,
       })
       .from(faceVectors)
+      .innerJoin(photos, eq(photos.id, faceVectors.photoId))
       .leftJoin(
         faceIdentityMembers,
         eq(faceIdentityMembers.faceVectorId, faceVectors.id)
@@ -1142,7 +1229,13 @@ export const listPhotoFaces = os
         faceIdentities,
         eq(faceIdentities.id, faceIdentityMembers.identityId)
       )
-      .where(eq(faceVectors.photoId, input.photoId))
+      .where(
+        and(
+          eq(faceVectors.photoId, input.photoId),
+          eq(faceVectors.contentRevision, photos.contentRevision),
+          isNull(photos.deletedAt)
+        )
+      )
       .orderBy(faceVectors.faceIndex)
       .all()
       .map((face) => {
@@ -1190,11 +1283,19 @@ export const reviewFace = os
     const vector = db
       .select({
         faceIndex: faceVectors.faceIndex,
+        contentRevision: faceVectors.contentRevision,
         id: faceVectors.id,
         photoId: faceVectors.photoId,
       })
       .from(faceVectors)
-      .where(eq(faceVectors.id, input.faceVectorId))
+      .innerJoin(photos, eq(photos.id, faceVectors.photoId))
+      .where(
+        and(
+          eq(faceVectors.id, input.faceVectorId),
+          eq(faceVectors.contentRevision, photos.contentRevision),
+          isNull(photos.deletedAt)
+        )
+      )
       .get();
     if (!vector) {
       throw new Error("Face vector not found");
@@ -1227,7 +1328,12 @@ export const reviewFace = os
         db.delete(faceIdentityExclusions)
           .where(eq(faceIdentityExclusions.faceVectorId, input.faceVectorId))
           .run();
-        clearReviewDecision(db, vector.photoId, vector.faceIndex);
+        clearReviewDecision(
+          db,
+          vector.photoId,
+          vector.faceIndex,
+          vector.contentRevision
+        );
         db.update(faceVectors)
           .set({ isRejected: false })
           .where(eq(faceVectors.id, input.faceVectorId))
@@ -1267,6 +1373,7 @@ export const reviewFace = os
       upsertReviewDecision(db, {
         decision: "rejected",
         faceIndex: vector.faceIndex,
+        contentRevision: vector.contentRevision,
         photoId: vector.photoId,
       });
       for (const previous of previousMembers) {
@@ -1284,11 +1391,19 @@ export const restoreRejectedFace = os.input(IdSchema).handler(({ input }) => {
   const vector = db
     .select({
       faceIndex: faceVectors.faceIndex,
+      contentRevision: faceVectors.contentRevision,
       isRejected: faceVectors.isRejected,
       photoId: faceVectors.photoId,
     })
     .from(faceVectors)
-    .where(eq(faceVectors.id, input.id))
+    .innerJoin(photos, eq(photos.id, faceVectors.photoId))
+    .where(
+      and(
+        eq(faceVectors.id, input.id),
+        eq(faceVectors.contentRevision, photos.contentRevision),
+        isNull(photos.deletedAt)
+      )
+    )
     .get();
   if (!vector) {
     throw new Error("Face vector not found");
@@ -1299,7 +1414,8 @@ export const restoreRejectedFace = os.input(IdSchema).handler(({ input }) => {
     .where(
       and(
         eq(faceReviewDecisions.photoId, vector.photoId),
-        eq(faceReviewDecisions.faceIndex, vector.faceIndex)
+        eq(faceReviewDecisions.faceIndex, vector.faceIndex),
+        eq(faceReviewDecisions.contentRevision, vector.contentRevision)
       )
     )
     .get();
@@ -1311,12 +1427,18 @@ export const restoreRejectedFace = os.input(IdSchema).handler(({ input }) => {
       .set({ isRejected: false })
       .where(eq(faceVectors.id, input.id))
       .run();
-    clearReviewDecision(db, vector.photoId, vector.faceIndex);
+    clearReviewDecision(
+      db,
+      vector.photoId,
+      vector.faceIndex,
+      vector.contentRevision
+    );
   });
   return { ok: true };
 });
 
 export const cancelFaceDetection_h = os.handler(() => {
+  setSetting("faces.autoRefreshStopped", "true");
   if (!isFaceDetectionRunning()) {
     return { cancelled: false, message: "没有正在运行的人脸检测" };
   }

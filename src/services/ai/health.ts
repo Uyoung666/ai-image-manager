@@ -1,5 +1,5 @@
 import path from "node:path";
-import { sql } from "drizzle-orm";
+import { isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
@@ -12,6 +12,7 @@ import {
   type VectorCompatibility,
 } from "./model-fingerprint";
 import { loadModel } from "./model-loader";
+import { lancePhotoRevisionFilter } from "./photo-version";
 import {
   currentProgress,
   embeddingModel,
@@ -220,6 +221,17 @@ export interface AiReadiness {
   vectorDB: "loading" | "ready" | "error";
 }
 
+function getReadinessCounts() {
+  return getDatabase()
+    .select({
+      total: sql<number>`count(*)`,
+      completed: sql<number>`count(case when ${photos.isAiProcessed} = 1 and ${photos.embeddingRevision} = ${photos.contentRevision} then 1 end)`,
+    })
+    .from(photos)
+    .where(isNull(photos.deletedAt))
+    .get();
+}
+
 export async function getAiReadiness(options?: {
   loadModel?: boolean;
 }): Promise<AiReadiness> {
@@ -245,14 +257,6 @@ export async function getAiReadiness(options?: {
       loadingStartedAt: currentProgress.loadingStartedAt ?? null,
     },
   };
-  readiness.totalPhotos =
-    getDatabase()
-      .select({ count: sql<number>`count(*)` })
-      .from(photos)
-      .where(sql`${photos.deletedAt} IS NULL`)
-      .get()?.count ?? 0;
-  readiness.pendingPhotos = readiness.totalPhotos;
-
   if (!isModelLoaded && options?.loadModel !== false) {
     try {
       await loadModel();
@@ -265,15 +269,24 @@ export async function getAiReadiness(options?: {
 
   await withVectorDbOperation(async () => {
     try {
-      await initVectorDB();
+      let completed = 0;
+      try {
+        await initVectorDB();
+      } finally {
+        const counts = getReadinessCounts();
+        readiness.totalPhotos = counts?.total ?? 0;
+        readiness.pendingPhotos = readiness.totalPhotos;
+        completed = counts?.completed ?? 0;
+      }
       const table = photoTable;
       if (table) {
         readiness.vectorDB = "ready";
-        const rowCount = await table.countRows();
-        // Cap at non-deleted photo count to exclude orphan vectors from trashed photos
-        const nonDeletedCount = readiness.totalPhotos;
-        readiness.vectorCount = Math.min(rowCount, nonDeletedCount);
-        readiness.totalPhotos = nonDeletedCount;
+        // Current Lance rows can be written before SQLite records completion.
+        // Cap their count at completed records. Normal indexing reconciles orphan IDs.
+        const rowCount = completed
+          ? await table.countRows(lancePhotoRevisionFilter("embedding"))
+          : 0;
+        readiness.vectorCount = Math.min(rowCount, completed);
         readiness.indexedPhotos = readiness.vectorCount;
         readiness.pendingPhotos = Math.max(
           0,
@@ -281,12 +294,12 @@ export async function getAiReadiness(options?: {
         );
         readiness.hasVectors = readiness.vectorCount > 0;
 
-        if (rowCount >= MIN_VECTORS_FOR_INDEX) {
+        if (readiness.vectorCount >= MIN_VECTORS_FOR_INDEX) {
           const indices = await table.listIndices();
           readiness.indexReady = indices.some(
             (idx) => idx.columns.includes("vector") || idx.name === "vector_idx"
           );
-        } else if (rowCount > 0) {
+        } else if (readiness.hasVectors) {
           // Below threshold — brute-force search works, mark index as "ready enough"
           readiness.indexReady = true;
         }

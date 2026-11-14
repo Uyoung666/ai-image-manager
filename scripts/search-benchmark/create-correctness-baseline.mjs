@@ -10,7 +10,7 @@ import {
 } from "./source-snapshot.mjs";
 
 const VECTOR_SELECT_RE =
-  / {4}if \(vq.select\) \{\s*vq = vq.select\(\["photo_id"\]\);\s*\}/;
+  / {4}if \(vq\.select\) \{\s*vq = vq\.select\(\["photo_id"(?:,\s*"content_revision")?\]\);\s*\}/;
 const COMBINED_RE =
   /^(\s*)const combined = rerankedList\.flatMap\(\(result\) => \{/m;
 const PHOTO_RE = /const photo = scopeById\.get\(result\.photoId\);/;

@@ -1,7 +1,7 @@
 import { fork } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
@@ -17,9 +17,20 @@ import { trackChildProcess } from "@/services/tracked-child-processes";
 import { getDataPath } from "@/utils/data-path";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { summarizeEmbeddingFailures } from "./embedding-failures";
+import {
+  embeddingRetryStateColumns,
+  recordEmbeddingFailures,
+  resetEmbeddingRefreshRetry,
+} from "./embedding-refresh-retries";
 import { getActiveEmbeddingWorkerAdapter } from "./model-config";
 import { shouldPublishVectorFingerprint } from "./model-fingerprint";
 import { ensureLocalModel } from "./model-loader";
+import {
+  aiSourceReady,
+  capturePhotoWorkFile,
+  photoWorkFileUnchanged,
+  photoWorkVersionMatch,
+} from "./photo-version";
 import type { EmbedProgress, EmbedProgressCallback } from "./state";
 import {
   _localModelPath,
@@ -116,47 +127,6 @@ interface EmbedResult {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function batchUpdatePhotoStatus(
-  db: ReturnType<typeof getDatabase>,
-  photoIds: number[]
-): number[] {
-  if (photoIds.length === 0) {
-    return [];
-  }
-
-  const CHUNK_SIZE = 500;
-  const updatedIds: number[] = [];
-
-  for (let i = 0; i < photoIds.length; i += CHUNK_SIZE) {
-    const chunk = photoIds.slice(i, i + CHUNK_SIZE);
-
-    try {
-      db.update(photos)
-        .set({ isAiProcessed: true })
-        .where(inArray(photos.id, chunk))
-        .run();
-      updatedIds.push(...chunk);
-    } catch {
-      console.warn(
-        `[AI] Batch update failed for chunk ${i}-${i + chunk.length}, falling back to individual updates`
-      );
-
-      for (const id of chunk) {
-        try {
-          db.update(photos)
-            .set({ isAiProcessed: true, vectorId: `vec_${id}` })
-            .where(eq(photos.id, id))
-            .run();
-          updatedIds.push(id);
-        } catch {
-          /* skip */
-        }
-      }
-    }
-  }
-  return updatedIds;
 }
 
 interface EmbedWorkerMessage {
@@ -364,10 +334,21 @@ export async function cleanupPartialEmbedding(
 }
 
 const embeddingTasks = new Set<Promise<number>>();
+let activeFailureExclusions: Set<number> | undefined;
+
+interface EmbedOptions {
+  excludePhotoIds?: ReadonlySet<number>;
+  onCompleted?: (retryAt?: number) => void;
+}
+
+/** A retry requested during inference supersedes that run's failure outcome. */
+export function ignoreActiveEmbeddingFailure(photoId: number): void {
+  activeFailureExclusions?.add(photoId);
+}
 
 export function embedAllPhotos(
   onProgress?: EmbedProgressCallback,
-  options?: { excludePhotoIds?: ReadonlySet<number> }
+  options?: EmbedOptions
 ): Promise<number> {
   const task = runEmbedding(onProgress, options);
   embeddingTasks.add(task);
@@ -385,7 +366,7 @@ export async function waitForEmbeddingTasks(): Promise<void> {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Embedding orchestration preserves cancellation, recovery, persistence, and auto-tagging lifecycle in one transaction-like flow.
 async function runEmbedding(
   onProgress?: EmbedProgressCallback,
-  options?: { excludePhotoIds?: ReadonlySet<number> }
+  options?: EmbedOptions
 ): Promise<number> {
   // Atomically guard against concurrent calls
   if (getAiControlState() !== "idle" || isEmbedding || isAiIndexResetting) {
@@ -396,6 +377,8 @@ async function runEmbedding(
   }
   const shouldResetPool = poolCancelled;
   const runId = beginEmbeddingRun();
+  const failureExclusions = new Set<number>();
+  activeFailureExclusions = failureExclusions;
   const shouldStopRun = () => !isRunWritable(runId) || poolCancelled;
   let didFinishCurrentRun = false;
   let diagnosticStage = "database";
@@ -618,16 +601,21 @@ async function runEmbedding(
     }
 
     const unprocessed = db
-      .select({ id: photos.id, path: photos.path })
+      .select(embeddingRetryStateColumns)
       .from(photos)
-      .where(sql`${photos.isAiProcessed} = 0 AND ${photos.deletedAt} IS NULL`)
+      .where(and(aiSourceReady, eq(photos.isAiProcessed, false)))
       .all()
       .filter((photo) => !options?.excludePhotoIds?.has(photo.id));
+    for (const photo of unprocessed) {
+      await capturePhotoWorkFile(photo);
+    }
 
     const total = unprocessed.length;
     let processed = 0;
     const successfulIds: number[] = [];
     const photoFailures = new Map<number, EmbedResult>();
+    const persistenceFailures = new Set<number>();
+    let superseded = false;
     function recordResults(results: EmbedResult[]): void {
       for (const result of results) {
         if (result.error) {
@@ -656,125 +644,152 @@ async function runEmbedding(
       });
       onProgress?.(currentProgress);
       console.log("[AI] No photos need embedding; worker pool startup skipped");
+      if (!shouldStopRun() && db === getDatabase()) {
+        options?.onCompleted?.();
+      }
       finishRun("idle");
       return 0;
     }
 
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Persistence keeps vector writes, cancellation cleanup, and SQLite status updates atomic from the caller's perspective.
+    const versions = new Map(unprocessed.map((row) => [row.id, row]));
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Version checks, Lance writes and SQLite completion are coordinated in one operation.
     async function persistEmbedResults(
       results: EmbedResult[]
     ): Promise<number> {
-      if (!isRunWritable(runId)) {
+      const table = photoTable;
+      if (!(isRunWritable(runId) && table) || db !== getDatabase()) {
         return 0;
       }
-      const candidateResults = results.filter(
-        (r) => r.vector && r.vector.length > 0
-      );
-      const candidateIds = candidateResults.map((result) => result.id);
-      const activeIds = new Set(
-        candidateIds.length > 0
-          ? db
-              .select({ id: photos.id })
-              .from(photos)
-              .where(
-                sql`${photos.id} IN (${sql.raw(candidateIds.join(","))}) AND ${photos.deletedAt} IS NULL`
-              )
-              .all()
-              .map((row) => row.id)
-          : []
-      );
-      const successResults = candidateResults.filter((result) =>
-        activeIds.has(result.id)
-      );
-      if (!(successResults.length > 0 && photoTable)) {
-        return 0;
-      }
-
-      const batchIds = successResults.map((r) => r.id);
-
-      try {
-        invalidateVectorSearch();
-        await photoTable.delete(buildPhotoIdFilter(batchIds));
-      } catch {
-        /* first write 鈥?table may be empty */
-      }
-
-      const records = successResults.map((r) => ({
-        photo_id: r.id,
-        vector: r.vector,
-        created_at: Date.now(),
-      }));
-      const writtenIds = new Set<number>();
-      try {
-        invalidateVectorSearch();
-        await photoTable.add(records);
-        for (const id of batchIds) {
-          writtenIds.add(id);
+      const records: Array<{
+        photo_id: number;
+        vector: number[];
+        created_at: number;
+        content_revision: number;
+      }> = [];
+      for (const result of results) {
+        const version = versions.get(result.id);
+        if (!(version && result.vector?.length)) {
+          continue;
         }
-      } catch (lanceErr: unknown) {
+        if (version.sourceSize !== null) {
+          const stat = await fs.promises.stat(version.path).catch(() => null);
+          if (
+            !stat ||
+            stat.size !== version.sourceSize ||
+            stat.mtimeMs !== version.sourceMtimeMs ||
+            stat.ctimeMs !== version.sourceCtimeMs
+          ) {
+            superseded = true;
+            continue;
+          }
+        }
+        if (
+          !isRunWritable(runId) ||
+          db !== getDatabase() ||
+          !db
+            .select({ id: photos.id })
+            .from(photos)
+            .where(photoWorkVersionMatch(version))
+            .get()
+        ) {
+          superseded = true;
+          continue;
+        }
+        records.push({
+          photo_id: result.id,
+          vector: result.vector,
+          created_at: Date.now(),
+          content_revision: version.contentRevision,
+        });
+      }
+      if (!(records.length && isRunWritable(runId))) {
+        return 0;
+      }
+      await table.delete(
+        buildPhotoIdFilter(records.map((record) => record.photo_id))
+      );
+      invalidateVectorSearch();
+      const written: typeof records = [];
+      try {
+        await table.add(records);
+        written.push(...records);
+      } catch (error) {
         console.warn(
-          `[AI] Batch add failed (${getErrorMessage(lanceErr)}), falling back to individual writes`
+          "[AI] Batch vector write failed; trying individual rows",
+          error
         );
         for (const record of records) {
           try {
-            invalidateVectorSearch();
-            await photoTable.add([record]);
-            writtenIds.add(record.photo_id);
-          } catch (individualErr: unknown) {
+            await table.add([record]);
+            written.push(record);
+          } catch (rowError) {
+            persistenceFailures.add(record.photo_id);
             console.warn(
-              `[AI] Vector write failed for photo ${record.photo_id}: ${getErrorMessage(individualErr)}`
+              "[AI] Vector row write failed",
+              record.photo_id,
+              rowError
             );
           }
         }
       }
-
-      if (!isRunWritable(runId)) {
-        await deletePhotoVectors([...writtenIds]).catch(() => {
-          /* best-effort */
-        });
+      const unchanged = new Set<number>();
+      for (const record of written) {
+        const version = versions.get(record.photo_id);
+        if (version && (await photoWorkFileUnchanged(version))) {
+          unchanged.add(record.photo_id);
+        }
+      }
+      if (db !== getDatabase()) {
         return 0;
       }
-
-      const writtenBatchIds = [...writtenIds];
-      if (writtenBatchIds.length === 0) {
-        return 0;
-      }
-
-      const stillActiveIds = new Set(
-        db
-          .select({ id: photos.id })
-          .from(photos)
-          .where(
-            sql`${photos.id} IN (${sql.raw(writtenBatchIds.join(","))}) AND ${photos.deletedAt} IS NULL`
+      const rejected: typeof records = [];
+      const persistedIds = db.transaction((tx) => {
+        const ids: number[] = [];
+        for (const record of written) {
+          const version = versions.get(record.photo_id);
+          if (
+            version &&
+            unchanged.has(record.photo_id) &&
+            isRunWritable(runId) &&
+            tx
+              .update(photos)
+              .set({
+                isAiProcessed: true,
+                embeddingRevision: record.content_revision,
+                ...resetEmbeddingRefreshRetry,
+              })
+              .where(photoWorkVersionMatch(version))
+              .run().changes === 1
+          ) {
+            ids.push(record.photo_id);
+          } else {
+            superseded = true;
+            rejected.push(record);
+          }
+        }
+        return ids;
+      });
+      if (rejected.length > 0) {
+        await table
+          .delete(
+            rejected
+              .map(
+                (record) =>
+                  "(photo_id = " +
+                  record.photo_id +
+                  " AND content_revision = " +
+                  record.content_revision +
+                  ")"
+              )
+              .join(" OR ")
           )
-          .all()
-          .map((row) => row.id)
-      );
-      const removedDuringWrite = writtenBatchIds.filter(
-        (photoId) => !stillActiveIds.has(photoId)
-      );
-      if (removedDuringWrite.length > 0) {
-        await deletePhotoVectors(removedDuringWrite);
+          .catch(() => undefined);
       }
-      const persistedIds = writtenBatchIds.filter((photoId) =>
-        stillActiveIds.has(photoId)
-      );
-      if (persistedIds.length === 0) {
-        return 0;
-      }
-
-      const statusIds = batchUpdatePhotoStatus(db, persistedIds);
-      const statusIdSet = new Set(statusIds);
-      const failedStatusIds = persistedIds.filter((id) => !statusIdSet.has(id));
-      if (failedStatusIds.length > 0) {
-        await deletePhotoVectors(failedStatusIds).catch(() => {
-          /* best-effort */
-        });
-      }
-      addWrittenPhotoIdsForRun(runId, statusIds);
-      addPendingAutoTagPhotoIds(statusIds);
-      successfulIds.push(...statusIds);
-      return statusIds.length;
+      invalidateVectorSearch();
+      addWrittenPhotoIdsForRun(runId, persistedIds);
+      addPendingAutoTagPhotoIds(persistedIds);
+      successfulIds.push(...persistedIds);
+      return persistedIds.length;
     }
 
     console.log(`[AI] Starting embedding for ${total} photos via Worker Pool`);
@@ -784,7 +799,6 @@ async function runEmbedding(
     const useGPU = getSetting("gpu.enabled") === "true";
     gpuRequested = useGPU;
     diagnosticStage = "embedding";
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Pool orchestration keeps initialization, progress, cancellation, persistence, and the single CPU fallback together.
     async function runPoolEmbedding(
       attemptUseGPU: boolean
     ): Promise<number | null> {
@@ -861,53 +875,6 @@ async function runEmbedding(
           );
         }
       );
-      // Persist results to LanceDB and SQLite — batch write
-      const successResults: EmbedResult[] = [];
-      if (successResults.length > 0 && photoTable) {
-        const batchIds = successResults.map((r) => r.id);
-
-        // 1. Batch delete old vectors
-        try {
-          invalidateVectorSearch();
-          await photoTable.delete(buildPhotoIdFilter(batchIds));
-        } catch {
-          /* first write — table may be empty */
-        }
-
-        // 2. Batch add new vectors
-        const records = successResults.map((r) => ({
-          photo_id: r.id,
-          vector: r.vector,
-          created_at: Date.now(),
-        }));
-        try {
-          invalidateVectorSearch();
-          await photoTable.add(records);
-        } catch (lanceErr: unknown) {
-          console.warn(
-            `[AI] Batch add failed (${getErrorMessage(lanceErr)}), falling back to individual writes`
-          );
-          for (const record of records) {
-            try {
-              invalidateVectorSearch();
-              await photoTable.add([record]);
-            } catch {
-              /* skip */
-            }
-          }
-        }
-
-        // 3. Batch update SQLite
-        batchUpdatePhotoStatus(db, batchIds);
-
-        // Track written IDs for potential cancel cleanup
-        addWrittenPhotoIdsForRun(runId, batchIds);
-        addPendingAutoTagPhotoIds(batchIds);
-
-        processed = successResults.length;
-        successfulIds.push(...batchIds);
-      }
-
       // After pool completes (or stops due to cancel): check for cancellation
       if (
         isCurrentEmbeddingRun(runId) &&
@@ -971,6 +938,8 @@ async function runEmbedding(
         processed = 0;
         successfulIds.length = 0;
         photoFailures.clear();
+        persistenceFailures.clear();
+        superseded = false;
         poolReady = false;
         shutdownPool();
         try {
@@ -1005,7 +974,6 @@ async function runEmbedding(
         return await settleStoppedRun(processed);
       }
 
-      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Legacy worker fallback recursively bisects failed batches while preserving the existing retry behavior.
       async function processBatch(
         batch: Array<{ id: number; path: string }>
       ): Promise<number> {
@@ -1019,113 +987,9 @@ async function runEmbedding(
           if (!isRunWritable(runId)) {
             return 0;
           }
-          const candidateBatch = results.filter(
-            (r) => r.vector && r.vector.length > 0
+          return await withVectorDbOperation(() =>
+            persistEmbedResults(results)
           );
-          const candidateIds = candidateBatch.map((result) => result.id);
-          const activeIds = new Set(
-            candidateIds.length > 0
-              ? db
-                  .select({ id: photos.id })
-                  .from(photos)
-                  .where(
-                    sql`${photos.id} IN (${sql.raw(candidateIds.join(","))}) AND ${photos.deletedAt} IS NULL`
-                  )
-                  .all()
-                  .map((row) => row.id)
-              : []
-          );
-          const successBatch = candidateBatch.filter((result) =>
-            activeIds.has(result.id)
-          );
-
-          if (successBatch.length > 0) {
-            const ids = successBatch.map((r) => r.id);
-            try {
-              await legacyTable.delete(buildPhotoIdFilter(ids));
-            } catch {
-              /* best-effort */
-            }
-
-            const records = successBatch.map((r) => ({
-              photo_id: r.id,
-              vector: r.vector,
-              created_at: Date.now(),
-            }));
-            const writtenIds = new Set<number>();
-            try {
-              await legacyTable.add(records);
-              for (const id of ids) {
-                writtenIds.add(id);
-              }
-            } catch (lanceErr: unknown) {
-              console.warn(
-                `[AI] Legacy batch add failed (${getErrorMessage(lanceErr)}), falling back to individual writes`
-              );
-              for (const record of records) {
-                try {
-                  await legacyTable.add([record]);
-                  writtenIds.add(record.photo_id);
-                } catch (individualErr: unknown) {
-                  console.warn(
-                    `[AI] Legacy vector write failed for photo ${record.photo_id}: ${getErrorMessage(individualErr)}`
-                  );
-                }
-              }
-            }
-
-            if (!isRunWritable(runId)) {
-              await deletePhotoVectors([...writtenIds]).catch(() => {
-                /* best-effort */
-              });
-              return 0;
-            }
-
-            const writtenBatchIds = [...writtenIds];
-            if (writtenBatchIds.length === 0) {
-              return 0;
-            }
-
-            const stillActiveIds = new Set(
-              db
-                .select({ id: photos.id })
-                .from(photos)
-                .where(
-                  sql`${photos.id} IN (${sql.raw(writtenBatchIds.join(","))}) AND ${photos.deletedAt} IS NULL`
-                )
-                .all()
-                .map((row) => row.id)
-            );
-            const removedDuringWrite = writtenBatchIds.filter(
-              (photoId) => !stillActiveIds.has(photoId)
-            );
-            if (removedDuringWrite.length > 0) {
-              await deletePhotoVectors(removedDuringWrite);
-            }
-            const persistedIds = writtenBatchIds.filter((photoId) =>
-              stillActiveIds.has(photoId)
-            );
-            if (persistedIds.length === 0) {
-              return 0;
-            }
-
-            const statusIds = batchUpdatePhotoStatus(db, persistedIds);
-            const statusIdSet = new Set(statusIds);
-            const failedStatusIds = persistedIds.filter(
-              (id) => !statusIdSet.has(id)
-            );
-            if (failedStatusIds.length > 0) {
-              await deletePhotoVectors(failedStatusIds).catch(() => {
-                /* best-effort */
-              });
-            }
-            // Track written IDs for potential cancel cleanup
-            addWrittenPhotoIdsForRun(runId, statusIds);
-            addPendingAutoTagPhotoIds(statusIds);
-            successfulIds.push(...statusIds);
-            return statusIds.length;
-          }
-          return 0;
         } catch (err: unknown) {
           diagnosticError = err;
           if (batch.length === 1) {
@@ -1281,6 +1145,54 @@ async function runEmbedding(
       }
     }
 
+    if (shouldStopRun() || db !== getDatabase()) {
+      return await settleStoppedRun(processed);
+    }
+    const confirmedFailures: typeof unprocessed = [];
+    for (const row of unprocessed) {
+      const errorCode = photoFailures.get(row.id)?.errorCode;
+      if (
+        (processed > 0 && persistenceFailures.has(row.id)) ||
+        errorCode === "IMAGE_DECODE_FAILED" ||
+        errorCode === "IMAGE_INFERENCE_FAILED"
+      ) {
+        if (await photoWorkFileUnchanged(row)) {
+          confirmedFailures.push(row);
+        } else {
+          superseded = true;
+        }
+      }
+    }
+    if (shouldStopRun() || db !== getDatabase()) {
+      return await settleStoppedRun(processed);
+    }
+    const retry = recordEmbeddingFailures(
+      db,
+      confirmedFailures.filter(({ id }) => !failureExclusions.has(id)),
+      Date.now()
+    );
+    if (processed || superseded || confirmedFailures.length) {
+      options?.onCompleted?.(retry.retryAt);
+    }
+    if (
+      superseded &&
+      processed === 0 &&
+      photoFailures.size === 0 &&
+      persistenceFailures.size === 0
+    ) {
+      finalProgress.phase = "idle";
+      finalProgress.error = undefined;
+    }
+    if (retry.newlyExhausted) {
+      const { notifyLibraryChange } = await import("../library-change");
+      if (db === getDatabase()) {
+        notifyLibraryChange(null, "status");
+      }
+      if (shouldStopRun()) {
+        return await settleStoppedRun(processed);
+      }
+    }
+
     if (tagError) {
       setCurrentProgress({
         processed: currentProgress.processed,
@@ -1319,6 +1231,9 @@ async function runEmbedding(
     finishRun("idle");
     throw err;
   } finally {
+    if (activeFailureExclusions === failureExclusions) {
+      activeFailureExclusions = undefined;
+    }
     if (
       didFinishCurrentRun &&
       (currentProgress.phase === "error" ||

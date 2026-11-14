@@ -78,6 +78,22 @@ afterEach(() => {
 });
 
 describe("batch tag refresh", () => {
+  it("does not write cached vector suggestions after content changes during a request", async () => {
+    const db = state.db;
+    if (!db) {
+      throw new Error("Database fixture not created");
+    }
+    const { getPhotoVectors } = await import("@/services/ai/vector-db");
+    vi.mocked(getPhotoVectors).mockImplementationOnce(() => {
+      db.update(photos)
+        .set({ contentRevision: 1, isAiProcessed: false })
+        .where(eq(photos.id, 1))
+        .run();
+      return Promise.resolve(state.vectors);
+    });
+    await batchSuggestTags([1], undefined, "refresh");
+    expect(db.select().from(photoTags).all()).toEqual([]);
+  });
   it("replaces only unconfirmed automatic tags and keeps protected tags", async () => {
     const db = state.db;
     if (!db) {

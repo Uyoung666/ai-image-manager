@@ -13,12 +13,13 @@ import {
   Int32,
   Schema,
 } from "apache-arrow";
-import { eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { appSettings, photos } from "@/db/schema";
 import { invalidateVectorSearch } from "@/services/search-revision";
 import { getDataPath } from "@/utils/data-path";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
+import { resetEmbeddingRefreshRetry } from "./embedding-refresh-retries";
 import { getActiveEmbeddingAdapter } from "./model-adapter";
 import {
   getActiveEmbeddingModel,
@@ -34,6 +35,7 @@ import {
   verifyAdapterArtifacts,
   writeStoredVectorFingerprint,
 } from "./model-fingerprint";
+import { currentLanceRows, lancePhotoRevisionFilter } from "./photo-version";
 import {
   _localModelPath,
   colorTable,
@@ -71,6 +73,25 @@ function getErrorCode(error: unknown): string | undefined {
     return typeof code === "string" ? code : undefined;
   }
   return undefined;
+}
+
+async function renameLockedVectorDirectory(
+  source: string,
+  destination: string
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.promises.rename(source, destination);
+      return;
+    } catch (error) {
+      const code = getErrorCode(error);
+      if (attempt >= 3 || (code !== "EPERM" && code !== "EBUSY")) {
+        throw error;
+      }
+      // Closed native handles can take a moment to stop blocking a Windows rename.
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
 }
 
 function getListSize(type: unknown): number | undefined {
@@ -425,6 +446,15 @@ async function initializeVectorDB(): Promise<void> {
         getListSize(vectorField.type) === vectorDimensions;
 
       if (schemaValid) {
+        try {
+          await ensureContentRevisionColumn(table);
+        } catch (error) {
+          setPhotoTable(null);
+          setIsVectorDBReady(false);
+          throw new Error("Could not upgrade vector content revisions", {
+            cause: error,
+          });
+        }
         console.log("[AI] Opened existing photo_embeddings table (schema OK)");
 
         // Run deep validation BEFORE checking the crash-safety marker.
@@ -519,6 +549,7 @@ async function initializeVectorDB(): Promise<void> {
       new FixedSizeList(vectorDimensions, new Field("item", new Float32()))
     ),
     new Field("created_at", new Float64()),
+    new Field("content_revision", new Int32()),
   ]);
 
   const newTable = await db.createEmptyTable("photo_embeddings", schema);
@@ -644,13 +675,19 @@ export async function cleanupOrphanVectors(
 }
 
 export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
+  const generation = vectorDbGeneration;
   if (photoIds.length === 0) {
     return;
   }
   if (!(isVectorDBReady && photoTable)) {
     await initVectorDB();
   }
-  return withVectorDbOperation(() => deletePhotoVectorsInOperation(photoIds));
+  return withVectorDbOperation(() => {
+    if (generation !== vectorDbGeneration) {
+      return;
+    }
+    return deletePhotoVectorsInOperation(photoIds);
+  });
 }
 
 async function deletePhotoVectorsInOperation(
@@ -703,12 +740,12 @@ async function getPhotoVectorsInOperation(
     return map;
   }
   try {
-    const filter = buildPhotoIdFilter(photoIds);
+    const filter = lancePhotoRevisionFilter("embedding", photoIds);
     const rows = (await photoTable.query().where(filter).toArray()) as Record<
       string,
       unknown
     >[];
-    for (const row of rows) {
+    for (const row of currentLanceRows(rows, "embedding")) {
       const pid = row.photo_id as number;
       const rawVec = row.vector;
       if (pid == null || !rawVec) {
@@ -855,7 +892,7 @@ export function resetAllAiProcessedFlags(): number {
     const db = getDatabase();
     const result = db
       .update(photos)
-      .set({ isAiProcessed: false })
+      .set({ isAiProcessed: false, ...resetEmbeddingRefreshRetry })
       .where(sql`${photos.deletedAt} IS NULL`)
       .run();
     console.log(
@@ -888,6 +925,8 @@ export function rebuildVectorDB(): Promise<{
     vectorDbGeneration++;
     vectorDbInitPromise = null;
     setIsVectorDBReady(false);
+    photoTable?.close?.();
+    colorTable?.close?.();
     setPhotoTable(null);
     setColorTable(null);
     try {
@@ -942,7 +981,7 @@ export function rebuildVectorDB(): Promise<{
               getDataPath(),
               `vectors.bak.${Date.now()}`
             );
-            await fs.promises.rename(vectorPath, bakPath);
+            await renameLockedVectorDirectory(vectorPath, bakPath);
             console.log(
               `[AI] rebuildVectorDB: renamed to ${bakPath} (mmap lock bypass)`
             );
@@ -1003,6 +1042,8 @@ export function closeVectorDB(): Promise<void> {
     vectorDbInitPromise = null;
     clearVectorMaintenance();
     const currentDb = vectordb;
+    photoTable?.close?.();
+    colorTable?.close?.();
     setVectordb(null);
     setPhotoTable(null);
     setColorTable(null);
@@ -1067,6 +1108,17 @@ function isIndexCleanShutdown(): boolean {
 // 替代 SQLite closest_color_dist JS UDF 全表扫描，将主导色 [R,G,B] 存入
 // LanceDB 3D 向量表，利用 IVF_PQ ANN 将 O(N) 转化为 O(log N)。
 
+export async function ensureContentRevisionColumn(
+  table: LanceTable
+): Promise<void> {
+  const schema = await table.schema();
+  if (!schema.fields.some((field) => field.name === "content_revision")) {
+    await table.addColumns([
+      { name: "content_revision", valueSql: "CAST(0 AS INT)" },
+    ]);
+  }
+}
+
 const COLOR_TABLE_NAME = "color_embeddings";
 const COLOR_VECTOR_DIM = 3;
 
@@ -1076,6 +1128,7 @@ async function initColorTable(db: LanceConnection): Promise<void> {
 
     if (tableNames.includes(COLOR_TABLE_NAME)) {
       const table = await db.openTable(COLOR_TABLE_NAME);
+      await ensureContentRevisionColumn(table);
       setColorTable(table);
       console.log("[AI] Opened existing color_embeddings table");
       return;
@@ -1088,6 +1141,7 @@ async function initColorTable(db: LanceConnection): Promise<void> {
         "vector",
         new FixedSizeList(COLOR_VECTOR_DIM, new Field("item", new Float32()))
       ),
+      new Field("content_revision", new Int32()),
     ]);
 
     const table = await db.createEmptyTable(COLOR_TABLE_NAME, schema);
@@ -1096,84 +1150,96 @@ async function initColorTable(db: LanceConnection): Promise<void> {
       "[AI] Created color_embeddings table (FixedSizeList<Float32>[3])"
     );
   } catch (err: unknown) {
+    setColorTable(null);
     console.warn("[AI] Color table init skipped:", getErrorMessage(err));
     // 非关键路径：颜色搜索降级为 SQLite UDF
   }
 }
 
-/** 写入或更新照片的主导颜色向量 */
+interface ColorVectorEntry {
+  b: number;
+  contentRevision?: number;
+  g: number;
+  photoId: number;
+  r: number;
+}
+
+/** Write a color vector only for the metadata snapshot it came from. */
 export function upsertColorVector(
   photoId: number,
   r: number,
   g: number,
-  b: number
+  b: number,
+  contentRevision = 0
 ): Promise<void> {
-  return withVectorDbOperation(() =>
-    upsertColorVectorInOperation(photoId, r, g, b)
-  );
+  return upsertColorVectors([{ photoId, r, g, b, contentRevision }]);
 }
 
-async function upsertColorVectorInOperation(
-  photoId: number,
-  r: number,
-  g: number,
-  b: number
-): Promise<void> {
-  if (!colorTable) {
-    throw new Error("color vector table is not initialized");
-  }
-  try {
-    // 删除旧记录（如果存在）
-    await colorTable.delete(`photo_id = ${photoId}`);
-    // 写入新记录
-    await colorTable.add([{ photo_id: photoId, vector: [r, g, b] }]);
-  } catch (err: unknown) {
-    console.error(
-      `[AI] Upsert color vector failed for photo ${photoId}:`,
-      getErrorMessage(err)
-    );
-    throw err;
-  } finally {
-    invalidateVectorSearch();
-  }
-}
-
-/** 批量写入颜色向量 */
-export function upsertColorVectors(
-  entries: Array<{ photoId: number; r: number; g: number; b: number }>
-): Promise<void> {
-  return withVectorDbOperation(() => upsertColorVectorsInOperation(entries));
-}
-
-async function upsertColorVectorsInOperation(
-  entries: Array<{ photoId: number; r: number; g: number; b: number }>
-): Promise<void> {
-  if (!colorTable || entries.length === 0) {
-    if (entries.length > 0 && !colorTable) {
+export function upsertColorVectors(entries: ColorVectorEntry[]): Promise<void> {
+  return withVectorDbOperation(async () => {
+    const table = colorTable;
+    if (!entries.length) {
+      return;
+    }
+    if (!table) {
       throw new Error("color vector table is not initialized");
     }
-    return;
-  }
-  try {
-    // 批量删除旧记录
-    const ids = entries.map((e) => e.photoId);
-    await colorTable.delete(`photo_id IN (${ids.join(",")})`);
-    // 批量写入
-    const rows = entries.map((e) => ({
-      photo_id: e.photoId,
-      vector: [e.r, e.g, e.b],
-    }));
-    await colorTable.add(rows);
-    console.log(`[AI] Upserted ${entries.length} color vectors`);
-  } catch (err: unknown) {
-    console.error(
-      "[AI] Batch upsert color vectors failed:",
-      getErrorMessage(err)
+    const db = getDatabase();
+    const match = (entry: ColorVectorEntry) =>
+      and(
+        eq(photos.id, entry.photoId),
+        isNull(photos.deletedAt),
+        eq(photos.contentRevision, entry.contentRevision ?? 0),
+        eq(photos.metadataRevision, photos.contentRevision)
+      );
+    const current = entries.filter((entry) =>
+      db.select({ id: photos.id }).from(photos).where(match(entry)).get()
     );
-    throw err;
-  } finally {
-    invalidateVectorSearch();
-  }
+    if (!current.length) {
+      return;
+    }
+    try {
+      await table.delete(
+        buildPhotoIdFilter(current.map((entry) => entry.photoId))
+      );
+      await table.add(
+        current.map((entry) => ({
+          photo_id: entry.photoId,
+          vector: [entry.r, entry.g, entry.b],
+          content_revision: entry.contentRevision ?? 0,
+        }))
+      );
+      if (db !== getDatabase()) {
+        return;
+      }
+      const stale = db.transaction((tx) =>
+        current.filter(
+          (entry) =>
+            tx
+              .update(photos)
+              .set({ colorRevision: entry.contentRevision ?? 0 })
+              .where(match(entry))
+              .run().changes !== 1
+        )
+      );
+      if (stale.length) {
+        await table.delete(
+          stale
+            .map(
+              (entry) =>
+                "(photo_id = " +
+                entry.photoId +
+                " AND content_revision = " +
+                (entry.contentRevision ?? 0) +
+                ")"
+            )
+            .join(" OR ")
+        );
+      }
+    } finally {
+      invalidateVectorSearch();
+    }
+  });
 }
 
 /** 颜色向量 ANN 搜索。colorTable 不可用时返回 null，调用方降级 SQLite UDF。 */
@@ -1201,14 +1267,13 @@ export function searchByColorVector(
         .vectorSearch(targetVector)
         .distanceType("l2")
         .limit(limit);
-      if (allowedPhotoIds) {
-        query = query
-          .where(buildPhotoIdFilter(allowedPhotoIds))
-          .bypassVectorIndex();
+      const filter = lancePhotoRevisionFilter("color", allowedPhotoIds);
+      if (filter) {
+        query = query.where(filter).bypassVectorIndex();
       }
       const rawResults = (await query.toArray()) as Record<string, unknown>[];
 
-      return rawResults.map((row) => ({
+      return currentLanceRows(rawResults, "color").map((row) => ({
         photoId: row.photo_id as number,
         // LanceDB L2 exposes squared Euclidean distance, the same unit used by
         // SQLite closest_color_dist.
@@ -1226,7 +1291,13 @@ export function searchByColorVector(
 
 /** 删除指定照片的颜色向量 */
 export function deleteColorVectors(photoIds: number[]): Promise<void> {
-  return withVectorDbOperation(() => deleteColorVectorsInOperation(photoIds));
+  const generation = vectorDbGeneration;
+  return withVectorDbOperation(() => {
+    if (generation !== vectorDbGeneration) {
+      return;
+    }
+    return deleteColorVectorsInOperation(photoIds);
+  });
 }
 
 async function deleteColorVectorsInOperation(
@@ -1353,14 +1424,14 @@ export async function backfillColorVectors(): Promise<{
       .select({
         id: photos.id,
         dominantColors: photos.dominantColors,
+        contentRevision: photos.contentRevision,
       })
       .from(photos)
       .where(needsBackfill)
       .limit(BATCH)
       .offset(i)
       .all();
-    const entries: Array<{ photoId: number; r: number; g: number; b: number }> =
-      [];
+    const entries: ColorVectorEntry[] = [];
 
     for (const row of batch) {
       try {
@@ -1390,7 +1461,13 @@ export async function backfillColorVectors(): Promise<{
           failed++;
           continue;
         }
-        entries.push({ photoId: row.id, r: color.r, g: color.g, b: color.b });
+        entries.push({
+          photoId: row.id,
+          r: color.r,
+          g: color.g,
+          b: color.b,
+          contentRevision: row.contentRevision,
+        });
       } catch {
         failed++;
       }

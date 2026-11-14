@@ -1,6 +1,6 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
-import { photoTags, tags } from "@/db/schema";
+import { photos, photoTags, tags } from "@/db/schema";
 import { invalidateSmartAlbumCache } from "../smart-album-engine";
 import { invalidateTagSearch } from "../tag-search-revision";
 import { cosineSimilarity } from "./constants";
@@ -797,6 +797,22 @@ async function runBatchSuggestTags(
   mode: BatchTagMode = "append"
 ): Promise<{ tagged: number; skipped: number }> {
   const db = getDatabase();
+  const revisions = new Map<number, number>();
+  for (let index = 0; index < photoIds.length; index += 500) {
+    for (const row of db
+      .select({ id: photos.id, revision: photos.contentRevision })
+      .from(photos)
+      .where(
+        and(
+          inArray(photos.id, photoIds.slice(index, index + 500)),
+          isNull(photos.deletedAt),
+          eq(photos.embeddingRevision, photos.contentRevision)
+        )
+      )
+      .all()) {
+      revisions.set(row.id, row.revision);
+    }
+  }
 
   try {
     await loadModel();
@@ -943,6 +959,25 @@ async function runBatchSuggestTags(
           }
 
           const changed = db.transaction((tx) => {
+            const revision = revisions.get(photoId);
+            if (
+              db !== getDatabase() ||
+              revision === undefined ||
+              !tx
+                .select({ id: photos.id })
+                .from(photos)
+                .where(
+                  and(
+                    eq(photos.id, photoId),
+                    eq(photos.contentRevision, revision),
+                    eq(photos.embeddingRevision, revision),
+                    isNull(photos.deletedAt)
+                  )
+                )
+                .get()
+            ) {
+              return 0;
+            }
             let changedRows = 0;
             if (mode === "refresh") {
               const deleted = tx

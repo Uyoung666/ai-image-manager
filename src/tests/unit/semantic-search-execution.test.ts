@@ -20,6 +20,14 @@ vi.mock("@/services/ai/translation-worker-client", () => ({
   getTranslationModelVersion: () => "test",
   warmupTranslationWorker: () => Promise.resolve(),
 }));
+// These tests exercise query execution against an in-memory Lance adapter.
+// SQLite revision admission is covered with a real table in library-vector-revisions.
+vi.mock("@/services/ai/photo-version", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/ai/photo-version")>()),
+  currentLanceRows: (rows: Record<string, unknown>[]) => rows,
+  lancePhotoRevisionFilter: (_kind: string, ids?: readonly number[]) =>
+    ids ? `photo_id IN (${ids.join(", ")})` : undefined,
+}));
 vi.mock("@/services/ai/threshold-profile", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/services/ai/threshold-profile")>();

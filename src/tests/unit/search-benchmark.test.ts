@@ -230,7 +230,14 @@ describe("reproducible search runtime", () => {
     expect(reconstructed).not.toContain(
       "return withVectorDbOperation(() => performTextSearch("
     );
-    expect(reconstructed).not.toContain('vq = vq.select(["photo_id"]);');
+    expect(source).toContain(
+      'vq = vq.select(["photo_id", "content_revision"]);'
+    );
+    expect(reconstructed).not.toContain("vq = vq.select(");
+    expect(reconstructed).toContain(
+      'currentLanceRows(rawResults, "embedding")'
+    );
+    expect(reconstructed).toContain("lancePhotoRevisionFilter(");
     expect(
       fs.readFileSync(path.join(target, "services/search-control.ts"), "utf8")
     ).toBe("controller?.abort();");

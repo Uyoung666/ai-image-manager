@@ -13,6 +13,14 @@ import {
   photos,
 } from "@/db/schema";
 import { getActiveFaceModel } from "@/services/ai/face-model-config";
+import {
+  aiSourceReady,
+  capturePhotoWorkFile,
+  type PhotoWorkVersion,
+  photoWorkFileUnchanged,
+  photoWorkVersionColumns,
+  photoWorkVersionMatch,
+} from "@/services/ai/photo-version";
 import { selectFaceRepresentative } from "@/services/face-identity-representative";
 import {
   abortAllFaceWorkers,
@@ -220,6 +228,7 @@ export function backupFaceData(): string {
         id: row.id,
         photo_id: row.photoId,
         face_index: row.faceIndex,
+        content_revision: row.contentRevision,
         bbox_x: row.bboxX,
         bbox_y: row.bboxY,
         bbox_width: row.bboxWidth,
@@ -273,6 +282,7 @@ export function backupFaceData(): string {
         photo_id: row.photoId,
         face_index: row.faceIndex,
         decision: row.decision,
+        content_revision: row.contentRevision,
         source_identity_id: row.sourceIdentityId,
         source_identity_name: row.sourceIdentityName,
         created_at: row.createdAt,
@@ -414,7 +424,8 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 function applyStableReviewDecision(
   faceVectorId: number,
   photoId: number,
-  faceIndex: number
+  faceIndex: number,
+  contentRevision: number
 ): void {
   const db = getDatabase();
   const decision = db
@@ -423,7 +434,8 @@ function applyStableReviewDecision(
     .where(
       and(
         eq(faceReviewDecisions.photoId, photoId),
-        eq(faceReviewDecisions.faceIndex, faceIndex)
+        eq(faceReviewDecisions.faceIndex, faceIndex),
+        eq(faceReviewDecisions.contentRevision, contentRevision)
       )
     )
     .get();
@@ -558,6 +570,83 @@ export function selectReplaceableFaceResults(
   });
 }
 
+function persistFacePhoto(
+  db: ReturnType<typeof getDatabase>,
+  photo: FaceDetectionResult,
+  contentRevision: number
+): number {
+  if (
+    photo.width &&
+    Number.isFinite(photo.width) &&
+    photo.width > 0 &&
+    photo.height &&
+    Number.isFinite(photo.height) &&
+    photo.height > 0
+  ) {
+    db.update(photos)
+      .set({ width: photo.width, height: photo.height })
+      .where(eq(photos.id, photo.id))
+      .run();
+  }
+  const confirmedIds = db
+    .select({ id: faceVectors.id })
+    .from(faceVectors)
+    .innerJoin(
+      faceIdentityMembers,
+      eq(faceIdentityMembers.faceVectorId, faceVectors.id)
+    )
+    .innerJoin(
+      faceIdentities,
+      eq(faceIdentities.id, faceIdentityMembers.identityId)
+    )
+    .where(
+      and(
+        eq(faceVectors.photoId, photo.id),
+        eq(faceIdentities.isConfirmed, true)
+      )
+    )
+    .all()
+    .map((row) => row.id);
+  db.delete(faceVectors)
+    .where(
+      and(
+        eq(faceVectors.photoId, photo.id),
+        confirmedIds.length
+          ? notInArray(faceVectors.id, confirmedIds)
+          : undefined
+      )
+    )
+    .run();
+  let insertedCount = 0;
+  for (const face of photo.faces) {
+    const inserted = db
+      .insert(faceVectors)
+      .values({
+        photoId: photo.id,
+        contentRevision,
+        faceIndex: face.faceIndex,
+        bboxX: face.bbox.x,
+        bboxY: face.bbox.y,
+        bboxWidth: face.bbox.width,
+        bboxHeight: face.bbox.height,
+        confidence: face.confidence,
+        embedding: face.embedding ? JSON.stringify(face.embedding) : null,
+      })
+      .returning({ id: faceVectors.id })
+      .get();
+    if (inserted) {
+      applyStableReviewDecision(
+        inserted.id,
+        photo.id,
+        face.faceIndex,
+        contentRevision
+      );
+      insertedCount++;
+    }
+  }
+  return insertedCount;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Detection coordinates worker lifecycle, batch writes, progress, and clustering as one operation.
 export async function detectFaces(
   photoIds: number[],
@@ -602,23 +691,26 @@ export async function detectFaces(
     const db = getDatabase();
 
     // Skip photos that are already face-processed
-    const photoRows: Array<{ id: number; path: string }> = [];
+    const photoRows: PhotoWorkVersion[] = [];
     for (let index = 0; index < photoIds.length; index += 500) {
       photoRows.push(
         ...db
-          .select({ id: photos.id, path: photos.path })
+          .select(photoWorkVersionColumns)
           .from(photos)
           .where(
             and(
               inArray(photos.id, photoIds.slice(index, index + 500)),
               eq(photos.isFaceProcessed, false),
-              isNull(photos.deletedAt)
+              aiSourceReady
             )
           )
           .all()
       );
     }
 
+    for (const photo of photoRows) {
+      await capturePhotoWorkFile(photo);
+    }
     if (!photoRows.length) {
       // Still need to cluster any unassigned faces
       clusterUnassignedFaces();
@@ -697,9 +789,34 @@ export async function detectFaces(
       const poolResultById = new Map(
         poolResults.map((result) => [result.id, result])
       );
-      const successfulResults = selectReplaceableFaceResults(
+      const versions = new Map(photoRows.map((row) => [row.id, row]));
+      const matchVersion = (id: number) => {
+        const version = versions.get(id);
+        return (
+          version &&
+          db
+            .select({ id: photos.id })
+            .from(photos)
+            .where(photoWorkVersionMatch(version))
+            .get()
+        );
+      };
+      const candidateResults = selectReplaceableFaceResults(
         poolResults,
         filtered.results
+      ).filter((row) => matchVersion(row.id));
+      const fileResults: FaceDetectionResult[] = [];
+      for (const row of candidateResults) {
+        const version = versions.get(row.id);
+        if (version && (await photoWorkFileUnchanged(version))) {
+          fileResults.push(row);
+        }
+      }
+      if (!isCurrentRun() || db !== getDatabase()) {
+        return 0;
+      }
+      const successfulResults = fileResults.filter((row) =>
+        matchVersion(row.id)
       );
       const invalidResultIds = new Set(
         filtered.results
@@ -712,109 +829,48 @@ export async function detectFaces(
           .map((result) => result.id)
       );
 
-      for (const result of poolResults) {
-        db.update(photos)
-          .set({
-            faceProcessingError:
-              result.error ??
-              (invalidResultIds.has(result.id)
-                ? "invalid face embedding"
-                : null),
-          })
-          .where(eq(photos.id, result.id))
-          .run();
-      }
-
-      // Replace only non-confirmed vectors before writing the fresh detection
-      // result. Confirmed memberships remain stable while retries cannot leave
-      // stale faces behind when a previous worker run failed halfway through.
-      for (const photo of successfulResults) {
-        const detectedWidth = photo.width;
-        const detectedHeight = photo.height;
-        if (
-          typeof detectedWidth === "number" &&
-          Number.isFinite(detectedWidth) &&
-          detectedWidth > 0 &&
-          typeof detectedHeight === "number" &&
-          Number.isFinite(detectedHeight) &&
-          detectedHeight > 0
-        ) {
+      db.transaction(() => {
+        for (const result of poolResults) {
+          if (!matchVersion(result.id)) {
+            continue;
+          }
           db.update(photos)
             .set({
-              height: detectedHeight,
-              width: detectedWidth,
+              faceProcessingError:
+                result.error ??
+                (invalidResultIds.has(result.id)
+                  ? "invalid face embedding"
+                  : null),
             })
-            .where(eq(photos.id, photo.id))
+            .where(eq(photos.id, result.id))
             .run();
         }
-        const confirmedVectorIds = db
-          .select({ id: faceVectors.id })
-          .from(faceVectors)
-          .innerJoin(
-            faceIdentityMembers,
-            eq(faceIdentityMembers.faceVectorId, faceVectors.id)
-          )
-          .innerJoin(
-            faceIdentities,
-            eq(faceIdentities.id, faceIdentityMembers.identityId)
-          )
-          .where(
-            and(
-              eq(faceVectors.photoId, photo.id),
-              eq(faceIdentities.isConfirmed, true)
-            )
-          )
-          .all()
-          .map((row) => row.id);
-        const vectorCondition = confirmedVectorIds.length
-          ? and(
-              eq(faceVectors.photoId, photo.id),
-              notInArray(faceVectors.id, confirmedVectorIds)
-            )
-          : eq(faceVectors.photoId, photo.id);
-        db.delete(faceVectors).where(vectorCondition).run();
-      }
 
-      for (const r of successfulResults) {
-        if (!r.faces.length) {
-          continue;
-        }
-
-        for (const face of r.faces) {
-          const inserted = db
-            .insert(faceVectors)
-            .values({
-              photoId: r.id,
-              faceIndex: face.faceIndex,
-              bboxX: face.bbox.x,
-              bboxY: face.bbox.y,
-              bboxWidth: face.bbox.width,
-              bboxHeight: face.bbox.height,
-              confidence: face.confidence,
-              embedding: face.embedding ? JSON.stringify(face.embedding) : null,
-            })
-            .onConflictDoNothing()
-            .returning({ insertedId: faceVectors.id })
-            .get();
-          const insertedId = inserted?.insertedId;
-          if (insertedId !== undefined) {
-            applyStableReviewDecision(insertedId, r.id, face.faceIndex);
-            totalFaces++;
+        for (const photo of successfulResults) {
+          const version = versions.get(photo.id);
+          if (version) {
+            totalFaces += persistFacePhoto(db, photo, version.contentRevision);
           }
         }
-      }
 
-      // Mark all processed photos as face-processed
-      const processedIds = successfulResults.map((r) => r.id);
-      processedPhotos = processedIds.length;
-      // Batch the UPDATE: split into chunks to avoid SQLite variable limit
-      for (let i = 0; i < processedIds.length; i += BATCH_SIZE) {
-        const chunk = processedIds.slice(i, i + BATCH_SIZE);
-        db.update(photos)
-          .set({ faceProcessingError: null, isFaceProcessed: true })
-          .where(inArray(photos.id, chunk))
-          .run();
-      }
+        // Mark all processed photos as face-processed
+        const processedIds = successfulResults.map((r) => r.id);
+        processedPhotos = processedIds.length;
+        // Batch the UPDATE: split into chunks to avoid SQLite variable limit
+        for (let i = 0; i < processedIds.length; i += BATCH_SIZE) {
+          const chunk = processedIds.slice(i, i + BATCH_SIZE);
+          db.update(photos)
+            .set({
+              faceProcessingError: null,
+              isFaceProcessed: true,
+              faceRefreshPending: false,
+              faceRefreshAttempts: 0,
+              faceRefreshRetryAt: 0,
+            })
+            .where(inArray(photos.id, chunk))
+            .run();
+        }
+      });
     } finally {
       shutdownFacePool();
     }
@@ -851,6 +907,13 @@ export async function detectFaces(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Face clustering keeps identity assignment and centroid updates consistent within one pass.
 function clusterUnassignedFaces(): void {
   const db = getDatabase();
+  // Persisted centroids may still include a previous content revision.
+  for (const identity of db
+    .select({ id: faceIdentities.id })
+    .from(faceIdentities)
+    .all()) {
+    updateIdentityCentroid(identity.id);
+  }
 
   const existingIdentities = db
     .select({
@@ -879,9 +942,11 @@ function clusterUnassignedFaces(): void {
       id: faceVectors.id,
       faceIndex: faceVectors.faceIndex,
       photoId: faceVectors.photoId,
+      contentRevision: faceVectors.contentRevision,
       embedding: faceVectors.embedding,
     })
     .from(faceVectors)
+    .innerJoin(photos, eq(photos.id, faceVectors.photoId))
     .leftJoin(
       faceIdentityMembers,
       eq(faceVectors.id, faceIdentityMembers.faceVectorId)
@@ -889,6 +954,8 @@ function clusterUnassignedFaces(): void {
     .where(
       and(
         isNull(faceIdentityMembers.id),
+        isNull(photos.deletedAt),
+        eq(faceVectors.contentRevision, photos.contentRevision),
         eq(faceVectors.isRejected, false),
         // Automatic grouping is quality-first: legacy faces without a
         // confidence value remain available for manual review.
@@ -918,17 +985,23 @@ function clusterUnassignedFaces(): void {
       faceIndex: faceReviewDecisions.faceIndex,
       photoId: faceReviewDecisions.photoId,
       sourceIdentityId: faceReviewDecisions.sourceIdentityId,
+      contentRevision: faceReviewDecisions.contentRevision,
     })
     .from(faceReviewDecisions)
     .all();
   const reviewByFace = new Map<string, (typeof reviewRows)[number]>();
   for (const review of reviewRows) {
-    reviewByFace.set(`${review.photoId}:${review.faceIndex}`, review);
+    reviewByFace.set(
+      `${review.photoId}:${review.faceIndex}:${review.contentRevision}`,
+      review
+    );
   }
 
   const affectedIdentityIds = new Set<number>();
   for (const face of unassignedFaces) {
-    const review = reviewByFace.get(`${face.photoId}:${face.faceIndex}`);
+    const review = reviewByFace.get(
+      `${face.photoId}:${face.faceIndex}:${face.contentRevision}`
+    );
     if (
       review?.decision === "rejected" ||
       review?.decision === "removed_from_identity"
@@ -994,7 +1067,9 @@ function clusterUnassignedFaces(): void {
   }
 }
 
-function updateIdentityCentroid(identityId: number): void {
+export function getCurrentFaceIdentityCentroid(
+  identityId: number
+): number[] | null {
   const db = getDatabase();
 
   const members = db
@@ -1008,7 +1083,8 @@ function updateIdentityCentroid(identityId: number): void {
     .where(
       and(
         eq(faceIdentityMembers.identityId, identityId),
-        isNull(photos.deletedAt)
+        isNull(photos.deletedAt),
+        eq(faceVectors.contentRevision, photos.contentRevision)
       )
     )
     .all();
@@ -1024,18 +1100,16 @@ function updateIdentityCentroid(identityId: number): void {
     }
   }
 
-  if (embeddings.length > 0) {
-    const centroid = computeCentroid(embeddings);
-    db.update(faceIdentities)
-      .set({ centroidEmbedding: JSON.stringify(centroid) })
-      .where(eq(faceIdentities.id, identityId))
-      .run();
-  } else {
-    db.update(faceIdentities)
-      .set({ centroidEmbedding: null })
-      .where(eq(faceIdentities.id, identityId))
-      .run();
-  }
+  return embeddings.length > 0 ? computeCentroid(embeddings) : null;
+}
+
+function updateIdentityCentroid(identityId: number): void {
+  const centroid = getCurrentFaceIdentityCentroid(identityId);
+  getDatabase()
+    .update(faceIdentities)
+    .set({ centroidEmbedding: centroid ? JSON.stringify(centroid) : null })
+    .where(eq(faceIdentities.id, identityId))
+    .run();
 }
 
 /** Rebuild denormalized identity fields after scoped face-vector removal. */
@@ -1069,7 +1143,8 @@ export function refreshFaceIdentityMetadata(identityId: number): void {
     .where(
       and(
         eq(faceIdentityMembers.identityId, identityId),
-        isNull(photos.deletedAt)
+        isNull(photos.deletedAt),
+        eq(faceVectors.contentRevision, photos.contentRevision)
       )
     )
     .all();

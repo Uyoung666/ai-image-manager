@@ -166,6 +166,12 @@ export function validateFaceBackupPayload(payload, options = {}) {
   const dimensions = new Set();
 
   for (const row of payload.faceVectors) {
+    if (row.content_revision !== undefined) {
+      assertInteger(
+        row.content_revision,
+        `faceVectors[${row.id}].content_revision`
+      );
+    }
     assertInteger(row.id, "faceVectors.id");
     if (vectorIds.has(row.id)) {
       fail(`duplicate face vector id ${row.id}`);
@@ -317,7 +323,13 @@ export function validateFaceBackupPayload(payload, options = {}) {
     ) {
       fail(`faceReviewDecisions[${row.id}].decision is invalid`);
     }
-    const key = `${row.photo_id}:${row.face_index}`;
+    if (row.content_revision !== undefined) {
+      assertInteger(
+        row.content_revision,
+        `faceReviewDecisions[${row.id}].content_revision`
+      );
+    }
+    const key = `${row.photo_id}:${row.face_index}:${row.content_revision ?? 0}`;
     if (reviewKeys.has(key)) {
       fail(`duplicate face review decision ${key}`);
     }
@@ -358,6 +370,34 @@ export function validateFaceBackupPayload(payload, options = {}) {
     }
     processedIds.add(id);
     referencedPhotoIds.add(id);
+  }
+  if (payload.faceProcessedPhotoRevisions !== undefined) {
+    if (!Array.isArray(payload.faceProcessedPhotoRevisions)) {
+      fail("faceProcessedPhotoRevisions must be an array");
+    }
+    const revisionIds = new Set();
+    for (const row of payload.faceProcessedPhotoRevisions) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) {
+        fail("faceProcessedPhotoRevisions must contain objects");
+      }
+      assertInteger(row.photo_id, "faceProcessedPhotoRevisions.photo_id");
+      assertInteger(
+        row.content_revision,
+        "faceProcessedPhotoRevisions.content_revision"
+      );
+      if (row.content_revision < 0) {
+        fail(
+          "faceProcessedPhotoRevisions.content_revision must be non-negative"
+        );
+      }
+      if (!processedIds.has(row.photo_id) || revisionIds.has(row.photo_id)) {
+        fail("faceProcessedPhotoRevisions must match processed photos exactly");
+      }
+      revisionIds.add(row.photo_id);
+    }
+    if (revisionIds.size !== processedIds.size) {
+      fail("faceProcessedPhotoRevisions must match processed photos exactly");
+    }
   }
 
   if (dimensions.size > 1) {
@@ -409,12 +449,22 @@ export function createFaceBackupPayload(
       )
       .get()
   );
+  const versionedPhotos = hasColumn(db, "photos", "content_revision");
+  const processedPhotos = dump(
+    `SELECT id${versionedPhotos ? ", content_revision" : ""} FROM photos WHERE is_face_processed = 1 ORDER BY id`
+  );
   const payload = {
     format: FACE_BACKUP_FORMAT,
     version: FACE_BACKUP_VERSION,
     createdAt,
     backupOf: path.basename(backupOf),
-    faceVectors: dump(`SELECT ${VECTOR_COLUMNS} FROM face_vectors ORDER BY id`),
+    faceVectors: dump(
+      `SELECT ${VECTOR_COLUMNS}${
+        hasColumn(db, "face_vectors", "content_revision")
+          ? ", content_revision"
+          : ""
+      } FROM face_vectors ORDER BY id`
+    ),
     faceIdentities: dump(
       `SELECT ${
         hasHiddenColumn ? IDENTITY_COLUMNS_WITH_HIDDEN : IDENTITY_COLUMNS
@@ -430,12 +480,22 @@ export function createFaceBackupPayload(
       : [],
     faceReviewDecisions: hasReviewTable
       ? dump(
-          "SELECT id, photo_id, face_index, decision, source_identity_id, source_identity_name, created_at, updated_at FROM face_review_decisions ORDER BY id"
+          `SELECT id, photo_id, face_index, decision, source_identity_id, source_identity_name, created_at, updated_at${
+            hasColumn(db, "face_review_decisions", "content_revision")
+              ? ", content_revision"
+              : ""
+          } FROM face_review_decisions ORDER BY id`
         )
       : [],
-    faceProcessedPhotoIds: dump(
-      "SELECT id FROM photos WHERE is_face_processed = 1 ORDER BY id"
-    ).map((row) => row.id),
+    faceProcessedPhotoIds: processedPhotos.map((row) => row.id),
+    ...(versionedPhotos
+      ? {
+          faceProcessedPhotoRevisions: processedPhotos.map((row) => ({
+            photo_id: row.id,
+            content_revision: row.content_revision,
+          })),
+        }
+      : {}),
     faceModelKind:
       db
         .prepare("SELECT value FROM app_settings WHERE key = 'face.model.kind'")

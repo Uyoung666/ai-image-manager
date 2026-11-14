@@ -8,10 +8,19 @@ import {
   normalizeAdvancedExif,
   sanitizeVendorTags,
 } from "@/services/advanced-exif-normalizer";
+import {
+  aiSourceReady,
+  capturePhotoWorkFile,
+  type PhotoWorkVersion,
+  photoWorkFileUnchanged,
+  photoWorkVersionColumns,
+  photoWorkVersionMatch,
+} from "@/services/ai/photo-version";
 import type {
   AdvancedExifProgress,
   PhotoMetadata,
 } from "@/types/photo-metadata";
+import { registerGalleryCleanup } from "@/utils/gallery-lifecycle";
 
 export const ADVANCED_EXIF_PARSER_VERSION = 3;
 const YIELD_MS = 150;
@@ -20,6 +29,8 @@ let running = false;
 let paused = false;
 let scheduled = false;
 let rescanRequested = false;
+let generation = 0;
+let scheduleTimer: ReturnType<typeof setTimeout> | undefined;
 let progress: AdvancedExifProgress = {
   failed: 0,
   paused: false,
@@ -80,15 +91,38 @@ async function importQueueBusy(): Promise<boolean> {
   }
 }
 
-async function waitUntilAvailable(): Promise<void> {
-  while (paused || (await importQueueBusy())) {
+async function waitUntilAvailable(expectedGeneration: number): Promise<void> {
+  while (
+    expectedGeneration === generation &&
+    (paused || (await importQueueBusy()))
+  ) {
     broadcast();
     await delay(500);
   }
 }
 
-async function enrichPhoto(photo: { id: number; path: string }): Promise<void> {
+async function enrichPhoto(
+  photo: PhotoWorkVersion,
+  expectedGeneration: number
+): Promise<void> {
   const db = getDatabase();
+  const isCurrent = () =>
+    expectedGeneration === generation &&
+    db === getDatabase() &&
+    Boolean(
+      db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(photoWorkVersionMatch(photo))
+        .get()
+    );
+  if (!isCurrent()) {
+    return;
+  }
+  await capturePhotoWorkFile(photo);
+  if (!isCurrent()) {
+    return;
+  }
   const base = {
     photoId: photo.id,
     parserVersion: ADVANCED_EXIF_PARSER_VERSION,
@@ -117,6 +151,9 @@ async function enrichPhoto(photo: { id: number; path: string }): Promise<void> {
     const raw = (await exiftool.readRaw(photo.path, {
       readArgs: ["-G1", "-a", "-s", "-struct"],
     })) as Record<string, unknown>;
+    if (!((await photoWorkFileUnchanged(photo)) && isCurrent())) {
+      return;
+    }
     const metadata = normalizeAdvancedExif(raw);
     const serialized = serializedMetadata(metadata);
     const hasAdvancedValue = [
@@ -139,6 +176,9 @@ async function enrichPhoto(photo: { id: number; path: string }): Promise<void> {
       .where(eq(advancedExifData.photoId, photo.id))
       .run();
   } catch (error) {
+    if (!isCurrent()) {
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     db.update(advancedExifData)
       .set({
@@ -156,12 +196,12 @@ async function enrichPhoto(photo: { id: number; path: string }): Promise<void> {
 function pendingPhotos() {
   const db = getDatabase();
   return db
-    .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
+    .select({ ...photoWorkVersionColumns, folderId: photos.folderId })
     .from(photos)
     .leftJoin(advancedExifData, eq(advancedExifData.photoId, photos.id))
     .where(
       and(
-        isNull(photos.deletedAt),
+        aiSourceReady,
         or(
           isNull(advancedExifData.photoId),
           lt(advancedExifData.parserVersion, ADVANCED_EXIF_PARSER_VERSION),
@@ -179,6 +219,7 @@ export async function runAdvancedExifEnrichment(): Promise<AdvancedExifProgress>
   }
   running = true;
   scheduled = false;
+  const expectedGeneration = generation;
   const candidates = pendingPhotos();
   progress = {
     failed: 0,
@@ -190,9 +231,12 @@ export async function runAdvancedExifEnrichment(): Promise<AdvancedExifProgress>
   broadcast();
 
   for (const photo of candidates) {
-    await waitUntilAvailable();
+    await waitUntilAvailable(expectedGeneration);
+    if (expectedGeneration !== generation) {
+      return progress;
+    }
     try {
-      await enrichPhoto(photo);
+      await enrichPhoto(photo, expectedGeneration);
     } catch {
       progress.failed += 1;
     }
@@ -202,6 +246,9 @@ export async function runAdvancedExifEnrichment(): Promise<AdvancedExifProgress>
   }
 
   running = false;
+  if (expectedGeneration !== generation) {
+    return progress;
+  }
   // Sequence detection is deliberately deferred until enrichment has yielded all
   // EXIF signals, so it never competes with import or exiftool work.
   try {
@@ -233,7 +280,8 @@ export function scheduleAdvancedExifEnrichment(delayMs = 1000): void {
     return;
   }
   scheduled = true;
-  setTimeout(() => {
+  scheduleTimer = setTimeout(() => {
+    scheduleTimer = undefined;
     runAdvancedExifEnrichment().catch(() => {
       running = false;
       scheduled = false;
@@ -241,6 +289,16 @@ export function scheduleAdvancedExifEnrichment(delayMs = 1000): void {
     });
   }, delayMs);
 }
+
+registerGalleryCleanup(() => {
+  generation++;
+  clearTimeout(scheduleTimer);
+  scheduleTimer = undefined;
+  running = false;
+  scheduled = false;
+  rescanRequested = false;
+  paused = false;
+});
 
 export function pauseAdvancedExifEnrichment(): AdvancedExifProgress {
   paused = true;

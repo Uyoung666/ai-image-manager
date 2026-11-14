@@ -25,6 +25,14 @@ vi.mock("@/services/ai/translation-worker-client", () => ({
   warmupTranslationWorker: vi.fn().mockResolvedValue(undefined),
 }));
 
+// These query execution tests use an in-memory Lance adapter. Admission against
+// the real SQLite and LanceDB schemas is covered by library-vector-revisions.
+vi.mock("@/services/ai/photo-version", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/ai/photo-version")>()),
+  currentLanceRows: (rows: Record<string, unknown>[]) => rows,
+  lancePhotoRevisionFilter: () => undefined,
+}));
+
 function createVectorTable(results: Record<string, unknown>[] = []) {
   const toArray = vi.fn().mockResolvedValue(results);
   const query = {

@@ -1,12 +1,10 @@
-import { and, eq, isNull } from "drizzle-orm";
 import { BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
-import { photos } from "@/db/schema";
 import { createLogger } from "@/utils/logger";
-import { embedAllPhotos } from "./ai/embedder";
+import { embedAllPhotos, ignoreActiveEmbeddingFailure } from "./ai/embedder";
+import { planEmbeddingRetries } from "./ai/embedding-refresh-retries";
 import { pauseEmbedding } from "./ai/model-loader";
 import {
-  currentProgress,
   getAiControlState,
   isAiIndexResetting,
   isModelLoaded,
@@ -28,16 +26,18 @@ let pending = false;
 let firstRequest = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let active: Promise<void> | undefined;
+let automaticController: AbortController | undefined;
 let scanBusy: () => boolean = () => false;
-const failedIds = new Set<number>();
+let failedPhotos = 0;
 let fatal = false;
+let manualRetryRequested = false;
 let status: AutoIndexStatus = { state: "idle", failedPhotos: 0 };
 
 function publish(
   state: AutoIndexStatus["state"],
   reason?: AutoIndexStatus["reason"]
 ) {
-  const next = { state, reason, failedPhotos: failedIds.size };
+  const next = { state, reason, failedPhotos };
   if (JSON.stringify(next) === JSON.stringify(status)) {
     return;
   }
@@ -78,12 +78,12 @@ export function requestAutoIndex(source: string): void {
   schedule(Math.max(0, Math.min(1000, 5000 - (Date.now() - firstRequest))));
 }
 
-function pendingRows() {
-  return getDatabase()
-    .select({ id: photos.id })
-    .from(photos)
-    .where(and(eq(photos.isAiProcessed, false), isNull(photos.deletedAt)))
-    .all();
+/** A deliberate per-photo retry can also recheck failed AI dependencies. */
+export function requestAutoIndexPhotoRetry(photoId: number): void {
+  ignoreActiveEmbeddingFailure(photoId);
+  fatal = false;
+  manualRetryRequested = Boolean(active);
+  requestAutoIndex("manual-photo-retry");
 }
 
 async function drain(): Promise<void> {
@@ -107,18 +107,27 @@ async function drain(): Promise<void> {
   }
   pending = false;
   firstRequest = 0;
-  const started = Date.now();
-  const attempted = pendingRows().filter((row) => !failedIds.has(row.id));
-  if (attempted.length === 0) {
-    publish(
-      failedIds.size ? "error" : "idle",
-      failedIds.size ? "failed" : undefined
-    );
+  const db = getDatabase();
+  const plan = planEmbeddingRetries(db, Date.now());
+  failedPhotos = plan.failedPhotoCount;
+  if (plan.hasWork) {
+    publish("running");
+  }
+  automaticController = new AbortController();
+  active = runAutomatic(db, plan, automaticController.signal);
+  await active;
+}
+
+function scheduleNextRun(retryAt: number): void {
+  if (stopped || held || fatal) {
     return;
   }
-  publish("running");
-  active = runAutomatic(attempted, started);
-  await active;
+  if (pending) {
+    schedule(0);
+  } else if (Number.isFinite(retryAt)) {
+    pending = true;
+    schedule(Math.max(0, retryAt - Date.now()));
+  }
 }
 
 function settleStatus(): void {
@@ -126,7 +135,7 @@ function settleStatus(): void {
     publish("paused");
   } else if (fatal) {
     publish("error");
-  } else if (failedIds.size) {
+  } else if (failedPhotos) {
     publish("error", "failed");
   } else {
     publish("idle");
@@ -134,52 +143,74 @@ function settleStatus(): void {
 }
 
 async function runAutomatic(
-  attempted: { id: number }[],
-  started: number
+  db: ReturnType<typeof getDatabase>,
+  plan: ReturnType<typeof planEmbeddingRetries>,
+  signal: AbortSignal
 ): Promise<void> {
+  const started = Date.now();
+  const retired = () => signal.aborted || stopped || db !== getDatabase();
+  let embeddingRetryAt = plan.retryAt ?? Number.POSITIVE_INFINITY;
+  let faceRetryAt: number | undefined;
   try {
-    await embedAllPhotos(
-      (progress) => {
-        for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send("ai-progress", progress);
+    if (plan.hasWork) {
+      let completed = false;
+      await embedAllPhotos(
+        (progress) => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            win.webContents.send("ai-progress", progress);
+          }
+        },
+        {
+          excludePhotoIds: plan.excludePhotoIds,
+          onCompleted: (retryAt) => {
+            completed = true;
+            embeddingRetryAt = Math.min(
+              embeddingRetryAt,
+              retryAt ?? Number.POSITIVE_INFINITY
+            );
+          },
         }
-      },
-      { excludePhotoIds: new Set(failedIds) }
-    );
-    if (!(held || stopped) && getAiControlState() === "idle") {
-      recordFailures(attempted);
+      );
+      if (retired()) {
+        return;
+      }
+      if (
+        !(completed || manualRetryRequested) &&
+        getAiControlState() === "idle"
+      ) {
+        fatal = true;
+        return;
+      }
+      failedPhotos = planEmbeddingRetries(db, Date.now()).failedPhotoCount;
+    }
+    if (!retired() && getAiControlState() === "idle") {
+      const { refreshChangedPhotoFaces } = await import(
+        "./library-face-refresh"
+      );
+      faceRetryAt = await refreshChangedPhotoFaces(signal);
     }
   } catch (error) {
-    fatal = true;
-    log.error({ error }, "Automatic AI indexing failed");
+    if (!retired()) {
+      fatal = !manualRetryRequested;
+      log.error({ error }, "Automatic AI indexing failed");
+    }
   } finally {
     active = undefined;
+    automaticController = undefined;
+    manualRetryRequested = false;
     log.info(
       {
         elapsedMs: Date.now() - started,
-        attempted: attempted.length,
-        failed: failedIds.size,
+        embedded: plan.hasWork,
+        failed: failedPhotos,
       },
       "Automatic AI indexing settled"
     );
-    settleStatus();
-    if (pending && !stopped && !held && !fatal) {
-      schedule(0);
-    }
-  }
-}
-
-function recordFailures(attempted: { id: number }[]): void {
-  fatal =
-    currentProgress.phase === "error" &&
-    !currentProgress.failureSummary?.failed;
-  if (fatal) {
-    return;
-  }
-  const remaining = new Set(pendingRows().map((row) => row.id));
-  for (const row of attempted) {
-    if (remaining.has(row.id)) {
-      failedIds.add(row.id);
+    if (!stopped && db === getDatabase()) {
+      settleStatus();
+      scheduleNextRun(
+        Math.min(embeddingRetryAt, faceRetryAt ?? Number.POSITIVE_INFINITY)
+      );
     }
   }
 }
@@ -188,7 +219,8 @@ export function startAutoIndexScheduler(isScanning: () => boolean): void {
   stopped = false;
   held = getSetting(STOP_KEY) === "true";
   fatal = false;
-  failedIds.clear();
+  manualRetryRequested = false;
+  failedPhotos = 0;
   scanBusy = isScanning;
   publish(held ? "paused" : "idle");
   requestAutoIndex("startup");
@@ -200,10 +232,10 @@ export function setAutoIndexStopped(value: boolean): void {
   held = value;
   clearTimeout(timer);
   if (value) {
+    automaticController?.abort();
     publish("paused");
   } else {
     fatal = false;
-    failedIds.clear();
     requestAutoIndex("manual-resume");
   }
 }
@@ -215,6 +247,7 @@ export function notifyAutoIndexReady(): void {
 
 export async function stopAutoIndexScheduler(): Promise<void> {
   stopped = true;
+  automaticController?.abort();
   pending = false;
   firstRequest = 0;
   clearTimeout(timer);

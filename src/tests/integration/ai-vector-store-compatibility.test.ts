@@ -1,9 +1,25 @@
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { photos } from "@/db/schema";
+import { TestRuntime } from "@/tests/helpers/test-runtime";
 
-const testPaths = vi.hoisted(() => ({ dataPath: "" }));
+const testPaths = vi.hoisted(() => ({
+  dataPath: "",
+  db: undefined as unknown,
+}));
 
 vi.mock("electron", () => ({
   app: {
@@ -18,9 +34,7 @@ vi.mock("@/utils/data-path", () => ({
 }));
 
 vi.mock("@/db", () => ({
-  getDatabase: () => {
-    throw new Error("SQLite is intentionally unavailable in this vector test");
-  },
+  getDatabase: () => testPaths.db,
 }));
 
 vi.mock("@/services/ai/model-loader", () => ({
@@ -31,13 +45,27 @@ function normalizedVector(dimensions: number): number[] {
   return [1, ...Array.from({ length: dimensions - 1 }, () => 0)];
 }
 
+function isWindowsFileLock(error: unknown): boolean {
+  return (
+    process.platform === "win32" &&
+    ["EPERM", "EBUSY"].includes((error as NodeJS.ErrnoException).code ?? "")
+  );
+}
+
 describe.sequential("real vector store fingerprint compatibility", () => {
-  beforeEach(async () => {
-    const reportsRoot = path.join(process.cwd(), "reports");
-    await fsPromises.mkdir(reportsRoot, { recursive: true });
-    testPaths.dataPath = await fsPromises.mkdtemp(
-      path.join(reportsRoot, "ai-vector-integration-")
-    );
+  let runtime: TestRuntime;
+  let sqlite: Database.Database;
+  const deferredCleanup: TestRuntime[] = [];
+  beforeEach(() => {
+    runtime = new TestRuntime("ai-vector-integration");
+    testPaths.dataPath = runtime.root;
+    sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    migrate(db, { migrationsFolder: "drizzle" });
+    db.insert(photos)
+      .values({ id: 1, path: "/photo.jpg", filename: "photo.jpg" })
+      .run();
+    testPaths.db = db;
   });
 
   afterEach(async () => {
@@ -49,16 +77,30 @@ describe.sequential("real vector store fingerprint compatibility", () => {
     vi.restoreAllMocks();
     adapterModule.registerEmbeddingAdapter(adapterModule.SIGLIP_V1_ADAPTER);
     adapterModule.setActiveEmbeddingAdapter(adapterModule.SIGLIP_V1_ADAPTER.id);
-    const expectedPrefix = path.join(
-      process.cwd(),
-      "reports",
-      "ai-vector-integration-"
-    );
-    if (path.resolve(testPaths.dataPath).startsWith(expectedPrefix)) {
-      await fsPromises.rm(testPaths.dataPath, {
-        force: true,
-        recursive: true,
-      });
+    sqlite.close();
+    try {
+      runtime.cleanup();
+    } catch (error) {
+      if (!isWindowsFileLock(error)) {
+        throw error;
+      }
+      // Lance mmap handles on Windows can outlive an explicitly closed connection.
+      deferredCleanup.push(runtime);
+    }
+  });
+
+  afterAll(() => {
+    for (const fixture of deferredCleanup) {
+      try {
+        fixture.cleanup();
+      } catch (error) {
+        if (!isWindowsFileLock(error)) {
+          throw error;
+        }
+        console.warn(
+          `Windows retained a Lance fixture for post-exit cleanup: ${fixture.root}`
+        );
+      }
     }
   });
 
@@ -81,6 +123,7 @@ describe.sequential("real vector store fingerprint compatibility", () => {
     await initialTable.add([
       {
         photo_id: 1,
+        content_revision: 0,
         vector: normalizedVector(dimensions),
         created_at: Date.now(),
       },
@@ -156,6 +199,7 @@ describe.sequential("real vector store fingerprint compatibility", () => {
     await state.photoTable?.add([
       {
         photo_id: 1,
+        content_revision: 0,
         vector: normalizedVector(dimensions),
         created_at: Date.now(),
       },
@@ -296,7 +340,9 @@ describe.sequential("real vector store fingerprint compatibility", () => {
     const vector = normalizedVector(
       adapterModule.getActiveEmbeddingAdapter().embeddingSpace.dimensions
     );
-    await table.add([{ photo_id: 1, vector, created_at: Date.now() }]);
+    await table.add([
+      { photo_id: 1, content_revision: 0, vector, created_at: Date.now() },
+    ]);
     const originalQuery = table.query.bind(table);
     const readingStarted = Promise.withResolvers<void>();
     const allowRead = Promise.withResolvers<void>();
@@ -348,18 +394,61 @@ describe.sequential("real vector store fingerprint compatibility", () => {
       }
       await remove(target, options);
     });
-    const renameSpy = vi.spyOn(fs.promises, "rename");
+    const renameSpy = vi.spyOn(fs.promises, "rename").mockRejectedValueOnce(
+      Object.assign(new Error("native handle is still closing"), {
+        code: "EPERM",
+      })
+    );
     expect(await vectorDb.rebuildVectorDB()).toEqual({ success: true });
     expect(renameSpy).toHaveBeenCalledWith(
       vectorPath,
       expect.stringContaining(`${vectorPath}.bak.`)
     );
+    expect(renameSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(state.isVectorDBReady).toBe(true);
     expect(state.colorTable).not.toBe(oldColorTable);
     expect(await state.photoTable?.countRows()).toBe(0);
     expect(await fsPromises.readFile(original, "utf8")).toBe(
       "preserve this original"
     );
+  });
+
+  it("bounds retries for a persistent rename lock and allows a later rebuild", async () => {
+    const [state, vectorDb] = await Promise.all([
+      import("@/services/ai/state"),
+      import("@/services/ai/vector-db"),
+    ]);
+    await vectorDb.initVectorDB();
+    const vectorPath = path.join(testPaths.dataPath, "vectors");
+    const remove = fs.promises.rm.bind(fs.promises);
+    const removeSpy = vi
+      .spyOn(fs.promises, "rm")
+      .mockImplementation(async (target, options) => {
+        if (String(target) === vectorPath) {
+          throw Object.assign(new Error("directory still locked"), {
+            code: "ENOTEMPTY",
+          });
+        }
+        await remove(target, options);
+      });
+    const renameSpy = vi
+      .spyOn(fs.promises, "rename")
+      .mockRejectedValue(
+        Object.assign(new Error("rename still locked"), { code: "EPERM" })
+      );
+    expect(await vectorDb.rebuildVectorDB()).toEqual({
+      success: false,
+      error: "rename still locked",
+    });
+    expect(renameSpy).toHaveBeenCalledTimes(4);
+    expect(state.isVectorDBReady).toBe(false);
+    expect(state.photoTable).toBeNull();
+    expect(state.colorTable).toBeNull();
+    expect(fs.existsSync(vectorPath)).toBe(true);
+    removeSpy.mockRestore();
+    renameSpy.mockRestore();
+    expect(await vectorDb.rebuildVectorDB()).toEqual({ success: true });
+    expect(state.isVectorDBReady).toBe(true);
   });
 
   it("reports an unrecoverable cleanup error and allows a later retry", async () => {
@@ -387,6 +476,7 @@ describe.sequential("real vector store fingerprint compatibility", () => {
       success: false,
       error: "rename denied",
     });
+    expect(renameSpy).toHaveBeenCalledTimes(1);
     expect(state.isVectorDBReady).toBe(false);
     expect(state.photoTable).toBeNull();
     expect(state.colorTable).toBeNull();
@@ -433,6 +523,7 @@ describe.sequential("real vector store fingerprint compatibility", () => {
       await state.photoTable?.add([
         {
           photo_id: 1,
+          content_revision: 0,
           vector: normalizedVector(dimensions),
           created_at: Date.now(),
         },

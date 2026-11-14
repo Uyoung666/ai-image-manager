@@ -1,6 +1,10 @@
 // @vitest-environment node
 import type { Table } from "@lancedb/lancedb";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { photos } from "@/db/schema";
 import { setColorTable } from "@/services/ai/state";
 import {
   deleteColorVectors,
@@ -10,7 +14,23 @@ import {
 } from "@/services/ai/vector-db";
 import { getVectorSearchRevision } from "@/services/search-revision";
 
-afterEach(() => setColorTable(null));
+const state = vi.hoisted(() => ({ db: undefined as unknown }));
+vi.mock("@/db", () => ({ getDatabase: () => state.db }));
+
+let sqlite: Database.Database;
+beforeEach(() => {
+  sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  migrate(db, { migrationsFolder: "drizzle" });
+  db.insert(photos)
+    .values({ id: 1, path: "/photo.jpg", filename: "photo.jpg" })
+    .run();
+  state.db = db;
+});
+afterEach(() => {
+  setColorTable(null);
+  sqlite.close();
+});
 
 describe("color vector state", () => {
   it("serializes delete/add with searches and invalidates cached sessions", async () => {
@@ -26,7 +46,7 @@ describe("color vector state", () => {
       toArray: vi.fn(async () => {
         await Promise.resolve();
         events.push("query");
-        return [{ photo_id: 1, _distance: 0 }];
+        return [{ photo_id: 1, _distance: 0, content_revision: 0 }];
       }),
       where: vi.fn().mockReturnThis(),
     };

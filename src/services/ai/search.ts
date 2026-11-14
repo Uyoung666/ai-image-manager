@@ -34,6 +34,7 @@ import {
   type VectorCompatibility,
 } from "./model-fingerprint";
 import { ensureLocalModel, loadModel } from "./model-loader";
+import { currentLanceRows, lancePhotoRevisionFilter } from "./photo-version";
 import {
   applyNegativeSemanticPenalty,
   filterCosineSearchResults,
@@ -70,7 +71,6 @@ import {
   warmupTranslationWorker,
 } from "./translation-worker-client";
 import {
-  buildPhotoIdFilter,
   getPhotoVectors,
   initVectorDB,
   withVectorDbOperation,
@@ -309,13 +309,22 @@ async function fallbackSearch(
   );
   const PAGE_SIZE = 500;
   const MAX_PAGES = Math.ceil(rowCount / PAGE_SIZE);
-  const allScored: Array<{ photoId: number; distance: number }> = [];
+  const allScored: Array<{
+    photoId: number;
+    distance: number;
+    photo_id: number;
+    content_revision: number;
+  }> = [];
+  const filter = lancePhotoRevisionFilter(
+    "embedding",
+    options?.allowedPhotoIds
+  );
 
   for (let page = 0; page < MAX_PAGES; page++) {
     checkSearch(options);
     let query = photoTable.query();
-    if (options?.allowedPhotoIds) {
-      query = query.where(buildPhotoIdFilter(options.allowedPhotoIds));
+    if (filter) {
+      query = query.where(filter);
     }
     const rows = await query
       .limit(PAGE_SIZE)
@@ -326,7 +335,10 @@ async function fallbackSearch(
       break;
     }
 
-    for (const row of rows as Record<string, unknown>[]) {
+    for (const row of currentLanceRows(
+      rows as Record<string, unknown>[],
+      "embedding"
+    )) {
       const rawVec = row.vector;
       if (!rawVec) {
         continue;
@@ -359,14 +371,19 @@ async function fallbackSearch(
         }
         const norm = Math.sqrt(normQ) * Math.sqrt(normV);
         const cosDist = norm > 0 ? 1 - dot / norm : 1;
-        allScored.push({ photoId, distance: cosDist });
+        allScored.push({
+          photoId,
+          distance: cosDist,
+          photo_id: photoId,
+          content_revision: Number(row.content_revision ?? 0),
+        });
       }
     }
   }
 
   allScored.sort((a, b) => a.distance - b.distance);
 
-  return allScored
+  return currentLanceRows(allScored, "embedding")
     .filter((r) => r.distance <= maxDistance)
     .slice(0, limit)
     .map((r) => ({
@@ -420,14 +437,18 @@ async function searchVector(
       .distanceType("cosine")
       .refineFactor(adaptiveRefine)
       .limit(queryLimit);
-    if (options?.allowedPhotoIds) {
-      vq = vq.where(buildPhotoIdFilter(options.allowedPhotoIds));
+    const filter = lancePhotoRevisionFilter(
+      "embedding",
+      options?.allowedPhotoIds
+    );
+    if (filter) {
+      vq = vq.where(filter);
     }
     if (limit >= rowCount && vq.bypassVectorIndex) {
       vq = vq.bypassVectorIndex();
     }
     if (vq.select) {
-      vq = vq.select(["photo_id"]);
+      vq = vq.select(["photo_id", "content_revision"]);
     }
     rawResults = (await vq.toArray()) as Record<string, unknown>[];
     checkSearch(options);
@@ -451,7 +472,7 @@ async function searchVector(
   }
 
   const filtered = filterCosineSearchResults(
-    rawResults.map((result) => ({
+    currentLanceRows(rawResults, "embedding").map((result) => ({
       distance: result._distance as number,
       photoId: result.photo_id as number,
     })),
@@ -1406,17 +1427,24 @@ export function warmupAiSearch(): Promise<void> {
 
 export function searchByImage(
   imagePath: string,
-  limit = 20
+  limit = 20,
+  allowedPhotoIds?: number[]
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   return initVectorDB().then(() =>
-    withVectorDbOperation(() => performSearchByImage(imagePath, limit))
+    withVectorDbOperation(() =>
+      performSearchByImage(imagePath, limit, allowedPhotoIds)
+    )
   );
 }
 
 async function performSearchByImage(
   imagePath: string,
-  limit: number
+  limit: number,
+  allowedPhotoIds?: number[]
 ): Promise<Array<{ photoId: number; similarity: number }>> {
+  if (allowedPhotoIds?.length === 0) {
+    return [];
+  }
   if (!(imagePath && fs.existsSync(imagePath))) {
     console.warn("[AI] searchByImage: image file not found:", imagePath);
     return [];
@@ -1475,36 +1503,8 @@ async function performSearchByImage(
   }
 
   const rowCount = await photoTable.countRows();
-  const adaptiveRefine = Math.min(
-    10,
-    Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
-  );
-  let rawResults: Record<string, unknown>[] = [];
-
-  try {
-    const vq = photoTable
-      .vectorSearch(queryVector)
-      .distanceType("cosine")
-      .refineFactor(adaptiveRefine)
-      .limit(limit);
-    rawResults = (await vq.toArray()) as Record<string, unknown>[];
-  } catch (err: unknown) {
-    console.error(
-      "[AI] searchByImage vectorSearch failed:",
-      getErrorMessage(err)
-    );
-  }
-
-  if (rawResults.length === 0) {
-    return fallbackSearch(queryVector, limit);
-  }
-
-  return filterCosineSearchResults(
-    rawResults.map((result) => ({
-      distance: result._distance as number,
-      photoId: result.photo_id as number,
-    })),
-    Number.POSITIVE_INFINITY,
-    limit
-  );
+  return searchVector(queryVector, limit, Number.POSITIVE_INFINITY, rowCount, {
+    allowedPhotoIds,
+    deadline: Number.POSITIVE_INFINITY,
+  });
 }

@@ -138,6 +138,25 @@ export function restoreFaceData(dbPath, backupFile, { legacyKind } = {}) {
   try {
     db.exec("PRAGMA foreign_keys = ON");
     const validation = validatePayloadAgainstDatabase(db, payload);
+    const versionedVectors = hasColumn(db, "face_vectors", "content_revision");
+    const versionedPhotos = hasColumn(db, "photos", "content_revision");
+    const versionedReviews =
+      hasTable(db, "face_review_decisions") &&
+      hasColumn(db, "face_review_decisions", "content_revision");
+    if (
+      (!versionedVectors &&
+        payload.faceVectors.some((row) => row.content_revision > 0)) ||
+      (!versionedReviews &&
+        payload.faceReviewDecisions?.some((row) => row.content_revision > 0)) ||
+      (!versionedPhotos &&
+        payload.faceProcessedPhotoRevisions?.some(
+          (row) => row.content_revision > 0
+        ))
+    ) {
+      throw new Error(
+        "Database cannot represent content-versioned face history"
+      );
+    }
 
     // No DELETE happens before all of the checks above have passed.
     db.exec("BEGIN IMMEDIATE");
@@ -169,7 +188,9 @@ export function restoreFaceData(dbPath, backupFile, { legacyKind } = {}) {
     db.exec("DELETE FROM face_identities");
 
     const insVector = db.prepare(
-      "INSERT INTO face_vectors (id, photo_id, face_index, bbox_x, bbox_y, bbox_width, bbox_height, confidence, embedding, vector_id, is_rejected, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      `INSERT INTO face_vectors (id, photo_id, face_index, bbox_x, bbox_y, bbox_width, bbox_height, confidence, embedding, vector_id, is_rejected, created_at${
+        versionedVectors ? ", content_revision" : ""
+      }) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${versionedVectors ? ", ?" : ""})`
     );
     for (const row of payload.faceVectors) {
       insVector.run(
@@ -184,7 +205,8 @@ export function restoreFaceData(dbPath, backupFile, { legacyKind } = {}) {
         row.embedding,
         row.vector_id,
         row.is_rejected,
-        row.created_at
+        row.created_at,
+        ...(versionedVectors ? [row.content_revision ?? 0] : [])
       );
     }
 
@@ -243,7 +265,9 @@ export function restoreFaceData(dbPath, backupFile, { legacyKind } = {}) {
 
     if (hasReviewTable) {
       const insReview = db.prepare(
-        "INSERT INTO face_review_decisions (id, photo_id, face_index, decision, source_identity_id, source_identity_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        `INSERT INTO face_review_decisions (id, photo_id, face_index, decision, source_identity_id, source_identity_name, created_at, updated_at${
+          versionedReviews ? ", content_revision" : ""
+        }) VALUES (?, ?, ?, ?, ?, ?, ?, ?${versionedReviews ? ", ?" : ""})`
       );
       for (const row of reviewDecisions) {
         insReview.run(
@@ -254,21 +278,47 @@ export function restoreFaceData(dbPath, backupFile, { legacyKind } = {}) {
           row.source_identity_id ?? null,
           row.source_identity_name ?? null,
           row.created_at,
-          row.updated_at
+          row.updated_at,
+          ...(versionedReviews ? [row.content_revision ?? 0] : [])
         );
       }
     }
 
+    const hasPendingFlag = hasColumn(db, "photos", "face_refresh_pending");
     const updateFlag = db.prepare(
-      "UPDATE photos SET is_face_processed = ? WHERE id = ?"
+      `UPDATE photos SET is_face_processed = ?${hasPendingFlag ? ", face_refresh_pending = ?" : ""} WHERE id = ?`
     );
     const processed = new Set(payload.faceProcessedPhotoIds);
+    const processedRevisions = new Map(
+      payload.faceProcessedPhotoRevisions?.map((row) => [
+        row.photo_id,
+        row.content_revision,
+      ])
+    );
     for (const row of db
-      .prepare("SELECT id, is_face_processed FROM photos")
+      .prepare(
+        `SELECT id, is_face_processed${versionedPhotos ? ", content_revision" : ""}${hasPendingFlag ? ", face_refresh_pending" : ""} FROM photos`
+      )
       .all()) {
-      const wanted = processed.has(row.id) ? 1 : 0;
-      if ((row.is_face_processed ? 1 : 0) !== wanted) {
-        updateFlag.run(wanted, row.id);
+      const matchesRevision =
+        !versionedPhotos ||
+        row.content_revision === (processedRevisions.get(row.id) ?? 0);
+      const wasProcessed = processed.has(row.id);
+      const wanted = wasProcessed && matchesRevision ? 1 : 0;
+      // Keep the scheduler's existing pause/stop settings and only queue work.
+      let wantedPending = row.face_refresh_pending;
+      if (wasProcessed) {
+        wantedPending = matchesRevision ? 0 : 1;
+      }
+      if (
+        (row.is_face_processed ? 1 : 0) !== wanted ||
+        (hasPendingFlag && wantedPending !== row.face_refresh_pending)
+      ) {
+        updateFlag.run(
+          wanted,
+          ...(hasPendingFlag ? [wantedPending] : []),
+          row.id
+        );
       }
     }
 
