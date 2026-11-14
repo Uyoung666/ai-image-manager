@@ -1,15 +1,15 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
-import os from "node:os";
 import path from "node:path";
-import {
-  _electron,
-  type ElectronApplication,
-  expect,
-  test,
-} from "@playwright/test";
+import { type ElectronApplication, expect } from "@playwright/test";
 import sharp from "sharp";
+import {
+  closeTestApp,
+  createTestRuntime,
+  launchTestApp,
+  test,
+} from "./helpers/test-runtime";
 
 const require = createRequire(import.meta.url);
 const electronPath = require("electron") as string;
@@ -17,7 +17,7 @@ const electronPath = require("electron") as string;
 test("an interrupted committed batch resumes across two launches", async () => {
   const testInfo = test.info();
   test.setTimeout(180_000);
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "aim-import-recovery-"));
+  const root = createTestRuntime("import-recovery");
   const profile = path.join(root, "profile");
   const fixture = path.join(root, "fixture");
   fs.mkdirSync(fixture);
@@ -46,15 +46,16 @@ test("an interrupted committed batch resumes across two launches", async () => {
     TMP: path.join(root, "scratch"),
   };
   env.ELECTRON_RUN_AS_NODE = undefined;
-  const query = (sql: string) =>
+  const query = (sql: string, write = false) =>
     JSON.parse(
       execFileSync(
         electronPath,
         [
           "-e",
-          "const D=require('better-sqlite3');const db=new D(process.argv[1],{readonly:true});try{console.log(JSON.stringify(db.prepare(process.argv[2]).all()));}finally{db.close();}",
+          "const D=require('better-sqlite3');const db=new D(process.argv[1],{readonly:process.argv[3]!=='write'});try{if(process.argv[3]==='write'){db.exec(process.argv[2]);console.log('[]')}else console.log(JSON.stringify(db.prepare(process.argv[2]).all()));}finally{db.close();}",
           path.join(profile, "data", "ai-image-manager.db"),
           sql,
+          write ? "write" : "read",
         ],
         { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
       )
@@ -67,7 +68,7 @@ test("an interrupted committed batch resumes across two launches", async () => {
     return app;
   };
   const launch = async () => {
-    app = await _electron.launch({
+    app = await launchTestApp(root, {
       args: ["-r", preload, "--e2e", "--lang=zh-CN", path.resolve(".")],
       env: Object.fromEntries(
         Object.entries(env).filter(
@@ -139,38 +140,101 @@ test("an interrupted committed batch resumes across two launches", async () => {
       )
       .toEqual([]);
     const completed = query(
-      "select last_scanned_at from folders where parent_id is null"
+      "select id,last_scanned_at from folders where parent_id is null order by id"
     );
-    await requireApp().close();
+    const completedPhotos = query(
+      "SELECT id,path,folder_id,file_revision,content_revision FROM photos ORDER BY id"
+    );
+    const reviewedId = completedPhotos[0].id;
+    query(
+      `
+      UPDATE photos SET is_favorite=1 WHERE id=${reviewedId};
+      INSERT INTO tags(id,name,created_at) VALUES(900001,'Recovery preserved tag',1);
+      INSERT INTO photo_tags(photo_id,tag_id,origin,user_confirmed) VALUES(${reviewedId},900001,'manual',1);
+      INSERT INTO albums(id,name,created_at) VALUES(900001,'Recovery preserved album',1);
+      INSERT INTO album_photos(album_id,photo_id) VALUES(900001,${reviewedId});
+    `,
+      true
+    );
+    const foldersBeforeRestart = query(
+      "SELECT id,path,parent_id,photo_count FROM folders ORDER BY id"
+    );
+    await closeTestApp(requireApp());
     app = undefined;
     page = await launch();
     await expect(
       page.getByText("60 张照片", { exact: true }).filter({ visible: true })
     ).toBeVisible();
     expect(query("select count(*) n from photos")[0].n).toBe(60);
+    await expect
+      .poll(
+        () =>
+          query(
+            "SELECT id,last_scanned_at FROM folders WHERE parent_id IS NULL ORDER BY id"
+          ).every(
+            (row: { id: number; last_scanned_at: number }, index: number) =>
+              row.id === completed[index].id &&
+              row.last_scanned_at > completed[index].last_scanned_at
+          ),
+        { timeout: 30_000 }
+      )
+      .toBe(true);
     expect(
       query("select path from photos group by lower(path) having count(*) > 1")
     ).toEqual([]);
     expect(query("pragma foreign_key_check")).toEqual([]);
+    // Startup reconciliation can advance the completed scan timestamp. Its
+    // catalogue identities, accepted file versions and review links stay stable.
     expect(
-      query("select last_scanned_at from folders where parent_id is null")
-    ).toEqual(completed);
+      query(
+        "SELECT id,path,folder_id,file_revision,content_revision FROM photos ORDER BY id"
+      )
+    ).toEqual(completedPhotos);
+    expect(
+      query("SELECT id,path,parent_id,photo_count FROM folders ORDER BY id")
+    ).toEqual(foldersBeforeRestart);
+    expect(
+      query(`SELECT id,is_favorite FROM photos WHERE id=${reviewedId}`)
+    ).toEqual([{ id: reviewedId, is_favorite: 1 }]);
+    expect(
+      query("SELECT photo_id,tag_id FROM photo_tags WHERE tag_id=900001")
+    ).toEqual([{ photo_id: reviewedId, tag_id: 900_001 }]);
+    expect(
+      query("SELECT album_id,photo_id FROM album_photos WHERE album_id=900001")
+    ).toEqual([{ album_id: 900_001, photo_id: reviewedId }]);
+    const afterRestart = query(
+      "SELECT id,last_scanned_at FROM folders WHERE parent_id IS NULL ORDER BY id"
+    );
+    expect(afterRestart.map((row: { id: number }) => row.id)).toEqual(
+      completed.map((row: { id: number }) => row.id)
+    );
+    for (let index = 0; index < completed.length; index++) {
+      expect(afterRestart[index].last_scanned_at).toBeGreaterThanOrEqual(
+        completed[index].last_scanned_at
+      );
+    }
+    expect(
+      JSON.parse(
+        query(
+          "SELECT value FROM app_settings WHERE key='imports.unfinishedRoots'"
+        )[0].value
+      )
+    ).toEqual([]);
     await testInfo.attach("recovery-accounting", {
-      body: JSON.stringify({ filesystem: 60, partial, final: 60, completed }),
+      body: JSON.stringify({
+        filesystem: 60,
+        partial,
+        final: 60,
+        completed,
+        afterRestart,
+        completedPhotos,
+        foldersBeforeRestart,
+      }),
       contentType: "application/json",
     });
   } finally {
-    await app?.close();
-    // This mkdtemp root contains only this test's generated PNGs and profile.
-    expect(path.dirname(root)).toBe(os.tmpdir());
-    const protectedEntry = fs
-      .readdirSync(root, { recursive: true, withFileTypes: true })
-      .find(
-        (entry) =>
-          [".csv", ".xlsx"].includes(path.extname(entry.name).toLowerCase()) ||
-          (entry.isDirectory() && entry.name.toLowerCase() === "temp")
-      );
-    expect(protectedEntry).toBeUndefined();
-    fs.rmSync(root, { recursive: true, force: true });
+    if (app) {
+      await closeTestApp(app);
+    }
   }
 });

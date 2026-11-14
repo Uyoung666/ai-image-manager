@@ -189,14 +189,22 @@ export async function closeTestApp(app: ElectronApplication): Promise<void> {
   }
 }
 
-function finishRuntime(managed: ManagedRuntime, outputDir: string): void {
+function finishRuntime(
+  managed: ManagedRuntime,
+  outputDir: string,
+  phase: (name: string) => void
+): void {
   const { runtime, diagnostics } = managed;
   const destination =
     diagnostics ??
     path.join(outputDir, "runtime-diagnostics", path.basename(runtime.root));
   // Saving before deletion also covers setup failures before test fixtures start.
+  phase("diagnostics-start");
   runtime.saveDiagnostics(destination);
+  phase("diagnostics-done");
+  phase("remove-start");
   const result = runtime.cleanup();
+  phase(`remove-${result.status}`);
   if (result.status === "skipped") {
     throw new Error(`${result.reason}: ${runtime.root}`);
   }
@@ -208,6 +216,17 @@ function finishRuntime(managed: ManagedRuntime, outputDir: string): void {
 }
 
 async function finishWorkerRuntimes(outputDir: string): Promise<Error[]> {
+  const record = (phase: string, root?: string, detail?: string) => {
+    if (!process.env.AIM_TEST_RUNTIME_CLEANUP_TRACE) {
+      return;
+    }
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.appendFileSync(
+      path.join(outputDir, `runtime-cleanup-${process.pid}.jsonl`),
+      `${JSON.stringify({ phase, root, detail, time: new Date().toISOString(), pid: process.pid })}\n`
+    );
+  };
+  record("worker-cleanup-start", undefined, String(runtimes.size));
   const errors: Error[] = [];
   const closeErrors = new Map<ManagedRuntime, unknown>();
   // Close every window before potentially slow Windows directory cleanup.
@@ -215,8 +234,11 @@ async function finishWorkerRuntimes(outputDir: string): Promise<Error[]> {
   for (const managed of runtimes.values()) {
     for (const { app } of managed.apps) {
       try {
+        record("close-start", managed.runtime.root);
         await closeTestApp(app);
+        record("close-done", managed.runtime.root);
       } catch (error) {
+        record("close-error", managed.runtime.root, String(error));
         closeErrors.set(managed, error);
       }
     }
@@ -226,9 +248,12 @@ async function finishWorkerRuntimes(outputDir: string): Promise<Error[]> {
       if (closeErrors.has(managed)) {
         throw closeErrors.get(managed);
       }
-      finishRuntime(managed, outputDir);
+      finishRuntime(managed, outputDir, (phase) =>
+        record(phase, managed.runtime.root)
+      );
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      record("runtime-cleanup-error", managed.runtime.root, reason);
       console.error(
         `[test-runtime] retained: ${managed.runtime.root}: ${reason}`
       );
@@ -261,6 +286,7 @@ async function finishWorkerRuntimes(outputDir: string): Promise<Error[]> {
     }
   }
   runtimes.clear();
+  record("worker-cleanup-done", undefined, String(errors.length));
   return errors;
 }
 

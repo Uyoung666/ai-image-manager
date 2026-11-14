@@ -194,11 +194,16 @@ test.beforeAll(async () => {
   );
   const photo = path.join(root, "photo.png");
   fs.copyFileSync(path.resolve("assets/readme/background.png"), photo);
+  // Keep generated backdrops and the app's own previews outside the catalogue.
+  const source = path.join(root, "library-source");
+  fs.mkdirSync(source);
+  const libraryPhoto = path.join(source, "photo.png");
+  fs.copyFileSync(photo, libraryPhoto);
   const sqlPath = (value: string) => value.replaceAll("'", "''");
   execute(
-    `INSERT INTO folders(id,path,display_name,photo_count,created_at) VALUES (1,'${sqlPath(root)}','Nebula test',1,1793203200000);
+    `INSERT INTO folders(id,path,display_name,photo_count,created_at) VALUES (1,'${sqlPath(source)}','Nebula test',1,1793203200000);
     INSERT INTO photos(id,path,folder_id,filename,width,height,format,thumbnail_path,is_ai_processed,is_face_processed,created_at)
-    VALUES (1,'${sqlPath(photo)}',1,'Nebula test photo.png',1586,992,'png','${sqlPath(photo)}',1,1,1793203200000);
+    VALUES (1,'${sqlPath(libraryPhoto)}',1,'Nebula test photo.png',1586,992,'png','${sqlPath(photo)}',1,1,1793203200000);
     INSERT INTO advanced_exif_data(photo_id,status,parser_version,enriched_at)
     VALUES (1,'unsupported',3,1793203200000);`
   );
@@ -680,25 +685,83 @@ function luminance(rgb: number[]) {
 
 async function assertControlBoundary() {
   const layout = page.getByRole("combobox", { name: "Material mode" });
-  const bounds = await layout.boundingBox();
-  if (!bounds) {
-    throw new Error("Missing layout control");
+  let lastScreenshot: Buffer | undefined;
+  let lastSample: Record<string, unknown> | undefined;
+  try {
+    await expect
+      .poll(async () => {
+        const before = await layout.boundingBox();
+        const css = await layout.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            borderTopColor: style.borderTopColor,
+            borderTopWidth: style.borderTopWidth,
+            backgroundColor: style.backgroundColor,
+            transform: style.transform,
+            devicePixelRatio,
+            viewport: { width: innerWidth, height: innerHeight },
+            theme: document.documentElement.className,
+          };
+        });
+        lastScreenshot = await page.screenshot();
+        const after = await layout.boundingBox();
+        // The global progress bar can finish its exit while screenshots wait
+        // for rendering. Only sample coordinates that still describe this image.
+        const stable = Boolean(
+          before &&
+            after &&
+            (["x", "y", "width", "height"] as const).every(
+              (key) => Math.abs(before[key] - after[key]) < 0.1
+            )
+        );
+        lastSample = { before, after, css, stable };
+        if (!(stable && before)) {
+          return 0;
+        }
+        const { data, info } = await sharp(lastScreenshot)
+          .removeAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        const x = Math.floor(before.x + before.width / 2);
+        const borderY = Math.floor(before.y);
+        const surroundingY = Math.floor(before.y - 3);
+        const read = (y: number) => {
+          const offset = (y * info.width + x) * info.channels;
+          return [...data.subarray(offset, offset + 3)];
+        };
+        const borderPixels = read(borderY);
+        const surroundingPixels = read(surroundingY);
+        const border = luminance(borderPixels);
+        const surrounding = luminance(surroundingPixels);
+        const ratio =
+          (Math.max(border, surrounding) + 0.05) /
+          (Math.min(border, surrounding) + 0.05);
+        lastSample = {
+          ...lastSample,
+          image: { width: info.width, height: info.height },
+          coordinates: { x, borderY, surroundingY },
+          borderPixels,
+          surroundingPixels,
+          borderLuminance: border,
+          surroundingLuminance: surrounding,
+          ratio,
+        };
+        return ratio;
+      })
+      .toBeGreaterThanOrEqual(3);
+  } catch (error) {
+    if (lastScreenshot) {
+      fs.writeFileSync(
+        test.info().outputPath("control-boundary-last.png"),
+        lastScreenshot
+      );
+    }
+    fs.writeFileSync(
+      test.info().outputPath("control-boundary-last.json"),
+      JSON.stringify(lastSample ?? { sample: "unavailable" }, null, 2)
+    );
+    throw error;
   }
-  const { data, info } = await sharp(await page.screenshot())
-    .removeAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const x = Math.floor(bounds.x + bounds.width / 2);
-  const read = (y: number) => {
-    const offset = (Math.floor(y) * info.width + x) * info.channels;
-    return luminance([...data.subarray(offset, offset + 3)]);
-  };
-  const border = read(bounds.y);
-  const surrounding = read(bounds.y - 3);
-  expect(
-    (Math.max(border, surrounding) + 0.05) /
-      (Math.min(border, surrounding) + 0.05)
-  ).toBeGreaterThanOrEqual(3);
 }
 
 async function waitForPane() {

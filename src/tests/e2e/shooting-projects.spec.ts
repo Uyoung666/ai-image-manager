@@ -159,9 +159,9 @@ function librarySnapshot(fixture: Fixture) {
   );
 }
 
-function expectNoProjectImports(fixture: Fixture): void {
+function queueEvents(fixture: Fixture): QueueEvent[] {
   const eventsFile = path.join(fixture.root, "queue-events.jsonl");
-  const events: QueueEvent[] = fs.existsSync(eventsFile)
+  return fs.existsSync(eventsFile)
     ? fs
         .readFileSync(eventsFile, "utf8")
         .trim()
@@ -169,7 +169,10 @@ function expectNoProjectImports(fixture: Fixture): void {
         .filter(Boolean)
         .map((line) => JSON.parse(line) as QueueEvent)
     : [];
-  for (const event of events) {
+}
+
+function expectNoProjectImports(fixture: Fixture): void {
+  for (const event of queueEvents(fixture)) {
     if (event.channel === "import-queue-status") {
       expect(event.payload.current).toBeNull();
       expect(event.payload.pending).toEqual([]);
@@ -1137,20 +1140,76 @@ test("keeps offline decisions and cached results through restart and verified so
 });
 
 test("requires acknowledgement for an existing library source at system scaling", async () => {
+  fs.mkdirSync(test.info().outputDir, { recursive: true });
+  const checkpoint = (step: string, detail?: string) =>
+    fs.appendFileSync(
+      test.info().outputPath("library-source-steps.jsonl"),
+      `${JSON.stringify({ step, detail, time: new Date().toISOString() })}\n`
+    );
+  checkpoint("create-fixture");
   const fixture = await createFixture("shooting-cull-library-source");
   try {
+    checkpoint("first-launch");
     await launch(fixture);
+    checkpoint("first-close");
     await close(fixture);
+    checkpoint("seed-existing-library");
     execute(
       fixture,
       "INSERT INTO folders(path,display_name,photo_count,last_scanned_at,created_at,is_watching) VALUES('" +
         fixture.sourceRoot.replaceAll("'", "''") +
         "','Existing library',0,1,1,0)"
     );
+    checkpoint("second-launch");
     const page = await launch(fixture);
+    checkpoint("settle-existing-library");
+    await expect
+      .poll(
+        () => {
+          const queue = queueEvents(fixture)
+            .filter((event) => event.channel === "import-queue-status")
+            .at(-1)?.payload;
+          return (
+            database<{ ready: number }>(
+              fixture,
+              "SELECT count(*) AS ready FROM folders WHERE parent_id IS NULL AND last_scanned_at>1"
+            )[0].ready > 0 &&
+            database<{ count: number }>(
+              fixture,
+              "SELECT count(*) AS count FROM photos"
+            )[0].count === 1 &&
+            queue?.current === null &&
+            queue.pending?.length === 0
+          );
+        },
+        { timeout: 30_000 }
+      )
+      .toBe(true);
+    await expect(
+      page.locator('[data-reduced-motion-keep="progress-bar"]')
+    ).toHaveCount(0, { timeout: 30_000 });
+    const existingPhotos = database(
+      fixture,
+      "SELECT id,path,folder_id,file_revision,content_revision FROM photos ORDER BY id"
+    );
+    const existingFolders = database(
+      fixture,
+      "SELECT id,path,parent_id,photo_count FROM folders ORDER BY id"
+    );
+    const queueBaseline = queueEvents(fixture).length;
+    fs.writeFileSync(
+      test.info().outputPath("existing-library-baseline.json"),
+      JSON.stringify(
+        { existingPhotos, existingFolders, queueBaseline },
+        null,
+        2
+      )
+    );
+    checkpoint("navigate-to-culling");
     await navigateToCull(page);
     await choosePath(fixture, fixture.sourceRoot);
     await page.getByTestId("cull-open-folder").click();
+    checkpoint("opened-source-dialog");
     const acknowledgement = page.getByTestId(
       "shooting-project-library-acknowledgement"
     );
@@ -1158,20 +1217,58 @@ test("requires acknowledgement for an existing library source at system scaling"
     await expect(acknowledgement).toBeVisible();
     await expect(submit).toBeDisabled();
     for (const size of SIZES) {
+      checkpoint("resize", `${size.width}x${size.height}`);
       await resize(fixture, page, size);
       await expectLayoutInsideViewport(page);
       await submit.scrollIntoViewIfNeeded();
       await expect(submit).toBeInViewport();
     }
+    checkpoint("resize-zoom", "720x480 at 1.25");
     await resize(fixture, page, SIZES[0], 1.25);
     await expectLayoutInsideViewport(page);
     expect(database(fixture, "SELECT id FROM shooting_projects")).toEqual([]);
     await acknowledgement.check();
+    checkpoint("create-project");
     await submit.click();
     await expect(page.getByTestId("shooting-project-workspace")).toBeVisible();
-    expectNoProjectImports(fixture);
+    checkpoint("verify-no-project-imports");
+    expect(
+      database(
+        fixture,
+        "SELECT id,path,folder_id,file_revision,content_revision FROM photos ORDER BY id"
+      )
+    ).toEqual(existingPhotos);
+    expect(
+      database(
+        fixture,
+        "SELECT id,path,parent_id,photo_count FROM folders ORDER BY id"
+      )
+    ).toEqual(existingFolders);
+    for (const event of queueEvents(fixture).slice(queueBaseline)) {
+      if (event.channel === "import-queue-status") {
+        const tasks = [
+          event.payload.current,
+          ...(event.payload.pending ?? []),
+          ...(event.payload.history ?? []),
+        ].filter(Boolean) as { source?: string }[];
+        expect(tasks.every((task) => task.source === "background")).toBe(true);
+      } else {
+        expect(event.payload.total ?? 0).toBeLessThanOrEqual(
+          existingPhotos.length
+        );
+      }
+    }
+    checkpoint("assertions-passed");
+  } catch (error) {
+    checkpoint(
+      "assertion-or-operation-failed",
+      error instanceof Error ? error.stack : String(error)
+    );
+    throw error;
   } finally {
+    checkpoint("cleanup-start");
     await close(fixture);
+    checkpoint("cleanup-done");
   }
 });
 
@@ -1510,10 +1607,12 @@ test("keeps archives compact with the shared theme toolbar and clears all confir
       (_, index) =>
         `INSERT INTO cull_sessions(name,mode,created_at,archived_at) VALUES('Library archive ${index}','curate',${index + 1},10);`
     );
+    // This is an already processed catalogue record used to verify retention.
+    // Its presence must not enqueue unrelated AI work during archive clearing.
     execute(
       fixture,
       rows.join("\n") +
-        `\nINSERT INTO cull_sessions(name,mode,created_at) VALUES('Active library stays','curate',1);\nINSERT INTO photos(path,filename,created_at) VALUES('${fixture.sourceFile.replaceAll("'", "''")}','original.png',1);`
+        `\nINSERT INTO cull_sessions(name,mode,created_at) VALUES('Active library stays','curate',1);\nINSERT INTO photos(path,filename,created_at,is_indexed,is_ai_processed,is_face_processed) VALUES('${fixture.sourceFile.replaceAll("'", "''")}','original.png',1,1,1,1);`
     );
     await page.getByTestId("cull-archive-list-link").click();
     await expect(page.locator("[data-task-key]")).toHaveCount(4);

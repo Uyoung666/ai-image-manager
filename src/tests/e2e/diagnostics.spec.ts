@@ -1,15 +1,15 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import {
-  type ElectronApplication,
-  _electron as electron,
-  expect,
-  type Page,
-  test,
-} from "@playwright/test";
+import { type ElectronApplication, expect, type Page } from "@playwright/test";
 import { open as openZip } from "yauzl";
+import { preparePackagedExecutable } from "./helpers/packaged-inspection";
+import {
+  closeTestApp,
+  createTestRuntime,
+  launchTestApp,
+  test,
+} from "./helpers/test-runtime";
 
 const SETTINGS_NAME = /^(设置|Settings)$/;
 const DIAGNOSTICS_NAME = /^(帮助与诊断|Help & Diagnostics)$/;
@@ -23,19 +23,24 @@ const { version: APP_VERSION } = JSON.parse(
 let electronApp: ElectronApplication | undefined;
 let page: Page | undefined;
 let selectedBundlePath: string | undefined;
-const packagedExecutable = process.env.AIM_PACKAGED_E2E_EXECUTABLE;
 const performSystemHandoff = process.env.AIM_FULL_SYSTEM_E2E === "1";
-const testRoot = path.join(
-  os.tmpdir(),
-  `ai-image-manager-e2e-diagnostics-${process.pid}-${Date.now()}`
-);
-const userDataDirectory = path.join(testRoot, "user-data");
-const downloadsDirectory = path.join(testRoot, "downloads");
+let userDataDirectory: string;
+let downloadsDirectory: string;
 
 test.setTimeout(60_000);
 
 test.beforeAll(async ({ browserName: _browserName }, testInfo) => {
-  testInfo.setTimeout(packagedExecutable ? 90_000 : 30_000);
+  testInfo.setTimeout(120_000);
+  const testRoot = createTestRuntime("diagnostics");
+  fs.mkdirSync(testInfo.outputDir, { recursive: true });
+  const packagedExecutable = await preparePackagedExecutable(
+    testRoot,
+    testInfo.outputDir
+  );
+  userDataDirectory = path.join(testRoot, "user-data");
+  downloadsDirectory = path.join(testRoot, "downloads");
+  const scratch = path.join(testRoot, "scratch");
+  fs.mkdirSync(scratch);
   fs.mkdirSync(downloadsDirectory, { recursive: true });
   const electronArgs = [
     "--disable-gpu-sandbox",
@@ -44,13 +49,16 @@ test.beforeAll(async ({ browserName: _browserName }, testInfo) => {
     "--use-angle=swiftshader",
     "--e2e",
   ];
-  electronApp = await electron.launch({
+  electronApp = await launchTestApp(testRoot, {
     args: packagedExecutable
       ? electronArgs
       : [...electronArgs, path.resolve(".")],
     env: {
       ...process.env,
       AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: userDataDirectory,
+      AI_IMAGE_MANAGER_USER_DATA_DIR: userDataDirectory,
+      TEMP: scratch,
+      TMP: scratch,
       CI: "e2e",
     },
     executablePath: packagedExecutable
@@ -92,12 +100,11 @@ test.beforeAll(async ({ browserName: _browserName }, testInfo) => {
 });
 
 test.afterAll(async () => {
-  await electronApp?.close();
+  if (electronApp) {
+    await closeTestApp(electronApp);
+  }
   if (performSystemHandoff && selectedBundlePath) {
     closeExplorerWindowSelecting(selectedBundlePath);
-  }
-  if (path.dirname(testRoot) === os.tmpdir()) {
-    fs.rmSync(testRoot, { force: true, recursive: true });
   }
 });
 

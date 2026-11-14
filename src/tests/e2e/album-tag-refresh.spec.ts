@@ -93,6 +93,8 @@ async function assertBounds() {
 }
 
 async function removeTag(photoId: number, tag: string, count: number) {
+  // Returning from the album list can restore its remembered sequence view.
+  await page.getByRole("button", { name: PHOTO_MODE }).click();
   await page.locator(`[data-photo-id="${photoId}"][role="option"]`).click();
   const remove = page
     .getByRole("button", { name: "Click to remove", exact: true })

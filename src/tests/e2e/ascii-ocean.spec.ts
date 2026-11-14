@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { type ElectronApplication, expect, type Page } from "@playwright/test";
+import { preparePackagedExecutable } from "./helpers/packaged-inspection";
 import {
   closeTestApp,
   createTestRuntime,
@@ -18,7 +19,6 @@ const SHARK_SPECIES = /^(Shark species|鲨鱼种类)$/;
 const NAVIGATION_OPACITY = /^(Navigation opacity|导航不透明度)$/;
 const EXIT_PREVIEW = /^(Exit preview|退出预览)$/;
 const RESET_ALL = /^(Reset all|全部重置)$/;
-const executable = process.env.AIM_PACKAGED_E2E_EXECUTABLE;
 const appRoot = process.env.AIM_E2E_APP_ROOT ?? path.resolve(".");
 let app: ElectronApplication;
 let page: Page;
@@ -132,6 +132,8 @@ async function contentSurfaces() {
 test.beforeAll(async ({ browserName: _browserName }, testInfo) => {
   testInfo.setTimeout(120_000);
   const root = createTestRuntime("ascii-ocean");
+  fs.mkdirSync(testInfo.outputDir, { recursive: true });
+  const executable = await preparePackagedExecutable(root, testInfo.outputDir);
   const scratch = path.join(root, "scratch");
   fs.mkdirSync(scratch);
   seedWanderLibrary(path.join(root, "profile"), { photoCount: 4 });

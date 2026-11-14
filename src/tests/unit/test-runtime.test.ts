@@ -94,6 +94,37 @@ describe("managed test runtime cleanup", () => {
     expect(fs.existsSync(runtime.root)).toBe(true);
   });
 
+  it("writes optional cleanup progress outside the removed runtime", () => {
+    const runtime = createRuntime();
+    const destination = createRuntime();
+    const trace = path.join(destination.root, "cleanup.jsonl");
+    vi.stubEnv("AIM_TEST_RUNTIME_CLEANUP_TRACE", trace);
+    fs.writeFileSync(path.join(runtime.root, "model.onnx"), "model");
+    expect(runtime.cleanup().status).toBe("deleted");
+    const events = fs
+      .readFileSync(trace, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(events[0].phase).toBe("cleanup-start");
+    expect(events.at(-1).phase).toBe("root-rm-after");
+    expect(events.every((event) => event.root === runtime.root)).toBe(true);
+  });
+
+  it("rejects a cleanup trace inside the runtime before deleting payloads", () => {
+    const runtime = createRuntime();
+    const model = path.join(runtime.root, "model.onnx");
+    fs.writeFileSync(model, "model");
+    vi.stubEnv(
+      "AIM_TEST_RUNTIME_CLEANUP_TRACE",
+      path.join(runtime.root, "cleanup.jsonl")
+    );
+    expect(() => runtime.cleanup()).toThrow(
+      "Runtime cleanup trace must be outside the runtime"
+    );
+    expect(fs.readFileSync(model, "utf8")).toBe("model");
+  });
+
   it("preserves an unconfirmed launch and a running related process", () => {
     const runtime = createRuntime();
     runtime.setLaunchPending();

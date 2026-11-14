@@ -285,6 +285,22 @@ function cleanupRuntime(
   ownRuntime = false
 ): RuntimeCleanupResult {
   assertRoot(root, base);
+  const traceFile = process.env.AIM_TEST_RUNTIME_CLEANUP_TRACE;
+  const trace = (phase: string, target = root) => {
+    if (!traceFile) {
+      return;
+    }
+    const output = path.resolve(traceFile);
+    const relative = path.relative(root, output);
+    if (!(relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))) {
+      throw new Error("Runtime cleanup trace must be outside the runtime");
+    }
+    fs.appendFileSync(
+      output,
+      `${JSON.stringify({ phase, root, target, pid: process.pid, time: new Date().toISOString() })}\n`
+    );
+  };
+  trace("cleanup-start");
   if (!fs.existsSync(root)) {
     return { root, status: "deleted" };
   }
@@ -306,7 +322,9 @@ function cleanupRuntime(
       reason: "A related process is still running",
     };
   }
+  trace("scan-before");
   scanRuntime(root, base);
+  trace("scan-after");
   const removalOptions = {
     recursive: true,
     force: true,
@@ -317,11 +335,16 @@ function cleanupRuntime(
   // partial cleanup must remain identifiable by the stale-runtime command.
   for (const name of fs.readdirSync(root)) {
     if (name !== RUNTIME_MARKER) {
-      fs.rmSync(path.join(root, name), removalOptions);
+      const target = path.join(root, name);
+      trace("rm-before", target);
+      fs.rmSync(target, removalOptions);
+      trace("rm-after", target);
     }
   }
   try {
+    trace("root-rm-before");
     fs.rmSync(root, removalOptions);
+    trace("root-rm-after");
   } catch (error) {
     if (fs.existsSync(root)) {
       try {

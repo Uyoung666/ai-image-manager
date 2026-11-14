@@ -4,7 +4,11 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { type ElectronApplication, expect } from "@playwright/test";
+import {
+  type ElectronApplication,
+  expect,
+  type Locator,
+} from "@playwright/test";
 import sharp from "sharp";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
@@ -19,6 +23,44 @@ declare global {
   interface Window {
     releaseDuplicateRescan: (() => void) | undefined;
   }
+}
+
+function readRescanLayout(main: Locator) {
+  return main.evaluate((element) => {
+    const route = element.closest('[data-surface="page"]');
+    const host = route?.closest('main[data-surface="content"]');
+    const header = route?.querySelector(":scope > header");
+    if (!(route && host && header)) {
+      throw new Error("Missing duplicate scan layout surfaces");
+    }
+    const hostRect = host.getBoundingClientRect();
+    const mainRect = element.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
+    return {
+      // Startup tasks can change the host viewport independently of this route.
+      relative: {
+        header: {
+          x: headerRect.x - hostRect.x,
+          y: headerRect.y - hostRect.y,
+          width: headerRect.width,
+          height: headerRect.height,
+        },
+        main: {
+          x: mainRect.x - hostRect.x,
+          y: mainRect.y - hostRect.y,
+          width: mainRect.width,
+          bottomInset: hostRect.bottom - mainRect.bottom,
+        },
+      },
+      scrollTop: element.scrollTop,
+      absolute: {
+        host: hostRect.toJSON(),
+        route: route.getBoundingClientRect().toJSON(),
+        header: headerRect.toJSON(),
+        main: mainRect.toJSON(),
+      },
+    };
+  });
 }
 
 test("mixed media summary, restart, and cleanup session exclusions", async () => {
@@ -182,12 +224,29 @@ test("mixed media summary, restart, and cleanup session exclusions", async () =>
       await expect
         .poll(() => page.evaluate(() => innerWidth))
         .toBeLessThanOrEqual(width + 2);
-      const main = page.locator("main").last();
+      const headerLayout = page
+        .locator('[data-surface="page"] > header > div')
+        .first();
+      await expect(headerLayout).toHaveCSS(
+        "display",
+        width >= 1024 ? "grid" : "flex"
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(() => matchMedia("(min-width: 1024px)").matches)
+        )
+        .toBe(width >= 1024);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+      );
+      const main = page.locator('[data-surface="page"] main');
       await main.evaluate((el) => {
         el.scrollTop = 100;
       });
-      const before = await main.boundingBox();
-      const scroll = await main.evaluate((el) => el.scrollTop);
+      const before = await readRescanLayout(main);
       // Keep background polls flowing while this scan waits for layout checks.
       await page.evaluate(() => {
         window.releaseDuplicateRescan = undefined;
@@ -219,20 +278,36 @@ test("mixed media summary, restart, and cleanup session exclusions", async () =>
       await expect
         .poll(() => page.evaluate(() => Boolean(window.releaseDuplicateRescan)))
         .toBe(true);
-      const status = page.getByRole("status").filter({
-        has: page.getByRole("button", { name: "取消", exact: true }),
-      });
+      const status = page
+        .locator('[data-surface="page"]')
+        .getByRole("status")
+        .filter({
+          has: page.getByRole("button", { name: "取消", exact: true }),
+        });
       await expect(status).toBeVisible();
-      expect(await main.boundingBox()).toEqual(before);
-      expect(await main.evaluate((el) => el.scrollTop)).toBe(scroll);
+      const scanning = await readRescanLayout(main);
+      const layoutEvidence = test
+        .info()
+        .outputPath(`rescan-layout-${width}.json`);
+      fs.writeFileSync(
+        layoutEvidence,
+        JSON.stringify({ width, height, before, scanning })
+      );
+      await test.info().attach(`rescan-layout-${width}`, {
+        path: layoutEvidence,
+        contentType: "application/json",
+      });
+      expect(scanning.relative).toEqual(before.relative);
+      expect(scanning.scrollTop).toBe(before.scrollTop);
       await page.evaluate(() => {
         const release = window.releaseDuplicateRescan;
         window.releaseDuplicateRescan = undefined;
         release?.();
       });
       await expect(status).not.toBeVisible();
-      expect(await main.boundingBox()).toEqual(before);
-      expect(await main.evaluate((el) => el.scrollTop)).toBe(scroll);
+      const after = await readRescanLayout(main);
+      expect(after.relative).toEqual(before.relative);
+      expect(after.scrollTop).toBe(before.scrollTop);
     }
     const firstGroup = page
       .locator("article")

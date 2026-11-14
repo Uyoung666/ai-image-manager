@@ -146,6 +146,8 @@ insertViewStat.run(photoIds[7], 1, now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
 // Wander settings (read through the app_settings IPC by the provider).
 const nowMs = Date.now();
+// UI fixtures must remain idle so automatic indexing cannot defer wandering.
+insertSetting.run("ai.autoIndexStopped", "true", nowMs);
 insertSetting.run("wander.enabled", String(enabled), nowMs);
 insertSetting.run("wander.idleMinutes", "15", nowMs);
 insertSetting.run("wander.intervalSeconds", "3", nowMs);

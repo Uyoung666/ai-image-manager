@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -18,19 +19,18 @@ interface ReflowFrame {
   scrollTop: number;
   width: number;
 }
+interface ReflowResult {
+  frames: ReflowFrame[];
+  initialOffset: number;
+  initialScrollTop: number;
+  removed: number;
+  replaced: number;
+  retained: number;
+  targetRetained: boolean;
+}
 declare global {
   interface Window {
-    masonryReflowProbe: {
-      stop: () => {
-        frames: ReflowFrame[];
-        retained: number;
-        replaced: number;
-        removed: number;
-        targetRetained: boolean;
-        initialOffset: number;
-        initialScrollTop: number;
-      };
-    };
+    masonryReflowProbe: { stop: () => ReflowResult } | undefined;
   }
 }
 let app: ElectronApplication;
@@ -82,32 +82,54 @@ test.beforeAll(async () => {
   const fixture = path.join(root, "fixture");
   fs.mkdirSync(fixture);
   const escapeSql = (value: string) => value.replaceAll("'", "''");
+  const heights = [66, 150, 100, 80, 125];
+  const color = { r: 75, g: 135, b: 185 };
+  const palette = JSON.stringify([
+    {
+      ...color,
+      hex: "#4b87b9",
+      hue: 207,
+      lightness: 130 / 255,
+      saturation: 0.44,
+      weight: 1,
+    },
+  ]);
+  const checkedAt = Date.now();
   const images = await Promise.all(
-    [66, 150, 100, 80, 125].map((height) =>
+    heights.map((height) =>
       sharp({
         create: {
           width: 100,
           height,
           channels: 3,
-          background: { r: 75, g: 135, b: 185 },
+          background: color,
         },
       })
         .png()
         .toBuffer()
     )
   );
+  // Imported individual files form a valid catalogue without queuing a root scan.
   const statements = [
-    `INSERT INTO folders(id,path,display_name,photo_count,created_at) VALUES(1,'${escapeSql(fixture)}','ReflowFixture',2000,1)`,
+    `INSERT INTO folders(id,path,display_name,photo_count,created_at,explicit_only,source_status,source_checked_at,last_scan_result) VALUES(1,'${escapeSql(fixture)}','ReflowFixture',2000,1,1,'available',${checkedAt},'complete')`,
+    "INSERT INTO app_settings(key,value,updated_at) VALUES('colors_migrated','true',1) ON CONFLICT(key) DO UPDATE SET value='true'",
   ];
   for (let id = 1; id <= 2000; id++) {
     const filename = `ReflowFixture-${id}.png`;
     const photoPath = path.join(fixture, filename);
-    fs.writeFileSync(photoPath, images[(id - 1) % 5]);
-    const height = [660, 1500, 1000, 800, 1250][(id - 1) % 5];
+    const index = (id - 1) % heights.length;
+    const image = images[index];
+    fs.writeFileSync(photoPath, image);
+    const stat = fs.statSync(photoPath);
+    const sourceHash = createHash("sha256").update(image).digest("hex");
+    // Keep the managed cache cold for the existing decoded-image probe.
     statements.push(
-      `INSERT INTO photos(id,path,filename,folder_id,file_size,file_date,width,height,format,thumbnail_path,is_indexed,is_ai_processed,is_face_processed,created_at) VALUES(${id},'${escapeSql(photoPath)}','${filename}',1,1024,${1_780_000_000_000 + id},1000,${height},'png','${escapeSql(photoPath)}',1,1,1,1)`
+      `INSERT INTO photos(id,path,filename,folder_id,file_size,file_date,width,height,format,dominant_colors,color_bucket,is_indexed,is_ai_processed,is_face_processed,created_at,source_status,source_checked_at,source_available_at,source_size,source_mtime_ms,source_ctime_ms,source_hash,source_hash_version,source_hash_file_revision) VALUES(${id},'${escapeSql(photoPath)}','${filename}',1,${stat.size},${1_780_000_000_000 + id},100,${heights[index]},'png','${palette}',20,1,1,1,1,'available',${checkedAt},${checkedAt},${stat.size},${stat.mtimeMs},${stat.ctimeMs},'${sourceHash}','sha256-full-v1',0)`
     );
   }
+  statements.push(
+    "INSERT INTO advanced_exif_data(photo_id,parser_version,status) SELECT id,3,'unsupported' FROM photos"
+  );
   execFileSync(
     electronPath,
     [
@@ -125,6 +147,12 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => {
   await app?.close();
+});
+test.afterEach(async () => {
+  const info = test.info();
+  if (info.status !== info.expectedStatus && page && !page.isClosed()) {
+    await attachReflowProbe("unfinished-reflow");
+  }
 });
 
 test.beforeEach(async () => {
@@ -546,45 +574,90 @@ async function expectCenteredTarget(id: string) {
   const card = page.locator(`[data-photo-id="${id}"][role="option"]`);
   await expect(card).toHaveAttribute("aria-selected", "true");
   await expect
-    .poll(() =>
-      card.evaluate((element) => {
-        const scroll = element.closest<HTMLElement>("[data-masonry-scroll]");
-        if (!scroll) {
-          throw new Error("Missing masonry scroll surface");
-        }
-        const bounds = scroll.getBoundingClientRect();
-        const rect = element.getBoundingClientRect();
-        const inset =
-          document
-            .querySelector(".home-gallery-toolbar-layer")
-            ?.getBoundingClientRect().height ?? 0;
-        const paddingBottom =
-          Number.parseFloat(getComputedStyle(scroll).paddingBottom) || 0;
-        const translateY =
-          Number.parseFloat(
-            getComputedStyle(element).translate.split(" ")[1] ?? "0"
-          ) || 0;
-        const top = rect.top - translateY;
-        const bottom = rect.bottom - translateY;
-        const viewportTop = bounds.top + inset;
-        const viewportBottom = bounds.top + scroll.clientHeight - paddingBottom;
-        const centerError =
-          (top + bottom) / 2 - (viewportTop + viewportBottom) / 2;
-        const expectedScrollTop = Math.max(
-          0,
-          Math.min(
-            scroll.scrollTop + centerError,
-            scroll.scrollHeight - scroll.clientHeight
-          )
-        );
-        const fits = rect.height <= viewportBottom - viewportTop;
-        return (
-          Math.abs(scroll.scrollTop - expectedScrollTop) <= 2 &&
-          (!fits || (top >= viewportTop - 2 && bottom <= viewportBottom + 2))
-        );
-      })
+    .poll(
+      () =>
+        card.evaluate((element) => {
+          const scroll = element.closest<HTMLElement>("[data-masonry-scroll]");
+          if (!scroll) {
+            throw new Error("Missing masonry scroll surface");
+          }
+          const bounds = scroll.getBoundingClientRect();
+          const rect = element.getBoundingClientRect();
+          const inset =
+            document
+              .querySelector(".home-gallery-toolbar-layer")
+              ?.getBoundingClientRect().height ?? 0;
+          const paddingBottom =
+            Number.parseFloat(getComputedStyle(scroll).paddingBottom) || 0;
+          const translateY =
+            Number.parseFloat(
+              getComputedStyle(element).translate.split(" ")[1] ?? "0"
+            ) || 0;
+          const top = rect.top - translateY;
+          const bottom = rect.bottom - translateY;
+          const viewportTop = bounds.top + inset;
+          const viewportBottom =
+            bounds.top + scroll.clientHeight - paddingBottom;
+          const centerError =
+            (top + bottom) / 2 - (viewportTop + viewportBottom) / 2;
+          const expectedScrollTop = Math.max(
+            0,
+            Math.min(
+              scroll.scrollTop + centerError,
+              scroll.scrollHeight - scroll.clientHeight
+            )
+          );
+          const fits = rect.height <= viewportBottom - viewportTop;
+          const scrollDeviation = Math.abs(
+            scroll.scrollTop - expectedScrollTop
+          );
+          return fits
+            ? Math.max(
+                scrollDeviation,
+                viewportTop - top,
+                bottom - viewportBottom
+              )
+            : scrollDeviation;
+        }),
+      { message: `Centering or clipping deviation for photo ${id} (px)` }
     )
-    .toBe(true);
+    .toBeLessThanOrEqual(2);
+}
+
+async function attachReflowProbe(label: string) {
+  const result = await page.evaluate(() => {
+    const probe = window.masonryReflowProbe;
+    window.masonryReflowProbe = undefined;
+    return probe?.stop();
+  });
+  if (!result) {
+    return;
+  }
+  const framePath = test.info().outputPath(`${label}.json`);
+  fs.writeFileSync(
+    framePath,
+    JSON.stringify(
+      {
+        ...result,
+        frames: result.frames.map((frame, index) => ({
+          ...frame,
+          index,
+          anchorDeviationPx:
+            frame.anchorOffset === null
+              ? null
+              : frame.anchorOffset - result.initialOffset,
+          scrollDeviationPx: frame.scrollTop - result.initialScrollTop,
+        })),
+      },
+      null,
+      2
+    )
+  );
+  await test.info().attach(label, {
+    path: framePath,
+    contentType: "application/json",
+  });
+  return result;
 }
 
 async function finishProbe(
@@ -592,17 +665,18 @@ async function finishProbe(
   overlay: boolean,
   centeredTargetId?: string
 ) {
-  await page.waitForTimeout(350);
-  if (centeredTargetId) {
-    await expectCenteredTarget(centeredTargetId);
+  let result: ReflowResult | undefined;
+  try {
+    await page.waitForTimeout(350);
+    if (centeredTargetId) {
+      await expectCenteredTarget(centeredTargetId);
+    }
+  } finally {
+    result = await attachReflowProbe(label);
   }
-  const result = await page.evaluate(() => window.masonryReflowProbe.stop());
-  const framePath = test.info().outputPath(`${label}.json`);
-  fs.writeFileSync(framePath, JSON.stringify(result, null, 2));
-  await test.info().attach(label, {
-    path: framePath,
-    contentType: "application/json",
-  });
+  if (!result) {
+    throw new Error(`Missing reflow probe for ${label}`);
+  }
   expect(result.retained).toBeGreaterThan(0);
   expect(result.replaced).toBe(0);
   expect(result.removed).toBe(0);
@@ -610,14 +684,15 @@ async function finishProbe(
     expect(result.targetRetained).toBe(true);
   }
   expect(result.frames.length).toBeGreaterThan(2);
-  for (const frame of result.frames) {
+  for (const [index, frame] of result.frames.entries()) {
     expect(frame.loaded).toBeGreaterThan(0);
     if (!centeredTargetId) {
       expect(frame.anchorOffset).not.toBeNull();
       // At the top boundary, a wrapping toolbar can legitimately change padding.
       if (result.initialScrollTop > 0 || frame.scrollTop > 0) {
         expect(
-          Math.abs((frame.anchorOffset ?? 0) - result.initialOffset)
+          Math.abs((frame.anchorOffset ?? 0) - result.initialOffset),
+          `${label} frame ${index} anchor deviation (px)`
         ).toBeLessThanOrEqual(2);
       }
     }

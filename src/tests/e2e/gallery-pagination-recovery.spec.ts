@@ -17,6 +17,8 @@ const COLUMN_WIDTHS = [140, 220, 320];
 const EDIT_TAGS = /^Edit tags for 2 photos$/;
 const RENDERER_URL = /^(?:http|file):/;
 const TAG_MATCH = /Tag match/;
+const PHOTO_INSPECTOR = '.photo-detail-panel-shell [data-surface="inspector"]';
+const AI_COVERAGE_STATUS = /^AI has indexed /;
 
 declare global {
   interface Window {
@@ -142,6 +144,7 @@ test.beforeAll(async () => {
   const escapeSql = (value: string) => value.replaceAll("'", "''");
   const statements = [
     `INSERT INTO folders(id,path,display_name,photo_count,created_at) VALUES(1,'${escapeSql(fixture)}','PaginationFixture',${PHOTO_COUNT},1)`,
+    "INSERT INTO app_settings(key,value,updated_at) VALUES('ui.reduceMotion','true',1) ON CONFLICT(key) DO UPDATE SET value='true'",
   ];
   for (let id = 1; id <= PHOTO_COUNT; id++) {
     const filename = `PaginationFixture-${String(id).padStart(3, "0")}.png`;
@@ -164,9 +167,14 @@ test.beforeAll(async () => {
       .png()
       .toFile(photoPath);
     statements.push(
-      `INSERT INTO photos(id,path,filename,folder_id,file_size,file_date,width,height,format,thumbnail_path,dominant_colors,is_indexed,is_ai_processed,is_face_processed,created_at) VALUES(${id},'${escapeSql(photoPath)}','${filename}',1,1024,${id},${width},${height},'png','${escapeSql(photoPath)}','[{"hex":"#336699","weight":1}]',1,1,1,1)`
+      `INSERT INTO photos(id,path,filename,folder_id,file_size,file_date,width,height,format,thumbnail_path,dominant_colors,is_indexed,is_ai_processed,is_face_processed,source_status,created_at) VALUES(${id},'${escapeSql(photoPath)}','${filename}',1,1024,${id},${width},${height},'png','${escapeSql(photoPath)}','[{"hex":"#336699","weight":1}]',1,1,1,'available',1)`
     );
   }
+  // The fixture represents an already scanned catalogue of PNGs without
+  // advanced EXIF. Pagination here exercises the subsequent tag edits.
+  statements.push(
+    "INSERT INTO advanced_exif_data(photo_id,parser_version,status) SELECT id,3,'unsupported' FROM photos"
+  );
   for (let index = 0; index < SIZES.length * COLUMN_WIDTHS.length; index++) {
     statements.push(
       `INSERT INTO tags(id,name,created_at) VALUES(${9300 + index},'PaginationTag-${index}',1)`
@@ -241,6 +249,18 @@ for (const [sizeIndex, size] of SIZES.entries()) {
       });
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => Boolean(window.__e2eNavigate));
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-reduced-motion",
+        "true"
+      );
+      // Readiness resolves after model preparation. The global task bar also
+      // includes startup source reconciliation, so settle both before probing.
+      await expect(
+        page.getByRole("status", { name: AI_COVERAGE_STATUS })
+      ).toBeVisible({ timeout: 60_000 });
+      await expect(
+        page.locator('[data-reduced-motion-keep="progress-bar"]')
+      ).toHaveCount(0, { timeout: 60_000 });
       if (mode === "search") {
         const input = page.locator("input.home-search-input");
         await input.fill(tag);
@@ -275,11 +295,37 @@ for (const [sizeIndex, size] of SIZES.entries()) {
               : window.paginationRecoveryRequests.length,
           mode === "search"
         );
+      const incompleteSearch = page
+        .getByRole("status")
+        .filter({ hasText: "Partial results. Retry to get complete results." });
+      let setupRetries = 0;
+      let attemptStartedAt = performance.now();
       await expect
         .poll(
           async () => {
-            if ((await requestCount()) >= 3) {
+            const requests = await requestCount();
+            if (requests >= 3) {
               return true;
+            }
+            // Startup maintenance can retire a search cursor while its first
+            // page remains visible. Retry from the notice and count the pages
+            // of the replacement search before starting the tag removals.
+            if (
+              mode === "search" &&
+              requests > 1 &&
+              setupRetries < 2 &&
+              performance.now() - attemptStartedAt >= 8000 &&
+              (await incompleteSearch.isVisible())
+            ) {
+              setupRetries++;
+              await page.evaluate(() => {
+                window.continuitySearchRequests = [];
+              });
+              await incompleteSearch
+                .getByRole("button", { name: "Retry", exact: true })
+                .click();
+              attemptStartedAt = performance.now();
+              return false;
             }
             await gallery.hover();
             await page.mouse.wheel(0, 10_000);
@@ -322,7 +368,7 @@ for (const [sizeIndex, size] of SIZES.entries()) {
       await page
         .locator(`[data-photo-id="${selectedId}"][role="option"]`)
         .click();
-      const inspector = page.locator('aside[data-surface="inspector"]');
+      const inspector = page.locator(PHOTO_INSPECTOR);
       await expect(inspector).toBeVisible();
       await page.evaluate(
         () =>
@@ -362,7 +408,42 @@ for (const [sizeIndex, size] of SIZES.entries()) {
           throw new Error("Missing surviving anchor");
         }
         const image = anchor.querySelector("img");
-        const offset = anchor.getBoundingClientRect().top;
+        const offset = anchor.getBoundingClientRect().top - viewport.top;
+        const absoluteOffset = anchor.getBoundingClientRect().top;
+        const snapshot = () => {
+          const ancestors: Record<string, string | number | undefined>[] = [];
+          for (
+            let element: Element | null = gallery;
+            element;
+            element = element.parentElement
+          ) {
+            const rect = element.getBoundingClientRect();
+            ancestors.push({
+              tag: element.tagName,
+              surface: element.getAttribute("data-surface") ?? undefined,
+              top: rect.top,
+              height: rect.height,
+              transform: getComputedStyle(element).transform,
+              scrollTop: element.scrollTop,
+            });
+          }
+          return {
+            anchor: anchor.getBoundingClientRect().toJSON(),
+            gallery: gallery.getBoundingClientRect().toJSON(),
+            selected: document
+              .querySelector(`[data-photo-id="${selected}"]`)
+              ?.getBoundingClientRect()
+              .toJSON(),
+            ancestors,
+            globalProgress: [
+              ...document.querySelectorAll(
+                '[data-reduced-motion-keep="progress-bar"]'
+              ),
+            ].map((element) => element.getBoundingClientRect().toJSON()),
+            reducedMotion: document.documentElement.dataset.reducedMotion,
+          };
+        };
+        const initial = snapshot();
         let missingFrames = 0;
         let overlayFrames = 0;
         let frame = 0;
@@ -389,8 +470,14 @@ for (const [sizeIndex, size] of SIZES.entries()) {
               retained:
                 anchor.isConnected && anchor.querySelector("img") === image,
               offsetChange: Math.abs(
-                anchor.getBoundingClientRect().top - offset
+                anchor.getBoundingClientRect().top -
+                  gallery.getBoundingClientRect().top -
+                  offset
               ),
+              absoluteOffsetChange:
+                anchor.getBoundingClientRect().top - absoluteOffset,
+              initial,
+              final: snapshot(),
             };
           },
         };
@@ -420,6 +507,10 @@ for (const [sizeIndex, size] of SIZES.entries()) {
       );
       const continuity = await page.evaluate(() =>
         window.continuityProbe.stop()
+      );
+      fs.writeFileSync(
+        test.info().outputPath("continuity.json"),
+        JSON.stringify({ mode, size, selectedId, ...continuity }, null, 2)
       );
       expect(continuity.missingFrames).toBe(0);
       expect(continuity.overlayFrames).toBe(0);
@@ -653,7 +744,7 @@ test("keeps the final mismatching photo open for further tag edits", async () =>
     await search.press("Escape");
   }
   await page.locator('[data-photo-id="21"][role="option"]').click();
-  const inspector = page.locator('aside[data-surface="inspector"]');
+  const inspector = page.locator(PHOTO_INSPECTOR);
   await inspector
     .getByRole("button", { name: "Click to remove", exact: true })
     .filter({ hasText: "ContinuityLastMatch" })
@@ -704,11 +795,11 @@ test("can leave during the tag-refresh debounce and return to an updated scope",
       );
     });
   await page
-    .locator('aside[data-surface="inspector"]')
+    .locator(PHOTO_INSPECTOR)
     .getByRole("button", { name: "Click to remove", exact: true })
     .filter({ hasText: "ContinuityScope" })
     .click();
-  await expect(page.locator('aside[data-surface="inspector"]')).toHaveCount(0);
+  await expect(page.locator(PHOTO_INSPECTOR)).toHaveCount(0);
   await expect(page.locator(".home-gallery-toolbar-layer")).toContainText(
     "620"
   );

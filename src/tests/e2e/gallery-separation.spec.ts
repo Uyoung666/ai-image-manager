@@ -2,7 +2,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { type ElectronApplication, expect, type Page } from "@playwright/test";
+import {
+  type ElectronApplication,
+  expect,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import sharp from "sharp";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
@@ -10,6 +15,8 @@ const electronPath = createRequire(import.meta.url)("electron") as string;
 const SEQUENCES = /^Sequences/;
 const PHOTO_MODE = /^(Photos|照片)$/;
 const SEQUENCE_MODE = /^(Sequences|序列)/;
+const NEBULA_PANE_GRADIENT = /linear-gradient/;
+const TRANSPARENT_BACKGROUND = "rgba(0, 0, 0, 0)";
 const GROUP_IDS = [1, 2, 3, 110, 111, 112, 168, 169, 170];
 const SIZES = [
   { width: 720, height: 480 },
@@ -438,6 +445,54 @@ for (const size of SIZES) {
   });
 }
 
+function luminance(rgb: number[]): number {
+  const [red, green, blue] = rgb.map((value) => {
+    const channel = value / 255;
+    return channel <= 0.040_45
+      ? channel / 12.92
+      : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+}
+
+async function expectToolbarTextContrast(text: Locator) {
+  const foreground = await text.evaluate((element) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Canvas unavailable");
+    }
+    context.fillStyle = getComputedStyle(element).color;
+    context.fillRect(0, 0, 1, 1);
+    return Array.from(context.getImageData(0, 0, 1, 1).data);
+  });
+  const screenshot = await text.screenshot({
+    scale: "css",
+    style:
+      ".page-toolbar, .page-toolbar * { -webkit-text-fill-color: transparent !important; text-shadow: none !important; } .page-toolbar svg { visibility: hidden !important; }",
+  });
+  const { data, info } = await sharp(screenshot)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const offset =
+    (Math.floor(info.height / 2) * info.width + Math.floor(info.width / 2)) *
+    info.channels;
+  const background = Array.from(data.subarray(offset, offset + 3));
+  const alpha = foreground[3] / 255;
+  const fg = luminance(
+    background.map(
+      (channel, index) => foreground[index] * alpha + channel * (1 - alpha)
+    )
+  );
+  const bg = luminance(background);
+  expect(
+    (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05)
+  ).toBeGreaterThanOrEqual(4.5);
+}
+
 test("preserves light and built-in theme materials on real page toolbars", async () => {
   await navigate("/people");
   await page.evaluate(() =>
@@ -449,11 +504,14 @@ test("preserves light and built-in theme materials on real page toolbars", async
   );
   await page.screenshot({ path: test.info().outputPath("people-light.png") });
   for (const name of ["Nebula Glass", "ASCII Ocean"]) {
+    const nebula = name === "Nebula Glass";
+    const attribute = nebula ? "data-nebula-glass" : "data-ascii-ocean";
     await navigate("/settings/plugins");
     await page
       .getByRole("checkbox", { name: `Toggle plugin: ${name}` })
       .locator("..")
       .click();
+    await expect(page.locator("html")).toHaveAttribute(attribute, "active");
     for (const light of [false, true]) {
       await page.evaluate((value) => {
         document.documentElement.classList.toggle("light", value);
@@ -463,16 +521,30 @@ test("preserves light and built-in theme materials on real page toolbars", async
         await navigate(route);
         const toolbar = page.locator(".page-toolbar");
         await expect(toolbar).toBeVisible();
-        const material = await toolbar.evaluate((element) => {
-          const style = getComputedStyle(element);
-          return {
-            background: style.backgroundColor,
-            color: style.color,
-            text: style.getPropertyValue("--foreground").trim(),
-          };
-        });
-        expect(material.background).not.toBe("rgba(0, 0, 0, 0)");
-        expect(material.text).not.toBe("");
+        if (nebula && route === "/settings/cull-archive") {
+          await expect(toolbar).toHaveCSS(
+            "background-color",
+            TRANSPARENT_BACKGROUND
+          );
+          const pane = toolbar.locator(
+            'xpath=ancestor::*[@data-surface="page" or @data-surface="gallery" or @data-surface="panel"][1]'
+          );
+          await expect(pane).toHaveCSS(
+            "background-image",
+            NEBULA_PANE_GRADIENT
+          );
+          await expect(toolbar).toHaveCSS("backdrop-filter", "none");
+        } else {
+          await expect(toolbar).not.toHaveCSS(
+            "background-color",
+            TRANSPARENT_BACKGROUND
+          );
+        }
+        const label =
+          route === "/people"
+            ? toolbar.getByRole("button").first()
+            : toolbar.getByRole("heading", { level: 1 });
+        await expectToolbarTextContrast(label);
         await page.screenshot({
           path: test
             .info()
@@ -485,6 +557,7 @@ test("preserves light and built-in theme materials on real page toolbars", async
       .getByRole("checkbox", { name: `Toggle plugin: ${name}` })
       .locator("..")
       .click();
+    await expect(page.locator("html")).not.toHaveAttribute(attribute, "active");
   }
   await page.evaluate(() =>
     document.documentElement.classList.replace("light", "dark")

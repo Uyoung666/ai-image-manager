@@ -141,6 +141,11 @@ test.beforeAll(async () => {
     }
   }
   statements.push(
+    // These generated PNGs have no EXIF. Keep this focus fixture at the current
+    // advanced EXIF parser version so startup enrichment cannot rebuild sequences
+    // while a test deliberately holds a detail request at the MessagePort boundary.
+    "INSERT INTO advanced_exif_data(photo_id,status,parser_version,enriched_at) SELECT id,'unsupported',3,1 FROM photos",
+    "INSERT INTO app_settings(key,value,updated_at) VALUES('ai.autoIndexStopped','true',1) ON CONFLICT(key) DO UPDATE SET value='true',updated_at=1",
     "INSERT INTO album_photos(album_id,photo_id) SELECT 9002,id FROM photos",
     `UPDATE face_identities SET representative_photo_id=${targetPhoto} WHERE id=9002`
   );
