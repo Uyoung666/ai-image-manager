@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -63,40 +64,59 @@ test.beforeAll(async () => {
   const fixture = path.join(root, "fixture");
   fs.mkdirSync(fixture);
   const escapeSql = (value: string) => value.replaceAll("'", "''");
+  const heights = [66, 150, 100, 80, 125];
+  const color = { r: 75, g: 135, b: 185 };
+  const palette = JSON.stringify([
+    {
+      ...color,
+      hex: "#4b87b9",
+      hue: 207,
+      lightness: 130 / 255,
+      saturation: 0.44,
+      weight: 1,
+    },
+  ]);
+  const checkedAt = Date.now();
   const images = await Promise.all(
-    [66, 150, 100, 80, 125].map((height) =>
+    heights.map((height) =>
       sharp({
         create: {
           width: 100,
           height,
           channels: 3,
-          background: { r: 75, g: 135, b: 185 },
+          background: color,
         },
       })
         .png()
         .toBuffer()
     )
   );
+  // Imported individual files form a valid catalogue without queuing a root scan.
   const statements = [
-    `INSERT INTO folders(id,path,display_name,photo_count,created_at) VALUES(1,'${escapeSql(fixture)}','BackTopFixture',2000,1)`,
+    `INSERT INTO folders(id,path,display_name,photo_count,created_at,explicit_only,source_status,source_checked_at,last_scan_result) VALUES(1,'${escapeSql(fixture)}','BackTopFixture',1760,1,1,'available',${checkedAt},'complete')`,
     "INSERT INTO albums(id,name,created_at) VALUES(1,'BackTopAlbum',1)",
+    "INSERT INTO app_settings(key,value,updated_at) VALUES('colors_migrated','true',1) ON CONFLICT(key) DO UPDATE SET value='true'",
   ];
   for (let id = 1; id <= 2000; id++) {
     const filename = `BackTopFixture-${id}.png`;
     const photoPath = path.join(fixture, filename);
     const group = Math.floor((id - 1) / 2);
-    fs.writeFileSync(
-      photoPath,
-      Buffer.concat([images[group % 5], Buffer.from(String(group))])
-    );
-    const height = [660, 1500, 1000, 800, 1250][group % 5];
+    const index = group % heights.length;
+    const image = Buffer.concat([images[index], Buffer.from(String(group))]);
+    fs.writeFileSync(photoPath, image);
+    const stat = fs.statSync(photoPath);
+    const sourceHash = createHash("sha256").update(image).digest("hex");
+    // Leave the managed cache cold so the existing loading assertions exercise it.
     statements.push(
-      `INSERT INTO photos(id,path,filename,folder_id,file_size,file_date,width,height,format,thumbnail_path,is_indexed,is_ai_processed,is_face_processed,created_at) VALUES(${id},'${escapeSql(photoPath)}','${filename}',1,1024,${1_780_000_000_000 + id},1000,${height},'png','${escapeSql(photoPath)}',1,1,1,1)`
+      `INSERT INTO photos(id,path,filename,folder_id,file_size,file_date,width,height,format,dominant_colors,color_bucket,is_indexed,is_ai_processed,is_face_processed,created_at,source_status,source_checked_at,source_available_at,source_size,source_mtime_ms,source_ctime_ms,source_hash,source_hash_version,source_hash_file_revision) VALUES(${id},'${escapeSql(photoPath)}','${filename}',1,${stat.size},${1_780_000_000_000 + id},100,${heights[index]},'png','${palette}',20,1,1,1,1,'available',${checkedAt},${checkedAt},${stat.size},${stat.mtimeMs},${stat.ctimeMs},'${sourceHash}','sha256-full-v1',0)`
     );
     statements.push(
       `INSERT INTO album_photos(album_id,photo_id,sort_order) VALUES(1,${id},${id})`
     );
   }
+  statements.push(
+    "INSERT INTO advanced_exif_data(photo_id,parser_version,status) SELECT id,3,'unsupported' FROM photos"
+  );
   statements.push(`UPDATE photos SET deleted_at=${Date.now()} WHERE id > 1760`);
   execFileSync(
     electronPath,
@@ -156,57 +176,79 @@ test("records near and distant back to top", async () => {
     .toBeGreaterThan(55);
   const results: unknown[] = [];
   for (const screens of [3, 3.95, 4.05, 50]) {
-    await gallery.evaluate((el, distance) => {
-      el.scrollTop = distance * el.clientHeight;
-    }, screens);
-    await page.waitForTimeout(350);
-    const frames = await gallery.evaluate(async (el) => {
-      const button =
-        document.querySelector<HTMLButtonElement>(".scroll-to-top-btn");
-      if (!button) {
-        throw new Error("Missing back to top button");
-      }
-      const frames: {
-        time: number;
-        top: number;
-        opacity: number;
-        cards: number;
-        visibleCards: number;
-      }[] = [];
-      const start = performance.now();
-      button.click();
-      await new Promise<void>((resolve) => {
-        function sample() {
-          const content = el.querySelector("[data-back-to-top-content]") ?? el;
-          const bounds = el.getBoundingClientRect();
-          const visibleCards = Array.from(
-            el.querySelectorAll("[data-photo-id]")
-          ).filter((card) => {
-            const rect = card.getBoundingClientRect();
-            return rect.bottom > bounds.top + 110 && rect.top < bounds.bottom;
-          }).length;
-          frames.push({
-            time: performance.now() - start,
-            top: el.scrollTop,
-            opacity: Number(getComputedStyle(content).opacity),
-            cards: el.querySelectorAll("[data-photo-id]").length,
-            visibleCards,
-          });
-          if (performance.now() - start < 1100) {
-            requestAnimationFrame(sample);
-          } else {
-            resolve();
-          }
+    const recordAtDistance = async () => {
+      await gallery.evaluate((el, distance) => {
+        el.scrollTop = distance * el.clientHeight;
+      }, screens);
+      await page.waitForTimeout(350);
+      return gallery.evaluate(async (el, distance) => {
+        const trigger = { top: el.scrollTop, height: el.clientHeight };
+        // If the progress bar changed the viewport, reposition and settle before
+        // activating the button. A pending scrollend can cancel the animation.
+        if (Math.abs(trigger.top - distance * trigger.height) > 2) {
+          return null;
         }
-        requestAnimationFrame(sample);
-      });
-      return frames;
-    });
-    expect(await gallery.evaluate((el) => el.scrollTop)).toBe(0);
+        const button =
+          el.parentElement?.querySelector<HTMLButtonElement>(
+            ".scroll-to-top-btn"
+          );
+        if (!button) {
+          throw new Error("Missing back to top button");
+        }
+        const frames: {
+          time: number;
+          top: number;
+          opacity: number;
+          cards: number;
+          visibleCards: number;
+        }[] = [];
+        const start = performance.now();
+        button.click();
+        await new Promise<void>((resolve) => {
+          function sample() {
+            const content =
+              el.querySelector("[data-back-to-top-content]") ?? el;
+            const bounds = el.getBoundingClientRect();
+            const visibleCards = Array.from(
+              el.querySelectorAll("[data-photo-id]")
+            ).filter((card) => {
+              const rect = card.getBoundingClientRect();
+              return rect.bottom > bounds.top + 110 && rect.top < bounds.bottom;
+            }).length;
+            frames.push({
+              time: performance.now() - start,
+              top: el.scrollTop,
+              opacity: Number(getComputedStyle(content).opacity),
+              cards: el.querySelectorAll("[data-photo-id]").length,
+              visibleCards,
+            });
+            if (performance.now() - start < 1100) {
+              requestAnimationFrame(sample);
+            } else {
+              resolve();
+            }
+          }
+          requestAnimationFrame(sample);
+        });
+        return { frames, trigger };
+      }, screens);
+    };
+    let recording = await recordAtDistance();
+    for (let attempt = 0; !recording && attempt < 3; attempt++) {
+      recording = await recordAtDistance();
+    }
+    if (!recording) {
+      throw new Error(
+        `Gallery viewport did not stabilize at ${screens} screens`
+      );
+    }
+    const { frames, trigger } = recording;
+    expect(trigger.top > 4 * trigger.height).toBe(screens > 4);
     fs.writeFileSync(
       test.info().outputPath(`frames-${screens}.json`),
       JSON.stringify(frames)
     );
+    expect(await gallery.evaluate((el) => el.scrollTop)).toBe(0);
     expect(
       frames.every(
         (frame) =>
@@ -227,7 +269,7 @@ test("records near and distant back to top", async () => {
     } else {
       expect(new Set(frames.map((frame) => frame.top)).size).toBeGreaterThan(3);
     }
-    results.push({ screens, frames });
+    results.push({ screens, trigger, frames });
   }
   fs.writeFileSync(
     test.info().outputPath("frames.json"),

@@ -43,7 +43,7 @@ export function createBackToTopController(
     document.removeEventListener("wheel", cancel, true);
     document.removeEventListener("touchstart", cancel, true);
     document.removeEventListener("keydown", onKeyDown, true);
-    element.removeEventListener("scrollend", finish);
+    element.removeEventListener("scrollend", finishSmooth);
     window.removeEventListener("blur", cancel);
     window.removeEventListener("resize", cancel);
     if (smooth) {
@@ -54,6 +54,17 @@ export function createBackToTopController(
 
   function finish() {
     cancel();
+  }
+
+  function finishSmooth() {
+    const needsPosition = smooth && element.scrollTop > 0;
+    smooth = false;
+    // Layout updates can end Chromium's animation early. Explicit input
+    // cancels the listener and timer before this completion path can run.
+    if (needsPosition) {
+      positionAtTop();
+    }
+    finish();
   }
 
   function onPointerDown(event: PointerEvent) {
@@ -138,8 +149,8 @@ export function createBackToTopController(
     window.addEventListener("resize", cancel);
     if (element.scrollTop <= element.clientHeight * 4) {
       smooth = true;
-      element.addEventListener("scrollend", finish);
-      timeout = setTimeout(finish, 1500);
+      element.addEventListener("scrollend", finishSmooth);
+      timeout = setTimeout(finishSmooth, 1500);
       element.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }

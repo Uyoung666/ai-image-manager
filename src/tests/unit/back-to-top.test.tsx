@@ -79,6 +79,17 @@ describe("back to top", () => {
       top: element.scrollTop,
       behavior: "instant",
     });
+    element.dispatchEvent(new Event("scrollend"));
+    expect(element.scrollTop).toBe(2000);
+  });
+
+  it("finishes a near return if passive layout ends the native animation early", () => {
+    const { controller, element, scrollTo } = fixture(2000);
+    controller.start(false);
+    element.scrollTop = 177;
+    element.dispatchEvent(new Event("scrollend"));
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: "instant" });
+    expect(element.scrollTop).toBe(0);
   });
 
   it.each([
