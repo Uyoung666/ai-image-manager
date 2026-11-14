@@ -1,9 +1,19 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LibraryPhotoStatusBadge } from "@/components/LibraryPhotoStatus";
 import { PhotoCard } from "@/components/PhotoCard";
 import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
 import { toGalleryThumbnailUrl } from "@/utils/local-media-url";
+
+vi.mock("@/components/LibraryPhotoStatus", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/components/LibraryPhotoStatus")>();
+  return {
+    ...actual,
+    LibraryPhotoStatusBadge: vi.fn(actual.LibraryPhotoStatusBadge),
+  };
+});
 
 vi.mock("@/hooks/useGalleryThumbnail", async (importOriginal) => {
   const actual =
@@ -38,6 +48,7 @@ describe("PhotoCard", () => {
     vi.useFakeTimers();
     baseProps.onClick.mockClear();
     baseProps.onDoubleClick.mockClear();
+    vi.mocked(LibraryPhotoStatusBadge).mockClear();
   });
 
   afterEach(() => {
@@ -51,6 +62,41 @@ describe("PhotoCard", () => {
     const { container } = render(<PhotoCard {...baseProps} />);
     const img = container.querySelector("img");
     expect(img).not.toBeInTheDocument();
+  });
+
+  it("mounts the status badge only when the photo has a visible source or refresh status", () => {
+    const { rerender } = render(<PhotoCard {...baseProps} />);
+    expect(LibraryPhotoStatusBadge).not.toHaveBeenCalled();
+    rerender(
+      <PhotoCard
+        {...baseProps}
+        refreshStatus="ready"
+        sourceStatus="available"
+      />
+    );
+    expect(LibraryPhotoStatusBadge).not.toHaveBeenCalled();
+
+    for (const sourceStatus of [
+      "unverified",
+      "offline",
+      "missing",
+      "inaccessible",
+    ] as const) {
+      vi.mocked(LibraryPhotoStatusBadge).mockClear();
+      rerender(<PhotoCard {...baseProps} sourceStatus={sourceStatus} />);
+      expect(LibraryPhotoStatusBadge).toHaveBeenCalled();
+    }
+    for (const refreshStatus of ["pending", "failed"] as const) {
+      vi.mocked(LibraryPhotoStatusBadge).mockClear();
+      rerender(
+        <PhotoCard
+          {...baseProps}
+          refreshStatus={refreshStatus}
+          sourceStatus="available"
+        />
+      );
+      expect(LibraryPhotoStatusBadge).toHaveBeenCalled();
+    }
   });
 
   it("acknowledges a cached image only during committed effects under StrictMode", () => {
@@ -80,6 +126,27 @@ describe("PhotoCard", () => {
     // StrictMode commits the mount effect twice; replaying state calculations
     // must not send another acknowledgment that could release a newer request.
     expect(onDisplayed).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an offline cache-missing card identifiable and openable without a futile retry", () => {
+    vi.mocked(toGalleryThumbnailUrl).mockReturnValue("http://gallery/1/256");
+    vi.mocked(useGalleryThumbnail).mockReturnValue({
+      ref: { current: null },
+      url: "",
+      failed: true,
+      onDisplayed: vi.fn(),
+    });
+    render(<PhotoCard {...baseProps} sourceStatus="offline" />);
+    expect(
+      screen.getByText("libraryReliability.status.offline")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "retry" })
+    ).not.toBeInTheDocument();
+    fireEvent.doubleClick(screen.getByRole("option"));
+    expect(baseProps.onDoubleClick).toHaveBeenCalledWith(1);
+    fireEvent.keyDown(screen.getByRole("option"), { key: " " });
+    expect(baseProps.onClick).toHaveBeenCalledWith(1, expect.anything());
   });
 
   it("clears a failed placeholder only after a rebound managed resource succeeds", () => {

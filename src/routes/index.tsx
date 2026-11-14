@@ -19,6 +19,8 @@ import {
 import { photoListingActions } from "@/actions/photo-listing";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyStateCard } from "@/components/EmptyStateCard";
+import { LIBRARY_HEALTH_QUERY } from "@/components/LibraryHealthDialog";
+import { isLibrarySourceUnavailable } from "@/components/LibraryPhotoStatus";
 import type { MasonryGridHandle } from "@/components/MasonryGrid";
 import { clearImageLoadCache } from "@/components/PhotoCard";
 import type { MenuState } from "@/components/PhotoContextMenu";
@@ -193,6 +195,7 @@ function HomePage() {
   const searchMode = filter.appliedSearch?.mode ?? null;
   const imageSearchPath = filter.appliedSearch?.imagePath ?? null;
   const searchFilters = filter.appliedSearch?.filters ?? {};
+  const libraryStatus = searchFilters.libraryStatus;
   const [showDrillBanner, setShowDrillBanner] = useState(false);
   const [drillDownFilters, setDrillDownFilters] = useState<ExifFilters>();
   const [dashboardReturnTarget, setDashboardReturnTarget] =
@@ -248,9 +251,10 @@ function HomePage() {
   );
   const colorHex = filter.appliedSearch?.colorHex ?? null;
   const [lightboxIndex, setLightboxIndex] = useState(-1);
-  const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">(
-    () => getBrowseSession("home-search").sequenceMode
-  );
+  const [preferredSequenceMode, setSequenceMode] = useState<
+    "photos" | "sequences"
+  >(() => getBrowseSession("home-search").sequenceMode);
+  const sequenceMode = libraryStatus ? "photos" : preferredSequenceMode;
   const gridRef = useRef<MasonryGridHandle>(null);
   const displayedSequenceModeRef = useRef<"photos" | "sequences">("photos");
   const gallerySurfaceRef = useRef<HTMLDivElement>(null);
@@ -585,6 +589,7 @@ function HomePage() {
       expandedSequenceCacheRef.current.clear();
       setSequenceRefresh((value) => value + 1);
     };
+    let imageRefresh: ReturnType<typeof setTimeout> | undefined;
     const handler = (event: MessageEvent) => {
       if (event.data?.channel === "file-change") {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
@@ -595,6 +600,15 @@ function HomePage() {
           refetchType: "active",
         });
         queryClient.invalidateQueries({ queryKey: ["folders"] });
+        queryClient.invalidateQueries({ queryKey: LIBRARY_HEALTH_QUERY });
+        if (isSearching) {
+          if (searchMode === "image") {
+            clearTimeout(imageRefresh);
+            imageRefresh = setTimeout(handleImageSearchRetry, 250);
+          } else {
+            refreshSearchAfterTags();
+          }
+        }
         clearImageLoadCache();
       }
       if (event.data?.channel === "ai-auto-repair-started") {
@@ -602,6 +616,14 @@ function HomePage() {
       }
       if (event.data?.channel === "ai-embedding-done") {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["libraryHealth"],
+          refetchType: "active",
+        });
       }
       if (event.data?.channel === "ai-status-changed") {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
@@ -610,10 +632,15 @@ function HomePage() {
     };
     window.addEventListener("message", handler);
     return () => {
+      clearTimeout(imageRefresh);
       window.removeEventListener("message", handler);
     };
   }, [
     handleSequenceOrderChange,
+    handleImageSearchRetry,
+    isSearching,
+    refreshSearchAfterTags,
+    searchMode,
     t,
     expandSequenceRequestRef,
     sequenceDetailsRequestRef,
@@ -637,7 +664,8 @@ function HomePage() {
     tagIds: filter.activeTagIds.length > 0 ? filter.activeTagIds : undefined,
     tagMode: filter.tagMode,
     favoriteOnly: filter.favoriteOnly || undefined,
-    ungroupedOnly: sequenceMode === "photos",
+    libraryStatus,
+    ungroupedOnly: sequenceMode === "photos" && !libraryStatus,
     sort: sortField,
     order: sortOrder,
     enabled: !isSearching,
@@ -648,6 +676,7 @@ function HomePage() {
     filter.activeTagIds,
     filter.tagMode,
     filter.favoriteOnly,
+    libraryStatus,
     sortField,
     sortOrder,
     sequenceMode,
@@ -937,6 +966,7 @@ function HomePage() {
     for (const photo of rawPhotos) {
       if (
         photo.thumbnailPath ||
+        isLibrarySourceUnavailable(photo.sourceStatus) ||
         thumbnailBackfillQueuedRef.current.has(photo.id)
       ) {
         continue;
@@ -1185,6 +1215,7 @@ function HomePage() {
       (filter.favoriteOnly ?? false) ? "fav" : "",
       sortField ?? "date",
       sortOrder ?? "desc",
+      libraryStatus,
     ]
       .filter(Boolean)
       .join("-");
@@ -1198,6 +1229,7 @@ function HomePage() {
     filter.activeFolderId,
     filter.activeTagIds,
     filter.favoriteOnly,
+    libraryStatus,
     sortField,
     sortOrder,
   ]);
@@ -2260,13 +2292,17 @@ function HomePage() {
   useEffect(() => {
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keyboard shortcuts intentionally share one event boundary
     function handleKeyDown(e: KeyboardEvent) {
+      if (e.defaultPrevented) {
+        return;
+      }
       if (
         e
           .composedPath()
           .some(
             (target) =>
               target instanceof HTMLElement &&
-              (target.dataset.overlayKind === "dialog" ||
+              (target.dataset.overlayKind === "popover" ||
+                target.dataset.overlayKind === "dialog" ||
                 target.dataset.overlayKind === "alert-dialog")
           )
       ) {
@@ -2451,6 +2487,7 @@ function HomePage() {
     detailPhoto || selectedSequence || sequenceDetailsLoading
   );
   useModalFocusTrap({
+    respectNestedOverlays: true,
     active: compactDetailOverlay && detailOverlayOpen && quickPreviewIndex < 0,
     containerRef: detailOverlayRef,
     onEscape: () => {
@@ -2485,6 +2522,7 @@ function HomePage() {
       <div className="relative flex h-full min-w-0 flex-col">
         <HomeToolbar
           dashboardReturnTarget={dashboardReturnTarget}
+          folderId={filter.activeFolderId}
           galleryContextLabel={galleryContextLabel}
           galleryScrolled={galleryScrolled}
           gridColumnWidth={gridColumnWidth}
@@ -2493,6 +2531,7 @@ function HomePage() {
           handleSequenceModeChange={handleSequenceModeChange}
           handleSortChange={handleSortChange}
           inert={compactDetailOverlay && detailOverlayOpen}
+          libraryStatus={libraryStatus}
           onDashboardReturn={() =>
             navigate({ to: "/dashboard", search: dashboardReturnTarget ?? {} })
           }
@@ -2533,7 +2572,9 @@ function HomePage() {
             aiStatus: aiStatus ?? null,
             colorHex: colorHex ?? undefined,
             drillDownFilters,
-            filters: filter.searchDraft.filters,
+            filters: searchMode
+              ? filter.searchDraft.filters
+              : { ...filter.searchDraft.filters, libraryStatus },
             imageSearchActive: searchMode === "image",
             imageSearchReference:
               searchMode === "image" && imageSearchPath

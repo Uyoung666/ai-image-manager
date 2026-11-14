@@ -32,6 +32,7 @@ import { useGalleryGeometryPhotos } from "@/hooks/useGalleryGeometryPhotos";
 import { useSequenceClickFocus } from "@/hooks/useSequenceClickFocus";
 import type { SequenceClickFocusRequest } from "@/hooks/useSequenceClickFocusRequest";
 import { useSequenceReturnFocus } from "@/hooks/useSequenceReturnFocus";
+import type { LibraryPhotoStatus } from "@/types/library-reliability";
 import type { SearchMatch } from "@/types/photo";
 import type {
   PhotoSequence,
@@ -70,7 +71,7 @@ import { LoadingSpinner } from "./ui/loading-spinner";
 import { Skeleton } from "./ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
-interface Photo {
+interface Photo extends LibraryPhotoStatus {
   dominantColors?: string | null;
   fileDate?: number | null;
   filename: string;
@@ -998,8 +999,10 @@ export function SequenceFocusTray({
                           recentlyViewedPulseActive
                         }
                         recentlyViewedPulseKey={recentlyViewedPulseKey}
+                        refreshStatus={member.refreshStatus}
                         renderImage={renderImage}
                         searchQuery={searchQuery}
+                        sourceStatus={member.sourceStatus}
                         thumbnailPath={member.thumbnailPath}
                         thumbnailVersion={member.thumbnailVersion}
                         width={member.width}
@@ -2014,9 +2017,11 @@ export const PhotoGrid = memo(
               recentlyViewedPulseActive && recentlyViewedPhotoId === photo.id
             }
             recentlyViewedPulseKey={recentlyViewedPulseKey}
+            refreshStatus={photo.refreshStatus}
             requestImage={options.requestImage}
             searchQuery={searchQuery}
             semanticTopSimilarity={semanticTopSimilarity}
+            sourceStatus={photo.sourceStatus}
             thumbnailPath={photo.thumbnailPath}
             thumbnailSmallPath={photo.thumbnailSmallPath}
             thumbnailVersion={photo.thumbnailVersion}

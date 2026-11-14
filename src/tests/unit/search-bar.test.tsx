@@ -158,6 +158,33 @@ describe("SearchBar", () => {
       ] as never);
   });
 
+  it("moves source status inside filters and keeps its removable chip visible", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        initialFilters={{ libraryStatus: "missing" }}
+        onSearch={onSearch}
+      />
+    );
+    expect(
+      screen.queryByLabelText("libraryReliability.filter")
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("libraryReliability.status.missing")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "exifFilterTitle" }));
+    expect(screen.getByLabelText("libraryReliability.filter")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "exifFilterTitle" }));
+    await user.click(
+      screen.getByRole("button", {
+        name: "移除筛选条件 libraryReliability.status.missing",
+      })
+    );
+    await waitFor(() => expect(onSearch).toHaveBeenCalled());
+    expect(
+      screen.queryByText("libraryReliability.status.missing")
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps saved search controls inside the search dropdown without a persistent extra row", async () => {
     const user = userEvent.setup();
     const apply = vi.fn();
@@ -1163,6 +1190,33 @@ describe("SearchBar", () => {
       })
     ).toBeInTheDocument();
     expect(screen.getByRole("combobox")).not.toBeDisabled();
+  });
+
+  it("shows paused indexing when the only photo is waiting for its replacement vector", () => {
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        aiStatus={{
+          autoIndex: { state: "paused", failedPhotos: 0 },
+          coverageState: "unavailable",
+          model: "ready",
+          vectorDB: "ready",
+          hasVectors: false,
+          vectorCount: 0,
+          indexReady: false,
+          indexedPhotos: 0,
+          totalPhotos: 1,
+          isEmbedding: false,
+          embeddingProgress: { processed: 0, total: 1, phase: "idle" },
+        }}
+      />
+    );
+
+    expect(
+      screen.getByRole("status", {
+        name: "AI 已索引 0/1 张照片，当前结果可能不完整；索引完成后将自动刷新。 自动索引已停止，请在设置中点击开始或继续。",
+      })
+    ).toBeInTheDocument();
   });
 
   it("does not open the text starter panel in image search mode", async () => {

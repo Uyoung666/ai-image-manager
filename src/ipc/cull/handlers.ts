@@ -22,6 +22,7 @@ import {
 import { BKTree, hammingDistance } from "@/services/bk-tree";
 import { listCullTaskSummaries } from "@/services/cull-task-summary";
 import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
+import { assertLibraryFileReady } from "@/services/library-file-guard";
 import {
   applyProjectCullTopN,
   archiveCullSession,
@@ -36,8 +37,10 @@ import {
 } from "@/services/project-cull";
 import { getSetting } from "@/services/settings-manager";
 import { undoShootingProjectSelection } from "@/services/shooting-projects";
+import { thumbnailSourceIdentity } from "@/services/thumbnail-identity";
 import {
   generateDuelPreview,
+  getDuelPreviewPath,
   getDuelPreviewStrategy,
 } from "@/services/thumbnailer";
 import type { CullAvailability } from "@/types/cull";
@@ -551,6 +554,16 @@ export const deleteSession = os.input(SessionIdSchema).handler(({ input }) => {
 
 // ── 对比预览懒生成 ──────────────────────────────────────────────
 
+function duelSourceIdentity(
+  photo: Parameters<typeof assertLibraryFileReady>[0]
+) {
+  try {
+    return thumbnailSourceIdentity(assertLibraryFileReady(photo));
+  } catch {
+    return null;
+  }
+}
+
 export const ensureDuelPreview = os
   .input(z.object({ photoId: z.number().int().positive() }))
   .handler(async ({ input }) => {
@@ -562,6 +575,13 @@ export const ensureDuelPreview = os
         height: photos.height,
         format: photos.format,
         duelPreviewPath: photos.duelPreviewPath,
+        fileRevision: photos.fileRevision,
+        contentRevision: photos.contentRevision,
+        metadataRevision: photos.metadataRevision,
+        sourceStatus: photos.sourceStatus,
+        sourceSize: photos.sourceSize,
+        sourceMtimeMs: photos.sourceMtimeMs,
+        sourceCtimeMs: photos.sourceCtimeMs,
       })
       .from(photos)
       .where(and(eq(photos.id, input.photoId), isNull(photos.deletedAt)))
@@ -571,12 +591,22 @@ export const ensureDuelPreview = os
       throw new Error("照片不存在");
     }
 
-    // 已有对比预览（或已标记为直接用原图）→ 直接返回
-    if (photo.duelPreviewPath) {
+    if (photo.metadataRevision !== photo.contentRevision) {
+      return { duelPreviewPath: null };
+    }
+    const unavailable =
+      photo.sourceStatus !== "available" && photo.sourceStatus !== "unverified";
+    if (unavailable) {
       return { duelPreviewPath: photo.duelPreviewPath };
     }
 
-    const _longEdge = Math.max(photo.width ?? 0, photo.height ?? 0);
+    const identity = duelSourceIdentity(photo);
+    if (!identity) {
+      return { duelPreviewPath: null };
+    }
+    if (photo.duelPreviewPath === getDuelPreviewPath(photo.path, identity)) {
+      return { duelPreviewPath: photo.duelPreviewPath };
+    }
     const strategy = getDuelPreviewStrategy(
       photo.path,
       photo.width ?? 0,
@@ -589,13 +619,29 @@ export const ensureDuelPreview = os
       return { duelPreviewPath: null, strategy: "use_original" };
     }
 
-    const preview = await generateDuelPreview(photo.path);
-    if (preview) {
-      db.update(photos)
+    const preview = await generateDuelPreview(photo.path, identity);
+    if (
+      preview &&
+      db === getDatabase() &&
+      identity === duelSourceIdentity(photo)
+    ) {
+      const write = db
+        .update(photos)
         .set({ duelPreviewPath: preview.previewPath })
-        .where(eq(photos.id, input.photoId))
+        .where(
+          and(
+            eq(photos.id, input.photoId),
+            eq(photos.path, photo.path),
+            eq(photos.fileRevision, photo.fileRevision),
+            eq(photos.contentRevision, photo.contentRevision),
+            eq(photos.sourceStatus, photo.sourceStatus),
+            isNull(photos.deletedAt)
+          )
+        )
         .run();
-      return { duelPreviewPath: preview.previewPath };
+      if (write.changes === 1) {
+        return { duelPreviewPath: preview.previewPath };
+      }
     }
 
     return { duelPreviewPath: null };
@@ -1370,6 +1416,18 @@ export const submitComparison = os
 
       if (!(winner && loser)) {
         throw new Error("照片不在会话中");
+      }
+      for (const entry of [winner, loser]) {
+        if (entry.photoId !== null) {
+          const current = db
+            .select({ revision: photos.contentRevision })
+            .from(photos)
+            .where(eq(photos.id, entry.photoId))
+            .get();
+          if (!current || current.revision !== entry.contentRevision) {
+            throw new Error("CULL_CONTENT_REVIEW_REQUIRED");
+          }
+        }
       }
 
       // Check session status — reject submissions after session is completed

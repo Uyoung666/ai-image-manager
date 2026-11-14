@@ -279,6 +279,18 @@ function ReviewPreview({
   );
 }
 
+function ChangedFaceNotice({ needsReview }: { needsReview?: boolean }) {
+  const { t } = useTranslation();
+  if (!needsReview) {
+    return null;
+  }
+  return (
+    <p className="mt-1 break-words text-muted-foreground text-xs" role="status">
+      {t("libraryReliability.faceNeedsReview")}
+    </p>
+  );
+}
+
 function FaceReviewPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -768,6 +780,7 @@ function FaceReviewPage() {
                 <p className="font-medium text-[13px] text-foreground">
                   {t("faceReviewWhoIsThis")}
                 </p>
+                <ChangedFaceNotice needsReview={activeCandidate.needsReview} />
                 <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
                   <p>
                     {t("faceReviewCurrentFace", {

@@ -60,6 +60,34 @@ describe("PhotoDetailPanel preview", () => {
     getPhotoTagAnalysisStatusMock.mockResolvedValue({ state: "ready" });
   });
 
+  it("reloads the original fallback when the same photo receives a new source version", async () => {
+    const photo = {
+      ...basePhoto,
+      thumbnailPath: null,
+      thumbnailVersion: "before",
+    };
+    const props = { onClose: vi.fn(), onOpenExplorer: vi.fn() };
+    const { container, rerender } = render(
+      <PhotoDetailPanel {...props} photo={photo} />
+    );
+    await act(async () => undefined);
+    const previous = container.querySelector("img") as HTMLImageElement;
+    const oldSource = previous.getAttribute("src");
+    fireEvent.load(previous);
+    expect(previous).toHaveClass("opacity-100");
+    rerender(
+      <PhotoDetailPanel
+        {...props}
+        photo={{ ...photo, thumbnailVersion: "after" }}
+      />
+    );
+    const current = container.querySelector("img") as HTMLImageElement;
+    expect(current).not.toBe(previous);
+    expect(current.getAttribute("src")).not.toBe(oldSource);
+    expect(current.getAttribute("src")).toContain("rv=after");
+    expect(current).toHaveClass("opacity-0");
+  });
+
   it("removes tags locally and rejects an earlier tag read after another removal", async () => {
     const tags = [1, 2, 3].map((id) => ({
       id,

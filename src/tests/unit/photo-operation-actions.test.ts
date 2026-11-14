@@ -39,3 +39,16 @@ it("restores only receipt IDs with the expected deletion operation", async () =>
     expectedDeletionBatchId: "receipt",
   });
 });
+
+it("reports culling entries whose previous decision no longer applies", async () => {
+  actions.deletePhotos.mockResolvedValueOnce({ succeededIds: [1] });
+  const result = await photoOperationActions.deletePhotos({
+    ids: [1, 2],
+    cullSessionId: 3,
+  });
+  expect(actions.deletePhotos).toHaveBeenCalledWith(
+    expect.objectContaining({ cullSessionId: 3 })
+  );
+  expect(result.succeededIds).toEqual([1]);
+  expect(result.failedIds).toEqual([2]);
+});

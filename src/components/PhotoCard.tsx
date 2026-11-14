@@ -11,11 +11,16 @@ import {
 import { useTranslation } from "react-i18next";
 import { animateFavoriteIcon } from "@/components/icons/icon-motion";
 import {
+  isLibrarySourceUnavailable,
+  LibraryPhotoStatusBadge,
+} from "@/components/LibraryPhotoStatus";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
+import type { LibraryPhotoStatus } from "@/types/library-reliability";
 import type { SearchMatch } from "@/types/photo";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import type { ImagePriority } from "@/utils/image-scheduler";
@@ -60,7 +65,7 @@ export function getFaceOverlayStyle(
   };
 }
 
-interface PhotoCardProps {
+interface PhotoCardProps extends LibraryPhotoStatus {
   deleting?: boolean;
   disableDrag?: boolean;
   dominantColors?: string | null;
@@ -279,7 +284,9 @@ export const PhotoCard = memo(function PhotoCard({
   imageVisible,
   imageIdle,
   path,
-  disableDrag = false,
+  disableDrag: preventDrag = false,
+  sourceStatus,
+  refreshStatus,
   thumbnailPath,
   thumbnailSmallPath,
   thumbnailVersion,
@@ -310,11 +317,13 @@ export const PhotoCard = memo(function PhotoCard({
   onToggleFavorite,
 }: PhotoCardProps) {
   const { t } = useTranslation();
+  const sourceUnavailable = isLibrarySourceUnavailable(sourceStatus);
+  const disableDrag = preventDrag || sourceUnavailable;
   const [retryCount, setRetryCount] = useState(0);
   const managed = Boolean(toGalleryThumbnailUrl(id, 256));
   const gallery = useGalleryThumbnail({
     id,
-    version: `${id}:${width}:${height}:${retryCount}`,
+    version: `${id}:${width}:${height}:${retryCount}${sourceUnavailable ? ":cached" : ""}`,
     sourceVersion: thumbnailVersion,
     sourceKey: path,
     sourceAspect: width > 0 && height > 0 ? width / height : 0,
@@ -577,6 +586,9 @@ export const PhotoCard = memo(function PhotoCard({
         data-photo-id={id}
         data-photo-path={path}
         data-recently-viewed={recentlyViewed ? "true" : undefined}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        onKeyDown={handleKeyDown}
         role="option"
         style={{ aspectRatio }}
         tabIndex={-1}
@@ -599,18 +611,27 @@ export const PhotoCard = memo(function PhotoCard({
         <span className="max-w-full truncate px-2 text-[10px] text-muted-foreground/70">
           {filename}
         </span>
-        <button
-          className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary hover:bg-primary/20"
-          onClick={(e) => {
-            e.stopPropagation();
-            setImgError(false);
-            setRetryCount((c) => c + 1);
-          }}
-          type="button"
-        >
-          {t("retry")}
-        </button>
+        {!sourceUnavailable && (
+          <button
+            className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary hover:bg-primary/20"
+            onClick={(e) => {
+              e.stopPropagation();
+              setImgError(false);
+              setRetryCount((c) => c + 1);
+            }}
+            type="button"
+          >
+            {t("retry")}
+          </button>
+        )}
         {recentlyViewedBadge}
+        {((sourceStatus && sourceStatus !== "available") ||
+          (refreshStatus && refreshStatus !== "ready")) && (
+          <LibraryPhotoStatusBadge
+            refreshStatus={refreshStatus}
+            sourceStatus={sourceStatus}
+          />
+        )}
       </div>
     );
   }
@@ -687,6 +708,13 @@ export const PhotoCard = memo(function PhotoCard({
       </div>
 
       {recentlyViewedBadge}
+      {((sourceStatus && sourceStatus !== "available") ||
+        (refreshStatus && refreshStatus !== "ready")) && (
+        <LibraryPhotoStatusBadge
+          refreshStatus={refreshStatus}
+          sourceStatus={sourceStatus}
+        />
+      )}
 
       {onNameFace &&
         faceOverlaysVisible &&

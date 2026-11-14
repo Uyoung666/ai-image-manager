@@ -351,6 +351,7 @@ export const SearchBar = memo(
         (v) => v && v.length > 0
       );
       const activeFilterCount = [
+        filters.libraryStatus,
         filters.dateFrom,
         filters.dateTo,
         filters.dateMonth,

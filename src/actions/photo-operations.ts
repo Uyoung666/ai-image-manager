@@ -10,12 +10,20 @@ export const photoOperationActions = {
     const succeededIds: number[] = [];
     const failedIds: number[] = [];
     for (let offset = 0; offset < ids.length; offset += 1000) {
+      const chunk = ids.slice(offset, offset + 1000);
       try {
         const result = await ipc.client.photos.deletePhotos({
-          ids: ids.slice(offset, offset + 1000),
+          ids: chunk,
           operationId: deletionBatchId,
+          ...(input.cullSessionId === undefined
+            ? {}
+            : { cullSessionId: input.cullSessionId }),
         });
         succeededIds.push(...result.succeededIds);
+        if (input.cullSessionId !== undefined) {
+          const succeeded = new Set(result.succeededIds);
+          failedIds.push(...chunk.filter((id) => !succeeded.has(id)));
+        }
       } catch {
         failedIds.push(...ids.slice(offset));
         break;

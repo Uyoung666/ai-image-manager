@@ -15,6 +15,7 @@ export interface FaceCandidate {
   faceIndex: number;
   id: number;
   identitySimilarity: number | null;
+  needsReview?: boolean;
   photoHeight: number | null;
   photoId: number;
   photoPath: string;

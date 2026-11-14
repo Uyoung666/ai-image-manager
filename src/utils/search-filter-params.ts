@@ -9,6 +9,9 @@ export function buildSearchFilterParams(
   if (!filters) {
     return params;
   }
+  if (filters.libraryStatus) {
+    params.libraryStatus = filters.libraryStatus;
+  }
   for (const key of ["dateFrom", "dateTo"] as const) {
     if (filters[key]) {
       const [year, month, day] = filters[key].split("-").map(Number);

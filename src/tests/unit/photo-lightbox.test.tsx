@@ -54,8 +54,10 @@ vi.mock("@/ipc/manager", () => ({
 vi.mock("@/utils/local-media-url", () => ({
   toGalleryThumbnailUrl: () => "",
   preloadImage: vi.fn(),
-  toLocalMediaUrl: (filePath: string | null | undefined) =>
-    filePath ? `local-media://${filePath}` : "",
+  toLocalMediaUrl: (filePath: string | null | undefined, revision?: string) =>
+    filePath
+      ? `local-media://${filePath}${revision === undefined ? "" : `?rv=${encodeURIComponent(revision)}`}`
+      : "",
 }));
 
 const THUMBNAIL_NAME = /^\d+: image-/;
@@ -130,6 +132,43 @@ function deferImageDecode(image: HTMLImageElement) {
 }
 
 describe("PhotoLightbox", () => {
+  it("rejects old decode results when the same photo's original URL gains a new content version", async () => {
+    const props = { initialIndex: 0, onClose: vi.fn(), open: true };
+    const { rerender } = render(
+      <PhotoLightbox
+        {...props}
+        photos={[{ ...photos[0], thumbnailVersion: "pending-descriptor" }]}
+      />
+    );
+    const previous = getFrame("[data-lightbox-original-frame]");
+    const oldSource = previous.getAttribute("src");
+    const deferred = deferImageDecode(previous);
+    fireEvent.load(previous);
+    rerender(
+      <PhotoLightbox
+        {...props}
+        photos={[
+          {
+            ...photos[0],
+            thumbnailPath: "C:/Thumbs/replaced.webp",
+            thumbnailVersion: "pending-descriptor",
+          },
+        ]}
+      />
+    );
+    const current = getFrame("[data-lightbox-original-frame]");
+    expect(current.getAttribute("src")).not.toBe(oldSource);
+    expect(decodeURIComponent(current.getAttribute("src") ?? "")).toContain(
+      "replaced.webp"
+    );
+    await act(async () => deferred.resolveDecode());
+    expect(current).toHaveClass("opacity-0");
+    fireEvent.error(previous);
+    expect(screen.queryByText("imageLoadFailed")).not.toBeInTheDocument();
+    await loadImage(current);
+    await waitFor(() => expect(current).toHaveClass("opacity-100"));
+  });
+
   it("keeps a 100k thumbnail strip bounded and opens directly near a deep current photo", () => {
     const many = Array.from({ length: 100_000 }, (_, index) => ({
       ...photos[0],

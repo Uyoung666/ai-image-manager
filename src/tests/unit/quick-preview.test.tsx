@@ -29,6 +29,37 @@ const photo = {
 };
 
 describe("QuickPreview", () => {
+  it("replaces the same photo's original request and load state after its cached version changes", () => {
+    const props = { onClose: vi.fn(), onNavigate: vi.fn() };
+    const first = {
+      ...photo,
+      thumbnailPath: "C:/Thumbs/old.webp",
+      thumbnailVersion: "pending-descriptor",
+    };
+    const { rerender } = render(<QuickPreview {...props} photo={first} />);
+    const previous = screen.getByRole("img");
+    const oldSource = previous.getAttribute("src");
+    fireEvent.load(previous);
+    expect(previous).toHaveClass("opacity-100");
+    rerender(
+      <QuickPreview
+        {...props}
+        photo={{ ...first, thumbnailPath: "C:/Thumbs/new.webp" }}
+      />
+    );
+    const current = screen.getByRole("img");
+    expect(current).not.toBe(previous);
+    expect(current.getAttribute("src")).not.toBe(oldSource);
+    expect(decodeURIComponent(current.getAttribute("src") ?? "")).toContain(
+      "new.webp"
+    );
+    expect(current).toHaveClass("opacity-0");
+    fireEvent.error(previous);
+    expect(screen.queryByRole("button", { name: "retry" })).toBeNull();
+    fireEvent.load(current);
+    expect(current).toHaveClass("opacity-100");
+  });
+
   it("focuses the preview surface without outlining the filename and keeps tooltips in its layer", async () => {
     const user = userEvent.setup();
     render(

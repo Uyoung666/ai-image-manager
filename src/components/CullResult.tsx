@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noNoninteractiveTabindex: Review status tooltips must be keyboard-focusable.
 // biome-ignore-all lint/a11y/noNoninteractiveElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/noStaticElementInteractions: scoped component lint cleanup preserves existing UI behavior
@@ -18,6 +19,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cullActions } from "@/actions/cull";
+import { photoOperationActions } from "@/actions/photo-operations";
 import { shootingProjectActions } from "@/actions/shooting-projects";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { ExportDialog } from "@/components/ExportDialog";
@@ -59,9 +61,29 @@ interface PhotoInfo extends CullMediaPhoto {
   id: number;
   isFavorite: boolean | null;
   isIndexed: boolean;
+  needsContentReview?: boolean;
   path: string;
   thumbnailPath: string | null;
   width: number;
+}
+
+function ContentReviewBadge() {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="max-w-full truncate rounded bg-muted px-1 text-[10px] text-muted-foreground"
+          tabIndex={0}
+        >
+          {t("libraryReliability.cullNeedsReview")}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {t("libraryReliability.cullNeedsReviewHint")}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 interface RankedItem {
@@ -209,6 +231,7 @@ const CullResultCard = memo(
           <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">
             {item.photo.filename}
           </span>
+          {item.photo.needsContentReview && <ContentReviewBadge />}
           {item.photo.isFavorite && (
             <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
           )}
@@ -363,6 +386,7 @@ const CullResultRow = memo(function CullResultRow({
         <p className="truncate text-[13px] text-foreground">
           {item.photo.filename}
         </p>
+        {item.photo.needsContentReview && <ContentReviewBadge />}
         <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground/60">
           <span>
             {item.photo.width}×{item.photo.height}
@@ -968,10 +992,19 @@ export function CullResult({
     setTrashConfirmOpen(false);
     setDeleting(true);
     try {
-      await ipc.client.photos.deletePhotos({
+      const result = await photoOperationActions.deletePhotos({
         ids: rejected.map((i) => i.photo.id),
+        cullSessionId: session.id,
       });
-      toast.success(t("cullRejectedToTrash"));
+      if (result.failedIds.length > 0) {
+        toast.error(
+          t("libraryReliability.cullDeleteSkipped", {
+            count: result.failedIds.length,
+          })
+        );
+      } else {
+        toast.success(t("cullRejectedToTrash"));
+      }
       queryClient.invalidateQueries({
         queryKey: ["photos"],
         refetchType: "active",
@@ -983,7 +1016,7 @@ export function CullResult({
     } finally {
       setDeleting(false);
     }
-  }, [rejected, t, onUpdate, queryClient]);
+  }, [rejected, session.id, t, onUpdate, queryClient]);
 
   const handleUndo = useCallback(async () => {
     try {

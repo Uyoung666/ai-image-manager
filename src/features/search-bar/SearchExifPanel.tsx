@@ -9,6 +9,7 @@ import { FilterBreadcrumb } from "@/components/FilterBreadcrumb";
 import { FilterPresets } from "@/components/FilterPresets";
 import { FilterDropdown } from "@/components/filter-dropdown";
 import { getFilterLabel } from "@/components/search-bar-utils";
+import { LIBRARY_SOURCE_STATUSES } from "@/types/library-reliability";
 import type { AdvancedExifFilterField, ExifFilters } from "@/types/search";
 import { cn } from "@/utils/tailwind";
 
@@ -118,11 +119,38 @@ export function SearchExifPanel({
       </div>
       <FilterBreadcrumb
         filters={filters}
-        getFilterLabel={getFilterLabel}
+        getFilterLabel={(key, value) =>
+          key === "libraryStatus" && value
+            ? t(`libraryReliability.status.${value}`)
+            : getFilterLabel(key, value)
+        }
         onClearAll={clearFilters}
         onRemoveFilter={(key) => updateFilter(key, "", true)}
       />
       <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="min-w-0 space-y-1.5">
+          <p className="text-muted-foreground text-xs">
+            {t("libraryReliability.filter")}
+          </p>
+          <FilterDropdown
+            ariaLabel={t("libraryReliability.filter")}
+            onChange={(value) =>
+              updateFilter("libraryStatus", value === "all" ? "" : value)
+            }
+            options={[
+              "all",
+              ...LIBRARY_SOURCE_STATUSES,
+              "pending",
+              "failed",
+            ].map((value) => ({
+              value,
+              label: t(`libraryReliability.status.${value}`),
+            }))}
+            placeholder={t("libraryReliability.status.all")}
+            value={filters.libraryStatus ?? "all"}
+          />
+        </div>
+
         {/* Date range */}
         <div>
           <label

@@ -39,6 +39,10 @@ import { Play } from "@/components/icons/play";
 import { RotateCcw } from "@/components/icons/rotate-ccw";
 import { RotateCw } from "@/components/icons/rotate-cw";
 import {
+  isLibrarySourceUnavailable,
+  LibraryPhotoStatusBadge,
+} from "@/components/LibraryPhotoStatus";
+import {
   LightboxInfoPanel,
   type LightboxInfoPhoto,
 } from "@/components/LightboxInfoPanel";
@@ -61,14 +65,19 @@ import { useLightboxImage } from "@/hooks/use-lightbox-image";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { useHorizontalGalleryWindow } from "@/hooks/useHorizontalGalleryWindow";
 import { ipc } from "@/ipc/manager";
+import type { LibraryPhotoStatus } from "@/types/library-reliability";
 import {
   ensureGalleryPhotos,
   getGalleryDataVersion,
   subscribeGalleryData,
 } from "@/utils/gallery-data-source";
-import { preloadImage, toLocalMediaUrl } from "@/utils/local-media-url";
+import {
+  preloadImage,
+  toGalleryThumbnailUrl,
+  toLocalMediaUrl,
+} from "@/utils/local-media-url";
 
-export interface LightboxPhoto extends LightboxInfoPhoto {
+export interface LightboxPhoto extends LightboxInfoPhoto, LibraryPhotoStatus {
   isFavorite?: boolean | null;
   thumbnailPath?: string | null;
   thumbnailVersion?: string;
@@ -208,6 +217,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
   const safeIndex = photos.length ? clamp(photoIndex, 0, photos.length - 1) : 0;
   const photo = photos[safeIndex];
+  const sourceUnavailable = isLibrarySourceUnavailable(photo?.sourceStatus);
   useEffect(() => {
     if (open) {
       ensureGalleryPhotos(
@@ -219,11 +229,19 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const previewUrl = photo?.thumbnailPath
     ? toLocalMediaUrl(photo.thumbnailPath)
     : null;
+  let originalUrl = photo?.path
+    ? toLocalMediaUrl(photo.path, photo.thumbnailPath ?? photo.thumbnailVersion)
+    : null;
+  if (sourceUnavailable && photo) {
+    originalUrl =
+      toGalleryThumbnailUrl(photo.id, 1024, "offline", undefined, true) ||
+      previewUrl;
+  }
   const original = useLightboxImage({
     enabled: open && !(previewPlayback && previewUrl),
     photoId: photo?.id,
     retry: sourceKey,
-    src: photo?.path ? toLocalMediaUrl(photo.path) : null,
+    src: originalUrl,
   });
   const showPreview =
     sequencePlayback && Boolean(previewUrl) && !original.loaded;
@@ -234,7 +252,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     src: previewUrl,
   });
   const imageError =
-    (original.error && !preview.loaded) || (previewPlayback && preview.error);
+    (original.error && !preview.loaded) ||
+    (previewPlayback && preview.error) ||
+    (sourceUnavailable && !original.request.src && !previewUrl);
   const needsLoading =
     open &&
     Boolean(photo) &&
@@ -1169,7 +1189,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               data-lightbox-playback-frame={
                 frame.kind === "preview" ? true : undefined
               }
-              draggable={!previewPlayback && zoom <= 1}
+              draggable={!(sourceUnavailable || previewPlayback) && zoom <= 1}
               height={photo.height || undefined}
               key={`${frame.kind}-${photo.id}-${frame.src}-${frame.retry}`}
               onDoubleClick={() => {
@@ -1181,7 +1201,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               }}
               onDragStart={(event) => {
                 event.preventDefault();
-                if (zoom > 1) {
+                if (sourceUnavailable || zoom > 1) {
                   return;
                 }
                 window.electronAPI?.startDrag?.(photo.path);
@@ -1215,6 +1235,10 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               />
             </div>
           )}
+          <LibraryPhotoStatusBadge
+            refreshStatus={photo.refreshStatus}
+            sourceStatus={photo.sourceStatus}
+          />
         </div>
 
         {photos.length > 1 && (

@@ -28,6 +28,9 @@ import {
 import { photoTagActions } from "@/actions/photo-tags";
 import { FolderOpen } from "@/components/icons/folder-open";
 import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { LibraryPhotoControls } from "@/components/LibraryPhotoControls";
+import { isLibrarySourceUnavailable } from "@/components/LibraryPhotoStatus";
+import { LibraryPathText } from "@/components/LibraryRelinkButton";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SmoothInput } from "@/components/ui/smooth-input";
 import {
@@ -37,11 +40,15 @@ import {
 } from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
+import type { LibraryPhotoStatus } from "@/types/library-reliability";
 import { getDateLocale } from "@/utils/date-locale";
-import { toLocalMediaUrl } from "@/utils/local-media-url";
+import {
+  toGalleryThumbnailUrl,
+  toLocalMediaUrl,
+} from "@/utils/local-media-url";
 import { notifyTagsChanged } from "@/utils/tag-change-event";
 
-interface PhotoDetail {
+interface PhotoDetail extends LibraryPhotoStatus {
   filename: string;
   fileSize: number;
   format?: string;
@@ -49,6 +56,7 @@ interface PhotoDetail {
   id: number;
   path: string;
   thumbnailPath?: string | null;
+  thumbnailVersion?: string;
   width: number;
 }
 
@@ -167,7 +175,8 @@ export function PhotoDetailPanel({
   const [aiTagTaskState, setAiTagTaskState] = useState<
     "checking" | "ready" | "indexing" | "tagging" | "busy" | "unavailable"
   >("checking");
-  const [loadedPreviewId, setLoadedPreviewId] = useState<number | null>(null);
+  const [loadedPreviewUrl, setLoadedPreviewUrl] = useState<string | null>(null);
+  const [failedPreview, setFailedPreview] = useState<string>();
   const [panelWidth, setPanelWidth] = useState(loadPhotoDetailPanelWidth);
   const [resizing, setResizing] = useState(false);
   const resizeStartX = useRef(0);
@@ -745,6 +754,14 @@ export function PhotoDetailPanel({
     : null;
 
   const dirPath = displayPhoto.path.replace(DIRECTORY_PATH_REGEX, "");
+  const unavailable = isLibrarySourceUnavailable(displayPhoto.sourceStatus);
+  const previewUrl = unavailable
+    ? toGalleryThumbnailUrl(displayPhoto.id, 512, "offline", undefined, true) ||
+      toLocalMediaUrl(displayPhoto.thumbnailPath)
+    : toLocalMediaUrl(
+        displayPhoto.thumbnailPath ?? displayPhoto.path,
+        displayPhoto.thumbnailPath ?? displayPhoto.thumbnailVersion
+      );
 
   return (
     <div
@@ -839,21 +856,24 @@ export function PhotoDetailPanel({
             className="photo-detail-preview flex h-[200px] items-center justify-center overflow-hidden rounded-[6px] bg-muted"
             data-surface="media-frame"
           >
-            <img
-              alt={displayPhoto.filename}
-              className={`max-h-full max-w-full object-contain transition-opacity duration-150 ${
-                loadedPreviewId === displayPhoto.id
-                  ? "opacity-100"
-                  : "opacity-0"
-              }`}
-              height={displayPhoto.height || undefined}
-              key={displayPhoto.id}
-              onLoad={() => setLoadedPreviewId(displayPhoto.id)}
-              src={toLocalMediaUrl(
-                displayPhoto.thumbnailPath ?? displayPhoto.path
-              )}
-              width={displayPhoto.width || undefined}
-            />
+            {previewUrl && failedPreview !== previewUrl ? (
+              <img
+                alt={displayPhoto.filename}
+                className={`max-h-full max-w-full object-contain transition-opacity duration-150 ${
+                  loadedPreviewUrl === previewUrl ? "opacity-100" : "opacity-0"
+                }`}
+                height={displayPhoto.height || undefined}
+                key={previewUrl}
+                onError={() => setFailedPreview(previewUrl)}
+                onLoad={() => setLoadedPreviewUrl(previewUrl)}
+                src={previewUrl}
+                width={displayPhoto.width || undefined}
+              />
+            ) : (
+              <p className="p-2 text-center text-muted-foreground text-xs">
+                {t("libraryReliability.previewUnavailable")}
+              </p>
+            )}
           </div>
         </div>
 
@@ -864,6 +884,7 @@ export function PhotoDetailPanel({
           onScroll={updateBottomFade}
           ref={contentScrollRef}
         >
+          <LibraryPhotoControls key={displayPhoto.id} photo={displayPhoto} />
           {/* Basic Info */}
           <section>
             <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
@@ -1298,15 +1319,23 @@ export function PhotoDetailPanel({
 
           {/* File Location */}
           <section>
-            <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
-              {t("filePath")}
-            </h4>
-            <p className="mb-2 truncate text-[11px] text-muted-foreground">
-              {dirPath}
-            </p>
+            <div className="mb-1 flex min-w-0 items-center justify-between gap-2">
+              <h4 className="font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+                {t("filePath")}
+              </h4>
+              <LibraryPhotoControls
+                key={`file-${displayPhoto.id}`}
+                photo={displayPhoto}
+                variant="menu"
+              />
+            </div>
+            <div className="mb-2 min-w-0 text-[11px]">
+              <LibraryPathText path={dirPath} />
+            </div>
             <IconMotionTrigger asChild>
               <button
                 className="flex min-w-0 max-w-full items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
+                disabled={unavailable}
                 onClick={() => onOpenExplorer(displayPhoto.path)}
                 type="button"
               >

@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { cullSessionPhotos, photos } from "@/db/schema";
 import {
@@ -21,6 +21,10 @@ export function selectPhotoFields() {
     fileDate: photos.fileDate,
     isFavorite: photos.isFavorite,
     isIndexed: photos.isIndexed,
+    needsContentReview:
+      sql<boolean>`${cullSessionPhotos.contentRevision} <> ${photos.contentRevision}`.mapWith(
+        Boolean
+      ),
   };
 }
 
@@ -54,7 +58,8 @@ function loadLibraryPendingWithMetadata(sessionId: number) {
       and(
         eq(cullSessionPhotos.sessionId, sessionId),
         eq(cullSessionPhotos.status, "pending"),
-        isNull(photos.deletedAt)
+        isNull(photos.deletedAt),
+        eq(cullSessionPhotos.contentRevision, photos.contentRevision)
       )
     )
     .orderBy(asc(photos.fileDate))

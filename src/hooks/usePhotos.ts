@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { photoListingActions } from "@/actions/photo-listing";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
+import type { LibraryStatusFilter } from "@/types/library-reliability";
 import type { PhotoListResponse } from "@/types/photo";
 import {
   galleryContext,
@@ -29,6 +30,7 @@ interface UsePhotosParams {
   enabled?: boolean;
   favoriteOnly?: boolean;
   folderId?: number | null;
+  libraryStatus?: LibraryStatusFilter;
   order?: "asc" | "desc";
   sort?: "name" | "date" | "size";
   tagId?: number | null;
@@ -52,13 +54,14 @@ export function usePhotos({
   tagIds,
   tagMode = "or",
   favoriteOnly,
+  libraryStatus,
   sort = "date",
   order = "desc",
   enabled = true,
 }: UsePhotosParams) {
   const queryClient = useQueryClient();
   const { getScrollPosition, saveScrollPosition } = useScrollPosition();
-  const restoreKey = `home-${[folderId ?? "all", (tagIds ?? []).join(","), favoriteOnly ? "fav" : "", sort, order].filter(Boolean).join("-")}`;
+  const restoreKey = `home-${[folderId ?? "all", (tagIds ?? []).join(","), favoriteOnly ? "fav" : "", sort, order, libraryStatus].filter(Boolean).join("-")}`;
   const cacheVersion = useSyncExternalStore(
     subscribeGalleryData,
     getGalleryDataVersion
@@ -73,11 +76,22 @@ export function usePhotos({
         tagIds: tagIds ?? null,
         tagMode: tagMode ?? "or",
         favoriteOnly: favoriteOnly ?? false,
+        libraryStatus,
         sort,
         order,
       },
     ],
-    [folderId, ungroupedOnly, tagId, tagIds, tagMode, favoriteOnly, sort, order]
+    [
+      folderId,
+      ungroupedOnly,
+      tagId,
+      tagIds,
+      tagMode,
+      favoriteOnly,
+      libraryStatus,
+      sort,
+      order,
+    ]
   );
   const defaultRetry = queryClient.defaultQueryOptions({ queryKey }).retry;
   const result = useInfiniteQuery<
@@ -106,6 +120,7 @@ export function usePhotos({
         tagIds: tagIds?.length ? tagIds : undefined,
         tagMode: tagIds?.length ? tagMode : undefined,
         favoriteOnly: favoriteOnly || undefined,
+        libraryStatus,
         sort,
         order,
         limit: PAGE_SIZE,
@@ -120,7 +135,7 @@ export function usePhotos({
       recordGalleryPerf("galleryQueryMs", performance.now() - started);
       recordGalleryPerf("gallerySqlMs", page.queryMs);
       const source = galleryContext(
-        `${JSON.stringify(params)}:${params.favoriteOnly ? page.revision : page.geometryRevision}`,
+        `${JSON.stringify(params)}:${params.favoriteOnly ? page.revision : page.geometryRevision}:${page.libraryStatusRevision ?? 0}`,
         photoListingActions.byIds
       );
       const saved = getScrollPosition(restoreKey)?.anchor;

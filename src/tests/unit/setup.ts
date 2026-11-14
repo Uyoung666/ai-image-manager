@@ -248,6 +248,7 @@ vi.mock("react-i18next", () => ({
         toastImportAlreadyQueued: "{{count}} 个文件夹已在导入队列中",
         semanticSearchPartial:
           "AI 已索引 {{indexed}}/{{total}} 张照片，当前结果可能不完整；索引完成后将自动刷新。",
+        "autoIndex.paused": "自动索引已停止，请在设置中点击开始或继续。",
         semanticSearchUnavailable:
           "AI 语义搜索暂不可用，当前仅显示文件名、标签和人名匹配。",
         toastScanFolderFailed: "扫描文件夹失败，请重试",

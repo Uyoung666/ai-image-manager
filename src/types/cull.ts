@@ -38,6 +38,7 @@ export interface CullPhoto {
   id: number;
   isFavorite: boolean | null;
   isIndexed: boolean;
+  needsContentReview?: boolean;
   originalUrl?: string | null;
   path: string;
   previewHeight?: number | null;

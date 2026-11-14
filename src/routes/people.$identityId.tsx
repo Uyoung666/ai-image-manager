@@ -71,6 +71,7 @@ interface IdentityDetail {
   id: number;
   name: string | null;
   photos: Photo[];
+  staleFaceCount?: number;
 }
 
 const GRID_SORT_FIELD_KEY = "person_grid_sort_field";
@@ -1120,6 +1121,16 @@ function PersonDetailPage() {
             <p className="mt-0.5 text-[11px] text-muted-foreground/70">
               {t("detectedPersonPhotos", { count: photos.length })}
             </p>
+            {Boolean(activeIdentity?.staleFaceCount) && (
+              <p
+                className="mt-1 break-words text-muted-foreground text-xs"
+                role="status"
+              >
+                {t("libraryReliability.staleFaces", {
+                  count: activeIdentity?.staleFaceCount,
+                })}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex max-w-full flex-wrap items-center justify-end gap-2">

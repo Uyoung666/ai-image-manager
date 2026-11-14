@@ -32,6 +32,107 @@ i18n.use(initReactI18next).init({
     zh: {
       translation: {
         appName: "AI 图片管理器",
+        libraryReliability: {
+          issueList: "需要处理的照片",
+          issueAll: "全部异常",
+          issueFilter: "异常类型",
+          issueRange: "第 {{from}}–{{to}} 张，共 {{total}} 张",
+          noIssues: "此范围内没有需要处理的照片。",
+          manage: "处理",
+          managePhoto: "处理 {{filename}}",
+          viewIssues: "查看异常照片",
+          backToScope: "返回当前范围",
+          checkingFile: "正在检查…",
+          checkHint: "按记录路径重新核对原文件，不会打开照片或搜索其他位置。",
+          checkResult: "检查完成：{{status}}。",
+          checkState: {
+            checking: "正在检查原文件…",
+            done: "检查完成，来源状态已重新核对。",
+            cancelled: "检查已取消。",
+            failed: "原文件检查未完成，请重试。",
+          },
+
+          attention: "图库中有 {{count}} 张照片需要处理",
+          resolve: "查看处理方式",
+          fileActions: "文件操作",
+          checkFile: "检查原文件",
+          regeneratePreview: "重新生成预览",
+          cachedHint:
+            "原文件暂不可用，已有缓存仍可浏览。可检查设备、权限或重新关联。",
+
+          faceNeedsReview:
+            "照片内容已变化，请重新确认这个人物。旧识别记录已保留。",
+          staleFaces: "有 {{count}} 张旧人脸记录因照片内容变化而等待复核。",
+
+          cullNeedsReview: "内容已更新，待复核",
+          cullNeedsReviewHint:
+            "照片内容已变化。原选片结果作为历史保留，重新复核后再用于批量清理。",
+          cullDeleteSkipped:
+            "有 {{count}} 张照片内容已变化，保留记录并等待复核。",
+
+          title: "图库来源",
+          filter: "来源状态筛选",
+          status: {
+            all: "全部状态",
+            available: "可用",
+            offline: "来源离线",
+            missing: "文件缺失",
+            inaccessible: "无法访问",
+            unverified: "待检查",
+            pending: "内容待刷新",
+            failed: "刷新失败",
+          },
+          total: "共 {{total}} 张 · {{unavailable}} 张来源不可用",
+          lastAvailable: "上次可访问：{{time}}",
+          previewUnavailable: "没有可用的缓存预览",
+          description: "检查图库的存储位置和照片状态，必要时重新关联文件。",
+          empty: "尚未添加图库文件夹。",
+          check: "重新检查",
+          retryRefresh: "重新刷新内容",
+          refreshQueued: "已加入刷新队列。",
+          relink: "重新关联",
+          relinkDescription:
+            "检查新位置的匹配结果，确认后更新图库中的文件位置。",
+          relinkBlocked: "此位置存在无法解决的冲突，请选择其他位置。",
+          relinkUpdated: "已更新 {{count}} 条照片记录。",
+          relinkWeak: "确认这个文件对应原照片（内容一致性未验证）",
+          relinkWeakAll:
+            "确认全部 {{count}} 项证据不足的文件映射（内容一致性未验证）",
+          relinkStatus: {
+            matched: "内容匹配",
+            unverified: "证据不足",
+            missing: "新位置缺失",
+            mismatch: "内容不符",
+            conflict: "路径冲突",
+            inaccessible: "无法访问",
+          },
+          candidatePage: "{{start}}–{{end}}，共 {{total}} 项",
+          previousPage: "上一页",
+          nextPage: "下一页",
+          remove: "移除缺失记录",
+          removeImpact:
+            "从图库移除 {{count}} 张缺失照片及其关联。原始文件会保留。",
+          removeLinks:
+            "标签 {{tags}} · 相册 {{albums}} · 人脸 {{faces}} · 选片 {{cull}}",
+          removed: "已移除 {{count}} 条缺失记录。",
+          error: "操作未完成。请确认文件位置和权限后重试。",
+          scanStatus: {
+            complete: "检查完成",
+            incomplete: "检查未完成",
+            empty: "来源意外为空",
+            offline: "来源离线",
+            inaccessible: "无法访问",
+          },
+          taskStatus: {
+            queued: "等待检查",
+            running: "正在检查",
+            done: "检查完成",
+            cancelled: "已取消",
+            failed: "检查失败",
+          },
+          progress: "{{status}} · {{processed}} / {{total}}",
+          historyReview: "内容已变更，历史判断待复核",
+        },
         cullProject: {
           dropFolder: "拖入文件夹，开始免导入选片",
           dropOneFolder: "请一次拖入一个拍摄文件夹，以创建独立选片任务。",

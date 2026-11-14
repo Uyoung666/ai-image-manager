@@ -136,7 +136,7 @@ export function usePhotoDetailPanel(
         detailPhotoIdRef.current = photo?.id ?? null;
       } else {
         const photo = photos.find((p) => p.id === id);
-        if (photo && photo.id !== detailPhotoIdRef.current) {
+        if (photo && photo !== currentRef.current.detailPhoto) {
           setDetailPhoto(photo);
           detailPhotoIdRef.current = photo.id;
         }

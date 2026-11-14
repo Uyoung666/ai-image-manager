@@ -13,6 +13,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { Expand } from "@/components/icons/expand";
 import { IconMotionTrigger } from "@/components/icons/icon-motion";
+import { isLibrarySourceUnavailable } from "@/components/LibraryPhotoStatus";
 import {
   PreviewContextMenu,
   type PreviewMenuState,
@@ -27,20 +28,26 @@ import {
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
+import type { LibraryPhotoStatus } from "@/types/library-reliability";
 import { getDateLocale } from "@/utils/date-locale";
 import {
   ensureGalleryPhotos,
   getGalleryDataVersion,
   subscribeGalleryData,
 } from "@/utils/gallery-data-source";
-import { toLocalMediaUrl } from "@/utils/local-media-url";
+import {
+  toGalleryThumbnailUrl,
+  toLocalMediaUrl,
+} from "@/utils/local-media-url";
 
-interface QuickPreviewPhoto {
+interface QuickPreviewPhoto extends LibraryPhotoStatus {
   fileDate?: number | null;
   filename: string;
   height: number;
   id: number;
   path: string;
+  thumbnailPath?: string | null;
+  thumbnailVersion?: string;
   width: number;
 }
 
@@ -218,7 +225,7 @@ export function QuickPreview({
           onClick={(e) => e.stopPropagation()}
         >
           <QuickPreviewImage
-            key={`${photo.id}:${photo.path}`}
+            key={`${photo.id}:${photo.path}:${photo.sourceStatus ?? ""}:${photo.thumbnailPath ?? photo.thumbnailVersion ?? ""}`}
             onContextMenu={(e) => {
               e.preventDefault();
               setPreviewMenu({
@@ -352,7 +359,11 @@ function QuickPreviewImage({
       {imgError ? (
         <div className="flex max-w-full flex-col items-center gap-3 rounded-[8px] bg-muted/20 p-6 sm:p-12">
           <span className="text-[14px] text-white/60">
-            {t("cullImageLoadError")}
+            {t(
+              isLibrarySourceUnavailable(photo.sourceStatus)
+                ? "libraryReliability.previewUnavailable"
+                : "cullImageLoadError"
+            )}
           </span>
           <button
             className="rounded-[6px] bg-white/10 px-3 py-1.5 text-[12px] text-white/80 hover:bg-white/20"
@@ -380,7 +391,20 @@ function QuickPreviewImage({
           }}
           onError={() => setImgError(true)}
           onLoad={() => setLoaded(true)}
-          src={photo.path ? toLocalMediaUrl(photo.path) : undefined}
+          src={
+            isLibrarySourceUnavailable(photo.sourceStatus)
+              ? toGalleryThumbnailUrl(
+                  photo.id,
+                  1024,
+                  "offline",
+                  undefined,
+                  true
+                ) || toLocalMediaUrl(photo.thumbnailPath)
+              : toLocalMediaUrl(
+                  photo.path,
+                  photo.thumbnailPath ?? photo.thumbnailVersion
+                )
+          }
           width={photo.width ?? 1}
         />
       )}

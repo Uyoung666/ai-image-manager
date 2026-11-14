@@ -251,7 +251,12 @@ export function CullSessionPage() {
         type: string;
         photoId?: number;
       };
-      if (!photoId) {
+      if (
+        !photoId &&
+        type !== "update" &&
+        type !== "status" &&
+        type !== "remove"
+      ) {
         return;
       }
 

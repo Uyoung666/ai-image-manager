@@ -11,6 +11,7 @@ import {
 import type { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import type { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { usePhotoSearch } from "@/hooks/use-photo-search";
+import type { LibraryStatusFilter } from "@/types/library-reliability";
 import type { Photo, SearchResponse } from "@/types/photo";
 import type { PhotoSequence } from "@/types/photo-sequence";
 import type { ExifFilters, SearchMode } from "@/types/search";
@@ -215,6 +216,9 @@ export function useHomeSearch({
   } | null>(null);
 
   const lastImageSearchPathRef = useRef<string | null>(null);
+  const lastImageLibraryStatusRef = useRef<LibraryStatusFilter | undefined>(
+    undefined
+  );
 
   const [searchLoading, setSearchLoading] = useState(false);
   const searchLoadingRef = useRef(searchLoading);
@@ -389,7 +393,12 @@ export function useHomeSearch({
   const handleImageSearchRetry = useCallback(() => {
     const imagePath = lastImageSearchPathRef.current;
     if (imagePath) {
-      imageSearchRef.current(imagePath).catch(() => undefined);
+      imageSearchRef
+        .current(imagePath, {
+          recordHistory: false,
+          libraryStatus: lastImageLibraryStatusRef.current,
+        })
+        .catch(() => undefined);
     }
   }, []);
 
@@ -546,7 +555,7 @@ export function useHomeSearch({
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: image search coordinates preview, source validation, and generation-safe result states
   async function handleImageSearch(
     imagePath: string,
-    options?: { recordHistory?: boolean }
+    options?: { recordHistory?: boolean; libraryStatus?: LibraryStatusFilter }
   ) {
     const historyTicket =
       options?.recordHistory === false ? null : beginSearchHistoryRecording();
@@ -563,15 +572,19 @@ export function useHomeSearch({
     setIsFetchingSearchNextPage(false);
     lastSearchParamsRef.current = null;
     lastImageSearchPathRef.current = imagePath;
+    lastImageLibraryStatusRef.current = options?.libraryStatus;
+    const filters: ExifFilters = options?.libraryStatus
+      ? { libraryStatus: options.libraryStatus }
+      : {};
     filter.applySearch({
-      filters: {},
+      filters,
       imagePath,
       mode: "image",
       query: "",
     });
     saveBrowseSession("home-search", {
       colorHex: null,
-      filters: {},
+      filters,
       imageSearchPath: imagePath,
       searchMode: "image",
       searchQuery: "",
@@ -592,7 +605,9 @@ export function useHomeSearch({
         })
         .catch(() => ({ dataUrl: null, exists: true }));
       const [result, preview] = await Promise.all([
-        imageSearchActions.search(imagePath, 500),
+        options?.libraryStatus
+          ? imageSearchActions.search(imagePath, 500, options.libraryStatus)
+          : imageSearchActions.search(imagePath, 500),
         previewPromise,
       ]);
       // 竞态保护：丢弃过时响应

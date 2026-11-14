@@ -30,7 +30,7 @@ export function FilterBreadcrumb({
   }
 
   return (
-    <div className="flex items-center gap-1.5 border-b bg-muted/30 px-3 py-1.5 text-sm">
+    <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 border-b bg-muted/30 px-3 py-1.5 text-sm">
       <Home className="h-3.5 w-3.5 text-muted-foreground" />
       <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
       {activeFilters.map((key, i) => (

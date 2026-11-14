@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Check, Copy, Trash2 } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { LibraryHealthDialog } from "@/components/LibraryHealthDialog";
 import { DataDirSection } from "@/components/settings/DataDirSection";
 import { SettingRow } from "@/components/settings/setting-row";
 import { SettingsPageShell } from "@/components/settings/settings-page-shell";
@@ -74,8 +75,6 @@ function StorageSettingsPage() {
   const queryClient = useQueryClient();
   const [clearCacheStatus, setClearCacheStatus] = useState("");
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
-  const [cleanupStatus, setCleanupStatus] = useState("");
-  const [cleanupCount, setCleanupCount] = useState(0);
   const [orphanCleanStatus, setOrphanCleanStatus] = useState("");
   const [orphanDialogOpen, setOrphanDialogOpen] = useState(false);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
@@ -180,22 +179,6 @@ function StorageSettingsPage() {
     }
     setTimeout(() => setOrphanCleanStatus(""), 4000);
   }
-
-  const handleCleanupOrphans = useCallback(async () => {
-    setCleanupStatus(t("cleanupOrphansRunning"));
-    try {
-      const result = await ipc.client.photos.cleanupOrphanPhotos({});
-      const removed = result?.removed ?? 0;
-      setCleanupCount(removed);
-      setCleanupStatus(t("cleanupOrphansDone", { count: removed }));
-      toast.success(t("cleanupOrphansDone", { count: removed }));
-      queryClient.invalidateQueries({ queryKey: ["indexStats"] });
-    } catch {
-      setCleanupStatus(t("cleanupOrphansFailed"));
-      toast.error(t("cleanupOrphansFailed"));
-    }
-    setTimeout(() => setCleanupStatus(""), 4000);
-  }, [queryClient, t]);
 
   return (
     <SettingsPageShell scrollRef={scrollRef} title={t("settingsStorage")}>
@@ -353,63 +336,13 @@ function StorageSettingsPage() {
           )}
 
           <SettingRow
-            action={
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    className="flex max-w-full items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5 min-[900px]:max-w-[160px] min-[900px]:shrink-0"
-                    onClick={handleCleanupOrphans}
-                    type="button"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">
-                      {cleanupStatus || t("cleanupInvalidRecords")}
-                    </span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {cleanupStatus || t("cleanupInvalidRecords")}
-                </TooltipContent>
-              </Tooltip>
-            }
+            action={<LibraryHealthDialog />}
             className="mt-3"
-            description={
-              <>
-                {t("settingsInvalidIndexHint")}
-                {cleanupCount > 0 && " "}
-                {cleanupCount > 0 &&
-                  t("lastCleanupCount", { count: cleanupCount })}
-              </>
-            }
-            title={t("cleanupInvalidIndex")}
-            tone={indexStats?.invalidPhotoCount ? "destructive" : "default"}
+            description={t("libraryReliability.description")}
+            title={t("libraryReliability.title")}
           >
             {indexStats ? (
               <div className="space-y-1">
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <div className="flex flex-wrap items-baseline gap-1.5">
-                    <span className="text-[11px] text-muted-foreground/60">
-                      {t("settingsValidIndexCount")}
-                    </span>
-                    <span className="font-semibold text-[12px] text-foreground">
-                      {indexStats.validPhotoCount.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap items-baseline gap-1.5">
-                    <span className="text-[11px] text-muted-foreground/60">
-                      {t("settingsInvalidIndexCount")}
-                    </span>
-                    <span
-                      className={`font-semibold text-[12px] ${
-                        indexStats.invalidPhotoCount > 0
-                          ? "text-destructive"
-                          : "text-foreground"
-                      }`}
-                    >
-                      {indexStats.invalidPhotoCount.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
                 <div className="flex min-w-0 items-baseline gap-2">
                   <span className="shrink-0 text-[11px] text-muted-foreground/60">
                     {t("settingsIndexDbLocation")}

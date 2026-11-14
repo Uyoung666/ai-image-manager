@@ -90,6 +90,12 @@ const photoKeys: Array<keyof Photo> = [
   "isIndexed",
   "isFavorite",
   "dominantColors",
+  "sourceStatus",
+  "sourceAvailableAt",
+  "sourceCheckedAt",
+  "sourceErrorCode",
+  "refreshStatus",
+  "refreshError",
   "match",
 ];
 
