@@ -108,7 +108,27 @@ Do not close the app while the data directory is being migrated. The interface a
 
 The queue scans supported extensions, reads basic information and EXIF, creates thumbnails, and prepares AI tasks. Import runs in the background, so processed photos can be viewed while the queue continues.
 
-The app records the selected folder and watches for later changes. New or changed files enter incremental processing. If a file is moved to a location the app cannot follow, the old record becomes invalid.
+The app records the selected folder and watches for later changes. New or changed files enter incremental processing. If a file cannot be found, its record, manual tags, favorites, albums and culling history remain in the library.
+
+### Library sources and relinking
+
+Open **Library sources** in Settings → Storage to check source availability and relocate folders. The gallery shows a highlighted disk icon (hover for the affected count) only when the library or current folder source has offline, missing, inaccessible or failed-refresh photos. Source status filtering lives inside the search filter panel; active filters remain visible and removable. Healthy photo details keep maintenance under the **File actions** ellipsis beside the file-location heading. Affected photos show a matching recovery action and **View recovery options**.
+
+The **Photos needing attention** list shows cached previews, filenames, paths and issue types, 20 per page. Filter by issue type or use a folder's **View affected photos** action; **Manage** opens recovery actions for that photo. **Check original file** reports progress and the final source status at the recorded path. It does not open the photo or search other locations; use **Relink** after a move.
+
+Offline sources retain photo records, favorites, manual tags, albums and culling history. Existing cached previews remain viewable. Reconnect the disk or network share and check again. Missing means the source root is accessible but the file is absent. Inaccessible indicates a permission or I/O error.
+
+Relink a single file from photo details, or select a new folder in Library sources. Inspect the preview before confirming. Full hash matches preserve identity. Older records without trustworthy hashes require explicit confirmation and a metadata/AI refresh. Conflicting paths, different contents and existing originals block relinking. Previews expire after ten minutes and must be regenerated after restart or source changes.
+
+External moves are linked automatically only when the old file is confirmed missing, a full hash matches and the mapping is unique. Copies remain separate. Same-path changes preserve manual organization while refreshing derived data. Stale vectors stop participating in search. Previous face confirmations and culling decisions require review.
+
+If a photo shows a refresh failure, make its source accessible and select **Refresh content** in photo details. The app queues the photo's content tasks again. If AI indexing is paused or stopped, the AI work waits until you resume indexing.
+
+Restoring a face backup preserves its content history and the current AI stop setting. Results from an older photo version remain historical and require fresh detection and review.
+
+Removing missing records displays affected relationships before removing catalogue entries. Restore from trash can recover the record while its original remains offline. Permanent cleanup verifies the original's identity and leaves unverifiable or replaced files pending.
+
+An upgrade creates a consistent `data/backups/pre-library-reliability-*.db` backup. Source and fingerprint backfill runs in the background. The first fingerprint records the current original. To regenerate historical AI results, use **Rebuild AI Index** in **Settings → AI Index**. To roll back the app version, close it and restore a compatible backup.
 
 ### 3. Read import progress
 
