@@ -8,17 +8,21 @@ const FOCUSABLE_SELECTOR = [
   "textarea:not([disabled])",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
+const NESTED_OVERLAY_SELECTOR =
+  '[data-slot="popover-content"][data-state="open"], [data-slot="dialog-content"][data-state="open"], [data-slot="alert-dialog-content"][data-state="open"]';
 
 export function useModalFocusTrap({
   active,
   containerRef,
   initialFocus = "first",
   onEscape,
+  respectNestedOverlays = false,
 }: {
   active: boolean;
   containerRef: RefObject<HTMLElement | null>;
   initialFocus?: "first" | "container";
   onEscape: () => void;
+  respectNestedOverlays?: boolean;
 }) {
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
@@ -91,13 +95,22 @@ export function useModalFocusTrap({
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown, true);
+    const handleOverlayKeyDown = (event: KeyboardEvent) => {
+      if (
+        respectNestedOverlays &&
+        document.querySelector(NESTED_OVERLAY_SELECTOR)
+      ) {
+        return;
+      }
+      handleKeyDown(event);
+    };
+    document.addEventListener("keydown", handleOverlayKeyDown, true);
     return () => {
       cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("keydown", handleOverlayKeyDown, true);
       if (previouslyFocused?.isConnected) {
         previouslyFocused.focus();
       }
     };
-  }, [active, containerRef, initialFocus]);
+  }, [active, containerRef, initialFocus, respectNestedOverlays]);
 }

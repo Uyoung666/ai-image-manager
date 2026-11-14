@@ -37,6 +37,43 @@ describe("Tooltip", () => {
     vi.restoreAllMocks();
   });
 
+  it("dismisses a suspended trigger and rejects restored focus until fresh hover", async () => {
+    const user = userEvent.setup();
+    function Fixture() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <Tooltip delayDuration={30} disabled={open}>
+            <TooltipTrigger asChild>
+              <button onClick={() => setOpen(true)} type="button">
+                open dialog
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>trigger hint</TooltipContent>
+          </Tooltip>
+          {open && (
+            <button onClick={() => setOpen(false)} type="button">
+              close dialog
+            </button>
+          )}
+        </>
+      );
+    }
+    render(<Fixture />);
+    const trigger = screen.getByRole("button", { name: "open dialog" });
+    await user.hover(trigger);
+    await screen.findByRole("tooltip");
+    await user.click(trigger);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "close dialog" }));
+    fireEvent.focus(trigger);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await user.unhover(trigger);
+    await user.hover(trigger);
+    await screen.findByRole("tooltip");
+  });
+
   it("shows the shared tooltip on hover and hides it after unhover", async () => {
     const user = userEvent.setup();
     renderTooltip();
@@ -59,6 +96,32 @@ describe("Tooltip", () => {
     await waitFor(() => {
       expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     });
+  });
+
+  it("opens for a stationary pointer after layout entry and cancels on leave", async () => {
+    vi.useFakeTimers();
+    renderTooltip({ delayDuration: 400 });
+    const trigger = screen.getByRole("button");
+    for (let cycle = 0; cycle < 3; cycle++) {
+      fireEvent.pointerOver(trigger, { pointerType: "mouse" });
+      await act(() => vi.advanceTimersByTimeAsync(399));
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(screen.getByRole("tooltip")).toBeVisible();
+      fireEvent(window, new Event("blur"));
+      fireEvent(window, new Event("focus"));
+      fireEvent.pointerOut(trigger, { pointerType: "mouse" });
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      fireEvent.pointerOver(trigger, { pointerType: "mouse" });
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      fireEvent.pointerMove(trigger, { pointerType: "mouse" });
+      fireEvent.pointerOut(trigger, { pointerType: "mouse" });
+    }
+    fireEvent.pointerOver(trigger, { pointerType: "mouse" });
+    fireEvent.pointerOut(trigger, { pointerType: "mouse" });
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("shows the tooltip when the trigger receives keyboard focus", async () => {

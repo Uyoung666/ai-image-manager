@@ -6,12 +6,20 @@ import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 function FocusTrapHarness({
   onEscape,
   initialFocus,
+  respectNestedOverlays,
 }: {
   onEscape: () => void;
+  respectNestedOverlays?: boolean;
   initialFocus?: "first" | "container";
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  useModalFocusTrap({ active: true, containerRef, onEscape, initialFocus });
+  useModalFocusTrap({
+    active: true,
+    containerRef,
+    onEscape,
+    initialFocus,
+    respectNestedOverlays,
+  });
 
   return (
     <div data-testid="focus-surface" ref={containerRef} tabIndex={-1}>
@@ -56,4 +64,38 @@ describe("useModalFocusTrap", () => {
     expect(onEscape).toHaveBeenCalledOnce();
     rects.mockRestore();
   });
+});
+
+it("lets nested portal overlays handle Escape and Tab before the inspector", () => {
+  const onEscape = vi.fn();
+  const { unmount } = render(
+    <FocusTrapHarness onEscape={onEscape} respectNestedOverlays />
+  );
+  const portal = document.createElement("div");
+  portal.dataset.slot = "popover-content";
+  portal.dataset.state = "open";
+  document.body.append(portal);
+  try {
+    const escapeEvent = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    portal.dispatchEvent(escapeEvent);
+    expect(escapeEvent.defaultPrevented).toBe(false);
+    expect(onEscape).not.toHaveBeenCalled();
+    const tab = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    });
+    portal.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+    portal.dataset.state = "closed";
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onEscape).toHaveBeenCalledOnce();
+  } finally {
+    portal.remove();
+    unmount();
+  }
 });

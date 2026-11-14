@@ -7,6 +7,7 @@ import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 declare global {
   interface Window {
     tooltipFocusEvents: string[];
+    tooltipPointerEvents: string[];
   }
 }
 
@@ -84,6 +85,29 @@ test.beforeAll(async () => {
     localStorage.setItem("sidebar_collapsed", "false");
     localStorage.setItem("ui.reduceMotion", "true");
     window.tooltipFocusEvents = [];
+    window.tooltipPointerEvents = [];
+    for (const type of [
+      "pointermove",
+      "pointerover",
+      "pointerout",
+      "focusin",
+      "focusout",
+    ]) {
+      document.addEventListener(
+        type,
+        (event) => {
+          const target =
+            event.target instanceof Element
+              ? event.target.closest('[data-slot="tooltip-trigger"]')
+              : null;
+          window.tooltipPointerEvents.push(
+            `${performance.now().toFixed(1)} ${type} folder=${target?.getAttribute("data-folder-id")} state=${target?.getAttribute("data-state")} focus=${document.hasFocus()}`
+          );
+          window.tooltipPointerEvents = window.tooltipPointerEvents.slice(-100);
+        },
+        true
+      );
+    }
     for (const event of ["blur", "focus"]) {
       window.addEventListener(event, () => {
         window.tooltipFocusEvents.push(event);
@@ -143,6 +167,23 @@ for (const size of [
       const width = await page.evaluate(() => window.innerWidth);
       await page.mouse.move(width - 16, 80);
       await expect(tooltip).not.toBeVisible();
+    };
+    const hoverFolderUntilVisible = async () => {
+      // Startup progress can move a row after hover() finishes. Keep the real
+      // pointer over the requested row throughout the normal tooltip delay.
+      await expect
+        .poll(
+          async () => {
+            await folder.hover();
+            return (
+              (await folder.evaluate((element) => element.matches(":hover"))) &&
+              (await tooltip.isVisible())
+            );
+          },
+          { timeout: 5000 }
+        )
+        .toBe(true);
+      await expect(tooltip).toBeVisible();
     };
     const assertClosedAfterSwitch = async () => {
       await page.evaluate(() => {
@@ -208,13 +249,11 @@ for (const size of [
       await assertClosedAfterSwitch();
 
       await moveAway();
-      await folder.hover();
-      await expect(tooltip).toBeVisible();
+      await hoverFolderUntilVisible();
       await assertClosedAfterSwitch();
 
       await moveAway();
-      await folder.hover();
-      await expect(tooltip).toBeVisible();
+      await hoverFolderUntilVisible();
       await app.evaluate(({ BrowserWindow }, id) => {
         BrowserWindow.fromId(id)?.minimize();
       }, mainId);
@@ -276,6 +315,94 @@ for (const size of [
       });
       await page.keyboard.press("Escape");
       await expect(tooltip).not.toBeVisible();
+    } catch (error) {
+      try {
+        const [renderer, native, screenshot] = await Promise.allSettled([
+          page.evaluate(() => {
+            const describe = (element: Element | null) =>
+              element
+                ? {
+                    tag: element.tagName,
+                    id: element.id,
+                    className: element.getAttribute("class"),
+                    role: element.getAttribute("role"),
+                    ariaLabel: element.getAttribute("aria-label"),
+                    folderId: element.getAttribute("data-folder-id"),
+                    slot: element.getAttribute("data-slot"),
+                    state: element.getAttribute("data-state"),
+                    hover: element.matches(":hover"),
+                    bounds: element.getBoundingClientRect().toJSON(),
+                  }
+                : null;
+            return {
+              hasFocus: document.hasFocus(),
+              visibilityState: document.visibilityState,
+              activeElement: describe(document.activeElement),
+              hoverChain: [...document.querySelectorAll(":hover")].map(
+                describe
+              ),
+              folder: describe(document.querySelector('[data-folder-id="1"]')),
+              nextFolder: describe(
+                document.querySelector('[data-folder-id="2"]')
+              ),
+              tooltips: [
+                ...document.querySelectorAll(
+                  '[data-slot="tooltip-trigger"], [data-slot="tooltip-content"]'
+                ),
+              ].map(describe),
+              focusEvents: [...window.tooltipFocusEvents],
+              pointerEvents: [...window.tooltipPointerEvents],
+            };
+          }),
+          app.evaluate(
+            ({ BrowserWindow }, windows) =>
+              Object.fromEntries(
+                Object.entries(windows).map(([name, id]) => {
+                  const window = BrowserWindow.fromId(id);
+                  return [
+                    name,
+                    window
+                      ? {
+                          id,
+                          isFocused: window.isFocused(),
+                          isVisible: window.isVisible(),
+                          isMinimized: window.isMinimized(),
+                          bounds: window.getBounds(),
+                        }
+                      : null,
+                  ];
+                })
+              ),
+            ids
+          ),
+          page.screenshot({
+            path: test.info().outputPath("tooltip-focus-failure.png"),
+          }),
+        ]);
+        const outcome = (result: PromiseSettledResult<unknown>) =>
+          result.status === "fulfilled"
+            ? { status: result.status, value: result.value }
+            : { status: result.status, error: String(result.reason) };
+        fs.writeFileSync(
+          test.info().outputPath("tooltip-focus-failure.json"),
+          JSON.stringify(
+            {
+              size,
+              renderer: outcome(renderer),
+              native: outcome(native),
+              screenshot:
+                screenshot.status === "fulfilled"
+                  ? { status: "saved" }
+                  : outcome(screenshot),
+            },
+            null,
+            2
+          )
+        );
+      } catch (diagnosticError) {
+        console.warn("Tooltip failure diagnostics failed:", diagnosticError);
+      }
+      throw error;
     } finally {
       await app.evaluate(({ BrowserWindow }, windows) => {
         BrowserWindow.fromId(windows.other)?.destroy();

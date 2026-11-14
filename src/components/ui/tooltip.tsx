@@ -7,9 +7,11 @@ const TOOLTIP_CONTENT_CLASS_NAME =
   "z-50 max-w-[260px] rounded-[6px] border border-border bg-popover px-2.5 py-1.5 text-[12px] text-popover-foreground leading-snug shadow-md ring-1 ring-foreground/10 surface-elevated duration-100 data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95";
 
 const TooltipPortalContext = React.createContext<HTMLElement | null>(null);
-const TooltipInteractionContext = React.createContext<
-  ((interaction: "pointer" | "focus") => boolean) | null
->(null);
+const TooltipInteractionContext = React.createContext<{
+  release: (interaction: "pointer" | "focus") => boolean;
+  enter: () => void;
+  leave: () => void;
+} | null>(null);
 const TOOLTIP_NAVIGATION_KEYS = new Set([
   "Tab",
   "ArrowUp",
@@ -59,8 +61,10 @@ function TooltipProvider({
 function Tooltip({
   onOpenChange,
   open: controlledOpen,
+  delayDuration = 400,
+  disabled = false,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+}: React.ComponentProps<typeof TooltipPrimitive.Root> & { disabled?: boolean }) {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
   const [windowInteractionBlocked, setWindowInteractionBlocked] =
     React.useState(() => !isTooltipDocumentActive());
@@ -68,8 +72,27 @@ function Tooltip({
   const windowFocusedRef = React.useRef(true);
   const keyboardNavigationRef = React.useRef(false);
 
+  const hoverTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancelHover = React.useCallback(() => {
+    clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = undefined;
+  }, []);
+  React.useEffect(() => cancelHover, [cancelHover]);
+  React.useEffect(() => {
+    if (!disabled) {
+      return;
+    }
+    cancelHover();
+    interactionBlockedRef.current = true;
+    keyboardNavigationRef.current = false;
+    setWindowInteractionBlocked(true);
+    setUncontrolledOpen(false);
+    onOpenChange?.(false);
+  }, [disabled, cancelHover, onOpenChange]);
+
   React.useEffect(() => {
     const blockInteraction = () => {
+      cancelHover();
       // Native focus restoration and pending hover timers can run before React commits.
       interactionBlockedRef.current = true;
       keyboardNavigationRef.current = false;
@@ -114,11 +137,11 @@ function Tooltip({
       window.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("pointerdown", handlePointerDown, true);
     };
-  }, [onOpenChange]);
+  }, [onOpenChange, cancelHover]);
 
   const releaseInteraction = (interaction: "pointer" | "focus") => {
     if (
-      !windowFocusedRef.current ||
+      disabled || !windowFocusedRef.current ||
       !isTooltipDocumentActive() ||
       (interaction === "focus" &&
         interactionBlockedRef.current &&
@@ -132,9 +155,10 @@ function Tooltip({
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
+    cancelHover();
     if (
       nextOpen &&
-      (interactionBlockedRef.current ||
+      (disabled || interactionBlockedRef.current ||
         !windowFocusedRef.current ||
         !isTooltipDocumentActive())
     ) {
@@ -148,12 +172,23 @@ function Tooltip({
 
   return (
     <TooltipProvider>
-      <TooltipInteractionContext.Provider value={releaseInteraction}>
+      <TooltipInteractionContext.Provider value={{
+        release: releaseInteraction,
+        enter: () => {
+          cancelHover();
+          if (!interactionBlockedRef.current && releaseInteraction("pointer")) {
+            // Layout can move a trigger beneath a stationary pointer without a move event.
+            hoverTimerRef.current = setTimeout(() => handleOpenChange(true), delayDuration);
+          }
+        },
+        leave: cancelHover,
+      }}>
         <TooltipPrimitive.Root
+          delayDuration={delayDuration}
           data-slot="tooltip"
           onOpenChange={handleOpenChange}
           open={
-            windowInteractionBlocked
+            disabled || windowInteractionBlocked
               ? false
               : (controlledOpen ?? uncontrolledOpen)
           }
@@ -167,16 +202,28 @@ function Tooltip({
 function TooltipTrigger({
   onFocus,
   onPointerMove,
+  onPointerEnter,
+  onPointerLeave,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  const releaseInteraction = React.useContext(TooltipInteractionContext);
+  const interaction = React.useContext(TooltipInteractionContext);
   return (
     <TooltipPrimitive.Trigger
       data-slot="tooltip-trigger"
       {...props}
+      onPointerEnter={(event) => {
+        onPointerEnter?.(event);
+        if (!event.defaultPrevented && event.pointerType !== "touch") {
+          interaction?.enter();
+        }
+      }}
+      onPointerLeave={(event) => {
+        onPointerLeave?.(event);
+        interaction?.leave();
+      }}
       onFocus={(event) => {
         onFocus?.(event);
-        if (!event.defaultPrevented && releaseInteraction?.("focus") === false) {
+        if (!event.defaultPrevented && interaction?.release("focus") === false) {
           event.preventDefault();
         }
       }}
@@ -185,7 +232,7 @@ function TooltipTrigger({
         if (
           !event.defaultPrevented &&
           event.pointerType !== "touch" &&
-          releaseInteraction?.("pointer") === false
+          interaction?.release("pointer") === false
         ) {
           event.preventDefault();
         }
