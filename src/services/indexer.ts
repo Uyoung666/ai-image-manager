@@ -1020,33 +1020,18 @@ export async function scanFolder(
       resolvedPath = folder.path;
     }
     if (!folder) {
-      const result = db
+      folder = db
         .insert(folders)
         .values({
           path: resolvedPath,
           displayName: path.basename(resolvedPath),
         })
-        .returning({ insertedId: folders.id })
+        .returning()
         .get();
-      if (!result) {
+      if (!folder) {
         throw new Error("Failed to create folder record");
       }
-      createdFolderIds.push(result.insertedId);
-      folder = {
-        id: result.insertedId,
-        path: resolvedPath,
-        displayName: path.basename(resolvedPath),
-        appearanceColor: null,
-        appearanceIcon: null,
-        parentId: null,
-        photoCount: 0,
-        lastScannedAt: null,
-        createdAt: Date.now(),
-        explicitOnly: false,
-        isWatching: false,
-        watcherStartedAt: null,
-        lastWatcherEventAt: null,
-      };
+      createdFolderIds.push(folder.id);
     }
 
     const folderId = folder.id;

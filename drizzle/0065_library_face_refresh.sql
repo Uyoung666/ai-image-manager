@@ -1,0 +1,1 @@
+ALTER TABLE `photos` ADD `face_refresh_pending` integer DEFAULT false NOT NULL;

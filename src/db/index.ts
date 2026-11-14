@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -36,6 +37,7 @@ import {
   faceVectors,
   folders,
   galleryDataRevision,
+  libraryRefreshJobs,
   photoSequenceExclusions,
   photoSequenceMembers,
   photoSequenceSuggestions,
@@ -84,6 +86,7 @@ const schema = {
   faceVectors,
   folders,
   galleryDataRevision,
+  libraryRefreshJobs,
   photoSequenceExclusions,
   photoSequenceMembers,
   photoSequenceSuggestions,
@@ -197,6 +200,25 @@ function getMigrationsFolder(): string {
   throw new Error("Migrations folder not found");
 }
 
+export function backupBeforeLibraryReliabilityMigration(
+  sqlite: Database.Database,
+  dbPath: string
+): string | null {
+  const columns = sqlite.pragma("table_info(photos)") as SQLiteTableColumn[];
+  if (!columns.length || columns.some(({ name }) => name === "file_revision")) {
+    return null;
+  }
+  const directory = path.join(path.dirname(dbPath), "backups");
+  fs.mkdirSync(directory, { recursive: true });
+  const destination = path.join(
+    directory,
+    `pre-library-reliability-${Date.now()}-${randomUUID()}.db`
+  );
+  // SQLite snapshots committed WAL contents consistently while copying.
+  sqlite.prepare("VACUUM INTO ?").run(destination);
+  return destination;
+}
+
 export function initDatabase(): ReturnType<typeof drizzle> {
   if (dbInstance) {
     return dbInstance;
@@ -242,6 +264,7 @@ export function initDatabase(): ReturnType<typeof drizzle> {
   // Auto-run migrations on startup
   const migrationsFolder = getMigrationsFolder();
   try {
+    backupBeforeLibraryReliabilityMigration(sqlite, dbPath);
     console.log(`[DB] Running migrations from: ${migrationsFolder}`);
     migrate(dbInstance, { migrationsFolder });
     console.log("[DB] Migrations complete");

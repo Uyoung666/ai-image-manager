@@ -1,0 +1,1 @@
+CREATE INDEX `idx_photos_path_folded` ON `photos` (lower("path"));

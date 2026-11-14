@@ -1,3 +1,8 @@
+import type {
+  LibraryPhotoStatus,
+  LibrarySourceStatus,
+} from "./library-reliability";
+
 export type SearchMatch =
   | { kind: "color"; score: number }
   | { kind: "exact"; source: "filename" | "person" | "tag" }
@@ -12,7 +17,7 @@ export type SearchMatch =
   | { kind: "image"; score: number }
   | { kind: "semantic"; score: number };
 
-export interface Photo {
+export interface Photo extends LibraryPhotoStatus {
   dominantColors?: string | null;
   fileDate?: number | null;
   filename: string;
@@ -39,6 +44,7 @@ export interface Folder {
   parentId: number | null;
   path: string;
   photoCount: number;
+  sourceStatus?: Exclude<LibrarySourceStatus, "missing">;
   totalPhotoCount?: number;
 }
 

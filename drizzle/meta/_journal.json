@@ -435,6 +435,48 @@
       "when": 1793284085057,
       "tag": "0061_cull_preferences_and_explicit_folders",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1794029360756,
+      "tag": "0062_library_reliability",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1794029485822,
+      "tag": "0063_library_path_lookup",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1794029804580,
+      "tag": "0064_library_face_review_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1794055075729,
+      "tag": "0065_library_face_refresh",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "6",
+      "when": 1794055628627,
+      "tag": "0066_library_face_retry",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1794184840314,
+      "tag": "0067_library_embedding_refresh_retries",
+      "breakpoints": true
     }
   ]
 }

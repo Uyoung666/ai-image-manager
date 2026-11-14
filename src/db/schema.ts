@@ -28,6 +28,15 @@ export const folders = sqliteTable(
     parentId: integer("parent_id"),
     photoCount: integer("photo_count").notNull().default(0),
     lastScannedAt: integer("last_scanned_at"),
+    sourceStatus: text("source_status", {
+      enum: ["unverified", "available", "offline", "inaccessible"],
+    })
+      .notNull()
+      .default("unverified"),
+    sourceCheckedAt: integer("source_checked_at"),
+    lastScanResult: text("last_scan_result", {
+      enum: ["complete", "incomplete", "empty", "offline", "inaccessible"],
+    }),
     createdAt: integer("created_at")
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -45,7 +54,7 @@ export const folders = sqliteTable(
   })
 );
 
-/** 1: layout + favorites; 2: layout; 3: tag membership and evidence. */
+/** 1: layout + favorites; 2: layout; 3: tag evidence; 4: source and refresh state. */
 export const galleryDataRevision = sqliteTable("gallery_data_revision", {
   id: integer("id").primaryKey(),
   revision: integer("revision").notNull().default(0),
@@ -74,6 +83,40 @@ export const photos = sqliteTable(
     colorBucket: integer("color_bucket"),
     phash: text("phash"),
     contentHash: text("content_hash"),
+    sourceStatus: text("source_status", {
+      enum: ["unverified", "available", "offline", "missing", "inaccessible"],
+    })
+      .notNull()
+      .default("unverified"),
+    sourceCheckedAt: integer("source_checked_at"),
+    sourceAvailableAt: integer("source_available_at"),
+    sourceMissingAt: integer("source_missing_at"),
+    sourceErrorCode: text("source_error_code"),
+    sourceSize: integer("source_size"),
+    sourceMtimeMs: real("source_mtime_ms"),
+    sourceCtimeMs: real("source_ctime_ms"),
+    sourceHash: text("source_hash"),
+    sourceHashVersion: text("source_hash_version"),
+    sourceHashFileRevision: integer("source_hash_file_revision"),
+    fileRevision: integer("file_revision").notNull().default(0),
+    contentRevision: integer("content_revision").notNull().default(0),
+    metadataRevision: integer("metadata_revision").notNull().default(0),
+    embeddingRevision: integer("embedding_revision").notNull().default(0),
+    embeddingRefreshAttempts: integer("embedding_refresh_attempts")
+      .notNull()
+      .default(0),
+    embeddingRefreshRetryAt: integer("embedding_refresh_retry_at")
+      .notNull()
+      .default(0),
+    embeddingRefreshFileRevision: integer("embedding_refresh_file_revision"),
+    colorRevision: integer("color_revision").notNull().default(0),
+    refreshStatus: text("refresh_status", {
+      enum: ["ready", "pending", "failed"],
+    })
+      .notNull()
+      .default("ready"),
+    refreshError: text("refresh_error"),
+    deletionSourceHash: text("deletion_source_hash"),
     vectorId: text("vector_id"),
     isIndexed: integer("is_indexed", { mode: "boolean" })
       .notNull()
@@ -81,6 +124,11 @@ export const photos = sqliteTable(
     isAiProcessed: integer("is_ai_processed", { mode: "boolean" })
       .notNull()
       .default(false),
+    faceRefreshPending: integer("face_refresh_pending", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    faceRefreshAttempts: integer("face_refresh_attempts").notNull().default(0),
+    faceRefreshRetryAt: integer("face_refresh_retry_at").notNull().default(0),
     isFaceProcessed: integer("is_face_processed", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -96,6 +144,14 @@ export const photos = sqliteTable(
   },
   (table) => ({
     folderIdIdx: index("idx_photos_folder_id").on(table.folderId),
+    foldedPathIdx: index("idx_photos_path_folded").on(
+      sql`lower(${table.path})`
+    ),
+    sourceStatusIdx: index("idx_photos_source_status").on(table.sourceStatus),
+    sourceHashIdx: index("idx_photos_source_hash").on(
+      table.sourceSize,
+      table.sourceHash
+    ),
     isAiProcessedIdx: index("idx_photos_is_ai_processed").on(
       table.isAiProcessed
     ),
@@ -567,6 +623,17 @@ export const pluginAssets = sqliteTable(
   })
 );
 
+export const libraryRefreshJobs = sqliteTable("library_refresh_jobs", {
+  photoId: integer("photo_id")
+    .primaryKey()
+    .references(() => photos.id, {
+      onDelete: "cascade",
+    }),
+  contentRevision: integer("content_revision").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  retryAt: integer("retry_at").notNull().default(0),
+});
+
 export const faceVectors = sqliteTable(
   "face_vectors",
   {
@@ -575,6 +642,7 @@ export const faceVectors = sqliteTable(
       .references(() => photos.id, { onDelete: "cascade" })
       .notNull(),
     faceIndex: integer("face_index").notNull().default(0),
+    contentRevision: integer("content_revision").notNull().default(0),
     bboxX: real("bbox_x").notNull(),
     bboxY: real("bbox_y").notNull(),
     bboxWidth: real("bbox_width").notNull(),
@@ -694,6 +762,7 @@ export const faceReviewDecisions = sqliteTable(
       .references(() => photos.id, { onDelete: "cascade" })
       .notNull(),
     faceIndex: integer("face_index").notNull(),
+    contentRevision: integer("content_revision").notNull().default(0),
     decision: text("decision").notNull(),
     sourceIdentityId: integer("source_identity_id").references(
       () => faceIdentities.id,
@@ -710,7 +779,8 @@ export const faceReviewDecisions = sqliteTable(
   (table) => ({
     uniquePhotoFace: uniqueIndex("idx_face_review_decision_photo_face").on(
       table.photoId,
-      table.faceIndex
+      table.faceIndex,
+      table.contentRevision
     ),
     photoIdIdx: index("idx_face_review_decision_photo_id").on(table.photoId),
     sourceIdentityIdx: index("idx_face_review_decision_source_identity").on(
@@ -1119,6 +1189,7 @@ export const cullSessionPhotos = sqliteTable(
       { onDelete: "cascade" }
     ),
     rating: integer("rating").notNull().default(1500),
+    contentRevision: integer("content_revision").notNull().default(0),
     comparisons: integer("comparisons").notNull().default(0),
     wins: integer("wins").notNull().default(0),
     losses: integer("losses").notNull().default(0),
