@@ -200,7 +200,16 @@ beforeEach(async () => {
   manager = await import("@/services/update-manager");
   // Do not setUpdateManagerTestOverrides: exercise the production GitHub path.
 });
-afterEach(async () => {
+afterEach(async ({ task }) => {
+  if (task.result?.state === "fail") {
+    console.error(
+      "UPDATE_TEST_FAILURE",
+      JSON.stringify({
+        state: mocks.state,
+        diagnostics: mocks.log.mock.calls.slice(-5),
+      })
+    );
+  }
   manager.stopUpdateManager();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -220,7 +229,9 @@ afterEach(async () => {
 
 async function download() {
   expect(manager.checkForUpdatesManually().ok).toBe(true);
-  await vi.waitFor(() => expect(mocks.state.phase).toBe("downloaded"));
+  await vi.waitFor(() =>
+    expect(mocks.state).toMatchObject({ phase: "downloaded" })
+  );
 }
 
 function metadataResponse(
