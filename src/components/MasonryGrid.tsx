@@ -17,6 +17,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { libraryReliabilityActions } from "@/actions/library-reliability";
 import { isReducedMotionEnabled } from "@/actions/ui-preferences";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import { useBackToTop } from "@/hooks/use-back-to-top";
@@ -320,6 +321,7 @@ export const MasonryGrid = memo(
     const viewportHeightStateRef = useRef(0);
     const scrollHeightStateRef = useRef(0);
     const isScrollingStateRef = useRef(false);
+    const foregroundReportedAtRef = useRef(Number.NEGATIVE_INFINITY);
     const currentTimeLabelRef = useRef("");
     const scrollVelocityRef = useRef(0);
     const scrollOverscanMultiplierRef = useRef(1);
@@ -484,6 +486,14 @@ export const MasonryGrid = memo(
     );
 
     const handleScroll = useCallback(() => {
+      const now = performance.now();
+      if (now - foregroundReportedAtRef.current >= 100) {
+        foregroundReportedAtRef.current = now;
+        // A best-effort short lease expires even if this view closes or reloads.
+        Promise.resolve()
+          .then(() => libraryReliabilityActions.noteForegroundActivity())
+          .catch(() => undefined);
+      }
       const reflowTop = reflowScrollTopRef.current;
       const isReflowScroll =
         reflowTop !== null &&

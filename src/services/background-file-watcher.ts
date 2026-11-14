@@ -12,12 +12,11 @@ export interface FileWatcherOptions {
   ignorePermissionErrors: boolean;
 }
 
+type FileWatcherEvent = "add" | "change" | "unlink" | "addDir" | "unlinkDir";
+
 export interface FileWatcherHandle {
   close(): Promise<void>;
-  on(
-    event: "add" | "unlink" | "addDir",
-    listener: (path: string) => void
-  ): this;
+  on(event: FileWatcherEvent, listener: (path: string) => void): this;
   on(event: "error", listener: (error: Error) => void): this;
   on(event: "ready", listener: () => void): this;
 }
@@ -31,7 +30,7 @@ type WatchMessage =
   | {
       type: "event";
       id: number;
-      event: "add" | "unlink" | "addDir";
+      event: FileWatcherEvent;
       path: string;
     }
   | { type: "ready"; id: number }
@@ -54,7 +53,7 @@ const post=message=>parentPort.postMessage(message);
     const watcher=chokidar.watch(message.path,message.options);
     watchers.set(message.id,watcher);
     watcher.on('error',error=>post({type:'error',id:message.id,error:wire(error)}));
-    for(const event of ['add','unlink','addDir'])watcher.on(event,path=>post({type:'event',id:message.id,event,path}));
+    for(const event of ['add','change','unlink','addDir','unlinkDir'])watcher.on(event,path=>post({type:'event',id:message.id,event,path}));
     watcher.once('ready',()=>post({type:'ready',id:message.id}));
    }catch(error){post({type:'error',id:message.id,error:wire(error)});}
   }else if(message.type==='close'){

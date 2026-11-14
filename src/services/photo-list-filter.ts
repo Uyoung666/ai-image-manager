@@ -1,11 +1,14 @@
 import { eq, inArray, isNull, like, type SQL, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { folders, photoSequenceMembers, photos, tags } from "@/db/schema";
+import type { LibraryStatusFilter } from "@/types/library-reliability";
 import { getFolderSubtreeIds } from "./folder-hierarchy";
+import { libraryStatusPredicate } from "./library-status-query";
 
 export interface PhotoListFilter {
   favoriteOnly?: boolean;
   folderId?: number;
+  libraryStatus?: LibraryStatusFilter;
   search?: string;
   tagId?: number;
   tagIds?: number[];
@@ -27,6 +30,9 @@ export function buildPhotoListFilter(input: PhotoListFilter) {
   } = input;
   // Always exclude soft-deleted photos
   const conditions: SQL[] = [isNull(photos.deletedAt)];
+  if (input.libraryStatus) {
+    conditions.push(libraryStatusPredicate(input.libraryStatus));
+  }
   let ungroupedCondition: SQL | null = null;
 
   if (folderId) {

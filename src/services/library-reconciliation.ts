@@ -26,13 +26,71 @@ import {
   stopWatching,
 } from "./indexer";
 import { notifyLibraryChange } from "./library-change";
+import {
+  observeLibraryPhoto,
+  startLibraryContentRefresh,
+  stopLibraryContentRefresh,
+} from "./library-content-refresh";
+import {
+  isLibraryForegroundBusy,
+  waitForLibraryForegroundIdle,
+} from "./library-foreground";
+import {
+  startLibraryHashBackfill,
+  stopLibraryHashBackfill,
+} from "./library-moves";
+import { reconcileLibrarySources } from "./library-source";
 
 const log = createLogger("library-reconciliation");
+const RECONCILIATION_DELAY_MS = 1000;
+// Give initial previews I/O capacity while watchers and offline-root checks start.
+const STARTUP_RECONCILIATION_DELAY_MS = 3000;
 let stopped = true;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let checking: ReturnType<typeof setTimeout> | undefined;
+let startupScheduledAt: number | undefined;
+let explicitCheck: Promise<void> | undefined;
+let explicitController: AbortController | undefined;
 
-function enqueueRoots(): void {
+function checkExplicitSources(): void {
+  if (explicitCheck) {
+    return;
+  }
+  const controller = new AbortController();
+  explicitController = controller;
+  explicitCheck = (async () => {
+    if (
+      !(await waitForLibraryForegroundIdle(
+        () => !(stopped || controller.signal.aborted),
+        controller.signal
+      ))
+    ) {
+      return;
+    }
+    let changed = false;
+    const summary = await reconcileLibrarySources({
+      explicitOnly: true,
+      signal: controller.signal,
+      onAvailable: async (photo) => {
+        if (await observeLibraryPhoto(photo.id, photo.path)) {
+          changed = true;
+        }
+      },
+    });
+    if (!stopped && (changed || summary.changed)) {
+      notifyLibraryChange(null, changed ? "update" : "status");
+    }
+  })()
+    .catch((error: unknown) => {
+      log.warn({ error }, "Library source check failed");
+    })
+    .finally(() => {
+      explicitCheck = undefined;
+      explicitController = undefined;
+    });
+}
+
+function enqueueRoots(startupStartedAt?: number): void {
   if (stopped) {
     return;
   }
@@ -53,7 +111,16 @@ function enqueueRoots(): void {
       );
     }
   }
-  log.info({ roots: roots.length }, "Library reconciliation queued");
+  log.info(
+    {
+      roots: roots.length,
+      ...(startupStartedAt === undefined
+        ? {}
+        : { startupToEnqueueMs: performance.now() - startupStartedAt }),
+    },
+    "Library reconciliation queued"
+  );
+  checkExplicitSources();
   waitForRound();
 }
 
@@ -84,37 +151,57 @@ function restartWatches(): void {
 }
 
 function resume(): void {
-  if (stopped) {
+  // Keep the startup deadline bounded even if watcher readiness keeps arriving.
+  if (stopped || (startupScheduledAt !== undefined && checking)) {
     return;
   }
   clearTimeout(checking);
-  checking = setTimeout(() => {
-    restartWatches();
-    enqueueRoots();
-  }, 1000);
+  checking = setTimeout(
+    () => {
+      checking = undefined;
+      const startupStartedAt = startupScheduledAt;
+      startupScheduledAt = undefined;
+      restartWatches();
+      enqueueRoots(startupStartedAt);
+    },
+    startupScheduledAt === undefined
+      ? RECONCILIATION_DELAY_MS
+      : STARTUP_RECONCILIATION_DELAY_MS
+  );
   checking.unref?.();
 }
 
 export function startLibraryReconciliation(): void {
   stopped = false;
-  startAutoIndexScheduler(() => isImportQueueBusy() || isIndexing());
+  startupScheduledAt = performance.now();
+  const isBusy = () =>
+    isLibraryForegroundBusy() || isImportQueueBusy() || isIndexing();
+  startAutoIndexScheduler(isBusy);
+  startLibraryContentRefresh();
+  startLibraryHashBackfill(() => startupScheduledAt !== undefined || isBusy());
   setWatcherReconciliationCallback(resume);
   powerMonitor.on("resume", resume);
+  // The shared check also covers roots whose watcher never becomes ready.
+  resume();
   restartWatches();
-  // Also reconcile roots whose watcher cannot reach ready.
-  enqueueRoots();
 }
 
 export async function stopLibraryReconciliation(): Promise<void> {
   stopped = true;
   clearTimeout(timer);
   clearTimeout(checking);
+  checking = undefined;
+  startupScheduledAt = undefined;
+  explicitController?.abort();
   powerMonitor.removeListener("resume", resume);
   setWatcherReconciliationCallback();
   pauseEmbedding();
   const aiStop = stopAutoIndexScheduler();
   await stopImports();
   await stopWatching();
+  await explicitCheck;
+  await stopLibraryHashBackfill();
+  await stopLibraryContentRefresh();
   await aiStop;
   await waitForEmbeddingTasks();
   if (activeEmbeddingRunId > 0) {

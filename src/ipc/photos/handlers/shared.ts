@@ -4,6 +4,13 @@ import {
   HEX_COLOR_PATTERN,
 } from "@/lib/folder-appearance";
 import type { ScoringOptions } from "@/services/ai/query-parser";
+import { LIBRARY_SOURCE_STATUSES } from "@/types/library-reliability";
+
+const LibraryStatusSchema = z.enum([
+  ...LIBRARY_SOURCE_STATUSES,
+  "pending",
+  "failed",
+]);
 
 export const FolderSchema = z.object({ path: z.string().min(1) });
 export const SearchSchema = z.object({
@@ -13,12 +20,14 @@ export const SearchSchema = z.object({
 export const ImageSearchSchema = z.object({
   imagePath: z.string().min(1),
   limit: z.number().optional().default(20),
+  libraryStatus: LibraryStatusSchema.optional(),
 });
 export const ImageSearchPreviewSchema = ImageSearchSchema.pick({
   imagePath: true,
 });
 export const ListSchema = z.object({
   folderId: z.number().optional(),
+  libraryStatus: LibraryStatusSchema.optional(),
   /** Only return active photos that are not members of any sequence. */
   ungroupedOnly: z.boolean().optional(),
   tagId: z.number().optional(),
@@ -91,6 +100,7 @@ export function applyTimeDecay<
 
 export const CompoundSearchSchema = z.object({
   requestId: z.string().uuid().optional(),
+  libraryStatus: LibraryStatusSchema.optional(),
   query: z.string().optional(),
   colorHex: z.string().optional(),
   dateFrom: z.number().optional(),

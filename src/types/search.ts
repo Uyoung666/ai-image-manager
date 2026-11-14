@@ -28,6 +28,7 @@ export interface ExifFilters {
   isoMax?: string;
   isoMin?: string;
   lensModel?: string;
+  libraryStatus?: LibraryStatusFilter;
   shutterMax?: string;
   shutterMin?: string;
 }
@@ -41,3 +42,5 @@ export interface SearchCriteria {
   mode: SearchMode;
   query: string;
 }
+
+import type { LibraryStatusFilter } from "./library-reliability";

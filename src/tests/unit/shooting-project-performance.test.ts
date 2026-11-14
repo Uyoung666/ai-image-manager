@@ -26,6 +26,7 @@ const state = vi.hoisted(() => ({
 vi.mock("@/utils/data-path", () => ({ getDataPath: () => state.dataPath }));
 vi.mock("@/services/ai-embedder", () => ({
   deletePhotoVectors: vi.fn().mockResolvedValue(undefined),
+  deleteColorVectors: vi.fn().mockResolvedValue(undefined),
   embedAllPhotos: state.embedding,
 }));
 vi.mock("@/services/ai/vector-db", () => ({

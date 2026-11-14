@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import sharp from "sharp";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { photos } from "@/db/schema";
 
 const state = vi.hoisted(() => ({
   db: undefined as unknown,
@@ -24,6 +25,11 @@ const state = vi.hoisted(() => ({
   },
   throwOnWatch: new Set<string>(),
   thumbnail: vi.fn(),
+  waitForeground: vi.fn(),
+}));
+vi.mock("@/services/library-foreground", () => ({
+  isLibraryForegroundBusy: () => false,
+  waitForLibraryForegroundIdle: state.waitForeground,
 }));
 vi.mock("@/db", () => ({ getDatabase: () => state.db }));
 vi.mock("@/services/background-file-watcher", () => ({
@@ -50,6 +56,7 @@ vi.mock("@/services/background-file-watcher", () => ({
 }));
 vi.mock("@/services/ai-embedder", () => ({
   deletePhotoVectors: async () => undefined,
+  deleteColorVectors: async () => undefined,
 }));
 vi.mock("@/services/dedup-service", () => ({
   checkNewPhotoDuplicates: () => undefined,
@@ -70,6 +77,19 @@ vi.mock("@/utils/logger", () => ({
 let sqlite: Database.Database;
 let root: string;
 let indexer: typeof import("@/services/indexer");
+
+async function verifyFixtureFingerprint(): Promise<number> {
+  const db = state.db as ReturnType<typeof drizzle>;
+  const photo = db.select().from(photos).get();
+  if (!photo) {
+    throw new Error("Missing indexed fixture");
+  }
+  const { backfillLibraryFingerprint } = await import(
+    "@/services/library-moves"
+  );
+  await backfillLibraryFingerprint(db, photo, () => true);
+  return photo.id;
+}
 beforeEach(async () => {
   vi.resetModules();
   state.watchers.length = 0;
@@ -78,6 +98,11 @@ beforeEach(async () => {
   state.logger.warn.mockReset();
   state.logger.error.mockReset();
   state.throwOnWatch.clear();
+  state.waitForeground
+    .mockReset()
+    .mockImplementation((isCurrent: () => boolean) =>
+      Promise.resolve(isCurrent())
+    );
   sqlite = new Database(":memory:");
   state.db = drizzle(sqlite);
   migrate(state.db as ReturnType<typeof drizzle>, {
@@ -100,6 +125,7 @@ beforeEach(async () => {
   await indexer.scanFolder(root);
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   indexer?.setWatcherReconciliationCallback();
   await indexer?.stopWatching();
   sqlite?.close();
@@ -159,6 +185,42 @@ it("background scans find offline deep additions without reprocessing existing p
   expect(state.thumbnail).toHaveBeenCalledOnce();
 });
 
+it("waits at a background batch boundary before probing originals and cancels cleanly", async () => {
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  state.waitForeground.mockImplementationOnce(
+    async (isCurrent: () => boolean) => {
+      entered.resolve();
+      await release.promise;
+      return isCurrent();
+    }
+  );
+  const original = path.join(root, "A/photo.jpg");
+  const access = vi.spyOn(fs.promises, "access");
+  const existing = sqlite
+    .prepare("SELECT id, path, source_checked_at FROM photos")
+    .all();
+  const scanning = indexer.scanFolder(root, undefined, { background: true });
+  await entered.promise;
+  expect(access.mock.calls.filter(([file]) => file === original)).toHaveLength(
+    0
+  );
+  indexer.stopScanning();
+  release.resolve();
+  expect(await scanning).toMatchObject({ cancelled: true, newPhotoIds: [] });
+  expect(
+    sqlite.prepare("SELECT id, path, source_checked_at FROM photos").all()
+  ).toEqual(existing);
+});
+
+it("keeps an explicit scan independent of the foreground background-work gate", async () => {
+  state.waitForeground.mockClear();
+  const result = await indexer.scanFolder(root);
+  expect(result.cancelled).toBe(false);
+  expect(result.photoIds).toHaveLength(1);
+  expect(state.waitForeground).not.toHaveBeenCalled();
+});
+
 it("recovers a failed watcher with bounded retries and ignores retired readiness", async () => {
   vi.useFakeTimers();
   try {
@@ -188,6 +250,7 @@ it.each([
   "watchFolder",
   "startWatching",
 ] as const)("%s assigns the first moved file to a newly discovered nested directory", async (entry) => {
+  const originalId = await verifyFixtureFingerprint();
   const changed = vi.fn();
   if (entry === "watchFolder") {
     indexer.watchFolder(root, changed);
@@ -198,11 +261,12 @@ it.each([
   const target = path.join(root, "B/深层/photo.jpg");
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.renameSync(oldPath, target);
-  state.watchers[0].emit("unlink", oldPath);
+  // A destination event is not dependent on delivery of the old-path event.
   state.watchers[0].emit("add", target);
   await vi.waitFor(() =>
-    expect(changed).toHaveBeenCalledWith(expect.any(Number), "add")
+    expect(changed).toHaveBeenCalledWith(originalId, "update")
   );
+  state.watchers[0].emit("unlink", oldPath);
   const rows = sqlite
     .prepare(
       "select p.path, f.path folderPath, f.photo_count count, parent.path parentPath from photos p join folders f on f.id=p.folder_id left join folders parent on parent.id=f.parent_id"
@@ -227,7 +291,7 @@ it("keeps the same directory and count when a scan finishes during watcher prepa
   const oldPath = path.join(root, "A/photo.jpg");
   const target = path.join(root, "B/photo.jpg");
   fs.mkdirSync(path.dirname(target));
-  fs.renameSync(oldPath, target);
+  fs.copyFileSync(oldPath, target);
   const thumbnail = await state.thumbnail();
   let release!: () => void;
   const waiting = new Promise<void>((resolve) => {
@@ -239,7 +303,6 @@ it("keeps the same directory and count when a scan finishes during watcher prepa
     await waiting;
     return thumbnail;
   });
-  state.watchers[0].emit("unlink", oldPath);
   state.watchers[0].emit("add", target);
   try {
     await vi.waitFor(() => expect(entered).toBe(true));
@@ -255,9 +318,9 @@ it("keeps the same directory and count when a scan finishes during watcher prepa
   expect(
     sqlite
       .prepare(
-        "select p.path, f.path folderPath, f.photo_count count from photos p join folders f on f.id=p.folder_id"
+        "select p.path, f.path folderPath, f.photo_count count from photos p join folders f on f.id=p.folder_id where p.path=?"
       )
-      .all()
+      .all(target)
   ).toEqual([{ path: target, folderPath: path.dirname(target), count: 1 }]);
 });
 
@@ -267,8 +330,7 @@ it("includes a watcher insert in the first scan result when the scan was prepari
   const oldPath = path.join(root, "A/photo.jpg");
   const target = path.join(root, "B/photo.jpg");
   fs.mkdirSync(path.dirname(target));
-  fs.renameSync(oldPath, target);
-  state.watchers[0].emit("unlink", oldPath);
+  fs.copyFileSync(oldPath, target);
   const thumbnail = await state.thumbnail();
   let release!: () => void;
   const waiting = new Promise<void>((resolve) => {
@@ -291,15 +353,128 @@ it("includes a watcher insert in the first scan result when the scan was prepari
     release();
   }
   const result = await scan;
-  expect(result.photoIds).toHaveLength(1);
+  expect(result.photoIds).toHaveLength(2);
   expect(result.newPhotoIds).toHaveLength(0);
   expect(
     sqlite
       .prepare(
-        "select p.path, f.path folderPath, f.photo_count count from photos p join folders f on f.id=p.folder_id"
+        "select p.path, f.path folderPath, f.photo_count count from photos p join folders f on f.id=p.folder_id where p.path=?"
       )
-      .all()
+      .all(target)
   ).toEqual([{ path: target, folderPath: path.dirname(target), count: 1 }]);
+});
+
+it("retains the original ID for an offline edit of the folder layout", async () => {
+  const originalId = await verifyFixtureFingerprint();
+  sqlite.prepare("UPDATE photos SET is_favorite=1 WHERE id=?").run(originalId);
+  sqlite.exec(`
+    INSERT INTO tags(id, name, created_at) VALUES (1, 'kept', 0);
+    INSERT INTO photo_tags(photo_id, tag_id) VALUES (${originalId}, 1);
+    INSERT INTO albums(id, name, created_at) VALUES (1, 'kept', 0);
+    INSERT INTO album_photos(photo_id, album_id) VALUES (${originalId}, 1);
+    INSERT INTO face_vectors(photo_id, bbox_x, bbox_y, bbox_width, bbox_height, created_at)
+      VALUES (${originalId}, 0, 0, 1, 1, 0);
+    INSERT INTO cull_sessions(id, name, created_at) VALUES (1, 'kept', 0);
+    INSERT INTO cull_session_photos(session_id, photo_id) VALUES (1, ${originalId});
+  `);
+  const oldPath = path.join(root, "A/photo.jpg");
+  const target = path.join(root, "renamed.jpg");
+  fs.renameSync(oldPath, target);
+  const result = await indexer.scanFolder(root);
+  expect(result).toMatchObject({
+    moved: 1,
+    newPhotoIds: [],
+    photoIds: [originalId],
+  });
+  expect(
+    sqlite.prepare("SELECT id, path, is_favorite FROM photos").all()
+  ).toEqual([{ id: originalId, path: target, is_favorite: 1 }]);
+  for (const table of [
+    "photo_tags",
+    "album_photos",
+    "face_vectors",
+    "cull_session_photos",
+  ]) {
+    expect(sqlite.prepare(`SELECT photo_id FROM ${table}`).all()).toEqual([
+      { photo_id: originalId },
+    ]);
+  }
+});
+
+it("imports a verified identical copy as a separate photo while the original still exists", async () => {
+  const originalId = await verifyFixtureFingerprint();
+  const target = path.join(root, "copy.jpg");
+  fs.copyFileSync(path.join(root, "A/photo.jpg"), target);
+  const result = await indexer.scanFolder(root);
+  expect(result.moved).toBe(0);
+  expect(result.newPhotoIds).toHaveLength(1);
+  expect(result.newPhotoIds[0]).not.toBe(originalId);
+  expect(result.photoIds).toHaveLength(2);
+});
+
+it.runIf(process.platform === "win32")(
+  "accepts case-only spelling changes without replacing the photo ID",
+  async () => {
+    const originalId = await verifyFixtureFingerprint();
+    const original = path.join(root, "A/photo.jpg");
+    const target = path.join(root, "A/PHOTO.JPG");
+    fs.renameSync(original, target);
+    const result = await indexer.scanFolder(root);
+    expect(result.newPhotoIds).toEqual([]);
+    expect(result.photoIds).toEqual([originalId]);
+    expect(
+      sqlite.prepare("SELECT id, path, filename FROM photos").all()
+    ).toEqual([{ id: originalId, path: target, filename: "PHOTO.JPG" }]);
+  }
+);
+
+it("keeps recorded availability after an unexpectedly empty scan", async () => {
+  const originalId = await verifyFixtureFingerprint();
+  fs.renameSync(path.join(root, "A/photo.jpg"), path.join(root, "outside.bak"));
+  const result = await indexer.scanFolder(root);
+  expect(result.incomplete).toBe(true);
+  expect(sqlite.prepare("SELECT id, source_status FROM photos").all()).toEqual([
+    { id: originalId, source_status: "available" },
+  ]);
+  expect(
+    sqlite
+      .prepare("SELECT last_scan_result FROM folders WHERE path=?")
+      .get(root)
+  ).toEqual({
+    last_scan_result: "empty",
+  });
+});
+
+it("keeps a missing ID when more than one new path matches its fingerprint", async () => {
+  const originalId = await verifyFixtureFingerprint();
+  const oldPath = path.join(root, "A/photo.jpg");
+  const target = path.join(root, "same.jpg");
+  fs.copyFileSync(oldPath, target);
+  fs.renameSync(oldPath, path.join(root, "renamed.jpg"));
+  const result = await indexer.scanFolder(root);
+  expect(result).toMatchObject({ moved: 0, newPhotoIds: [], missing: 1 });
+  expect(
+    sqlite.prepare("SELECT id, path, source_status FROM photos").all()
+  ).toEqual([{ id: originalId, path: oldPath, source_status: "missing" }]);
+});
+
+it("defers a watcher move when another identical target exists before its add event arrives", async () => {
+  const originalId = await verifyFixtureFingerprint();
+  const changed = vi.fn();
+  indexer.watchFolder(root, changed);
+  const oldPath = path.join(root, "A/photo.jpg");
+  const first = path.join(root, "first.jpg");
+  const second = path.join(root, "second.jpg");
+  fs.copyFileSync(oldPath, first);
+  fs.renameSync(oldPath, second);
+  state.watchers[0].emit("add", first);
+  await vi.waitFor(() => expect(indexer.getWatcherStats().skipped).toBe(1));
+  state.watchers[0].emit("add", second);
+  await vi.waitFor(() => expect(indexer.getWatcherStats().skipped).toBe(2));
+  expect(changed).not.toHaveBeenCalled();
+  expect(sqlite.prepare("SELECT id, path FROM photos").all()).toEqual([
+    { id: originalId, path: oldPath },
+  ]);
 });
 
 it("rolls back directory discovery on a database failure instead of assigning the ancestor", async () => {

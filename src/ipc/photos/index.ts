@@ -45,6 +45,21 @@ import {
   listPhotoPage,
 } from "./handlers/gallery-listing";
 import {
+  applyLibraryRelink,
+  cancelLibraryTask,
+  getLibraryHealth,
+  getLibraryIssues,
+  getLibraryTask,
+  getRelinkInspection,
+  inspectFolderRelink,
+  inspectMissingRecordRemoval,
+  inspectPhotoRelink,
+  noteLibraryForegroundActivity,
+  reconcileLibrary,
+  removeMissingRecords,
+  retryPhotoRefresh,
+} from "./handlers/library-reliability";
+import {
   cancelAllImports_h,
   cancelQueuedImports_h,
   deleteFolder,
@@ -139,6 +154,19 @@ import {
 } from "./handlers/tags";
 
 export const photos = {
+  applyLibraryRelink,
+  cancelLibraryTask,
+  getLibraryHealth,
+  getLibraryIssues,
+  getLibraryTask,
+  getRelinkInspection,
+  inspectFolderRelink,
+  inspectMissingRecordRemoval,
+  inspectPhotoRelink,
+  noteLibraryForegroundActivity,
+  reconcileLibrary,
+  removeMissingRecords,
+  retryPhotoRefresh,
   getSearchStarterFallbacks,
   getSearchStarters,
   getTagOptions,

@@ -1,6 +1,9 @@
 import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { GlobalAiStatusProvider } from "@/hooks/use-global-ai-status";
+import {
+  GlobalAiStatusProvider,
+  useGlobalAiStatus,
+} from "@/hooks/use-global-ai-status";
 
 const mocks = vi.hoisted(() => ({
   success: vi.fn(),
@@ -34,6 +37,48 @@ vi.mock("react-i18next", () => ({
 }));
 
 beforeEach(() => vi.clearAllMocks());
+
+function QueueRunningState() {
+  const status = useGlobalAiStatus();
+  return <output data-testid="running">{String(status.isRunning)}</output>;
+}
+
+it("keeps deferred background checks quiet while reporting user queues and active checks", async () => {
+  const view = render(
+    <GlobalAiStatusProvider>
+      <QueueRunningState />
+    </GlobalAiStatusProvider>
+  );
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const task = {
+    id: 1,
+    folderPath: "fixture",
+    position: 1,
+    source: "background",
+    status: "queued",
+  };
+  const send = (current: unknown, pending: unknown[]) =>
+    act(() =>
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            channel: "import-queue-status",
+            current,
+            pending,
+            history: [],
+          },
+        })
+      )
+    );
+  send(null, [task]);
+  expect(view.getByTestId("running")).toHaveTextContent("false");
+  send(null, [{ ...task, source: "user" }]);
+  expect(view.getByTestId("running")).toHaveTextContent("true");
+  send({ ...task, status: "scanning" }, []);
+  expect(view.getByTestId("running")).toHaveTextContent("true");
+});
 
 it("summarizes a mixed import once, including existing photos on rescan", async () => {
   render(

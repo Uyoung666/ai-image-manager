@@ -6,6 +6,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { folders, photos } from "@/db/schema";
 import {
+  getPhotoDetail,
   invalidateCountCache,
   listPhotos,
 } from "@/ipc/photos/handlers/listing";
@@ -47,6 +48,23 @@ beforeEach(() => {
   invalidateCountCache();
 });
 afterEach(() => sqlite.close());
+
+it("exposes the photo state without internal content versions or fingerprints", async () => {
+  sqlite
+    .prepare(
+      "UPDATE photos SET source_status='offline', source_hash='fingerprint', content_revision=1, file_revision=2 WHERE id=1"
+    )
+    .run();
+  const photo = await call(getPhotoDetail, { id: 1 });
+  expect(photo).toMatchObject({
+    id: 1,
+    sourceStatus: "offline",
+    refreshStatus: "pending",
+  });
+  expect(photo).not.toHaveProperty("sourceHash");
+  expect(photo).not.toHaveProperty("contentRevision");
+  expect(photo).not.toHaveProperty("fileRevision");
+});
 
 const list = (offset = 0) =>
   call(listPhotos, {

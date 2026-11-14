@@ -8,12 +8,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const listing = vi.hoisted(() => ({
   page: vi.fn(),
   byIds: vi.fn(),
+  thumbnailSources: vi.fn(),
   prefix: vi.fn(),
   describe: vi.fn(),
 }));
 vi.mock("@/services/gallery-listing", () => ({
   listGalleryPhotos: listing.page,
   getGalleryPhotosByIds: listing.byIds,
+  getGalleryThumbnailSources: listing.thumbnailSources,
   getGalleryLayoutPrefix: listing.prefix,
 }));
 vi.mock("@/services/thumbnail-identity", () => ({
@@ -73,12 +75,13 @@ describe("gallery listing IPC", () => {
   });
 
   it("reads current file identities only for the requested thumbnail IDs", async () => {
-    listing.byIds.mockReturnValue([{ id: 2, path: "visible.webp" }]);
+    listing.thumbnailSources.mockReturnValue([{ id: 2, path: "visible.webp" }]);
     listing.describe.mockResolvedValue([{ id: 2, thumbnailVersion: "fresh" }]);
     expect(await call(getPhotoThumbnailVersions, { ids: [2] })).toEqual([
       { id: 2, thumbnailVersion: "fresh" },
     ]);
-    expect(listing.byIds).toHaveBeenCalledWith([2]);
+    expect(listing.thumbnailSources).toHaveBeenCalledWith([2]);
+    expect(listing.byIds).not.toHaveBeenCalled();
     expect(listing.describe).toHaveBeenCalledWith(
       [{ id: 2, path: "visible.webp" }],
       2,

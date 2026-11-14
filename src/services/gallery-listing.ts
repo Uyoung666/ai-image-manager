@@ -13,6 +13,7 @@ import {
 import { getDatabase } from "@/db";
 import { photos, photoTags } from "@/db/schema";
 import type { Photo } from "@/types/photo";
+import { libraryStatusColumns } from "./library-status-query";
 import {
   buildPhotoListFilter,
   type PhotoListFilter,
@@ -41,6 +42,7 @@ interface Cursor {
   version: 1;
 }
 const columns = {
+  ...libraryStatusColumns,
   id: photos.id,
   path: photos.path,
   filename: photos.filename,
@@ -84,7 +86,16 @@ function getListingRevision(input: PhotoListFilter): number {
           sql`SELECT revision FROM gallery_data_revision WHERE id=3`
         )?.revision ?? 0)
       : 0;
-  return layoutRevision + tagRevision;
+  const statusRevision = input.libraryStatus ? getLibraryStatusRevision() : 0;
+  return layoutRevision + tagRevision + statusRevision;
+}
+
+export function getLibraryStatusRevision(): number {
+  return (
+    getDatabase().get<{ revision: number }>(
+      sql`SELECT revision FROM gallery_data_revision WHERE id=4`
+    )?.revision ?? 0
+  );
 }
 function fingerprint(input: GalleryListInput): string {
   return createHash("sha256")
@@ -97,6 +108,7 @@ function fingerprint(input: GalleryListInput): string {
         tagMode: input.tagMode ?? "or",
         search: input.search ?? "",
         favoriteOnly: input.favoriteOnly ?? false,
+        libraryStatus: input.libraryStatus ?? null,
         sort: input.sort,
         order: input.order,
       })
@@ -319,6 +331,7 @@ export function listGalleryPhotos(input: GalleryListInput) {
     ...total,
     revision,
     geometryRevision: revision,
+    libraryStatusRevision: getLibraryStatusRevision(),
     nextCursor: !forward || hasExtra ? encode(rows.at(-1)) : null,
     previousCursor: (forward ? Boolean(cursor) : hasExtra)
       ? encode(rows[0])
@@ -342,6 +355,29 @@ export function getGalleryPhotosByIds(ids: number[]): Photo[] {
       width: photo.width ?? 0,
       height: photo.height ?? 0,
     })) as Photo[];
+}
+
+/** Source evidence for the host's descriptor queue. Internal versions stay in the host. */
+export function getGalleryThumbnailSources(ids: number[]) {
+  if (ids.length === 0) {
+    return [];
+  }
+  return getDatabase()
+    .select({
+      id: photos.id,
+      path: photos.path,
+      width: photos.width,
+      height: photos.height,
+      thumbnailPath: photos.thumbnailPath,
+      sourceSize: photos.sourceSize,
+      sourceMtimeMs: photos.sourceMtimeMs,
+      sourceCtimeMs: photos.sourceCtimeMs,
+      metadataRevision: photos.metadataRevision,
+      contentRevision: photos.contentRevision,
+    })
+    .from(photos)
+    .where(and(inArray(photos.id, ids), isNull(photos.deletedAt)))
+    .all();
 }
 
 /** Restoration fetches geometry only. Full photo records remain windowed. */

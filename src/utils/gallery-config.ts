@@ -15,6 +15,7 @@ export const GALLERY_CONFIG = {
   thumbnailVariantWarmIdleMs: 500,
   imageTransferCacheSeconds: 1,
   maintenanceFileConcurrency: 2,
+  sourceCheckConcurrency: 1,
   generationConcurrency: 4,
   diskCheckIntervalMs: 5 * 60_000,
   initialDiskAuditDelayMs: 30_000,

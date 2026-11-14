@@ -1,3 +1,4 @@
+import path from "node:path";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
@@ -8,6 +9,7 @@ import { deletePhotoVectors } from "@/services/ai-embedder";
 import { requestAutoIndex } from "@/services/ai-index-scheduler";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import {
+  type IndexProgress,
   scanFolder as scanFolderService,
   stopScanning as stopScanningService,
   watchFolder,
@@ -16,6 +18,8 @@ import { getSetting, setSetting } from "@/services/settings-manager";
 import { deletePhotoThumbnails } from "@/services/thumbnailer";
 import { importPathKey, normalizeImportFolderPath } from "@/utils/import-path";
 import { notifyLibraryChange } from "./library-change";
+import { isLibraryForegroundBusy } from "./library-foreground";
+import { librarySourceIsPaused } from "./library-source";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -34,8 +38,12 @@ export interface ImportTask {
   folderPath: string;
   /** Unique id — timestamp of enqueue. */
   id: number;
+  inaccessible?: number;
+  missing?: number;
+  moved?: number;
   /** Number of photos newly indexed by this task. */
   newPhotoCount?: number;
+  offline?: number;
   /** Result from scanFolderService, set once scanning completes. */
   photoCount?: number;
   /** 1-based position in queue (only meaningful while status === "queued"). */
@@ -44,6 +52,7 @@ export interface ImportTask {
   skipped?: number;
   source?: "user" | "background";
   status: ImportTaskStatus;
+  updated?: number;
 }
 
 export interface ImportQueueStatus {
@@ -64,7 +73,41 @@ let nextId = 1;
 let suspending = false;
 let recoveryStarted = false;
 let activeScan: Promise<boolean> | null = null;
+let queueGeneration = 0;
+let backgroundWait: ReturnType<typeof setTimeout> | undefined;
 const RECOVERY_KEY = "imports.unfinishedRoots";
+
+function clearBackgroundWait(): void {
+  clearTimeout(backgroundWait);
+  backgroundWait = undefined;
+}
+
+function scheduleProcessNext(): void {
+  if (running || suspending) {
+    return;
+  }
+  const generation = queueGeneration;
+  setImmediate(() => {
+    if (generation === queueGeneration && !suspending) {
+      processNext();
+    }
+  });
+}
+
+function waitForBackgroundTurn(): void {
+  if (backgroundWait) {
+    return;
+  }
+  const generation = queueGeneration;
+  backgroundWait = setTimeout(() => {
+    if (generation !== queueGeneration || suspending) {
+      return;
+    }
+    backgroundWait = undefined;
+    processNext();
+  }, 100);
+  backgroundWait.unref?.();
+}
 
 function readUnfinishedRoots(): string[] {
   const value = getSetting(RECOVERY_KEY);
@@ -148,6 +191,8 @@ export function resumeInterruptedImports(): void {
 /** Shutdown is suspension, not the user's explicit cancel-and-rollback action. */
 export function suspendImportsForShutdown(): void {
   suspending = true;
+  queueGeneration++;
+  clearBackgroundWait();
   stopScanningService();
 }
 
@@ -237,10 +282,24 @@ function cleanupCancelledImport(
       }
     }
 
-    for (const fid of descendantIds) {
-      db.delete(folders).where(eq(folders.id, fid)).run();
+    for (const fid of [...descendantIds.reverse(), folderId]) {
+      const hasPhotos = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(eq(photos.folderId, fid))
+        .get();
+      const hasChildren = db
+        .select({ id: folders.id })
+        .from(folders)
+        .where(eq(folders.parentId, fid))
+        .get();
+      if (
+        !(hasPhotos || hasChildren) &&
+        (fid === folderId || createdFolderIds.includes(fid))
+      ) {
+        db.delete(folders).where(eq(folders.id, fid)).run();
+      }
     }
-    db.delete(folders).where(eq(folders.id, folderId)).run();
     reloadFolderMatcher();
   } else if (createdFolderIds.length > 0) {
     for (const fid of [...createdFolderIds].reverse()) {
@@ -259,16 +318,56 @@ function cleanupCancelledImport(
 
 // ── Phase runners ───────────────────────────────────────────────────
 
-async function runScanPhase(task: ImportTask): Promise<boolean> {
-  const result = await scanFolderService(
-    task.folderPath,
-    (progress) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send("scan-progress", progress);
+function createScanProgressReporter() {
+  const intervalMs = 100;
+  let pending: IndexProgress | undefined;
+  let lastPhase: IndexProgress["phase"] | undefined;
+  let lastSentAt = Number.NEGATIVE_INFINITY;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flush = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    if (!pending) {
+      return;
+    }
+    const progress = pending;
+    pending = undefined;
+    lastPhase = progress.phase;
+    lastSentAt = performance.now();
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("scan-progress", progress);
+    }
+  };
+  return {
+    report(progress: IndexProgress) {
+      pending = progress;
+      const remaining = intervalMs - (performance.now() - lastSentAt);
+      if (
+        progress.phase !== lastPhase ||
+        progress.phase === "complete" ||
+        remaining <= 0
+      ) {
+        flush();
+      } else if (!timer) {
+        timer = setTimeout(flush, remaining);
+        timer.unref?.();
       }
     },
-    { background: task.source === "background" }
-  );
+    finish: flush,
+  };
+}
+
+async function runScanPhase(task: ImportTask): Promise<boolean> {
+  const reporter = createScanProgressReporter();
+  let result: Awaited<ReturnType<typeof scanFolderService>>;
+  try {
+    result = await scanFolderService(task.folderPath, reporter.report, {
+      background: task.source === "background",
+    });
+  } finally {
+    // Finish or failure must not leave a timer publishing into the next task.
+    reporter.finish();
+  }
 
   if (suspending) {
     return false;
@@ -294,6 +393,11 @@ async function runScanPhase(task: ImportTask): Promise<boolean> {
   task.newPhotoCount = result.newPhotoIds.length;
   task.skipped = result.skipped;
   task.failed = result.failed ?? 0;
+  task.moved = result.moved;
+  task.updated = result.updated;
+  task.missing = result.missing;
+  task.offline = result.offline;
+  task.inaccessible = result.inaccessible;
   if (result.incomplete) {
     task.error = "Directory check incomplete";
   }
@@ -303,6 +407,13 @@ async function runScanPhase(task: ImportTask): Promise<boolean> {
   if (result.newPhotoIds.length > 0) {
     notifyLibraryChange(null, "add");
     requestAutoIndex("folder-scan");
+  } else if (
+    result.moved ||
+    result.updated ||
+    result.sourceChanges ||
+    result.incomplete
+  ) {
+    notifyLibraryChange(null, result.updated ? "update" : "status");
   }
 
   return true;
@@ -314,6 +425,16 @@ async function processNext(): Promise<void> {
   if (running || suspending) {
     return;
   }
+
+  if (
+    queue.length > 0 &&
+    queue.every((task) => task.source === "background") &&
+    isLibraryForegroundBusy()
+  ) {
+    waitForBackgroundTurn();
+    return;
+  }
+  clearBackgroundWait();
 
   const task = dequeueTask();
   if (!task) {
@@ -386,7 +507,15 @@ export function enqueueImport(
   if (suspending) {
     throw new Error("Application is shutting down");
   }
-  const resolved = normalizeImportFolderPath(folderPath);
+  if (librarySourceIsPaused(folderPath)) {
+    throw new Error("LIBRARY_SOURCE_BUSY");
+  }
+  // Reconciliation receives previously registered paths. Keep a disconnected
+  // root queued so its existing records can be marked offline.
+  const resolved =
+    source === "background"
+      ? path.resolve(folderPath)
+      : normalizeImportFolderPath(folderPath);
   const resolvedKey = importPathKey(resolved);
 
   const duplicate = queue.find(
@@ -396,6 +525,8 @@ export function enqueueImport(
     if (source === "user" && duplicate.source === "background") {
       duplicate.source = "user";
       rememberRoot(resolved, true);
+      clearBackgroundWait();
+      scheduleProcessNext();
     }
     return duplicate;
   }
@@ -422,16 +553,18 @@ export function enqueueImport(
   queue.push(task);
   broadcast();
 
-  if (!running) {
-    // 延迟到下一 tick，确保 task 以 "queued" 状态返回给调用者
-    setImmediate(() => processNext());
+  if (source === "user") {
+    clearBackgroundWait();
   }
+  // Preserve the queued acknowledgement while allowing user work past a wait.
+  scheduleProcessNext();
 
   return task;
 }
 
 /** Cancel all queued (not-yet-started) tasks. The currently-running task is not affected. */
 export function cancelQueuedImports(): ImportTask[] {
+  clearBackgroundWait();
   const cancelled = queue.splice(0, queue.length);
   for (const t of cancelled) {
     if (t.source !== "background") {

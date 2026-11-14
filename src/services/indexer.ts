@@ -9,7 +9,8 @@ import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos } from "@/db/schema";
 import { invalidateFoldersCache } from "@/utils/folder-paths";
-import { containsLibraryPath, selectLibraryRoots } from "@/utils/library-roots";
+import { importPathKey } from "@/utils/import-path";
+import { containsLibraryPath } from "@/utils/library-roots";
 import { createLogger } from "@/utils/logger";
 import { deletePhotoVectors } from "./ai-embedder";
 import {
@@ -30,9 +31,28 @@ import {
   getOrientedDimensions,
   resolveImageOrientation,
 } from "./image-orientation";
-import { findMissingPhotoIds } from "./orphan-photo-check";
+import { waitForLibraryForegroundIdle } from "./library-foreground";
+import {
+  acceptLibraryPathSpelling,
+  commitLibraryMove,
+  type LibraryMovePlan,
+  libraryPhotoPathEquals,
+  libraryPhotoPathsIn,
+  planLibraryMoves,
+  planWatchedLibraryMoves,
+  requestLibraryHashBackfill,
+} from "./library-moves";
+import {
+  inspectLibraryRoot,
+  type LibraryFileObservation,
+  libraryPathCondition,
+  librarySourceIsPaused,
+  reconcileLibrarySources,
+  writeLibraryFolderSource,
+} from "./library-source";
 import { computePHash } from "./perceptual-hash";
 import { extractRawPreview, isRawFile, readRawDimensions } from "./raw-preview";
+import { thumbnailSourceIdentity } from "./thumbnail-identity";
 import {
   deletePhotoThumbnails,
   generateThumbnail,
@@ -97,7 +117,7 @@ export function getWatcherStats() {
   };
 }
 
-interface IndexProgress {
+export interface IndexProgress {
   currentFile: string;
   phase: "scanning" | "indexing" | "complete";
   scanned: number;
@@ -117,13 +137,21 @@ interface WatcherContext {
 }
 
 const watchers = new Map<string, WatcherContext>();
+const pendingWatcherAdds = new Map<
+  string,
+  { context: WatcherContext; filePath: string }
+>();
+let watcherAddTimer: ReturnType<typeof setTimeout> | undefined;
 
 type WatcherStateContext = Pick<
   WatcherContext,
   "db" | "folderId" | "folderPath"
 >;
 
-type WatchChange = (photoId: number | null, event: "add" | "remove") => void;
+type WatchChange = (
+  photoId: number | null,
+  event: "add" | "remove" | "update" | "status"
+) => void;
 let onWatcherReady: ((folderPath: string) => void) | undefined;
 const retries = new Map<
   string,
@@ -192,7 +220,7 @@ function logWatcherFailure(
 }
 
 function isCurrentWatcher(context: WatcherContext): boolean {
-  return watchers.get(context.key) === context;
+  return watchers.get(context.key) === context && context.db === getDatabase();
 }
 
 function removeCurrentWatcher(context: WatcherContext): void {
@@ -424,6 +452,9 @@ async function readBasicMeta(filePath: string): Promise<{
       }
     }
     input = await resolveHeifInput(input);
+    if (typeof input === "string") {
+      input = await fs.promises.readFile(input);
+    }
     if (Buffer.isBuffer(input)) {
       thumbnailInput = input;
     }
@@ -499,6 +530,12 @@ interface PhotoRecord {
   isIndexed: boolean;
   path: string;
   phash: string | null;
+  sourceAvailableAt: number;
+  sourceCheckedAt: number;
+  sourceCtimeMs: number;
+  sourceMtimeMs: number;
+  sourceSize: number;
+  sourceStatus: "available";
   thumbnailPath: string | null;
   thumbnailSize: string;
   width: number;
@@ -641,7 +678,7 @@ function queuePrimaryColorVectorUpsert(
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Photo preparation combines metadata, thumbnail, RAW preview, EXIF, and color extraction for one indexed file.
-async function preparePhotoRecord(
+export async function preparePhotoRecord(
   filePath: string,
   folderId: number | null
 ): Promise<{
@@ -668,6 +705,7 @@ async function preparePhotoRecord(
   let thumb: Awaited<ReturnType<typeof generateThumbnail>>;
   try {
     thumb = await generateThumbnail(filePath, "md", {
+      expectedIdentity: thumbnailSourceIdentity(stat),
       input: meta.thumbnailInput,
       prepared: meta.thumbnailPrepared,
       orientation: meta.orientation,
@@ -716,6 +754,12 @@ async function preparePhotoRecord(
     folderId,
     filename: path.basename(filePath),
     fileSize: stat.size,
+    sourceSize: stat.size,
+    sourceMtimeMs: stat.mtimeMs,
+    sourceCtimeMs: stat.ctimeMs,
+    sourceStatus: "available",
+    sourceCheckedAt: Date.now(),
+    sourceAvailableAt: Date.now(),
     fileDate: Math.floor(Math.min(stat.birthtimeMs, stat.mtimeMs)),
     width: meta.width,
     height: meta.height,
@@ -821,52 +865,102 @@ async function preparePhotoRecord(
     );
   }
 
+  try {
+    const latest = await fs.promises.stat(filePath);
+    if (
+      stat.size !== latest.size ||
+      stat.mtimeMs !== latest.mtimeMs ||
+      stat.ctimeMs !== latest.ctimeMs ||
+      stat.ino !== latest.ino ||
+      stat.dev !== latest.dev
+    ) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
   return { photoRecord, exifRecord, stat, phash };
+}
+
+async function observeIndexedPhoto(
+  photo: { id: number; path: string },
+  force = false,
+  verifiedObservation?: LibraryFileObservation
+): Promise<boolean> {
+  if (librarySourceIsPaused(photo.path)) {
+    return false;
+  }
+  const { observeLibraryPhoto } = await import("./library-content-refresh");
+  return observeLibraryPhoto(photo.id, photo.path, {
+    force,
+    verifiedObservation,
+  });
+}
+
+function assignDeeperPhotoFolder(
+  db: ReturnType<typeof getDatabase>,
+  photo: { id: number; folderId: number | null },
+  folderId: number | null
+): void {
+  if (folderId === null || photo.folderId === folderId) {
+    return;
+  }
+  const oldFolder =
+    photo.folderId === null
+      ? undefined
+      : db
+          .select({ path: folders.path })
+          .from(folders)
+          .where(eq(folders.id, photo.folderId))
+          .get();
+  const nextFolder = db
+    .select({ path: folders.path })
+    .from(folders)
+    .where(eq(folders.id, folderId))
+    .get();
+  if (
+    nextFolder &&
+    (!oldFolder ||
+      getFolderDepth(nextFolder.path) > getFolderDepth(oldFolder.path))
+  ) {
+    db.update(photos).set({ folderId }).where(eq(photos.id, photo.id)).run();
+  }
 }
 
 async function indexSingleFile(
   filePath: string,
-  folderId: number | null
+  folderId: number | null,
+  isCurrent = () => !librarySourceIsPaused(filePath)
 ): Promise<number | null> {
   const db = getDatabase();
 
   // Check if already indexed — update folderId to the more specific (deeper) folder
   const existing = db
-    .select({ id: photos.id, folderId: photos.folderId })
+    .select({
+      id: photos.id,
+      path: photos.path,
+      folderId: photos.folderId,
+      deletedAt: photos.deletedAt,
+    })
     .from(photos)
-    .where(eq(photos.path, filePath))
+    .where(libraryPhotoPathEquals(filePath))
     .get();
   if (existing) {
-    if (folderId !== null && existing.folderId !== folderId) {
-      // Only reassign if the new folder is more specific (deeper path) than the current one
-      const existingFolder = existing.folderId
-        ? db
-            .select({ path: folders.path })
-            .from(folders)
-            .where(eq(folders.id, existing.folderId))
-            .get()
-        : null;
-      const newFolder = db
-        .select({ path: folders.path })
-        .from(folders)
-        .where(eq(folders.id, folderId))
-        .get();
-      if (
-        newFolder &&
-        (!existingFolder ||
-          getFolderDepth(newFolder.path) > getFolderDepth(existingFolder.path))
-      ) {
-        db.update(photos)
-          .set({ folderId })
-          .where(eq(photos.id, existing.id))
-          .run();
-      }
+    if (existing.deletedAt !== null) {
+      return existing.id;
     }
+    acceptLibraryPathSpelling(db, existing, filePath);
+    assignDeeperPhotoFolder(db, existing, folderId);
+    await reconcileLibrarySources({
+      photoIds: [existing.id],
+      isCurrent,
+      onAvailable: (photo) => observeIndexedPhoto(photo),
+    });
     return existing.id;
   }
 
   const prepared = await preparePhotoRecord(filePath, folderId);
-  if (!prepared) {
+  if (!(prepared && isCurrent())) {
     return null;
   }
 
@@ -877,7 +971,7 @@ async function indexSingleFile(
   const indexedDuringPreparation = db
     .select({ id: photos.id })
     .from(photos)
-    .where(eq(photos.path, filePath))
+    .where(libraryPhotoPathEquals(filePath))
     .get();
   if (indexedDuringPreparation) {
     return indexedDuringPreparation.id;
@@ -894,6 +988,7 @@ async function indexSingleFile(
     return null;
   }
   const photoId = result.insertedId;
+  requestLibraryHashBackfill();
 
   // Incremental duplicate detection
   checkNewPhotoDuplicates(photoId, phash, filePath, stat.size);
@@ -983,6 +1078,12 @@ export async function scanFolder(
   folderId: number;
   photoIds: number[];
   newPhotoIds: number[];
+  moved: number;
+  updated: number;
+  sourceChanges: number;
+  missing: number;
+  offline: number;
+  inaccessible: number;
   skipped: number;
   failed: number;
   cancelled: boolean;
@@ -999,12 +1100,17 @@ export async function scanFolder(
   let incomplete = false;
   const newPhotoIds: number[] = [];
   const createdFolderIds: number[] = [];
+  const scope = path.resolve(folderPath);
+  const current = () =>
+    !scanToken.cancelled &&
+    db === getDatabase() &&
+    !librarySourceIsPaused(scope);
 
   try {
-    let resolvedPath = path.resolve(folderPath);
-    if (!fs.existsSync(resolvedPath)) {
-      throw new Error(`Folder does not exist: ${resolvedPath}`);
+    if (!current()) {
+      throw new Error("LIBRARY_SOURCE_BUSY");
     }
+    let resolvedPath = scope;
 
     let folder = db
       .select()
@@ -1018,6 +1124,48 @@ export async function scanFolder(
     const folderExisted = !!folder;
     if (folder) {
       resolvedPath = folder.path;
+    }
+    const checkedAt = Date.now();
+    const root = await inspectLibraryRoot(resolvedPath);
+    if (root.status !== "available") {
+      if (!folder) {
+        throw new Error(
+          `Folder unavailable: ${resolvedPath} (${root.errorCode})`
+        );
+      }
+      if (current()) {
+        writeLibraryFolderSource(
+          db,
+          resolvedPath,
+          root,
+          checkedAt,
+          root.status
+        );
+      }
+      const state = await reconcileLibrarySources({
+        folderPath: resolvedPath,
+        isCurrent: current,
+      });
+      return {
+        incomplete: true,
+        createdFolderIds,
+        folderId: folder.id,
+        photoIds: [],
+        newPhotoIds,
+        moved: 0,
+        updated: 0,
+        sourceChanges: state.changed,
+        missing: state.missing,
+        offline: state.offline,
+        inaccessible: state.inaccessible,
+        skipped: 0,
+        failed: 0,
+        cancelled: !current(),
+        folderExisted,
+      };
+    }
+    if (!current()) {
+      throw new Error("LIBRARY_SOURCE_BUSY");
     }
     if (!folder) {
       folder = db
@@ -1041,22 +1189,38 @@ export async function scanFolder(
       .run();
     invalidateFoldersCache();
 
-    if (options?.background) {
-      await fs.promises.readdir(resolvedPath);
-    }
-
     // Async walk — avoids blocking the main process on large folders.
     // Each directory level yields the event loop via setImmediate to keep the UI responsive.
     const files: string[] = [];
+    async function recordDirectoryFailure(
+      dir: string,
+      error: unknown
+    ): Promise<void> {
+      if (!current()) {
+        return;
+      }
+      const unavailable = await inspectLibraryRoot(dir);
+      if (unavailable.status !== "available" && current()) {
+        writeLibraryFolderSource(
+          db,
+          dir,
+          unavailable,
+          checkedAt,
+          unavailable.status
+        );
+      }
+      log.warn({ error, dir }, "Library directory check incomplete");
+    }
     async function walk(dir: string): Promise<void> {
-      if (scanToken.cancelled) {
+      if (!current()) {
         return;
       }
       let entries: fs.Dirent[];
       try {
         entries = await fs.promises.readdir(dir, { withFileTypes: true });
-      } catch {
+      } catch (error) {
         incomplete = true;
+        await recordDirectoryFailure(dir, error);
         return;
       }
       // Yield the event loop after reading each directory to prevent UI jank
@@ -1068,7 +1232,7 @@ export async function scanFolder(
         currentFile: dir,
       });
       for (const entry of entries) {
-        if (scanToken.cancelled) {
+        if (!current()) {
           return;
         }
         const fullPath = path.join(dir, entry.name);
@@ -1083,6 +1247,9 @@ export async function scanFolder(
       }
     }
     await walk(resolvedPath);
+    if (!current()) {
+      scanToken.cancelled = true;
+    }
 
     // Auto-discover subdirectories that contain images and create folder records.
     // Walk up from each file's directory to the scan root, creating any missing
@@ -1090,7 +1257,7 @@ export async function scanFolder(
     const dirToFolderId = new Map<string, number>();
     dirToFolderId.set(resolvedPath, folderId);
 
-    for (const f of files) {
+    for (const f of scanToken.cancelled ? [] : files) {
       let dir = path.dirname(f);
 
       // Collect missing ancestor directories (bottom-up)
@@ -1148,6 +1315,13 @@ export async function scanFolder(
     let scanned = 0;
     let skipped = 0;
     let failed = 0;
+    let moved = 0;
+    let updated = 0;
+    let sourceChanges = 0;
+    let missing = 0;
+    let offline = 0;
+    let inaccessible = 0;
+    const movePlan = await planLibraryMoves(db, files, current);
 
     async function runWithConcurrency<T, R>(
       items: T[],
@@ -1158,7 +1332,7 @@ export async function scanFolder(
       let cursor = 0;
 
       async function worker(): Promise<void> {
-        while (cursor < items.length && !scanToken.cancelled) {
+        while (cursor < items.length && current()) {
           const idx = cursor++;
           const item = items[idx];
           results[idx] = await fn(item);
@@ -1180,22 +1354,55 @@ export async function scanFolder(
       batchStart < files.length;
       batchStart += BATCH_SIZE
     ) {
+      // Yield before observing this batch, never while retaining file evidence.
+      if (
+        options?.background &&
+        !(await waitForLibraryForegroundIdle(current))
+      ) {
+        scanToken.cancelled = true;
+        break;
+      }
+      if (!current()) {
+        scanToken.cancelled = true;
+        break;
+      }
       const batchFiles = files.slice(batchStart, batchStart + BATCH_SIZE);
       const existingRows = db
         .select({ id: photos.id, folderId: photos.folderId, path: photos.path })
         .from(photos)
-        .where(inArray(photos.path, batchFiles))
+        .where(libraryPhotoPathsIn(batchFiles))
         .all();
       const existingByPath = new Map(
-        existingRows.map((row) => [row.path, row])
+        existingRows.map((row) => [importPathKey(row.path), row])
       );
+      if (existingRows.length) {
+        for (const file of batchFiles) {
+          const indexed = existingByPath.get(importPathKey(file));
+          if (indexed) {
+            acceptLibraryPathSpelling(db, indexed, file);
+          }
+        }
+        const state = await reconcileLibrarySources({
+          photoIds: existingRows.map(({ id }) => id),
+          isCurrent: current,
+          onAvailable: async (photo, observation) => {
+            if (await observeIndexedPhoto(photo, false, observation)) {
+              updated++;
+            }
+          },
+        });
+        sourceChanges += state.changed;
+        missing += state.missing;
+        offline += state.offline;
+        inaccessible += state.inaccessible;
+      }
 
       // Sample a bounded batch together, so stability checks do not add two
       // seconds to every four new photos in a large offline addition.
       const beforeWrite = new Map<string, fs.Stats>();
       if (options?.background) {
         await runWithConcurrency(
-          batchFiles.filter((file) => !existingByPath.has(file)),
+          batchFiles.filter((file) => !existingByPath.has(importPathKey(file))),
           async (file) => {
             try {
               beforeWrite.set(file, await fs.promises.stat(file));
@@ -1214,7 +1421,7 @@ export async function scanFolder(
         batchFiles,
         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Per-file indexing callback keeps all error and cancellation branches together for queue ordering.
         async (file) => {
-          if (scanToken.cancelled) {
+          if (!current()) {
             return null;
           }
 
@@ -1230,36 +1437,45 @@ export async function scanFolder(
             const fileFolderId = dirToFolderId.get(fileDir) || folderId;
 
             // Check if already indexed
-            const existing = existingByPath.get(file);
+            const key = importPathKey(file);
+            const existing = existingByPath.get(key);
 
             if (existing) {
-              if (fileFolderId !== null && existing.folderId !== fileFolderId) {
-                const existingFolder = existing.folderId
-                  ? db
-                      .select({ path: folders.path })
-                      .from(folders)
-                      .where(eq(folders.id, existing.folderId))
-                      .get()
-                  : null;
-                const newFolder = db
-                  .select({ path: folders.path })
-                  .from(folders)
-                  .where(eq(folders.id, fileFolderId))
-                  .get();
-                if (
-                  newFolder &&
-                  (!existingFolder ||
-                    getFolderDepth(newFolder.path) >
-                      getFolderDepth(existingFolder.path))
-                ) {
-                  db.update(photos)
-                    .set({ folderId: fileFolderId })
-                    .where(eq(photos.id, existing.id))
-                    .run();
-                }
-              }
+              assignDeeperPhotoFolder(db, existing, fileFolderId);
               scanned++;
               return { type: "existing" as const, photoId: existing.id };
+            }
+
+            const move = movePlan.moves.get(key);
+            if (move) {
+              const photoId = await commitLibraryMove(
+                db,
+                move,
+                file,
+                fileFolderId,
+                current
+              );
+              if (photoId !== null) {
+                moved++;
+                scanned++;
+                return { type: "existing" as const, photoId };
+              }
+              // A concurrent watcher can already have completed the same move.
+              const currentPhoto = db
+                .select({ id: photos.id })
+                .from(photos)
+                .where(libraryPhotoPathEquals(file))
+                .get();
+              if (currentPhoto) {
+                scanned++;
+                return { type: "existing" as const, photoId: currentPhoto.id };
+              }
+              scanned++;
+              return null;
+            }
+            if (movePlan.unresolved.has(key)) {
+              scanned++;
+              return null;
             }
 
             if (options?.background) {
@@ -1315,7 +1531,8 @@ export async function scanFolder(
 
       // Batch insert new photos
       for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
-        if (scanToken.cancelled) {
+        if (!current()) {
+          scanToken.cancelled = true;
           // Clean up thumbnails for prepared-but-uninserted records.
           // These files were processed by preparePhotoRecord (thumbnails
           // already on disk) but were never committed to the database, so
@@ -1332,7 +1549,7 @@ export async function scanFolder(
           const indexed = db
             .select({ id: photos.id })
             .from(photos)
-            .where(eq(photos.path, record.photoRecord.path))
+            .where(libraryPhotoPathEquals(record.photoRecord.path))
             .get();
           if (indexed) {
             photoIds.push(indexed.id);
@@ -1380,6 +1597,7 @@ export async function scanFolder(
             }
           });
 
+          requestLibraryHashBackfill();
           for (const { photoId, record } of insertedPairs) {
             checkNewPhotoDuplicates(
               photoId,
@@ -1410,6 +1628,7 @@ export async function scanFolder(
                 const photoId = result.insertedId;
                 photoIds.push(photoId);
                 newPhotoIds.push(photoId);
+                requestLibraryHashBackfill();
 
                 checkNewPhotoDuplicates(
                   photoId,
@@ -1453,40 +1672,64 @@ export async function scanFolder(
       );
     }
 
-    // Clean up photos whose files no longer exist on disk — check all folders
-    const stalePhotoIds: number[] = [];
-    for (const [_dirPath, fid] of dirToFolderId) {
-      const dbPhotos = db
-        .select({ id: photos.id, path: photos.path })
-        .from(photos)
-        .where(eq(photos.folderId, fid))
-        .all();
-      for (const p of dbPhotos) {
-        if (
-          !(options?.background || incomplete) &&
-          (await findMissingPhotoIds([p])).has(p.id)
-        ) {
-          db.delete(exifData).where(eq(exifData.photoId, p.id)).run();
-          db.delete(photos).where(eq(photos.id, p.id)).run();
-          stalePhotoIds.push(p.id);
-          const idx = photoIds.indexOf(p.id);
-          if (idx >= 0) {
-            photoIds.splice(idx, 1);
-          }
-          const newIdx = newPhotoIds.indexOf(p.id);
-          if (newIdx >= 0) {
-            newPhotoIds.splice(newIdx, 1);
-          }
-          log.info({ path: p.path }, "Removed stale record");
+    if (current()) {
+      const rootCheckedAt = Date.now();
+      const finalRoot = await inspectLibraryRoot(resolvedPath);
+      const unexpectedlyEmpty =
+        files.length === 0 &&
+        !!db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(
+            and(
+              isNull(photos.deletedAt),
+              libraryPathCondition(photos.path, resolvedPath)
+            )
+          )
+          .limit(1)
+          .get();
+      if (current()) {
+        let scanResult: typeof folders.$inferSelect.lastScanResult = "complete";
+        if (unexpectedlyEmpty) {
+          scanResult = "empty";
         }
+        if (incomplete) {
+          scanResult = "incomplete";
+        }
+        if (finalRoot.status !== "available") {
+          scanResult = finalRoot.status;
+        }
+        writeLibraryFolderSource(
+          db,
+          resolvedPath,
+          finalRoot,
+          rootCheckedAt,
+          scanResult
+        );
       }
-    }
-    if (stalePhotoIds.length > 0) {
-      await deletePhotoVectors(stalePhotoIds).catch((err) => {
-        log.warn({ err }, "Failed to remove stale photo vectors");
-      });
+      if (
+        !(incomplete || unexpectedlyEmpty) ||
+        finalRoot.status !== "available"
+      ) {
+        const state = await reconcileLibrarySources({
+          folderPath: resolvedPath,
+          isCurrent: current,
+          unseenPaths:
+            finalRoot.status === "available"
+              ? new Set(files.map(importPathKey))
+              : undefined,
+        });
+        sourceChanges += state.changed;
+        missing += state.missing;
+        offline += state.offline;
+        inaccessible += state.inaccessible;
+      }
+      incomplete ||= unexpectedlyEmpty || finalRoot.status !== "available";
     }
 
+    if (!current()) {
+      scanToken.cancelled = true;
+    }
     const folderIds = Array.from(new Set(dirToFolderId.values()));
     const folderPhotoCounts = new Map<number, number>();
     if (folderIds.length > 0) {
@@ -1559,6 +1802,12 @@ export async function scanFolder(
       folderId,
       photoIds,
       newPhotoIds,
+      moved,
+      updated,
+      sourceChanges,
+      missing,
+      offline,
+      inaccessible,
       skipped,
       failed,
       cancelled: scanToken.cancelled,
@@ -1665,6 +1914,143 @@ function resolveWatchedFileFolder(filePath: string): number | null {
   return folderId;
 }
 
+async function applyWatcherAdd(
+  context: WatcherContext,
+  filePath: string,
+  plan: LibraryMovePlan
+): Promise<void> {
+  const current = () =>
+    isCurrentWatcher(context) && !librarySourceIsPaused(filePath);
+  if (!current()) {
+    return;
+  }
+  const { db } = context;
+  const existing = db
+    .select({ id: photos.id, path: photos.path })
+    .from(photos)
+    .where(libraryPhotoPathEquals(filePath))
+    .get();
+  if (existing) {
+    acceptLibraryPathSpelling(db, existing, filePath);
+    await checkWatchedSource(context, filePath, false);
+    return;
+  }
+  const key = importPathKey(filePath);
+  if (plan.unresolved.has(key)) {
+    watcherStats.skipped++;
+    log.info({ filePath }, "Deferred ambiguous or unstable library move");
+    return;
+  }
+  const folderId = resolveWatchedFileFolder(filePath);
+  if (folderId === null) {
+    return;
+  }
+  const move = plan.moves.get(key);
+  const photoId = move
+    ? await commitLibraryMove(db, move, filePath, folderId, current)
+    : await indexSingleFile(filePath, folderId, current);
+  if (!(current() && photoId)) {
+    return;
+  }
+  db.update(folders)
+    .set({
+      photoCount: sql`(SELECT count(*) FROM photos WHERE folder_id = ${folderId} AND deleted_at IS NULL)`,
+      lastWatcherEventAt: Date.now(),
+    })
+    .where(eq(folders.id, folderId))
+    .run();
+  watcherStats.processed++;
+  context.onChange?.(photoId, move ? "update" : "add");
+}
+
+function queueWatcherAdd(context: WatcherContext, filePath: string): void {
+  pendingWatcherAdds.set(importPathKey(filePath), { context, filePath });
+  watcherAddTimer ??= setTimeout(() => {
+    watcherAddTimer = undefined;
+    const batch = [...pendingWatcherAdds.values()];
+    pendingWatcherAdds.clear();
+    watcherQueue
+      .add(async () => {
+        const active = batch.filter(
+          (item) =>
+            isCurrentWatcher(item.context) &&
+            !librarySourceIsPaused(item.filePath)
+        );
+        if (!active.length) {
+          return;
+        }
+        const plan = await planWatchedLibraryMoves(
+          active[0].context.db,
+          active.map((item) => item.filePath),
+          () => active.some((item) => isCurrentWatcher(item.context)),
+          shouldIndex
+        );
+        for (const item of active) {
+          await applyWatcherAdd(item.context, item.filePath, plan);
+        }
+      })
+      .catch((err: unknown) => {
+        watcherStats.errors++;
+        log.error({ err }, "Watcher: Error processing added files");
+      });
+  }, 125);
+  watcherAddTimer.unref?.();
+}
+
+async function checkWatchedSource(
+  context: WatcherContext,
+  filePath: string,
+  force: boolean
+): Promise<void> {
+  const current = () =>
+    isCurrentWatcher(context) && !librarySourceIsPaused(filePath);
+  if (!current()) {
+    return;
+  }
+  const photo = context.db
+    .select({ id: photos.id, folderId: photos.folderId })
+    .from(photos)
+    .where(and(libraryPhotoPathEquals(filePath), isNull(photos.deletedAt)))
+    .get();
+  if (!photo) {
+    return;
+  }
+  let updated = false;
+  const status = await reconcileLibrarySources({
+    photoIds: [photo.id],
+    isCurrent: current,
+    onAvailable: async (observed) => {
+      updated = await observeIndexedPhoto(observed, force);
+    },
+  });
+  if (!(current() && (status.changed || updated))) {
+    watcherStats.skipped++;
+    return;
+  }
+  if (photo.folderId !== null) {
+    context.db
+      .update(folders)
+      .set({ lastWatcherEventAt: Date.now() })
+      .where(eq(folders.id, photo.folderId))
+      .run();
+  }
+  watcherStats.processed++;
+  context.onChange?.(photo.id, updated ? "update" : "status");
+}
+
+function queueWatcherSourceCheck(
+  context: WatcherContext,
+  filePath: string,
+  force = false
+): void {
+  watcherQueue
+    .add(() => checkWatchedSource(context, filePath, force))
+    .catch((err: unknown) => {
+      watcherStats.errors++;
+      log.error({ filePath, err }, "Watcher: Error checking photo source");
+    });
+}
+
 export function startWatching(onChange: WatchChange): void {
   const indexedFolders = getDatabase()
     .select({ path: folders.path })
@@ -1729,101 +2115,43 @@ function installWatcher(folderPath: string, onChange: WatchChange): void {
     onWatcherReady?.(folderPath);
   });
   watcher.on("add", (filePath) => {
-    if (!isCurrentWatcher(context)) {
-      return;
+    if (isCurrentWatcher(context) && shouldIndex(filePath)) {
+      watcherStats.addEvents++;
+      queueWatcherAdd(context, filePath);
     }
-    if (!shouldIndex(filePath)) {
-      return;
-    }
-    watcherStats.addEvents++;
-
-    watcherQueue.add(async () => {
-      try {
-        if (!isCurrentWatcher(context)) {
-          return;
-        }
-        const matchedFolderId = resolveWatchedFileFolder(filePath);
-        if (matchedFolderId === null) {
-          return;
-        }
-
-        const alreadyIndexed = db
-          .select({ id: photos.id })
-          .from(photos)
-          .where(eq(photos.path, filePath))
-          .get();
-
-        if (alreadyIndexed) {
-          watcherStats.skipped++;
-          return;
-        }
-
-        const photoId = await indexSingleFile(filePath, matchedFolderId);
-        if (matchedFolderId && photoId) {
-          db.update(folders)
-            .set({
-              photoCount: sql`(select count(*) from photos where folder_id = ${matchedFolderId} and deleted_at is null)`,
-              lastWatcherEventAt: Date.now(),
-            })
-            .where(eq(folders.id, matchedFolderId))
-            .run();
-        }
-        watcherStats.processed++;
-        onChange(photoId, "add");
-      } catch (err) {
-        watcherStats.errors++;
-        log.error({ filePath, err }, "Watcher: Error processing add event");
-      }
-    });
   });
-
-  watcher.on("unlink", (filePath) => {
-    if (!isCurrentWatcher(context)) {
-      return;
+  watcher.on("change", (filePath) => {
+    if (isCurrentWatcher(context) && shouldIndex(filePath)) {
+      queueWatcherSourceCheck(context, filePath, true);
     }
-    watcherStats.unlinkEvents++;
-
-    watcherQueue.add(() => {
-      try {
-        if (!isCurrentWatcher(context)) {
-          return;
-        }
-        const photo = db
-          .select({ id: photos.id, folderId: photos.folderId })
-          .from(photos)
-          .where(
-            and(eq(photos.path, filePath), sql`${photos.deletedAt} IS NULL`)
-          )
-          .get();
-        if (photo) {
-          db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
-          db.delete(photos).where(eq(photos.id, photo.id)).run();
-          deletePhotoThumbnails(filePath);
-          deletePhotoVectors([photo.id]).catch((err) =>
-            log.error(
-              { err, photoId: photo.id },
-              "Watcher: vector cleanup failed on unlink"
-            )
-          );
-
-          if (photo.folderId) {
-            db.update(folders)
-              .set({
-                photoCount: sql`MAX(0, photo_count - 1)`,
-                lastWatcherEventAt: Date.now(),
-              })
-              .where(eq(folders.id, photo.folderId))
-              .run();
+  });
+  watcher.on("unlink", (filePath) => {
+    if (isCurrentWatcher(context)) {
+      watcherStats.unlinkEvents++;
+      queueWatcherSourceCheck(context, filePath);
+    }
+  });
+  watcher.on("unlinkDir", () => {
+    if (isCurrentWatcher(context)) {
+      watcherQueue
+        .add(async () => {
+          const status = await reconcileLibrarySources({
+            folderPath,
+            isCurrent: () => isCurrentWatcher(context),
+          });
+          if (status.changed && isCurrentWatcher(context)) {
+            onChange(null, "status");
           }
-
-          watcherStats.processed++;
-          onChange(photo.id, "remove");
-        }
-      } catch (err) {
-        watcherStats.errors++;
-        log.error({ filePath, err }, "Watcher: Error processing unlink event");
-      }
-    });
+        })
+        .catch((err: unknown) => {
+          watcherStats.errors++;
+          log.error(
+            { folderPath, err },
+            "Watcher: Error checking removed directory"
+          );
+        });
+      onWatcherReady?.(folderPath);
+    }
   });
 }
 
@@ -1865,6 +2193,9 @@ export async function stopWatching(): Promise<void> {
   }
   retries.clear();
   retryCounts.clear();
+  clearTimeout(watcherAddTimer);
+  watcherAddTimer = undefined;
+  pendingWatcherAdds.clear();
 
   const contexts = Array.from(watchers.values());
   watchers.clear();
@@ -1901,149 +2232,16 @@ export function cleanupOrphanedRecords(): Promise<{
   return cleanupOrphanedRecordsAsync();
 }
 
-async function confirmOrphanedPhoto(
-  db: ReturnType<typeof getDatabase>,
-  photo: { id: number; path: string },
-  signal?: AbortSignal
-) {
-  // Recheck rare missing files and their database paths after the async gap.
-  const missing = await findMissingPhotoIds([photo], signal);
-  if (signal?.aborted || !missing.has(photo.id)) {
-    return;
-  }
-  return db
-    .select({ folderId: photos.folderId })
-    .from(photos)
-    .where(
-      and(
-        eq(photos.id, photo.id),
-        eq(photos.path, photo.path),
-        isNull(photos.deletedAt)
-      )
-    )
-    .get();
-}
-
-async function rootStillAvailable(
-  roots: { path: string }[],
-  photoPath: string
-): Promise<boolean> {
-  const root = roots.find((candidate) =>
-    containsLibraryPath(candidate.path, photoPath)
-  );
-  if (!root) {
-    return false;
-  }
-  try {
-    await fs.promises.readdir(root.path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function accessibleLibraryRoots(
-  signal?: AbortSignal
-): Promise<{ path: string }[]> {
-  const roots = selectLibraryRoots(
-    getDatabase().select({ path: folders.path }).from(folders).all()
-  );
-  const accessible: { path: string }[] = [];
-  for (const root of roots) {
-    if (signal?.aborted) {
-      break;
-    }
-    try {
-      await fs.promises.readdir(root.path);
-      accessible.push(root);
-    } catch {
-      /* unavailable does not mean deleted */
-    }
-  }
-  return accessible;
-}
-
-/**
- * Async variant of cleanupOrphanedRecords — yields the event loop every
- * BATCH_SIZE photos so the UI stays responsive during startup cleanup.
- */
+/** Historical entry point. Absence only changes the recorded source state. */
 export async function cleanupOrphanedRecordsAsync(
   onProgress?: (checked: number, removed: number, total: number) => void,
   signal?: AbortSignal
 ): Promise<{ checked: number; removed: number }> {
-  const db = getDatabase();
-  const roots = await accessibleLibraryRoots(signal);
-  const allPhotos = db
-    .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
-    .from(photos)
-    .where(sql`${photos.deletedAt} IS NULL`)
-    .all()
-    .filter((photo) =>
-      roots.some((root) => containsLibraryPath(root.path, photo.path))
-    );
-
-  let removed = 0;
-  const removedPhotoIds: number[] = [];
-  const folderUpdates = new Map<number, number>();
-  const BATCH_SIZE = 200;
-  let checked = 0;
-
-  for (let i = 0; i < allPhotos.length; i += BATCH_SIZE) {
-    const batch = allPhotos.slice(i, i + BATCH_SIZE);
-    const missing = await findMissingPhotoIds(batch, signal);
-    if (signal?.aborted) {
-      break;
-    }
-    for (const photo of batch) {
-      if (!missing.has(photo.id)) {
-        continue;
-      }
-      if (!(await rootStillAvailable(roots, photo.path))) {
-        continue;
-      }
-      const current = await confirmOrphanedPhoto(db, photo, signal);
-      if (!current) {
-        continue;
-      }
-      db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
-      db.delete(photos).where(eq(photos.id, photo.id)).run();
-      await deletePhotoThumbnails(photo.path).catch((err) => {
-        log.warn({ err }, "Failed to remove orphaned thumbnails");
-      });
-      removedPhotoIds.push(photo.id);
-
-      if (current.folderId) {
-        folderUpdates.set(
-          current.folderId,
-          (folderUpdates.get(current.folderId) || 0) + 1
-        );
-      }
-      removed++;
-    }
-    checked = Math.min(i + BATCH_SIZE, allPhotos.length);
-    // Yield the event loop every batch to keep UI responsive
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    onProgress?.(
-      Math.min(i + BATCH_SIZE, allPhotos.length),
-      removed,
-      allPhotos.length
-    );
-  }
-
-  if (removedPhotoIds.length > 0) {
-    await deletePhotoVectors(removedPhotoIds).catch((err) => {
-      log.warn({ err }, "Failed to remove orphaned photo vectors");
-    });
-  }
-
-  for (const [folderId, count] of folderUpdates) {
-    db.update(folders)
-      .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
-      .where(eq(folders.id, folderId))
-      .run();
-  }
-
-  return { checked, removed };
+  const summary = await reconcileLibrarySources({
+    signal,
+    onProgress: ({ checked }) => onProgress?.(checked, 0, checked),
+  });
+  return { checked: summary.checked, removed: 0 };
 }
 
 export function stopScanning(): void {

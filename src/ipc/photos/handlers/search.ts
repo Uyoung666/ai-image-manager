@@ -32,6 +32,10 @@ import {
   isAiSearchReady,
 } from "@/services/ai-embedder";
 import { createImageSearchPreview } from "@/services/image-search-preview";
+import {
+  libraryStatusColumns,
+  libraryStatusPredicate,
+} from "@/services/library-status-query";
 import type { RewrittenQuery } from "@/services/query-rewrite";
 import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
 import {
@@ -96,6 +100,7 @@ export const getImageSearchPreview = os
 // Excludes heavy columns (phash, contentHash, vectorId, duelPreviewPath)
 // that are never needed in search result lists, saving ~150+ bytes/photo.
 const SEARCH_PHOTO_COLUMNS = {
+  ...libraryStatusColumns,
   id: photos.id,
   path: photos.path,
   folderId: photos.folderId,
@@ -324,8 +329,17 @@ export const searchByImage = os
 
     let results: Array<{ photoId: number; similarity: number }> = [];
     try {
+      const allowedIds = input.libraryStatus
+        ? getPhotoSearchScope(
+            db,
+            { libraryStatus: input.libraryStatus },
+            getSearchDatabaseRevision(db, false)
+          ).allowedPhotoIds
+        : undefined;
       results = await runForegroundSearch(() =>
-        aiSearchByImage(input.imagePath, input.limit)
+        allowedIds
+          ? aiSearchByImage(input.imagePath, input.limit, allowedIds)
+          : aiSearchByImage(input.imagePath, input.limit)
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -349,7 +363,15 @@ export const searchByImage = os
     const photoList = db
       .select(SEARCH_PHOTO_COLUMNS)
       .from(photos)
-      .where(and(isNull(photos.deletedAt), inArray(photos.id, photoIds)))
+      .where(
+        and(
+          isNull(photos.deletedAt),
+          inArray(photos.id, photoIds),
+          input.libraryStatus
+            ? libraryStatusPredicate(input.libraryStatus)
+            : undefined
+        )
+      )
       .all();
 
     const photoMap = new Map(photoList.map((p) => [p.id, p]));
@@ -671,6 +693,7 @@ async function performCompoundSearch(
     rewrittenQuery,
   }));
   const filters: PhotoSearchFilters = {
+    libraryStatus: input.libraryStatus,
     dateFrom: effectiveDateFrom,
     dateTo: effectiveDateTo,
     dateMonth,
@@ -745,7 +768,12 @@ async function performCompoundSearch(
           ),
         })
         .from(photos)
-        .where(scopePredicate);
+        .where(
+          and(
+            scopePredicate,
+            eq(photos.metadataRevision, photos.contentRevision)
+          )
+        );
       const paletteResults = db.all(
         sql`WITH color_candidates AS MATERIALIZED (${candidates.getSQL()})
           SELECT id, dist FROM color_candidates
@@ -1029,7 +1057,13 @@ async function performCompoundSearch(
       db
         .select({ id: photos.id, name: faceIdentities.name })
         .from(photos)
-        .innerJoin(faceVectors, eq(faceVectors.photoId, photos.id))
+        .innerJoin(
+          faceVectors,
+          and(
+            eq(faceVectors.photoId, photos.id),
+            eq(faceVectors.contentRevision, photos.contentRevision)
+          )
+        )
         .innerJoin(
           faceIdentityMembers,
           eq(faceIdentityMembers.faceVectorId, faceVectors.id)

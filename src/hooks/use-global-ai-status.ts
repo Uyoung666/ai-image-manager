@@ -263,7 +263,10 @@ function getQueueSnapshot(
   queueRunning: boolean
 ) {
   const current = queue?.current ?? null;
-  const pending = queue?.pending.length ?? 0;
+  // Deferred source checks remain visible in the queue without claiming that
+  // foreground import work is running while the user is browsing.
+  const pending =
+    queue?.pending.filter((task) => task.source !== "background").length ?? 0;
   const hasQueue = queueRunning && (current !== null || pending > 0);
   let queueText = "";
   if (current) {

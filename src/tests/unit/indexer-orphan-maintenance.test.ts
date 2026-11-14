@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
 vi.mock("@/db", () => ({ getDatabase: () => state.db }));
 vi.mock("@/services/ai-embedder", () => ({
   deletePhotoVectors: state.vectors,
+  deleteColorVectors: vi.fn(),
 }));
 vi.mock("@/services/thumbnailer", () => ({
   deletePhotoThumbnails: state.thumbnails,
@@ -52,6 +53,7 @@ beforeEach(() => {
   state.vectors.mockResolvedValue(undefined);
   runtime = new TestRuntime("orphan-maintenance");
   source = path.join(runtime.root, "source.png");
+  fs.writeFileSync(source, "library source fixture");
   sqlite = new Database(":memory:");
   db = drizzle(sqlite);
   migrate(db, { migrationsFolder: "drizzle" });
@@ -76,27 +78,58 @@ afterEach(() => {
 
 describe("asynchronous orphan maintenance", () => {
   it("keeps all records when the registered root is offline", async () => {
-    vi.spyOn(fs.promises, "readdir").mockRejectedValue(absent());
-    vi.spyOn(fs.promises, "access").mockRejectedValue(absent());
+    vi.spyOn(fs.promises, "opendir").mockRejectedValue(absent());
+    const access = vi.spyOn(fs.promises, "access");
     expect(await cleanupOrphanedRecordsAsync()).toEqual({
-      checked: 0,
+      checked: 1,
       removed: 0,
     });
     expect(db.select({ id: photos.id }).from(photos).get()?.id).toBe(1);
+    expect(
+      db.select({ status: photos.sourceStatus }).from(photos).get()?.status
+    ).toBe("offline");
+    expect(access).not.toHaveBeenCalled();
     expect(state.vectors).not.toHaveBeenCalled();
   });
-  it("removes only confirmed missing records and updates the folder count", async () => {
-    vi.spyOn(fs.promises, "access").mockRejectedValue(absent());
+  it("marks a confirmed missing file and preserves its catalogue relationships", async () => {
+    sqlite.exec(`
+      UPDATE photos SET is_favorite = 1 WHERE id = 1;
+      INSERT INTO tags(id, name, created_at) VALUES (1, 'kept', 0);
+      INSERT INTO photo_tags(photo_id, tag_id) VALUES (1, 1);
+      INSERT INTO albums(id, name, created_at) VALUES (1, 'kept', 0);
+      INSERT INTO album_photos(photo_id, album_id) VALUES (1, 1);
+      INSERT INTO face_vectors(photo_id, bbox_x, bbox_y, bbox_width, bbox_height, created_at) VALUES (1, 0, 0, 1, 1, 0);
+      INSERT INTO face_identities(id, name, representative_photo_id, is_confirmed, created_at) VALUES (1, 'kept', 1, 1, 0);
+      INSERT INTO face_identity_members(identity_id, face_vector_id) VALUES (1, 1);
+      INSERT INTO cull_sessions(id, name, created_at) VALUES (1, 'kept', 0);
+      INSERT INTO cull_session_photos(session_id, photo_id) VALUES (1, 1);
+    `);
+    fs.unlinkSync(source);
     expect(await cleanupOrphanedRecordsAsync()).toEqual({
       checked: 1,
-      removed: 1,
+      removed: 0,
     });
-    expect(db.select({ id: photos.id }).from(photos).all()).toEqual([]);
+    expect(db.select().from(photos).get()).toMatchObject({
+      id: 1,
+      sourceStatus: "missing",
+      deletedAt: null,
+      isFavorite: true,
+    });
     expect(
       db.select({ count: folders.photoCount }).from(folders).get()?.count
-    ).toBe(0);
-    expect(state.thumbnails).toHaveBeenCalledWith(source);
-    expect(state.vectors).toHaveBeenCalledWith([1]);
+    ).toBe(1);
+    expect(
+      sqlite
+        .prepare(`SELECT
+      (SELECT photo_id FROM photo_tags) AS tag,
+      (SELECT photo_id FROM album_photos) AS album,
+      (SELECT photo_id FROM face_vectors JOIN face_identity_members ON face_vectors.id = face_vector_id) AS face,
+      (SELECT photo_id FROM cull_session_photos) AS cull
+    `)
+        .get()
+    ).toEqual({ tag: 1, album: 1, face: 1, cull: 1 });
+    expect(state.thumbnails).not.toHaveBeenCalled();
+    expect(state.vectors).not.toHaveBeenCalled();
   });
 
   it("preserves a photo renamed while its old path is being checked", async () => {
@@ -125,6 +158,9 @@ describe("asynchronous orphan maintenance", () => {
       removed: 0,
     });
     expect(db.select({ id: photos.id }).from(photos).get()?.id).toBe(1);
+    expect(
+      db.select({ status: photos.sourceStatus }).from(photos).get()?.status
+    ).toBe("inaccessible");
     expect(state.thumbnails).not.toHaveBeenCalled();
   });
 

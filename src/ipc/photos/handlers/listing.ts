@@ -12,6 +12,7 @@ import {
   photos,
   photoTags,
 } from "@/db/schema";
+import { libraryStatusColumns } from "@/services/library-status-query";
 import { readPhotoExif } from "@/services/photo-exif";
 import { buildPhotoListFilter } from "@/services/photo-list-filter";
 
@@ -294,6 +295,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   // 每条照片节省约 116+ bytes 的结构化克隆传输
   let query = db
     .select({
+      ...libraryStatusColumns,
       id: photos.id,
       path: photos.path,
       folderId: photos.folderId,
@@ -342,6 +344,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     tagMode: effectiveTagMode,
     search: search ?? null,
     favoriteOnly: favoriteOnly ?? null,
+    libraryStatus: input.libraryStatus ?? null,
     ungroupedOnly: ungroupedOnly ?? false,
   });
 
@@ -431,7 +434,38 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
 // Photo detail
 export const getPhotoDetail = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();
-  const photo = db.select().from(photos).where(eq(photos.id, input.id)).get();
+  const photo = db
+    .select({
+      ...libraryStatusColumns,
+      id: photos.id,
+      path: photos.path,
+      folderId: photos.folderId,
+      filename: photos.filename,
+      fileSize: photos.fileSize,
+      fileDate: photos.fileDate,
+      width: photos.width,
+      height: photos.height,
+      format: photos.format,
+      colorSpace: photos.colorSpace,
+      hasAlpha: photos.hasAlpha,
+      thumbnailPath: photos.thumbnailPath,
+      thumbnailSize: photos.thumbnailSize,
+      duelPreviewPath: photos.duelPreviewPath,
+      dominantColors: photos.dominantColors,
+      colorBucket: photos.colorBucket,
+      vectorId: photos.vectorId,
+      isIndexed: photos.isIndexed,
+      isAiProcessed: photos.isAiProcessed,
+      isFaceProcessed: photos.isFaceProcessed,
+      faceProcessingError: photos.faceProcessingError,
+      isFavorite: photos.isFavorite,
+      deletedAt: photos.deletedAt,
+      deletionBatchId: photos.deletionBatchId,
+      createdAt: photos.createdAt,
+    })
+    .from(photos)
+    .where(eq(photos.id, input.id))
+    .get();
   return photo || null;
 });
 

@@ -39,10 +39,10 @@ import { BKTree } from "@/services/bk-tree";
 import {
   aggregateFromStoredColors,
   computeColorDistribution,
-  extractDominantColors,
   invalidateColorCache,
   type PaletteColor,
 } from "@/services/color-extractor";
+import { runColorMigration } from "@/services/color-migration";
 import {
   createExactDuplicatePairs,
   type DuplicateGroupPhotosResult,
@@ -2276,91 +2276,6 @@ export function invalidateIndexStatsCache(): void {
 // ── Color migration: backfill dominant_colors for existing photos ─────
 // Exported as a plain function so main.ts can call it directly on startup,
 // and also exposed as an oRPC handler for manual trigger from the frontend.
-
-export async function runColorMigration(
-  force = false
-): Promise<{ processed: number; total: number; complete: boolean }> {
-  const db = getDatabase();
-
-  if (force) {
-    // Clear existing color data for re-extraction
-    db.run(
-      sql`UPDATE photos SET dominant_colors = NULL, color_bucket = NULL WHERE deleted_at IS NULL`
-    );
-  }
-
-  const photoRows = db
-    .select({ id: photos.id, thumbnailPath: photos.thumbnailPath })
-    .from(photos)
-    .where(
-      and(
-        isNull(photos.deletedAt),
-        isNotNull(photos.thumbnailPath),
-        isNull(photos.dominantColors)
-      )
-    )
-    .all();
-
-  const total = photoRows.length;
-  let processed = 0;
-
-  for (const photo of photoRows) {
-    try {
-      if (!photo.thumbnailPath) {
-        continue;
-      }
-      const colors = await extractDominantColors(photo.thumbnailPath);
-      if (colors) {
-        // Compute hue bucket from the primary color for pre-filter optimization
-        let bucketSql = sql`NULL`;
-        try {
-          const palette = JSON.parse(colors) as Array<{
-            hue?: number;
-            weight: number;
-          }>;
-          if (palette.length > 0 && palette[0].hue != null) {
-            const bucket = Math.floor(palette[0].hue / 10) % 36;
-            bucketSql = sql`${bucket}`;
-          }
-        } catch {
-          /* keep NULL */
-        }
-        db.run(
-          sql`UPDATE photos SET dominant_colors = ${colors}, color_bucket = ${bucketSql} WHERE id = ${photo.id}`
-        );
-      }
-    } catch (err) {
-      console.warn(`[ColorMigration] Failed for photo ${photo.id}:`, err);
-    }
-    processed++;
-
-    if (processed % 10 === 0 || processed === total) {
-      console.log(`[ColorMigration] Progress: ${processed}/${total}`);
-    }
-  }
-
-  // Mark migration complete so startup skip works on subsequent launches
-  console.log("[ColorMigration] Writing completion marker...");
-  try {
-    db.run(
-      sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('colors_migrated', 'true', ${Date.now()})`
-    );
-    console.log("[ColorMigration] Completion marker written.");
-  } catch (err) {
-    console.error("[ColorMigration] Failed to write completion marker:", err);
-  }
-
-  // Invalidate cached color distribution so the dashboard picks up fresh data
-  try {
-    invalidateColorCache();
-    console.log("[ColorMigration] Color cache invalidated.");
-  } catch (err) {
-    console.warn("[ColorMigration] Failed to invalidate cache:", err);
-  }
-
-  console.log("[ColorMigration] Background backfill complete.");
-  return { processed, total, complete: true };
-}
 
 export const migrateColors = os
   .input(z.object({ force: z.boolean().optional().default(false) }))

@@ -16,7 +16,10 @@ vi.mock("@/ipc/photos/handlers/stats", () => ({
   invalidateStatsCache: vi.fn(),
   invalidateIndexStatsCache: vi.fn(),
 }));
-vi.mock("@/services/ai-embedder", () => ({ deletePhotoVectors: vi.fn() }));
+vi.mock("@/services/ai-embedder", () => ({
+  deletePhotoVectors: vi.fn(),
+  deleteColorVectors: vi.fn(),
+}));
 vi.mock("@/services/photo-sequences", () => ({
   cleanupDeletedPhotoSequenceMembers: vi.fn(),
   notifySequencesChanged: vi.fn(),
@@ -83,7 +86,7 @@ it("does not restore a photo deleted by a later operation", async () => {
     photo_count: 1,
   });
 });
-it("keeps the existing missing-original failure path", async () => {
+it("restores catalogue relationships when the original is unavailable", async () => {
   sqlite.exec(
     "UPDATE photos SET path='X:/missing-original-undo-fixture.jpg' WHERE id=2"
   );
@@ -92,6 +95,6 @@ it("keeps the existing missing-original failure path", async () => {
     ids: [2],
     expectedDeletionBatchId: operationId,
   });
-  expect(restored.succeededIds).toEqual([]);
-  expect(restored.failed[0].code).toBe("SOURCE_MISSING");
+  expect(restored.succeededIds).toEqual([2]);
+  expect(restored.failed).toEqual([]);
 });

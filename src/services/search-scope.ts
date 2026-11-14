@@ -3,6 +3,8 @@ import type { SQL } from "drizzle-orm";
 import { and, eq, gte, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import type { getDatabase } from "@/db";
 import { advancedExifData, exifData, photos } from "@/db/schema";
+import type { LibraryStatusFilter } from "@/types/library-reliability";
+import { libraryStatusPredicate } from "./library-status-query";
 
 const advancedColumns = {
   vendor: advancedExifData.vendor,
@@ -36,6 +38,7 @@ export interface PhotoSearchFilters {
   isoMax?: number;
   isoMin?: number;
   lensModel?: string;
+  libraryStatus?: LibraryStatusFilter;
   shutterMax?: number;
   shutterMin?: number;
 }
@@ -45,6 +48,9 @@ export function buildPhotoSearchScope(
   filters: PhotoSearchFilters
 ): SQL {
   const conditions: SQL[] = [isNull(photos.deletedAt)];
+  if (filters.libraryStatus) {
+    conditions.push(libraryStatusPredicate(filters.libraryStatus));
+  }
   const basic: SQL[] = [];
   for (const [value, column, minimum] of [
     [filters.dateFrom, exifData.dateTaken, true],
@@ -129,6 +135,13 @@ export function buildPhotoSearchScope(
     conditions.push(
       sql`LOWER(${photos.filename}) GLOB LOWER(${filters.filenameGlob})`
     );
+  }
+  if (
+    basic.length > 0 ||
+    filters.creator ||
+    (filters.advancedField && filters.advancedValue)
+  ) {
+    conditions.push(eq(photos.metadataRevision, photos.contentRevision));
   }
   return and(...conditions) as SQL;
 }

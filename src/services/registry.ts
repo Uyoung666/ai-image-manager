@@ -17,7 +17,6 @@ import {
 import { shutdownPool } from "@/services/embed-worker-pool";
 import { repairUnassignedLibraryPhotos } from "@/services/explicit-library-folders";
 import { resumeInterruptedImports } from "@/services/import-queue";
-import { cleanupOrphanedRecordsAsync } from "@/services/indexer";
 import {
   initThumbnailer,
   scheduleThumbnailMaintenance,
@@ -25,10 +24,12 @@ import {
 } from "@/services/thumbnailer";
 import { GALLERY_CONFIG } from "@/utils/gallery-config";
 import { notifyAutoIndexReady, requestAutoIndex } from "./ai-index-scheduler";
+import { notifyLibraryChange } from "./library-change";
 import {
   startLibraryReconciliation,
   stopLibraryReconciliation,
 } from "./library-reconciliation";
+import { reconcileLibrarySources } from "./library-source";
 
 // ── Service lifecycle types ───────────────────────────────────────────
 
@@ -76,7 +77,19 @@ export interface HealthReport {
 
 // ── Registry ──────────────────────────────────────────────────────────
 
-class ServiceRegistry {
+export class ServiceRegistry {
+  private lifecycleGeneration = 0;
+  private stopping: Promise<void> | undefined;
+  private startQueue: Promise<void> = Promise.resolve();
+  private readonly startupWork = new Set<Promise<unknown>>();
+
+  get generation(): number {
+    return this.lifecycleGeneration;
+  }
+
+  private isCurrentGeneration(generation: number): boolean {
+    return generation === this.lifecycleGeneration && !this.stopping;
+  }
   private readonly services = new Map<string, ServiceDescriptor>();
   private startOrder: string[] = [];
 
@@ -88,9 +101,8 @@ class ServiceRegistry {
   }
 
   /** Start all registered services in dependency order. */
-  async start(): Promise<HealthReport> {
-    await this.startServices({});
-    return this.health();
+  start(): Promise<HealthReport> {
+    return this.startStage();
   }
 
   /**
@@ -98,38 +110,88 @@ class ServiceRegistry {
    * level=Critical starts only critical services; level=Essential starts
    * critical + essential; level=Optional starts all.
    */
-  async startLevel(maxLevel: ServiceLevel): Promise<HealthReport> {
-    await this.startServices({ maxLevel });
-    return this.health(maxLevel);
+  startLevel(maxLevel: ServiceLevel): Promise<HealthReport> {
+    return this.startStage(maxLevel);
   }
 
   /**
    * Start remaining registered-but-not-yet-started services.
    * Useful after staged startup inserts maintenance between levels.
    */
-  async startRemaining(): Promise<HealthReport> {
-    await this.startServices({ skipStarted: true });
-    return this.health();
+  startRemaining(maxLevel?: ServiceLevel): Promise<HealthReport> {
+    return this.startStage(maxLevel);
   }
 
-  private async startServices(opts: {
-    maxLevel?: ServiceLevel;
-    skipStarted?: boolean;
-  }): Promise<void> {
+  private async startStage(maxLevel?: ServiceLevel): Promise<HealthReport> {
+    const generation = this.lifecycleGeneration;
+    if (this.stopping) {
+      return this.stoppedHealth(maxLevel);
+    }
+    await this.startServices(generation, maxLevel);
+    if (!this.isCurrentGeneration(generation)) {
+      return this.stoppedHealth(maxLevel);
+    }
+    return this.health(maxLevel);
+  }
+
+  /** Register model checks/copies before invoking them so shutdown can drain them. */
+  runStartupWork(work: () => Promise<void>): Promise<void> {
+    if (this.stopping) {
+      return Promise.resolve();
+    }
+    const generation = this.lifecycleGeneration;
+    const task = Promise.resolve().then(async () => {
+      if (!this.isCurrentGeneration(generation)) {
+        return;
+      }
+      await work();
+    });
+    return this.trackStartupWork(task);
+  }
+
+  private trackStartupWork<T>(task: Promise<T>): Promise<T> {
+    this.startupWork.add(task);
+    // Handle both outcomes without creating an unhandled rejecting finally chain.
+    task.then(
+      () => this.startupWork.delete(task),
+      () => this.startupWork.delete(task)
+    );
+    return task;
+  }
+
+  private startServices(
+    generation: number,
+    maxLevel?: ServiceLevel
+  ): Promise<void> {
+    const task = this.startQueue
+      .catch(() => undefined)
+      .then(async () => {
+        if (!this.isCurrentGeneration(generation)) {
+          return;
+        }
+        await this.startServicesInOrder(generation, maxLevel);
+      });
+    this.startQueue = task;
+    return this.trackStartupWork(task);
+  }
+
+  private async startServicesInOrder(
+    generation: number,
+    maxLevel?: ServiceLevel
+  ): Promise<void> {
     const order = this.resolveOrder();
     const started = new Set(this.startOrder);
 
     for (const name of order) {
-      if (opts.skipStarted && started.has(name)) {
-        continue;
+      if (!this.isCurrentGeneration(generation)) {
+        return;
       }
-
       const svc = this.services.get(name);
-      if (!svc) {
+      if (!svc || started.has(name)) {
         continue;
       }
 
-      if (opts.maxLevel !== undefined && svc.level > opts.maxLevel) {
+      if (svc.level > (maxLevel ?? ServiceLevel.Optional)) {
         continue;
       }
 
@@ -139,8 +201,17 @@ class ServiceRegistry {
         console.log(`[ServiceRegistry] Starting ${name} (${levelLabel})…`);
         await svc.start();
         this.startOrder.push(name);
+        started.add(name);
+        if (!this.isCurrentGeneration(generation)) {
+          return;
+        }
         console.log(`[ServiceRegistry] ${name} started`);
       } catch (err: unknown) {
+        if (!this.isCurrentGeneration(generation)) {
+          // A failed native initializer may still own handles in the old directory.
+          await this.stopService(svc);
+          return;
+        }
         const msg = (err as Error)?.message ?? String(err);
         if (svc.level === ServiceLevel.Critical) {
           console.error(
@@ -157,9 +228,40 @@ class ServiceRegistry {
   }
 
   /** Stop all started services in reverse order. */
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.stopping) {
+      return this.stopping;
+    }
+    this.lifecycleGeneration++;
+    const task = Promise.resolve().then(async () => {
+      await Promise.allSettled([...this.startupWork]);
+      await this.stopStartedServices();
+    });
+    this.stopping = task.finally(() => {
+      this.stopping = undefined;
+    });
+    return this.stopping;
+  }
+
+  private async stopService(svc: ServiceDescriptor): Promise<void> {
+    try {
+      console.log(`[ServiceRegistry] Stopping ${svc.name}…`);
+      await svc.stop();
+    } catch (err: unknown) {
+      console.warn(
+        `[ServiceRegistry] Error stopping ${svc.name}:`,
+        (err as Error)?.message
+      );
+    }
+  }
+
+  private async stopStartedServices(): Promise<void> {
     if (this.startOrder.includes("fileWatcher")) {
-      await stopLibraryReconciliation();
+      try {
+        await stopLibraryReconciliation();
+      } catch (error) {
+        console.warn("[ServiceRegistry] Reconciliation stop failed:", error);
+      }
     }
     const toStop = [...this.startOrder].reverse();
     for (const name of toStop) {
@@ -167,37 +269,68 @@ class ServiceRegistry {
       if (!svc) {
         continue;
       }
-      try {
-        console.log(`[ServiceRegistry] Stopping ${name}…`);
-        await svc.stop();
-      } catch (err: unknown) {
-        console.warn(
-          `[ServiceRegistry] Error stopping ${name}:`,
-          (err as Error)?.message
-        );
-      }
+      await this.stopService(svc);
     }
     this.startOrder = [];
   }
 
+  private stoppedHealth(
+    maxLevel: ServiceLevel = ServiceLevel.Optional
+  ): HealthReport {
+    return {
+      allHealthy: false,
+      services: [...this.services.values()]
+        .filter((svc) => svc.level <= maxLevel)
+        .map((svc) => ({
+          name: svc.name,
+          level: svc.level,
+          status: "stopped" as const,
+        })),
+      summary: "Services stopped",
+    };
+  }
+
   /** Run health checks on all registered services. */
-  async health(
+  health(
     maxLevel: ServiceLevel = ServiceLevel.Optional
   ): Promise<HealthReport> {
+    if (this.stopping) {
+      return Promise.resolve(this.stoppedHealth(maxLevel));
+    }
+    const generation = this.lifecycleGeneration;
+    const task = Promise.resolve().then(() =>
+      this.isCurrentGeneration(generation)
+        ? this.checkHealth(maxLevel)
+        : this.stoppedHealth(maxLevel)
+    );
+    return this.trackStartupWork(task);
+  }
+
+  private async checkHealth(maxLevel: ServiceLevel): Promise<HealthReport> {
+    const generation = this.lifecycleGeneration;
     const results: ServiceHealth[] = [];
     let allHealthy = true;
 
     for (const [name, svc] of this.services) {
+      if (!this.isCurrentGeneration(generation)) {
+        return this.stoppedHealth(maxLevel);
+      }
       if (svc.level > maxLevel) {
         continue;
       }
       try {
         const h = await svc.health();
+        if (!this.isCurrentGeneration(generation)) {
+          return this.stoppedHealth(maxLevel);
+        }
         results.push({ name, level: svc.level, ...h });
         if (h.status !== "ok") {
           allHealthy = false;
         }
       } catch (err: unknown) {
+        if (!this.isCurrentGeneration(generation)) {
+          return this.stoppedHealth(maxLevel);
+        }
         results.push({
           name,
           level: svc.level,
@@ -217,7 +350,8 @@ class ServiceRegistry {
 
   /** Topological sort by dependency graph. */
   private resolveOrder(): string[] {
-    const names = [...this.services.keys()];
+    const services = this.services;
+    const names = [...services.keys()];
     const visited = new Set<string>();
     const result: string[] = [];
     const visiting = new Set<string>();
@@ -230,10 +364,10 @@ class ServiceRegistry {
         throw new Error(`Circular dependency detected involving "${name}"`);
       }
       visiting.add(name);
-      const svc = registry.services.get(name);
+      const svc = services.get(name);
       if (svc?.dependencies) {
         for (const dep of svc.dependencies) {
-          if (!registry.services.has(dep)) {
+          if (!services.has(dep)) {
             throw new Error(
               `Service "${name}" depends on unknown service "${dep}"`
             );
@@ -296,8 +430,8 @@ registry.register({
   },
 });
 
-let orphanCleanupController: AbortController | null = null;
-let orphanCleanupTask: Promise<void> | null = null;
+let startupSourceController: AbortController | null = null;
+let startupSourceTask: Promise<void> | null = null;
 
 registry.register({
   name: "shootingProjects",
@@ -327,31 +461,31 @@ registry.register({
   level: ServiceLevel.Essential,
   dependencies: ["database", "thumbnailer"],
   start: () => {
-    // 启动时清理孤立记录（fire-and-forget，不阻塞启动）
-    orphanCleanupController = new AbortController();
-    orphanCleanupTask = cleanupOrphanedRecordsAsync(
-      undefined,
-      orphanCleanupController.signal
-    )
-      .then(({ removed }) => {
-        if (removed > 0) {
-          console.log(
-            `[Registry] Cleaned up ${removed} orphaned records on startup`
-          );
+    // Quickly propagate unavailable roots; online photos are checked by the
+    // normal reconciliation below, so startup does not probe each file twice.
+    const controller = new AbortController();
+    startupSourceController = controller;
+    startupSourceTask = reconcileLibrarySources({
+      signal: controller.signal,
+      unavailableRootsOnly: true,
+    })
+      .then(({ changed }) => {
+        if (!controller.signal.aborted && changed > 0) {
+          notifyLibraryChange(null, "status");
         }
       })
       .catch((error) => {
-        console.warn("[Registry] Startup orphan cleanup failed", error);
+        console.warn("[Registry] Startup library source check failed", error);
       });
 
     resumeInterruptedImports();
     startLibraryReconciliation();
   },
   stop: async () => {
-    orphanCleanupController?.abort();
-    await orphanCleanupTask;
-    orphanCleanupController = null;
-    orphanCleanupTask = null;
+    startupSourceController?.abort();
+    await startupSourceTask;
+    startupSourceController = null;
+    startupSourceTask = null;
     await stopLibraryReconciliation();
   },
   health: () => {

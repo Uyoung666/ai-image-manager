@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   getGalleryLayoutPrefix,
   getGalleryPhotosByIds,
+  getGalleryThumbnailSources,
   listGalleryPhotos,
 } from "@/services/gallery-listing";
 import { describeGalleryThumbnails } from "@/services/thumbnail-identity";
@@ -90,7 +91,7 @@ export const getPhotoThumbnailVersions = os
   .handler(async ({ input }) => {
     const edges = new Map(input.edges?.map((item) => [item.id, item.edge]));
     const records = await describeGalleryThumbnails(
-      getGalleryPhotosByIds(input.ids),
+      getGalleryThumbnailSources(input.ids),
       input.priority,
       input.edge || edges.size > 0
         ? (photo, stat, readStat) =>
@@ -98,7 +99,8 @@ export const getPhotoThumbnailVersions = os
               photo,
               edges.get(photo.id) ?? input.edge ?? 512,
               stat,
-              readStat
+              readStat,
+              photo
             )
         : undefined
     );

@@ -19,7 +19,10 @@ import { TestRuntime } from "../helpers/test-runtime";
 
 const state = vi.hoisted(() => ({ dataPath: "", watch: vi.fn() }));
 vi.mock("@/utils/data-path", () => ({ getDataPath: () => state.dataPath }));
-vi.mock("@/services/ai-embedder", () => ({ deletePhotoVectors: vi.fn() }));
+vi.mock("@/services/ai-embedder", () => ({
+  deletePhotoVectors: vi.fn(),
+  deleteColorVectors: vi.fn(),
+}));
 vi.mock("@/services/background-file-watcher", () => ({
   createBackgroundWatcher: state.watch,
 }));

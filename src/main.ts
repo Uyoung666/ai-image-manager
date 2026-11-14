@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import {
   app,
   BrowserWindow,
@@ -24,12 +25,9 @@ import Store from "electron-store";
 import { exiftool } from "exiftool-vendored";
 import sharp from "sharp";
 import { getDatabase } from "@/db";
-import { appSettings, exifData, folders, photos, photoTags } from "@/db/schema";
+import { appSettings, folders, photos } from "@/db/schema";
 import { ipcContext } from "@/ipc/context";
-import {
-  cleanupExpiredTrash,
-  getOrphanPhotoIds,
-} from "@/ipc/photos/handlers/mutations";
+import { cleanupExpiredTrash } from "@/ipc/photos/handlers/mutations";
 import {
   getMainLocaleText,
   initializeMainLocalization,
@@ -42,7 +40,6 @@ import {
   getTranslationModelFile,
 } from "@/services/ai/model-config";
 import { copyModelsOnce } from "@/services/ai/model-loader";
-import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import {
   createDevLoadingWindow,
   createDevStartupWindow,
@@ -65,6 +62,8 @@ import {
   getHttpServerPort,
   startHttpServerEarly,
 } from "@/services/http-server";
+import { assertLibraryFileReady } from "@/services/library-file-guard";
+import { waitForLibraryForegroundIdle } from "@/services/library-foreground";
 import { MODEL_MANIFEST, verifyModelFile } from "@/services/model-downloader";
 import {
   configurePluginManager,
@@ -77,6 +76,7 @@ import {
   setupSendToShortcut,
 } from "@/services/sendto-integration";
 import { getSetting } from "@/services/settings-manager";
+import { thumbnailSourceIdentity } from "@/services/thumbnail-identity";
 import { generateThumbnail, getThumbnailDir } from "@/services/thumbnailer";
 import {
   beginChildProcessShutdown,
@@ -313,6 +313,7 @@ let wanderLifecycleBridge: WanderLifecycleBridge | null = null;
 // shutdown). Without this flag, every close is intercepted and app.quit()
 // becomes a no-op, breaking app.relaunch() and similar flows.
 let isQuitting = false;
+const backgroundStartupController = new AbortController();
 let devStartupWindow: ReturnType<typeof createDevStartupWindow> | null = null;
 
 function ensureDevStartupWindow() {
@@ -1438,29 +1439,6 @@ async function setupORPC() {
 
 // ── Startup cleanup: orphan records + photoCount drift ───────────────
 async function runStartupCleanup() {
-  try {
-    const db = getDatabase();
-    const orphanIds = getOrphanPhotoIds(db);
-
-    if (orphanIds.length > 0) {
-      db.delete(exifData).where(inArray(exifData.photoId, orphanIds)).run();
-      db.delete(photoTags).where(inArray(photoTags.photoId, orphanIds)).run();
-      db.delete(photos).where(inArray(photos.id, orphanIds)).run();
-      log.info(
-        { count: orphanIds.length },
-        "Startup cleanup: removed orphan photo records"
-      );
-
-      initVectorDB()
-        .then(() => deletePhotoVectors(orphanIds))
-        .catch(() => {
-          /* best-effort */
-        });
-    }
-  } catch (err) {
-    log.warn({ err }, "Orphan cleanup skipped");
-  }
-
   // ── Expired trash cleanup: permanently delete photos in trash > 30 days ──
   try {
     const expiredCount = await cleanupExpiredTrash();
@@ -1498,10 +1476,19 @@ async function runStartupCleanup() {
 
 // ── Bootstrap background services (non-blocking after window is shown) ──
 async function startBackgroundServices() {
+  const startupGeneration = registry.generation;
+  const isCurrent = () =>
+    !isQuitting && startupGeneration === registry.generation;
   let criticalStarted = false;
   try {
+    if (!isCurrent()) {
+      return;
+    }
     logMain("[bg] startLevel(Critical) begin");
     const criticalReport = await registry.startLevel(ServiceLevel.Critical);
+    if (!isCurrent()) {
+      return;
+    }
     updateCriticalServicesReady(
       criticalReport.services
         .filter((service) => service.level === ServiceLevel.Critical)
@@ -1511,6 +1498,7 @@ async function startBackgroundServices() {
     const confirmationHealthTimer = setInterval(() => {
       const confirmationState = getUpdateState();
       if (
+        !isCurrent() ||
         confirmationState.version !== app.getVersion() ||
         confirmationState.phase === "idle" ||
         (confirmationState.phase === "error" &&
@@ -1520,9 +1508,10 @@ async function startBackgroundServices() {
         return;
       }
       registry
-        .health(ServiceLevel.Critical)
-        .then((report) => {
+        .runStartupWork(async () => {
+          const report = await registry.health(ServiceLevel.Critical);
           if (
+            isCurrent() &&
             report.services.some(
               (service) =>
                 service.level === ServiceLevel.Critical &&
@@ -1532,28 +1521,69 @@ async function startBackgroundServices() {
             updateCriticalServicesReady(false);
           }
         })
-        .catch(() => updateCriticalServicesReady(false));
+        .catch(() => {
+          if (isCurrent()) {
+            updateCriticalServicesReady(false);
+          }
+        });
     }, 1000);
     confirmationHealthTimer.unref();
     log.info("Critical services started");
     logMain("[bg] startLevel(Critical) done");
 
-    await runStartupCleanup();
+    await registry.runStartupWork(runStartupCleanup);
+    if (!isCurrent()) {
+      return;
+    }
     logMain("[bg] runStartupCleanup done");
 
-    // 模型复制和服务初始化并行：AI 服务在模型就绪前启动会优雅降级
-    const modelPromise = ensureModelAvailable();
-    await registry.startRemaining();
+    // Watchers and source availability stay prompt; optional model I/O gives
+    // the initial gallery a bounded foreground window before warming up.
+    await registry.startRemaining(ServiceLevel.Essential);
+    if (!isCurrent()) {
+      return;
+    }
+    try {
+      await delay(3000, undefined, {
+        signal: backgroundStartupController.signal,
+        ref: false,
+      });
+    } catch (error) {
+      if (backgroundStartupController.signal.aborted) {
+        return;
+      }
+      throw error;
+    }
+    if (
+      !(await waitForLibraryForegroundIdle(
+        isCurrent,
+        backgroundStartupController.signal
+      ))
+    ) {
+      return;
+    }
+    if (!isCurrent()) {
+      return;
+    }
+
+    // Model copying and optional services can proceed together after the grace.
+    await Promise.all([
+      registry.runStartupWork(ensureModelAvailable),
+      registry.startRemaining(),
+    ]);
+    if (!isCurrent()) {
+      return;
+    }
     log.info("All services started");
     logMain("[bg] startRemaining done");
 
-    await modelPromise;
     logMain("[bg] ensureModelAvailable done");
 
     // ── Periodic trash cleanup: enforce 30-day retention even when app runs for days ──
     trashCleanupTimer = setInterval(() => {
-      cleanupExpiredTrash()
-        .then((count) => {
+      registry
+        .runStartupWork(async () => {
+          const count = await cleanupExpiredTrash();
           if (count > 0) {
             log.info(
               { count },
@@ -1569,6 +1599,9 @@ async function startBackgroundServices() {
       `[bg] Periodic trash cleanup scheduled (every ${TRASH_CLEANUP_INTERVAL_MS / 3_600_000}h)`
     );
   } catch (err) {
+    if (!isCurrent()) {
+      return;
+    }
     const stack = (err as Error)?.stack || String(err);
     if (!criticalStarted) {
       updateCriticalServicesReady(false);
@@ -1640,68 +1673,113 @@ function notFoundResponse(): Response {
   return new Response(null, { status: 404 });
 }
 
-async function ensureLocalMediaFile(resolved: string): Promise<boolean> {
+async function ensureLocalMediaFile(resolved: string): Promise<string | null> {
   if (fs.existsSync(resolved)) {
-    return true;
+    return resolved;
   }
   const thumbDir = getThumbnailDir();
   if (!(thumbDir && resolveSafePath(resolved, [thumbDir]))) {
-    return false;
+    return null;
   }
-  const photo = getDatabase()
-    .select({ path: photos.path })
+  const db = getDatabase();
+  const photo = db
+    .select({
+      id: photos.id,
+      path: photos.path,
+      fileRevision: photos.fileRevision,
+      contentRevision: photos.contentRevision,
+      sourceSize: photos.sourceSize,
+      sourceMtimeMs: photos.sourceMtimeMs,
+      sourceCtimeMs: photos.sourceCtimeMs,
+    })
     .from(photos)
-    .where(eq(photos.thumbnailPath, resolved))
+    .where(
+      and(
+        eq(photos.thumbnailPath, resolved),
+        eq(photos.metadataRevision, photos.contentRevision)
+      )
+    )
     .get();
   if (!photo) {
-    return false;
+    return null;
   }
   try {
-    await generateThumbnail(photo.path, "md");
-    return fs.existsSync(resolved);
+    const identity = thumbnailSourceIdentity(assertLibraryFileReady(photo));
+    const generated = await generateThumbnail(photo.path, "md", {
+      expectedIdentity: identity,
+    });
+    if (db !== getDatabase()) {
+      return null;
+    }
+    if (identity !== thumbnailSourceIdentity(assertLibraryFileReady(photo))) {
+      return null;
+    }
+    const updated = db
+      .update(photos)
+      .set({
+        thumbnailPath: generated.thumbnailPath,
+        thumbnailSize: `${generated.width}x${generated.height}`,
+      })
+      .where(
+        and(
+          eq(photos.id, photo.id),
+          eq(photos.path, photo.path),
+          eq(photos.fileRevision, photo.fileRevision),
+          eq(photos.contentRevision, photo.contentRevision),
+          eq(photos.thumbnailPath, resolved)
+        )
+      )
+      .run();
+    if (updated.changes !== 1) {
+      return null;
+    }
+    const { notifyLibraryChange } = await import("@/services/library-change");
+    notifyLibraryChange(photo.id, "update");
+    return generated.thumbnailPath;
   } catch (err) {
     log.warn(
       { filePath: resolved, err },
       "local-media: Thumbnail regeneration failed"
     );
-    return false;
+    return null;
   }
 }
 
 async function renderLocalMedia(resolved: string): Promise<Response> {
-  if (!(await ensureLocalMediaFile(resolved))) {
+  const availablePath = await ensureLocalMediaFile(resolved);
+  if (!availablePath) {
     return notFoundResponse();
   }
-  const ext = path.extname(resolved).toLowerCase();
-  const buffer = await fs.promises.readFile(resolved);
+  const ext = path.extname(availablePath).toLowerCase();
+  const buffer = await fs.promises.readFile(availablePath);
   if (BROWSER_COMPATIBLE_EXTENSIONS.has(ext)) {
     return new Response(buffer, {
       headers: {
         "content-type": getMimeType(ext),
-        "cache-control": "public, max-age=31536000, immutable",
+        "cache-control": "private, no-cache",
       },
     });
   }
-  if (isRawFile(resolved)) {
-    const preview = await extractRawPreview(resolved);
+  if (isRawFile(availablePath)) {
+    const preview = await extractRawPreview(availablePath);
     if (preview) {
       return new Response(new Uint8Array(preview), {
         headers: {
           "content-type": "image/jpeg",
-          "cache-control": "public, max-age=31536000, immutable",
+          "cache-control": "private, no-cache",
         },
       });
     }
   }
   try {
-    const converted = await sharp(await resolveHeifInput(resolved))
+    const converted = await sharp(await resolveHeifInput(availablePath))
       .rotate()
       .png()
       .toBuffer();
     return new Response(new Uint8Array(converted), {
       headers: {
         "content-type": "image/png",
-        "cache-control": "public, max-age=31536000, immutable",
+        "cache-control": "private, no-cache",
       },
     });
   } catch (err) {
@@ -1709,7 +1787,7 @@ async function renderLocalMedia(resolved: string): Promise<Response> {
     return new Response(buffer, {
       headers: {
         "content-type": getMimeType(ext),
-        "cache-control": "public, max-age=31536000, immutable",
+        "cache-control": "private, no-cache",
       },
     });
   }
@@ -1719,7 +1797,9 @@ async function handleLocalMediaRequest(request: {
   url: string;
 }): Promise<Response> {
   try {
-    const encodedPath = request.url.slice("local-media://".length);
+    const encodedPath = request.url
+      .slice("local-media://".length)
+      .split("?")[0];
     const filePath = decodeURIComponent(encodedPath);
     const resolved = path.resolve(filePath);
     const allowedPaths = [getDataPath(), ...getFolderPaths()];
@@ -1829,7 +1909,7 @@ app.whenReady().then(async () => {
         if (!row || row.value !== "true") {
           log.info("[ColorMigration] Starting background color backfill...");
           const { runColorMigration } = await import(
-            "@/ipc/photos/handlers/stats"
+            "@/services/color-migration"
           );
           const result = await runColorMigration(false);
           log.info({ result }, "[ColorMigration] Background backfill complete");
@@ -1921,6 +2001,7 @@ async function waitForQuitCleanup(
 
 async function cleanupApplicationBeforeQuit(): Promise<void> {
   log.info("quit cleanup: started");
+  backgroundStartupController.abort();
   beginChildProcessShutdown();
   const { suspendImportsForShutdown } = await import("@/services/import-queue");
   suspendImportsForShutdown();
