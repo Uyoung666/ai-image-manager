@@ -5,6 +5,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { SIGLIP_V1_ADAPTER } from "@/services/ai/model-adapter";
+import { TestRuntime } from "@/tests/helpers/test-runtime";
 import { preprocessImage } from "../../../scripts/image-preprocessing.mjs";
 
 const imageSpec = SIGLIP_V1_ADAPTER.embeddingSpace.image;
@@ -69,6 +70,28 @@ function referenceTensorHash(input: Buffer): string {
 }
 
 describe("SigLIP image preprocessing", () => {
+  it("releases a decoded original before an Explorer-style overwrite", async () => {
+    const runtime = new TestRuntime("preprocess-overwrite");
+    const previousCache = sharp.cache();
+    sharp.cache({ memory: 50, files: 20, items: 100 });
+    try {
+      const original = path.join(runtime.root, "original.jpg");
+      const replacement = path.join(runtime.root, "replacement.jpg");
+      const bytes = await patternedImage(64, 48, 3).jpeg().toBuffer();
+      fs.writeFileSync(original, bytes);
+      fs.writeFileSync(replacement, bytes);
+      await preprocessImage(original, imageSpec);
+      fs.copyFileSync(replacement, original);
+      expect(fs.readFileSync(original)).toEqual(bytes);
+    } finally {
+      sharp.cache({
+        memory: previousCache.memory.max,
+        files: previousCache.files.max,
+        items: previousCache.items.max,
+      });
+      runtime.cleanup();
+    }
+  });
   it.each([
     ["RGB", 513, 337, 3, "normal"],
     ["grayscale", 171, 93, 3, "grayscale"],

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import sharp from "sharp";
@@ -16,6 +17,7 @@ import {
   vi,
 } from "vitest";
 import { folders, photos } from "@/db/schema";
+import { runColorMigration } from "@/services/color-migration";
 import {
   getHttpServerAuthToken,
   startHttpServerEarly,
@@ -23,6 +25,7 @@ import {
 } from "@/services/http-server";
 import { thumbnailSourceIdentity } from "@/services/thumbnail-identity";
 import {
+  clearThumbnailDiskCache,
   deletePhotoThumbnails,
   generateGalleryThumbnail,
   generateThumbnail,
@@ -171,6 +174,89 @@ afterAll(async () => {
   });
 });
 describe("ID thumbnail HTTP lifecycle", () => {
+  it("reads current deletion state and the active database on every request", async () => {
+    const db = drizzle(sqlite);
+    const alternateSqlite = new Database(":memory:");
+    const alternateDb = drizzle(alternateSqlite);
+    try {
+      migrate(alternateDb, { migrationsFolder: "drizzle" });
+      alternateDb
+        .insert(photos)
+        .values({
+          id: 1,
+          path: original,
+          filename: "one.jpg",
+          deletedAt: 1,
+        })
+        .run();
+      expect((await request(1)).status).toBe(200);
+      db.update(photos).set({ deletedAt: 1 }).where(eq(photos.id, 1)).run();
+      expect((await request(1)).status).toBe(404);
+      db.update(photos).set({ deletedAt: null }).where(eq(photos.id, 1)).run();
+      expect((await request(1)).status).toBe(200);
+
+      const previousDb = state.db;
+      try {
+        state.db = alternateDb;
+        expect((await request(1)).status).toBe(404);
+      } finally {
+        state.db = previousDb;
+      }
+      expect((await request(1)).status).toBe(200);
+    } finally {
+      db.update(photos).set({ deletedAt: null }).where(eq(photos.id, 1)).run();
+      alternateSqlite.close();
+    }
+  });
+  it("serves offline cached pixels and releases them after palette backfill", async () => {
+    const preview = await generateThumbnail(original, "md");
+    const db = drizzle(sqlite);
+    db.update(photos)
+      .set({ sourceStatus: "offline", thumbnailPath: preview.thumbnailPath })
+      .where(eq(photos.id, 1))
+      .run();
+    sharp.cache({ files: 20 });
+    try {
+      const response = await request(1);
+      expect(response.status).toBe(200);
+      expect(response.headers["cache-control"]).toBe("private, no-cache");
+      expect((await sharp(response.body).metadata()).width).toBeGreaterThan(0);
+      await expect(runColorMigration()).resolves.toEqual({
+        processed: 1,
+        total: 1,
+        complete: true,
+      });
+      expect(
+        db
+          .select({ colors: photos.dominantColors })
+          .from(photos)
+          .where(eq(photos.id, 1))
+          .get()?.colors
+      ).toBeTruthy();
+      db.update(photos)
+        .set({ contentRevision: 1 })
+        .where(eq(photos.id, 1))
+        .run();
+      expect((await request(1)).status).toBe(404);
+      db.update(photos)
+        .set({ contentRevision: 0 })
+        .where(eq(photos.id, 1))
+        .run();
+      expect((await clearThumbnailDiskCache()).fileCount).toBeGreaterThan(0);
+      expect((await request(1)).status).toBe(404);
+    } finally {
+      sharp.cache(false);
+      db.update(photos)
+        .set({
+          sourceStatus: "unverified",
+          contentRevision: 0,
+          dominantColors: null,
+          colorBucket: null,
+        })
+        .where(eq(photos.id, 1))
+        .run();
+    }
+  });
   it("selects an adequate preview without a second HTTP request, then prefers a prepared exact tier", async () => {
     const preview = await generateThumbnail(original, "md");
     await makePreviewNewerThanSource(original, preview.thumbnailPath);
@@ -360,7 +446,7 @@ describe("ID thumbnail HTTP lifecycle", () => {
     expect(changed.headers["cache-control"]).toBe("private, no-cache");
     expect(changed.body.equals(previous.body)).toBe(false);
   });
-  it("changes ETag when an exact legacy preview is rebuilt at the same path", async () => {
+  it("changes the cache path and ETag when the source is replaced at the same path", async () => {
     const file = path.join(path.dirname(original), "exact.jpg");
     const writeSource = async (background: string) =>
       sharp({ create: { width: 512, height: 256, channels: 3, background } })
@@ -387,7 +473,7 @@ describe("ID thumbnail HTTP lifecycle", () => {
     await writeSource("#b68229");
     await deletePhotoThumbnails(file);
     const rebuilt = await generateThumbnail(file, "md");
-    expect(rebuilt.thumbnailPath).toBe(preview.thumbnailPath);
+    expect(rebuilt.thumbnailPath).not.toBe(preview.thumbnailPath);
     await makePreviewNewerThanSource(file, rebuilt.thumbnailPath);
     const next = await request(5, identity, first.headers.etag);
     expect(next.status).toBe(200);

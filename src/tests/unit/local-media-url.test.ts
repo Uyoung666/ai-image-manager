@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { getHttpPortSync } from "@/utils/http-port";
 import {
   toDuelPreviewUrl,
   toGalleryThumbnailUrl,
@@ -13,6 +14,38 @@ vi.mock("@/utils/http-port", () => ({
 }));
 
 describe("local media URL cache version", () => {
+  it("encodes optional source revisions without changing the original file path", () => {
+    const file = "C:\\photos\\same name.jpg";
+    const revision = "C:\\cache\\new & preview.webp";
+    const original = new URL(toLocalMediaUrl(file));
+    expect(original.searchParams.has("rv")).toBe(false);
+    const updated = new URL(toLocalMediaUrl(file, revision));
+    expect(updated.searchParams.get("path")).toBe(file);
+    expect(updated.searchParams.get("rv")).toBe(revision);
+    expect(updated.href).not.toBe(original.href);
+    const raw = new URL(toPreviewUrl("C:\\photos\\same name.cr3", revision));
+    expect(raw.searchParams.get("rv")).toBe(revision);
+    expect(toLocalMediaUrl(null, revision)).toBe("");
+    expect(toPreviewUrl(undefined, revision)).toBe("");
+  });
+
+  it("versions the local protocol fallback without adding revisions to existing callers", () => {
+    vi.mocked(getHttpPortSync).mockReturnValue(null);
+    try {
+      const file = "C:\\photos\\same name.jpg";
+      const original = toLocalMediaUrl(file);
+      expect(original).toBe("local-media://C%3A/photos/same%20name.jpg");
+      expect(toLocalMediaUrl(file, "new & current")).toBe(
+        `${original}?rv=new%20%26%20current`
+      );
+      expect(toPreviewUrl(file, "new & current")).toBe(
+        `${original}?rv=new%20%26%20current`
+      );
+    } finally {
+      vi.mocked(getHttpPortSync).mockReturnValue(45_678);
+    }
+  });
+
   it("versions gallery policy separately from source identity and legacy paths", () => {
     const url = new URL(toGalleryThumbnailUrl(1, 256, "geometry", "identity"));
     expect(url.searchParams.get("gv")).toBe("2");

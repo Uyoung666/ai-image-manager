@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { cloudConfigs, cloudSyncLog, photos } from "@/db/schema";
 import { decrypt, encrypt, needsMigration } from "@/services/credential-vault";
+import { assertLibraryFileReady } from "@/services/library-file-guard";
 import type { CloudProvider, CloudProviderType } from "./abstract-provider";
 import { s3Provider } from "./s3-provider";
 import { webdavProvider } from "./webdav-provider";
@@ -86,6 +87,7 @@ export async function uploadPhoto(
   const config = JSON.parse(plaintext);
   const provider = getProvider(cfg.provider as CloudProviderType);
 
+  assertLibraryFileReady(photo);
   const buffer = fs.readFileSync(photo.path);
   const ext = path.extname(photo.filename);
   const remotePath = buildPhotoRemotePath(photo.id, photo.filename);

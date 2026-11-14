@@ -3,31 +3,68 @@ import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { thumbnailSourceIdentity } from "@/services/thumbnail-identity";
 import {
   clearThumbnailDiskCache,
   deletePhotoThumbnails,
+  generateDuelPreview,
   generateGalleryThumbnail,
   generateThumbnail,
   getGalleryThumbnailHint,
   getThumbnailDir,
   getThumbnailPath,
+  getVersionedThumbnailPath,
   initThumbnailer,
+  preserveRelinkThumbnail,
   stopThumbnailer,
   thumbnailGenerationSlots,
 } from "@/services/thumbnailer";
+import { heifFixturePath } from "@/tests/helpers/heif-fixture";
 import { TestRuntime } from "@/tests/helpers/test-runtime";
 import { makePreviewNewerThanSource } from "@/tests/helpers/thumbnail-fixture";
 
 const state = vi.hoisted(() => ({ root: "" }));
 vi.mock("@/utils/data-path", () => ({ getDataPath: () => state.root }));
 vi.mock("@/db", () => ({
-  getDatabase: () => {
-    throw new Error("Isolated thumbnail fixture has no database");
-  },
+  getDatabase: () => ({
+    select: () => ({
+      from: () => ({ all: () => [], where: () => ({ get: () => undefined }) }),
+    }),
+    transaction: vi.fn(),
+  }),
 }));
 let runtime: TestRuntime;
 let original: string;
 const previousSharpCache = sharp.cache();
+
+it("keeps comparison preview pixels separate after an overwrite", async () => {
+  const prior = await generateDuelPreview(original);
+  expect(prior).not.toBeNull();
+  await sharp({
+    create: { width: 300, height: 150, channels: 3, background: "#f0272f" },
+  })
+    .jpeg()
+    .toFile(original);
+  const next = await generateDuelPreview(original);
+  expect(next?.previewPath).not.toBe(prior?.previewPath);
+  const pixels = await sharp(next?.previewPath ?? "")
+    .raw()
+    .toBuffer();
+  expect(pixels[0]).toBeGreaterThan(200);
+  expect(pixels[1]).toBeLessThan(80);
+});
+
+function legacyEvidence(thumbnailPath: string) {
+  const source = fs.statSync(original);
+  return {
+    thumbnailPath,
+    sourceSize: source.size,
+    sourceMtimeMs: source.mtimeMs,
+    sourceCtimeMs: source.ctimeMs,
+    metadataRevision: 0,
+    contentRevision: 0,
+  };
+}
 async function damagePixels(file: string): Promise<void> {
   const bytes = await fs.promises.readFile(file);
   const chunk = bytes.indexOf(Buffer.from("VP8 "));
@@ -60,12 +97,172 @@ afterEach(async () => {
   });
 });
 describe("physical gallery thumbnail generation", () => {
-  it("does not create generation work when cancelled during legacy file lookup", async () => {
+  it("serves a relinked HEIF viewport from its preview without reading the original again", async () => {
+    const input = path.join(runtime.root, "source.heic");
+    await fs.promises.copyFile(heifFixturePath, input);
+    const source = await fs.promises.stat(input);
+    const preview = await generateThumbnail(input);
+    const destination = path.join(runtime.root, "relinked.heic");
+    await fs.promises.rename(input, destination);
+    const started = performance.now();
+    const transferred = await preserveRelinkThumbnail(input, destination, {
+      thumbnailPath: preview.thumbnailPath,
+      metadataRevision: 0,
+      contentRevision: 0,
+      sourceSize: source.size,
+      sourceMtimeMs: source.mtimeMs,
+      sourceCtimeMs: source.ctimeMs,
+    });
+    const committedAt = performance.now();
+    expect(transferred).toBeTruthy();
+    const read = vi.spyOn(fs.promises, "readFile");
+    const decode = vi.spyOn(
+      await import("@/services/heif-input"),
+      "resolveHeifInput"
+    );
+    try {
+      await generateGalleryThumbnail(destination, 256);
+      expect(decode.mock.calls.some(([file]) => file === destination)).toBe(
+        false
+      );
+      expect(read.mock.calls.some(([file]) => file === destination)).toBe(
+        false
+      );
+      console.log(
+        "RELINK_PREVIEW_EVIDENCE",
+        JSON.stringify({
+          transferMs: committedAt - started,
+          viewportMs: performance.now() - committedAt,
+          originalReads: 0,
+        })
+      );
+    } finally {
+      decode.mockRestore();
+      read.mockRestore();
+    }
+  });
+  it("releases original files after decoding with the production Sharp cache enabled", async () => {
+    sharp.cache({ memory: 50, files: 20, items: 100 });
+    const replacement = path.join(runtime.root, "replacement.jpg");
+    const bytes = await sharp({
+      create: { width: 80, height: 60, channels: 3, background: "red" },
+    })
+      .jpeg()
+      .toBuffer();
+    await fs.promises.writeFile(replacement, bytes);
+    await generateThumbnail(original);
+    await generateGalleryThumbnail(original, 256);
+    await fs.promises.copyFile(replacement, original);
+    expect(await fs.promises.readFile(original)).toEqual(bytes);
+  });
+
+  it("transfers only the version-owned preview when full-content relinking is proven", async () => {
+    const source = await fs.promises.stat(original);
+    const preview = await generateThumbnail(original);
+    const destination = path.join(runtime.root, "relocated.jpg");
+    await fs.promises.rename(original, destination);
+    const evidence = {
+      thumbnailPath: preview.thumbnailPath,
+      metadataRevision: 0,
+      contentRevision: 0,
+      sourceSize: source.size,
+      sourceMtimeMs: source.mtimeMs,
+      sourceCtimeMs: source.ctimeMs,
+    };
+    const transferred = await preserveRelinkThumbnail(
+      original,
+      destination,
+      evidence
+    );
+    expect(transferred).toBeTruthy();
+    expect(await fs.promises.readFile(transferred ?? "")).toEqual(
+      await fs.promises.readFile(preview.thumbnailPath)
+    );
+    expect((await generateThumbnail(destination)).thumbnailPath).toBe(
+      transferred
+    );
+    expect(
+      await preserveRelinkThumbnail(original, destination, {
+        ...evidence,
+        metadataRevision: -1,
+      })
+    ).toBeUndefined();
+    await fs.promises.writeFile(preview.thumbnailPath, "damaged cache");
+    expect(
+      await preserveRelinkThumbnail(original, destination, evidence)
+    ).toBeUndefined();
+  });
+  it("does not reuse an old in-flight preview or remove the replacement after an overwrite", async () => {
+    await sharp({
+      create: { width: 80, height: 60, channels: 3, background: "#ff0000" },
+    })
+      .jpeg()
+      .toFile(original);
+    const source = fs.statSync(original);
+    const identity = thumbnailSourceIdentity(source);
+    const destination = getVersionedThumbnailPath(original, "md", identity);
+    let release!: () => void;
+    let entered!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const writing = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const rename = fs.promises.rename.bind(fs.promises);
+    let first = true;
+    const interception = vi
+      .spyOn(fs.promises, "rename")
+      .mockImplementation(async (source, target) => {
+        if (target === destination && first) {
+          first = false;
+          entered();
+          await blocked;
+        }
+        return rename(source, target);
+      });
+    const oldResult = generateThumbnail(original, "md", {
+      expectedIdentity: identity,
+    }).catch((error: unknown) => error);
+    await writing;
+    await sharp({
+      create: { width: 80, height: 60, channels: 3, background: "#0000ff" },
+    })
+      .jpeg()
+      .toFile(original);
+    await fs.promises.utimes(original, new Date(0), new Date(0));
+    const refreshed = generateThumbnail(original);
+    try {
+      const result = await refreshed;
+      release();
+      const { data } = await sharp(result.buffer)
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      expect(data[2]).toBeGreaterThan(240);
+      expect(data[0]).toBeLessThan(15);
+      expect(await oldResult).toBeInstanceOf(Error);
+      expect(fs.existsSync(destination)).toBe(false);
+      expect(fs.existsSync(result.thumbnailPath)).toBe(true);
+      await expect(
+        generateThumbnail(original, "md", { expectedIdentity: identity })
+      ).rejects.toThrow("Source changed");
+    } finally {
+      release();
+      await oldResult;
+      await refreshed.catch(() => undefined);
+      interception.mockRestore();
+    }
+  });
+  it("does not create generation work when cancelled during versioned preview lookup", async () => {
     const actualStat = fs.promises.stat.bind(fs.promises);
-    const legacy = getThumbnailPath(original, "md");
+    const preview = getVersionedThumbnailPath(
+      original,
+      "md",
+      thumbnailSourceIdentity(fs.statSync(original))
+    );
     let resume: (() => void) | undefined;
     const stat = vi.spyOn(fs.promises, "stat").mockImplementation((file) =>
-      String(file) === legacy
+      String(file) === preview
         ? new Promise<fs.Stats>((resolve, reject) => {
             resume = () => actualStat(file).then(resolve, reject);
           })
@@ -134,24 +331,34 @@ describe("physical gallery thumbnail generation", () => {
     expect(await getGalleryThumbnailHint(photo, 256, stat, readStat)).toBe(256);
   });
   it("resamples oversized previews without decoding the original, and reuses exact variants", async () => {
-    const preview = await generateThumbnail(original, "md");
+    const preview = getThumbnailPath(original, "md");
     const large = await sharp(original)
       .rotate()
       .resize(1024, 1024, { fit: "inside" })
       .webp()
       .toBuffer();
-    await fs.promises.writeFile(preview.thumbnailPath, large);
+    await fs.promises.writeFile(preview, large);
     // A readable source identity with undecodable pixels proves the preview is
     // used as input. Make the preview newer than this deliberately bad source.
     await fs.promises.writeFile(
       original,
       "source pixels intentionally unavailable"
     );
-    await makePreviewNewerThanSource(original, preview.thumbnailPath);
+    await makePreviewNewerThanSource(original, preview);
+    const evidence = legacyEvidence(preview);
     for (const edge of [256, 512] as const) {
-      const result = await generateGalleryThumbnail(original, edge);
+      const result = await generateGalleryThumbnail(
+        original,
+        edge,
+        undefined,
+        0,
+        undefined,
+        false,
+        false,
+        evidence
+      );
       expect(Math.max(result.width, result.height)).toBe(edge);
-      expect(result.thumbnailPath).not.toBe(preview.thumbnailPath);
+      expect(result.thumbnailPath).not.toBe(preview);
       const write = vi.spyOn(fs.promises, "rename");
       expect(
         (await generateGalleryThumbnail(original, edge)).thumbnailPath
@@ -161,18 +368,31 @@ describe("physical gallery thumbnail generation", () => {
     }
   });
   it("directly reuses an exactly sized legacy preview", async () => {
-    const preview = await generateThumbnail(original, "md");
-    const bytes = await sharp(preview.thumbnailPath)
+    const preview = getThumbnailPath(original, "md");
+    await sharp(original)
+      .rotate()
       .resize(512, 512, { fit: "inside" })
       .webp()
-      .toBuffer();
-    await fs.promises.writeFile(preview.thumbnailPath, bytes);
-    await makePreviewNewerThanSource(original, preview.thumbnailPath);
-    const result = await generateGalleryThumbnail(original, 512);
-    expect(result.thumbnailPath).toBe(preview.thumbnailPath);
+      .toFile(preview);
+    await makePreviewNewerThanSource(original, preview);
+    const evidence = legacyEvidence(preview);
+    const result = await generateGalleryThumbnail(
+      original,
+      512,
+      undefined,
+      0,
+      undefined,
+      false,
+      false,
+      evidence
+    );
+    expect(result.thumbnailPath).toBe(preview);
     expect(Math.max(result.width, result.height)).toBe(512);
+    expect(
+      (await generateGalleryThumbnail(original, 512)).thumbnailPath
+    ).not.toBe(preview);
   });
-  it("does not treat a legacy preview with unapplied orientation as an upright input", async () => {
+  it("does not treat a preview with unapplied orientation as an upright input", async () => {
     const preview = await generateThumbnail(original, "md");
     await fs.promises.writeFile(
       preview.thumbnailPath,
@@ -206,7 +426,7 @@ describe("physical gallery thumbnail generation", () => {
     expect(Math.max(result.width, result.height)).toBe(256);
     expect((await sharp(result.thumbnailPath).metadata()).height).toBe(256);
   });
-  it("repairs an exactly sized legacy preview from the source without reusing its readable damaged metadata", async () => {
+  it("repairs an exactly sized preview from the source without reusing its readable damaged metadata", async () => {
     const preview = await generateThumbnail(original, "md");
     await fs.promises.writeFile(
       preview.thumbnailPath,
@@ -273,20 +493,26 @@ describe("physical gallery thumbnail generation", () => {
   it.each([
     0, 1000,
   ])("does not trust a legacy preview at or before the source change (source ahead by %i ms)", async (offset) => {
-    const preview = await generateThumbnail(original, "md");
+    const preview = getThumbnailPath(original, "md");
+    await sharp(original).rotate().resize(512).webp().toFile(preview);
     const replacement = await sharp({
       create: { width: 700, height: 700, channels: 3, background: "#b68229" },
     })
       .jpeg()
       .toBuffer();
     await fs.promises.writeFile(original, replacement);
-    const timestamp = fs.statSync(preview.thumbnailPath).mtimeMs + offset;
+    const timestamp = fs.statSync(preview).mtimeMs + offset;
     const tiedSource = Object.assign(fs.statSync(original), {
       mtimeMs: timestamp,
       ctimeMs: timestamp,
       birthtimeMs: timestamp,
     });
     const actualStat = fs.promises.stat.bind(fs.promises);
+    const evidence = {
+      ...legacyEvidence(preview),
+      sourceMtimeMs: timestamp,
+      sourceCtimeMs: timestamp,
+    };
     const stat = vi
       .spyOn(fs.promises, "stat")
       .mockImplementation((file) =>
@@ -300,7 +526,8 @@ describe("physical gallery thumbnail generation", () => {
           { path: original, width: 700, height: 700 },
           512,
           tiedSource,
-          (file) => actualStat(file).catch(() => undefined)
+          (file) => actualStat(file).catch(() => undefined),
+          evidence
         )
       ).toBeUndefined();
       const result = await generateGalleryThumbnail(
@@ -311,9 +538,12 @@ describe("physical gallery thumbnail generation", () => {
         {
           width: 700,
           height: 700,
-        }
+        },
+        false,
+        false,
+        evidence
       );
-      expect(result.thumbnailPath).not.toBe(preview.thumbnailPath);
+      expect(result.thumbnailPath).not.toBe(preview);
       expect(result).toMatchObject({ width: 512, height: 512 });
     } finally {
       stat.mockRestore();

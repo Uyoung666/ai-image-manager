@@ -31,11 +31,14 @@ function getHttpAuthToken(): string {
 function buildHttpMediaUrl(
   port: number,
   route: string,
-  filePath: string
+  filePath: string,
+  revision?: string
 ): string {
   const token = getHttpAuthToken();
   const auth = token ? `&token=${encodeURIComponent(token)}` : "";
-  return `http://127.0.0.1:${port}/${route}?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}${auth}`;
+  const version =
+    revision === undefined ? "" : `&rv=${encodeURIComponent(revision)}`;
+  return `http://127.0.0.1:${port}/${route}?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}${version}${auth}`;
 }
 
 /**
@@ -48,7 +51,10 @@ function buildHttpMediaUrl(
  * 端口号由 preload 脚本在窗口创建时通过 --http-port 参数同步注入。
  * 如果 HTTP 端口尚未就绪，回退到原有的 local-media:// 自定义协议。
  */
-export function toLocalMediaUrl(filePath: string | null | undefined): string {
+export function toLocalMediaUrl(
+  filePath: string | null | undefined,
+  revision?: string
+): string {
   if (!filePath) {
     return "";
   }
@@ -58,7 +64,7 @@ export function toLocalMediaUrl(filePath: string | null | undefined): string {
     // webp 缩略图走 /thumbnail 路由，非 webp 原始文件走 /image 路由
     const lower = filePath.toLowerCase();
     const route = lower.endsWith(".webp") ? "thumbnail" : "image";
-    return buildHttpMediaUrl(port, route, filePath);
+    return buildHttpMediaUrl(port, route, filePath, revision);
   }
 
   // ── 回退：原有 local-media:// 协议 ──────────────────────────────
@@ -67,25 +73,30 @@ export function toLocalMediaUrl(filePath: string | null | undefined): string {
     .split("/")
     .map((s) => encodeURIComponent(s))
     .join("/");
-  return `local-media://${encoded}`;
+  const version =
+    revision === undefined ? "" : `?rv=${encodeURIComponent(revision)}`;
+  return `local-media://${encoded}${version}`;
 }
 
 /**
  * 显式构造 /preview 路由 URL（提取 RAW 内嵌 JPEG 预览）。
  * 用于大图查看时的首层降级：/preview → /image → 兜底错误。
  */
-export function toPreviewUrl(filePath: string | null | undefined): string {
+export function toPreviewUrl(
+  filePath: string | null | undefined,
+  revision?: string
+): string {
   if (!filePath) {
     return "";
   }
 
   const port = getHttpPortSync();
   if (port !== null) {
-    return buildHttpMediaUrl(port, "preview", filePath);
+    return buildHttpMediaUrl(port, "preview", filePath, revision);
   }
 
   // 回退：提取 preview 对 local-media:// 无意义，走通用 URL
-  return toLocalMediaUrl(filePath);
+  return toLocalMediaUrl(filePath, revision);
 }
 
 /**

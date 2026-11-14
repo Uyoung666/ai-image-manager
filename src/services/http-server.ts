@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
@@ -11,7 +11,10 @@ import {
   resolveImageOrientation,
 } from "@/services/image-orientation";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
-import { validateThumbnail } from "@/services/thumbnail-validation";
+import {
+  readValidatedThumbnail,
+  validateThumbnail,
+} from "@/services/thumbnail-validation";
 import {
   findPhotoPathByDuelPreview,
   findPhotoPathByThumbnail,
@@ -191,13 +194,14 @@ async function serveOrientedBrowserFile(
 ): Promise<boolean> {
   let pipeline: ReturnType<typeof sharp>;
   try {
-    const metadata = await sharp(safePath, { failOn: "none" }).metadata();
+    const input = await fs.promises.readFile(safePath);
+    const metadata = await sharp(input, { failOn: "none" }).metadata();
     const orientation = await resolveImageOrientation(safePath, metadata);
     if (orientation === 1) {
       return false;
     }
     pipeline = applyExifOrientation(
-      sharp(safePath, { failOn: "none" }),
+      sharp(input, { failOn: "none" }),
       orientation
     );
   } catch {
@@ -209,7 +213,7 @@ async function serveOrientedBrowserFile(
     ? await pipeline.jpeg({ quality: 95 }).toBuffer()
     : await pipeline.png().toBuffer();
   res.setHeader("content-type", isJpeg ? "image/jpeg" : "image/png");
-  res.setHeader("cache-control", "public, max-age=86400");
+  res.setHeader("cache-control", "private, no-cache");
   res.setHeader("content-length", output.length);
   res.writeHead(200);
   res.end(output);
@@ -396,7 +400,8 @@ async function regenerateAndServeThumbnail(
     );
 
     const result = await generateThumbnail(lookup.photoPath, lookup.size);
-    serveStaticFile(result.thumbnailPath, res, "image/webp", true);
+    res.setHeader("cache-control", "private, no-cache");
+    serveStaticFile(result.thumbnailPath, res, "image/webp", false);
   } catch (regenerateErr) {
     if (!res.headersSent) {
       res.writeHead(500);
@@ -438,7 +443,8 @@ async function regenerateAndServeDuelPreview(
       return;
     }
 
-    serveStaticFile(result.previewPath, res, "image/jpeg", true);
+    res.setHeader("cache-control", "private, no-cache");
+    serveStaticFile(result.previewPath, res, "image/jpeg", false);
   } catch (regenerateErr) {
     if (!res.headersSent) {
       res.writeHead(500);
@@ -455,6 +461,7 @@ async function handleThumbnail(
   res: http.ServerResponse
 ): Promise<void> {
   setCorsHeaders(res);
+  res.setHeader("cache-control", "private, no-cache");
   recordGalleryMediaStat("thumbnailRequest");
 
   // Phase A: Try to serve existing file (with integrity validation)
@@ -507,6 +514,7 @@ async function handleDuelPreview(
   res: http.ServerResponse
 ): Promise<void> {
   setCorsHeaders(res);
+  res.setHeader("cache-control", "private, no-cache");
 
   // Phase A: Try to serve existing file (with integrity validation)
   let stats: fs.Stats;
@@ -641,7 +649,7 @@ async function handlePreview(
   preview = await normalizeJpegPreview(preview, safePath);
 
   res.setHeader("content-type", "image/jpeg");
-  res.setHeader("cache-control", "public, max-age=86400");
+  res.setHeader("cache-control", "private, no-cache");
   res.setHeader("content-length", preview.length);
   res.writeHead(200);
   res.end(preview);
@@ -706,7 +714,7 @@ function handleImage(
         preview = await normalizeJpegPreview(preview, safePath);
 
         res.setHeader("content-type", "image/jpeg");
-        res.setHeader("cache-control", "public, max-age=86400");
+        res.setHeader("cache-control", "private, no-cache");
         res.setHeader("content-length", preview.length);
         res.writeHead(200);
         res.end(preview);
@@ -721,7 +729,7 @@ function handleImage(
 
         const mimeType = getMimeType(ext);
         res.setHeader("content-type", mimeType);
-        res.setHeader("cache-control", "public, max-age=86400");
+        res.setHeader("cache-control", "private, no-cache");
         res.setHeader("content-length", stats.size);
         res.writeHead(200);
 
@@ -776,7 +784,7 @@ function handleImage(
         // 自动发送响应头。若 sharp 流在产出数据前报错，headersSent 仍为
         // false，可 writeHead(500).end() 正常关闭，杜绝 ERR_EMPTY_RESPONSE。
         res.setHeader("content-type", "image/png");
-        res.setHeader("cache-control", "public, max-age=86400");
+        res.setHeader("cache-control", "private, no-cache");
 
         try {
           const sharpStream = (
@@ -892,6 +900,92 @@ function galleryThumbnailCachePolicy(
     : "private, no-cache";
 }
 
+function offlineCachedPreview(photo: {
+  contentRevision: number;
+  metadataRevision: number;
+  thumbnailPath: string | null;
+}): string | null {
+  return photo.contentRevision === photo.metadataRevision
+    ? photo.thumbnailPath
+    : null;
+}
+
+async function serveOfflinePhotoThumbnail(
+  res: http.ServerResponse,
+  thumbnailPath: string | null,
+  signal: AbortSignal
+): Promise<void> {
+  const cacheRoot = path.join(getDataPath(), "thumbnails");
+  const safe = thumbnailPath && resolveSecurePath(thumbnailPath, [cacheRoot]);
+  if (!safe || path.extname(safe).toLowerCase() !== ".webp") {
+    safeEndError(res, 404, "Thumbnail unavailable");
+    return;
+  }
+  try {
+    const stat = await fs.promises.stat(safe);
+    if (!stat.isFile()) {
+      safeEndError(res, 404, "Thumbnail unavailable");
+      return;
+    }
+    const { metadata, buffer } = await readValidatedThumbnail(safe, stat);
+    if (metadata.format !== "webp") {
+      safeEndError(res, 404, "Thumbnail unavailable");
+      return;
+    }
+    if (!(signal.aborted || res.destroyed)) {
+      res.setHeader("cache-control", "private, no-cache");
+      if (buffer) {
+        res.setHeader("content-type", "image/webp");
+        res.setHeader("content-length", buffer.length);
+        res.writeHead(200);
+        res.end(buffer);
+      } else {
+        serveStaticFile(safe, res, "image/webp", false, stat);
+      }
+    }
+  } catch {
+    if (!(signal.aborted || res.destroyed)) {
+      safeEndError(res, 404, "Thumbnail unavailable");
+    }
+  }
+}
+
+function preparePhotoThumbnailReader(db: ReturnType<typeof getDatabase>) {
+  return db
+    .select({
+      path: photos.path,
+      width: photos.width,
+      height: photos.height,
+      sourceStatus: photos.sourceStatus,
+      sourceSize: photos.sourceSize,
+      sourceMtimeMs: photos.sourceMtimeMs,
+      sourceCtimeMs: photos.sourceCtimeMs,
+      thumbnailPath: photos.thumbnailPath,
+      contentRevision: photos.contentRevision,
+      metadataRevision: photos.metadataRevision,
+    })
+    .from(photos)
+    .where(
+      and(eq(photos.id, sql.placeholder("photoId")), isNull(photos.deletedAt))
+    )
+    .prepare();
+}
+
+const photoThumbnailReaders = new WeakMap<
+  ReturnType<typeof getDatabase>,
+  ReturnType<typeof preparePhotoThumbnailReader>
+>();
+
+function readPhotoThumbnail(photoId: number) {
+  const db = getDatabase();
+  let reader = photoThumbnailReaders.get(db);
+  if (!reader) {
+    reader = preparePhotoThumbnailReader(db);
+    photoThumbnailReaders.set(db, reader);
+  }
+  return reader.get({ photoId });
+}
+
 async function handlePhotoThumbnail(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -911,13 +1005,20 @@ async function handlePhotoThumbnail(
   const cancel = () => controller.abort();
   res.once("close", cancel);
   try {
-    const photo = getDatabase()
-      .select({ path: photos.path, width: photos.width, height: photos.height })
-      .from(photos)
-      .where(and(eq(photos.id, id), isNull(photos.deletedAt)))
-      .get();
+    const photo = readPhotoThumbnail(id);
     if (!photo) {
       safeEndError(res, 404, "Not Found");
+      return;
+    }
+    if (
+      photo.sourceStatus !== "available" &&
+      photo.sourceStatus !== "unverified"
+    ) {
+      await serveOfflinePhotoThumbnail(
+        res,
+        offlineCachedPreview(photo),
+        controller.signal
+      );
       return;
     }
     const safePath = resolveSafePath(photo.path, true);
@@ -937,7 +1038,8 @@ async function handlePhotoThumbnail(
       0,
       photo,
       selectExisting,
-      params.get("repair") === "1"
+      params.get("repair") === "1",
+      photo
     );
     if (controller.signal.aborted) {
       return;

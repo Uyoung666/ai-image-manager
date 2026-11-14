@@ -6,6 +6,7 @@ import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { appSettings, exifData, photos, photoTags, tags } from "@/db/schema";
+import { assertLibraryFileReady } from "@/services/library-file-guard";
 import { buildHtmlGallery } from "./gallery-template";
 
 // Watermark settings persistence
@@ -421,6 +422,7 @@ export const exportPhotos = os
 
         for (const photo of photoList) {
           throwIfExportAborted(signal);
+          assertLibraryFileReady(photo);
           const destName = allocateExportFilename(
             photo.filename,
             format,

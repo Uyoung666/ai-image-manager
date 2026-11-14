@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import sharp from "sharp";
 import { isHeifInput } from "./heif-decoder.mjs";
 import { resolveHeifResult } from "./heif-input.mjs";
@@ -30,7 +31,10 @@ export async function preprocessImage(input, image, options = {}) {
     }
     return normalizeModelRgb(data, image);
   }
-  const decoder = sharp(input, { failOn: "none" });
+  const decoder = sharp(
+    typeof input === "string" ? await fs.readFile(input) : input,
+    { failOn: "none" }
+  );
   return normalizeModelRgb(
     await resizeModelRgb(decoder, await decoder.metadata(), image),
     image

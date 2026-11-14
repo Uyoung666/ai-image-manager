@@ -1,8 +1,20 @@
 import { fork } from "node:child_process";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { isHeifInput } from "./heif-decoder.mjs";
+
+async function sourceIdentity(input) {
+  if (typeof input !== "string") {
+    return null;
+  }
+  const stat = await fs.stat(input);
+  if (!stat.isFile()) {
+    throw new Error("HEIC source is not a file");
+  }
+  return `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}:${stat.dev}`;
+}
 
 /** One serial decoder per owner process. Timeout/crash rejects only the current photo. */
 export function createHeifResolver({
@@ -17,6 +29,19 @@ export function createHeifResolver({
   const pending = new Map();
   const bufferKeys = new WeakMap();
   let generation = 0;
+  function assertGeneration(expected) {
+    if (generation !== expected) {
+      throw new Error("HEIC decoding cancelled");
+    }
+  }
+  async function assertSource(input, identity, expectedGeneration) {
+    assertGeneration(expectedGeneration);
+    const current = await sourceIdentity(input);
+    assertGeneration(expectedGeneration);
+    if (current !== identity) {
+      throw new Error("HEIC source changed during decoding");
+    }
+  }
   function recycle() {
     clearTimeout(idleTimer);
     if (useProcess) {
@@ -124,14 +149,19 @@ export function createHeifResolver({
     });
   }
   async function resolveResult(input, options = {}) {
-    if (!(await isHeifInput(input))) {
+    const scheduledGeneration = generation;
+    const supported = await isHeifInput(input);
+    assertGeneration(scheduledGeneration);
+    if (!supported) {
       return null;
     }
+    const identity = await sourceIdentity(input);
+    assertGeneration(scheduledGeneration);
     const policy = JSON.stringify(options);
     let key;
     if (typeof input === "string") {
       const normalized = path.resolve(input);
-      key = `${process.platform === "win32" ? normalized.toLowerCase() : normalized}:${policy}`;
+      key = `${process.platform === "win32" ? normalized.toLowerCase() : normalized}:${identity}:${policy}`;
     } else {
       let policies = bufferKeys.get(input);
       if (!policies) {
@@ -144,20 +174,20 @@ export function createHeifResolver({
       key = policies.get(policy);
     }
     if (pending.has(key)) {
-      return pending.get(key);
+      const result = await pending.get(key);
+      await assertSource(input, identity, scheduledGeneration);
+      return result;
     }
     const queuedAt = performance.now();
     let queueMs = 0;
-    const scheduledGeneration = generation;
     const job = tail
-      .then(() => {
-        if (generation !== scheduledGeneration) {
-          throw new Error("HEIC decoding cancelled");
-        }
+      .then(async () => {
+        await assertSource(input, identity, scheduledGeneration);
         queueMs = performance.now() - queuedAt;
         return decode(input, options);
       })
-      .then((result) => {
+      .then(async (result) => {
+        await assertSource(input, identity, scheduledGeneration);
         if (result.timings) {
           result.timings.queueMs = queueMs;
         }
@@ -171,7 +201,9 @@ export function createHeifResolver({
     try {
       return await job;
     } finally {
-      pending.delete(key);
+      if (pending.get(key) === job) {
+        pending.delete(key);
+      }
     }
   }
   async function resolveInput(input) {
@@ -180,6 +212,7 @@ export function createHeifResolver({
   }
   function stop() {
     generation++;
+    pending.clear();
     recycle();
   }
   return { resolveInput, resolveResult, stop };

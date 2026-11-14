@@ -1,7 +1,8 @@
 import { eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, photos, photoTags, tags } from "@/db/schema";
-import { getThumbnailPath } from "@/services/thumbnailer";
+import { getThumbnailDir } from "@/services/thumbnailer";
+import { resolveSafePath } from "@/utils/path-security";
 
 export interface SharePhoto {
   aperture: string;
@@ -241,12 +242,18 @@ export async function generateSharePage(
     // Thumbnail base64
     let thumbnailBase64 = "";
     try {
-      const thumbPath = getThumbnailPath(photo.path, "md");
-      if (thumbPath) {
+      const cacheRoot = getThumbnailDir();
+      const thumbPath =
+        cacheRoot &&
+        photo.thumbnailPath &&
+        photo.metadataRevision === photo.contentRevision
+          ? resolveSafePath(photo.thumbnailPath, [cacheRoot])
+          : null;
+      if (thumbPath?.toLowerCase().endsWith(".webp")) {
         const fs = await import("node:fs");
         if (fs.existsSync(thumbPath)) {
           const buf = fs.readFileSync(thumbPath);
-          thumbnailBase64 = `data:image/jpeg;base64,${buf.toString("base64")}`;
+          thumbnailBase64 = `data:image/webp;base64,${buf.toString("base64")}`;
         }
       }
     } catch {

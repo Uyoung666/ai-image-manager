@@ -63,7 +63,9 @@ registerGalleryCleanup(() => {
   pending.clear();
 });
 
-export function thumbnailSourceIdentity(stat: fs.Stats): string {
+export function thumbnailSourceIdentity(
+  stat: Pick<fs.Stats, "size" | "mtimeMs" | "ctimeMs">
+): string {
   return createHash("md5")
     .update(`${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:v1`)
     .digest("hex");
