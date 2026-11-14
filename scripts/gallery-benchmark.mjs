@@ -15,6 +15,8 @@ import electronPath from "electron";
 import sharp from "sharp";
 import { TestRuntime } from "../src/tests/helpers/test-runtime.ts";
 
+import { waitForBackgroundIdle } from "./gallery-background-idle.mjs";
+
 const PHOTO_LABEL = /photo-(\d+)\.webp$/;
 const MANAGED_PREVIEW =
   /^(?:[a-f0-9]{32}\.(?:webp|jpg)|g-[a-f0-9]{32}-[a-f0-9]{32}-(?:256|512|1024|2048)\.webp)$/i;
@@ -45,6 +47,8 @@ const trace = option("trace", "0") === "1";
 const anchor = Number(option("anchor", "0"));
 const gate = option("gate", "");
 const measureEntry = option("entry-metric", "0") === "1";
+const waitBackground = option("wait-background-idle", "0") === "1";
+let launchedAt;
 const controlledScroll = option("controlled-scroll", "0") === "1";
 const albumKind = option("album-kind", "ordinary");
 if (
@@ -94,6 +98,12 @@ fs.writeFileSync(
   `const {app}=require('electron');const fs=require('node:fs');const path=require('node:path');for(const [key,part] of Object.entries({appData:'appdata',cache:'cache',userData:'profile',sessionData:'profile',temp:'scratch',logs:'logs',crashDumps:'crashes'})){const p=['userData','sessionData'].includes(key)?${JSON.stringify(profile)}:path.join(__dirname,part);fs.mkdirSync(p,{recursive:true});app.setPath(key,p);}const marker=${JSON.stringify(borrowed?.markerPath ?? "")};if(marker&&process.type==='browser'){const record=exited=>{const m=JSON.parse(fs.readFileSync(marker,'utf8'));m.launchPending=false;m.childPids=exited?m.childPids.filter(pid=>pid!==process.pid):[...new Set([...m.childPids,process.pid])];fs.writeFileSync(marker,JSON.stringify(m));};record(false);process.once('exit',()=>record(true));}`
 );
 let active;
+if (waitBackground) {
+  fs.appendFileSync(
+    isolation,
+    `;app.on('web-contents-created',(_,contents)=>{const send=contents.send;contents.send=function(channel,...args){if(channel==='import-queue-status'){globalThis.__galleryQueueEvents??=[];globalThis.__galleryQueueEvents.push({at:Date.now(),status:args[0]});}return Reflect.apply(send,this,[channel,...args]);};});`
+  );
+}
 let bundleHash;
 let sourceCommit;
 let sourceDiffHash;
@@ -296,7 +306,38 @@ function cloneClosedFixture() {
   ) {
     throw new Error("Fixture database has an uncheckpointed WAL");
   }
+  // A terminated bootstrap can leave a WAL for its empty database. Checkpoint
+  // it before replacing the main file, so it cannot replay over the seed.
+  const bootstrapCheckpoint = execFileSync(
+    electronPath,
+    [
+      "-e",
+      `const fs=require('node:fs');const D=require(${JSON.stringify(path.resolve("node_modules/better-sqlite3"))});const target=process.argv[1];const wal=target+'-wal';const before=fs.existsSync(wal)?fs.statSync(wal).size:0;const d=new D(target);try{const result=d.pragma('wal_checkpoint(TRUNCATE)')[0];if(result.busy)throw Error('Bootstrap database is still busy');console.log(JSON.stringify({bootstrapWalBytes:before,checkpoint:result}));}finally{d.close();}if(fs.existsSync(wal)&&fs.statSync(wal).size)throw Error('Bootstrap WAL was not drained');`,
+      path.join(profile, "data/ai-image-manager.db"),
+    ],
+    { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
+  );
+  fs.writeFileSync(
+    path.join(reportDir, "bootstrap-checkpoint.json"),
+    bootstrapCheckpoint
+  );
   fs.copyFileSync(database, path.join(profile, "data/ai-image-manager.db"));
+  const installed = JSON.parse(
+    execFileSync(
+      electronPath,
+      [
+        "-e",
+        `const D=require(${JSON.stringify(path.resolve("node_modules/better-sqlite3"))});const d=new D(process.argv[1],{readonly:true});try{console.log(JSON.stringify(d.prepare('select count(*) as count from photos where deleted_at is null').get()))}finally{d.close();}`,
+        path.join(profile, "data/ai-image-manager.db"),
+      ],
+      { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8" }
+    )
+  );
+  if (option("subset-fixture", "0") !== "1" && installed.count !== count) {
+    throw new Error(
+      `Cloned dataset mismatch: expected ${count}, got ${installed.count}`
+    );
+  }
   if (option("subset-fixture", "0") === "1") {
     execFileSync(
       electronPath,
@@ -416,6 +457,7 @@ function fingerprintBuild() {
 async function launch() {
   runtime.setLaunchPending();
   borrowLaunch(true);
+  launchedAt = Date.now();
   active = await electron.launch({
     executablePath: executable,
     args: [
@@ -764,9 +806,15 @@ async function sample(run) {
   const imageRequests = new Map();
   const imageTransfers = [];
   const imageHttpRequests = [];
-  cdp.on("Network.requestWillBeSent", ({ requestId, request }) => {
+  let reloadStartedAt;
+  let firstGalleryImageRequestAt;
+  cdp.on("Network.requestWillBeSent", ({ requestId, request, wallTime }) => {
     const resource = new URL(request.url);
     if (resource.pathname === "/photo-thumbnail") {
+      const requestedAt = wallTime * 1000;
+      if (reloadStartedAt !== undefined && requestedAt >= reloadStartedAt) {
+        firstGalleryImageRequestAt ??= requestedAt;
+      }
       imageHttpRequests.push({
         id: Number(resource.searchParams.get("id")),
         edge: Number(resource.searchParams.get("edge")),
@@ -796,6 +844,7 @@ async function sample(run) {
     );
   }
   const cpuProfile = await startCpuProfile(app, cdp, run);
+  reloadStartedAt = Date.now();
   await page.reload();
   if (view === "album") {
     await page.waitForFunction(
@@ -811,6 +860,7 @@ async function sample(run) {
   await page.waitForFunction(
     () => window.__galleryPerf?.firstViewport80Ms?.count > 0
   );
+  const viewportReadyObservedAt = Date.now();
   if (measureEntry) {
     await page.waitForFunction(
       () => window.__galleryPerf?.entryFirstViewport80Ms?.count > 0
@@ -828,7 +878,9 @@ async function sample(run) {
             BrowserWindow.getAllWindows()[0].webContents.getOSProcessId()
         )?.memory ?? null
   );
+  const scrollStartedAt = Date.now();
   const scrollProtocol = await scrollAndWait(page);
+  const scrollFinishedAt = Date.now();
   const memoryAfter = await cdp.send("Runtime.getHeapUsage");
   const processMemoryAfter = await app.evaluate(
     ({ app: host, BrowserWindow }) =>
@@ -872,6 +924,37 @@ async function sample(run) {
         };
       }),
   }));
+  const measurementFinishedAt = Date.now();
+  const measuredImageTransfers = structuredClone(imageTransfers);
+  const measuredImageHttpRequests = structuredClone(imageHttpRequests);
+  const media = await app.evaluate(() => globalThis.__galleryMediaStats ?? {});
+  fs.writeFileSync(
+    path.join(reportDir, `measurement-${run}.json`),
+    JSON.stringify(
+      {
+        snapshot,
+        media,
+        launchedAt,
+        measurementFinishedAt,
+        reloadStartedAt,
+        viewportReadyObservedAt,
+        scrollStartedAt,
+        scrollFinishedAt,
+        imageTransfers: measuredImageTransfers,
+        imageHttpRequests: measuredImageHttpRequests,
+      },
+      null,
+      2
+    )
+  );
+  const backgroundIdle = waitBackground
+    ? await waitForBackgroundIdle(app, {
+        profile,
+        launchedAt,
+        count,
+        failurePath: path.join(reportDir, `idle-failure-${run}.json`),
+      })
+    : null;
   const workerUrls = page.workers().map((worker) => worker.url());
   if (
     snapshot.galleryPerf.masonryWorkerMs?.count > 0 &&
@@ -893,7 +976,6 @@ async function sample(run) {
   );
   await page.screenshot({ path: path.join(reportDir, `probe-${run}.png`) });
   assertGallerySample(snapshot);
-  const media = await app.evaluate(() => globalThis.__galleryMediaStats ?? {});
   const actual = JSON.parse(
     execFileSync(
       electronPath,
@@ -922,14 +1004,25 @@ async function sample(run) {
         0
       ),
     galleryMediaStats: media,
+    backgroundIdle,
     scenario: `${label}-${count}-${cache}`,
     run,
     datasetCount: count,
     gridColumnWidth,
     fixtureEdge,
     variantCache,
-    imageTransfers,
-    imageHttpRequests,
+    imageTransfers: measuredImageTransfers,
+    imageHttpRequests: measuredImageHttpRequests,
+    timeline: {
+      // Epoch milliseconds let the report line up renderer and service logs.
+      launchedAt,
+      measurementFinishedAt,
+      reloadStartedAt,
+      firstGalleryImageRequestAt: firstGalleryImageRequestAt ?? null,
+      viewportReadyObservedAt,
+      scrollStartedAt,
+      scrollFinishedAt,
+    },
     fixtureRoot: borrowed?.root ?? root,
     sourceCommit,
     sourceDiffHash,
