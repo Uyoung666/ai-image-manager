@@ -33,6 +33,10 @@ import {
 } from "./image-orientation";
 import { waitForLibraryForegroundIdle } from "./library-foreground";
 import {
+  forgetLibraryMoveTarget,
+  pruneLibraryMoveTargets,
+} from "./library-move-candidates";
+import {
   acceptLibraryPathSpelling,
   commitLibraryMove,
   type LibraryMovePlan,
@@ -680,7 +684,8 @@ function queuePrimaryColorVectorUpsert(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Photo preparation combines metadata, thumbnail, RAW preview, EXIF, and color extraction for one indexed file.
 export async function preparePhotoRecord(
   filePath: string,
-  folderId: number | null
+  folderId: number | null,
+  options: { repairPreview?: boolean } = {}
 ): Promise<{
   photoRecord: PhotoRecord;
   exifRecord: ExifRecord | null;
@@ -705,6 +710,7 @@ export async function preparePhotoRecord(
   let thumb: Awaited<ReturnType<typeof generateThumbnail>>;
   try {
     thumb = await generateThumbnail(filePath, "md", {
+      force: options.repairPreview,
       expectedIdentity: thumbnailSourceIdentity(stat),
       input: meta.thumbnailInput,
       prepared: meta.thumbnailPrepared,
@@ -712,6 +718,9 @@ export async function preparePhotoRecord(
     });
   } catch {
     log.warn({ filePath }, "Thumbnail generation failed");
+    if (options.repairPreview) {
+      return null;
+    }
     thumb = { thumbnailPath: "", width: 0, height: 0 };
   }
 
@@ -1321,7 +1330,20 @@ export async function scanFolder(
     let missing = 0;
     let offline = 0;
     let inaccessible = 0;
-    const movePlan = await planLibraryMoves(db, files, current);
+    const movePlan = await planLibraryMoves(db, files, current, {
+      include: shouldIndex,
+      skipDirectory: (directory) =>
+        SKIP_PATTERNS.some((pattern) => pattern.test(directory)),
+      scan: { folderPath: resolvedPath, complete: !incomplete },
+    });
+    sourceChanges += movePlan.candidatesChanged ? 1 : 0;
+    if (
+      !incomplete &&
+      current() &&
+      pruneLibraryMoveTargets(db, resolvedPath, files)
+    ) {
+      sourceChanges++;
+    }
 
     async function runWithConcurrency<T, R>(
       items: T[],
@@ -1983,8 +2005,13 @@ function queueWatcherAdd(context: WatcherContext, filePath: string): void {
           active[0].context.db,
           active.map((item) => item.filePath),
           () => active.some((item) => isCurrentWatcher(item.context)),
-          shouldIndex
+          shouldIndex,
+          (directory) =>
+            SKIP_PATTERNS.some((pattern) => pattern.test(directory))
         );
+        if (plan.candidatesChanged) {
+          active[0].context.onChange?.(null, "status");
+        }
         for (const item of active) {
           await applyWatcherAdd(item.context, item.filePath, plan);
         }
@@ -2128,6 +2155,9 @@ function installWatcher(folderPath: string, onChange: WatchChange): void {
   watcher.on("unlink", (filePath) => {
     if (isCurrentWatcher(context)) {
       watcherStats.unlinkEvents++;
+      if (forgetLibraryMoveTarget(context.db, filePath)) {
+        onChange(null, "status");
+      }
       queueWatcherSourceCheck(context, filePath);
     }
   });

@@ -8,20 +8,28 @@ import {
   isNotNull,
   isNull,
   ne,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
 import PQueue from "p-queue";
 import { getDatabase } from "@/db";
-import { folders, photos } from "@/db/schema";
+import { folders, libraryMoveCandidates, photos } from "@/db/schema";
 import { invalidateFoldersCache } from "@/utils/folder-paths";
 import { importPathKey } from "@/utils/import-path";
+import { selectLibraryRoots } from "@/utils/library-roots";
 import { createLogger } from "@/utils/logger";
 import { computeFullFileHash, FULL_FILE_HASH_VERSION } from "./file-hash";
 import {
+  type LibraryMoveCandidate,
+  rememberLibraryMoveCandidates,
+} from "./library-move-candidates";
+import {
   getLibraryRootPaths,
   inspectLibraryPath,
+  inspectLibraryRoot,
   libraryRootForPhoto,
+  librarySourceIsPaused,
 } from "./library-source";
 
 type LibraryDb = ReturnType<typeof getDatabase>;
@@ -69,11 +77,18 @@ export function acceptLibraryPathSpelling(
 
 export async function hashLibraryFile(
   filePath: string,
-  priority = 1
+  priority = 1,
+  signal?: AbortSignal
 ): Promise<string | null> {
+  signal?.throwIfAborted();
   return (
-    (await hashQueue.add(() => computeFullFileHash(filePath), { priority })) ??
-    null
+    (await hashQueue.add(
+      () => {
+        signal?.throwIfAborted();
+        return computeFullFileHash(filePath, signal);
+      },
+      { priority }
+    )) ?? null
   );
 }
 
@@ -104,8 +119,31 @@ interface LibraryMove {
 }
 
 export interface LibraryMovePlan {
+  candidatesChanged: boolean;
   moves: Map<string, LibraryMove>;
   unresolved: Set<string>;
+}
+
+interface MoveTarget {
+  filePath: string;
+  key: string;
+  stat: fs.Stats;
+}
+
+interface MoveGroup {
+  matches: StoredPhoto[];
+  targets: MoveTarget[];
+}
+
+interface MoveScan {
+  complete: boolean;
+  folderPath: string;
+}
+
+interface MoveOptions {
+  include: (filePath: string) => boolean;
+  scan?: MoveScan;
+  skipDirectory: (folderPath: string) => boolean;
 }
 
 function hashCandidates(db: LibraryDb, size: number) {
@@ -149,27 +187,281 @@ async function collectNewLibraryPaths(
   return newPaths;
 }
 
-function resolveMoveGroups(
-  plan: LibraryMovePlan,
-  groups: Map<string, { matches: LibraryMove[]; targets: string[] }>
-): void {
-  for (const { matches, targets } of groups.values()) {
-    if (targets.length === 1 && matches.length === 1) {
-      plan.moves.set(targets[0], matches[0]);
-    } else {
-      for (const target of targets) {
-        plan.unresolved.add(target);
-      }
+interface MoveObservation {
+  fingerprints: Map<string, { hash: string; stat: fs.Stats }>;
+  groups: Map<string, MoveGroup>;
+  originals: Map<number, StoredPhoto>;
+  unstable: Set<string>;
+  unstableSizes: Set<number>;
+}
+
+async function observeMoveTargets(
+  db: LibraryDb,
+  files: readonly string[],
+  isCurrent: () => boolean,
+  previous?: MoveObservation
+): Promise<MoveObservation> {
+  const result: MoveObservation = {
+    groups: new Map(),
+    unstable: new Set(),
+    unstableSizes: new Set(),
+    originals: new Map(),
+    fingerprints: new Map(),
+  };
+  const roots = getLibraryRootPaths(db);
+  const bySize = new Map<number, Promise<StoredPhoto[]>>();
+  const knownPaths = new Set(files.map(importPathKey));
+  const verifiedOldPhotos = (size: number): Promise<StoredPhoto[]> => {
+    let pending = bySize.get(size);
+    if (!pending) {
+      pending = (async () => {
+        const candidates: StoredPhoto[] = [];
+        for (const old of hashCandidates(db, size)) {
+          if (!isCurrent()) {
+            break;
+          }
+          if (
+            knownPaths.has(importPathKey(old.path)) ||
+            librarySourceIsPaused(old.path)
+          ) {
+            continue;
+          }
+          if (
+            (
+              await inspectLibraryPath(
+                old.path,
+                libraryRootForPhoto(roots, old.path)
+              )
+            ).status === "missing"
+          ) {
+            candidates.push(old);
+            result.originals.set(old.id, old);
+          }
+        }
+        return candidates;
+      })();
+      bySize.set(size, pending);
+    }
+    return pending;
+  };
+  const newPaths = await collectNewLibraryPaths(db, files, isCurrent);
+  for (const [key, filePath] of newPaths) {
+    if (!isCurrent()) {
+      break;
+    }
+    const stat = await readStat(filePath);
+    if (!stat || librarySourceIsPaused(filePath)) {
+      continue;
+    }
+    const candidates = await verifiedOldPhotos(stat.size);
+    if (!candidates.length) {
+      continue;
+    }
+    const cached = previous?.fingerprints.get(key);
+    const hash =
+      cached && sameStat(cached.stat, stat)
+        ? cached.hash
+        : await hashLibraryFile(filePath, 2);
+    const after = await readStat(filePath);
+    if (!(hash && after && sameStat(stat, after))) {
+      result.unstable.add(key);
+      result.unstableSizes.add(stat.size);
+      continue;
+    }
+    result.fingerprints.set(key, { hash, stat: after });
+    const matches = candidates.filter((old) => old.sourceHash === hash);
+    if (matches.length) {
+      const group = result.groups.get(hash) ?? { matches, targets: [] };
+      group.targets.push({ filePath, key, stat: after });
+      result.groups.set(hash, group);
+    }
+  }
+  return result;
+}
+
+interface ReachableFiles {
+  complete: boolean;
+  files: string[];
+}
+
+function collectMoveDirectoryEntries(
+  entries: fs.Dirent[],
+  directory: string,
+  files: Map<string, string>,
+  pending: string[],
+  options: MoveOptions
+) {
+  for (const entry of entries) {
+    const filePath = path.join(directory, entry.name);
+    if (entry.isDirectory() && !options.skipDirectory(filePath)) {
+      pending.push(filePath);
+    } else if (entry.isFile() && options.include(filePath)) {
+      files.set(importPathKey(filePath), filePath);
     }
   }
 }
 
+async function collectMoveRoot(
+  rootPath: string,
+  files: Map<string, string>,
+  options: MoveOptions,
+  isCurrent: () => boolean
+): Promise<boolean> {
+  let complete = true;
+  const pending = [rootPath];
+  const scanKey = options.scan ? importPathKey(options.scan.folderPath) : null;
+  while (pending.length && isCurrent()) {
+    const directory = pending.pop();
+    if (!directory) {
+      break;
+    }
+    if (importPathKey(directory) === scanKey) {
+      continue;
+    }
+    if (librarySourceIsPaused(directory)) {
+      complete = false;
+      continue;
+    }
+    try {
+      const entries = await fs.promises.readdir(directory, {
+        withFileTypes: true,
+      });
+      collectMoveDirectoryEntries(entries, directory, files, pending, options);
+    } catch (error) {
+      complete = false;
+      log.warn({ error, directory }, "Move destination check incomplete");
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  return complete && isCurrent();
+}
+
+async function collectReachableMoveFiles(
+  db: LibraryDb,
+  initial: readonly string[],
+  options: MoveOptions,
+  isCurrent: () => boolean
+): Promise<ReachableFiles> {
+  const files = new Map(initial.map((file) => [importPathKey(file), file]));
+  const roots = selectLibraryRoots(
+    db
+      .select({ path: folders.path })
+      .from(folders)
+      .where(eq(folders.explicitOnly, false))
+      .all()
+  );
+  let complete = options.scan?.complete ?? true;
+  for (const root of roots) {
+    if (!isCurrent()) {
+      return { complete: false, files: [...files.values()] };
+    }
+    const status = await inspectLibraryRoot(root.path);
+    if (status.status === "offline") {
+      continue;
+    }
+    if (status.status !== "available") {
+      complete = false;
+      continue;
+    }
+    const rootComplete = await collectMoveRoot(
+      root.path,
+      files,
+      options,
+      isCurrent
+    );
+    complete = rootComplete && complete;
+  }
+  return { complete: complete && isCurrent(), files: [...files.values()] };
+}
+
+function resolveObservedMoves(
+  plan: LibraryMovePlan,
+  observed: MoveObservation,
+  complete: boolean,
+  roots: string[]
+) {
+  const pendingCandidates = new Map<number, LibraryMoveCandidate[]>();
+  for (const key of observed.unstable) {
+    plan.unresolved.add(key);
+  }
+  for (const [hash, group] of observed.groups) {
+    const verified =
+      complete && !observed.unstableSizes.has(group.targets[0].stat.size);
+    if (verified && group.matches.length === 1 && group.targets.length === 1) {
+      const target = group.targets[0];
+      const oldPhoto = group.matches[0];
+      plan.moves.set(target.key, {
+        hash,
+        oldPhoto,
+        oldRoot: libraryRootForPhoto(roots, oldPhoto.path),
+        stat: target.stat,
+      });
+      continue;
+    }
+    const candidates: LibraryMoveCandidate[] = group.targets.map(
+      ({ filePath }) => ({
+        targetPath: filePath,
+        reason: verified ? "ambiguous" : "incomplete",
+      })
+    );
+    for (const target of group.targets) {
+      plan.unresolved.add(target.key);
+    }
+    for (const original of group.matches) {
+      pendingCandidates.set(original.id, candidates);
+    }
+  }
+  return pendingCandidates;
+}
+
+function recordObservedCandidates(
+  db: LibraryDb,
+  observed: MoveObservation,
+  pendingCandidates: Map<number, LibraryMoveCandidate[]>,
+  complete: boolean
+): boolean {
+  let changed = false;
+  const checkedAt = Date.now();
+  for (const original of observed.originals.values()) {
+    const candidates = pendingCandidates.get(original.id) ?? [];
+    if (complete) {
+      const keys = candidates.map((candidate) =>
+        importPathKey(candidate.targetPath)
+      );
+      const removed = db
+        .delete(libraryMoveCandidates)
+        .where(
+          and(
+            eq(libraryMoveCandidates.photoId, original.id),
+            keys.length
+              ? notInArray(libraryMoveCandidates.targetPathKey, keys)
+              : undefined
+          )
+        )
+        .run().changes;
+      changed ||= removed > 0;
+    }
+    if (candidates.length) {
+      changed =
+        rememberLibraryMoveCandidates(db, original, candidates, checkedAt) ||
+        changed;
+    }
+  }
+  return changed;
+}
+
+/** Resolve all observed destinations before assigning any historical identity. */
 export async function planLibraryMoves(
   db: LibraryDb,
   files: readonly string[],
-  isCurrent: () => boolean
+  isCurrent: () => boolean,
+  options: MoveOptions
 ): Promise<LibraryMovePlan> {
-  const plan: LibraryMovePlan = { moves: new Map(), unresolved: new Set() };
+  const plan: LibraryMovePlan = {
+    candidatesChanged: false,
+    moves: new Map(),
+    unresolved: new Set(),
+  };
   if (
     !(
       isCurrent() &&
@@ -184,135 +476,51 @@ export async function planLibraryMoves(
   ) {
     return plan;
   }
-  const roots = getLibraryRootPaths(db);
-  const groups = new Map<
-    string,
-    { matches: LibraryMove[]; targets: string[] }
-  >();
-  const bySize = new Map<number, Promise<StoredPhoto[]>>();
-  const knownPaths = new Set(files.map(importPathKey));
-  const verifiedOldPhotos = (size: number): Promise<StoredPhoto[]> => {
-    let pending = bySize.get(size);
-    if (!pending) {
-      pending = (async () => {
-        const result: StoredPhoto[] = [];
-        for (const old of hashCandidates(db, size)) {
-          if (!isCurrent()) {
-            break;
-          }
-          if (knownPaths.has(importPathKey(old.path))) {
-            continue;
-          }
-          const oldRoot = libraryRootForPhoto(roots, old.path);
-          if (
-            (await inspectLibraryPath(old.path, oldRoot)).status === "missing"
-          ) {
-            result.push(old);
-          }
-        }
-        return result;
-      })();
-      bySize.set(size, pending);
-    }
-    return pending;
-  };
-  const newPaths = await collectNewLibraryPaths(db, files, isCurrent);
-  for (const [key, file] of newPaths) {
-    if (!isCurrent()) {
-      break;
-    }
-    const stat = await readStat(file);
-    if (
-      !stat ||
-      db
-        .select({ id: photos.id })
-        .from(photos)
-        .where(libraryPhotoPathEquals(file))
-        .get()
-    ) {
-      continue;
-    }
-    const candidates = await verifiedOldPhotos(stat.size);
-    if (!candidates.length) {
-      continue;
-    }
-    const hash = await hashLibraryFile(file, 2);
-    const after = await readStat(file);
-    if (!(hash && after && sameStat(stat, after))) {
-      // A changing or inaccessible target must be reconsidered by a later scan.
-      plan.unresolved.add(importPathKey(file));
-      continue;
-    }
-    const matches = candidates.filter((old) => old.sourceHash === hash);
-    if (matches.length === 0) {
-      continue;
-    }
-    const group = groups.get(hash) ?? { matches: [], targets: [] };
-    group.targets.push(key);
-    group.matches.push(
-      ...matches.map((oldPhoto) => ({
-        hash,
-        oldPhoto,
-        oldRoot: libraryRootForPhoto(roots, oldPhoto.path),
-        stat: after,
-      }))
-    );
-    groups.set(hash, group);
+  const initial = await observeMoveTargets(db, files, isCurrent);
+  for (const key of initial.unstable) {
+    plan.unresolved.add(key);
   }
-  resolveMoveGroups(plan, groups);
+  if (!(initial.groups.size && isCurrent())) {
+    return plan;
+  }
+  const reachable = await collectReachableMoveFiles(
+    db,
+    files,
+    options,
+    isCurrent
+  );
+  const observed = await observeMoveTargets(
+    db,
+    reachable.files,
+    isCurrent,
+    initial
+  );
+  if (!isCurrent()) {
+    return plan;
+  }
+  const pendingCandidates = resolveObservedMoves(
+    plan,
+    observed,
+    reachable.complete,
+    getLibraryRootPaths(db)
+  );
+  plan.candidatesChanged = recordObservedCandidates(
+    db,
+    observed,
+    pendingCandidates,
+    reachable.complete
+  );
   return plan;
 }
 
-async function collectReachableMoveFiles(
-  roots: string[],
-  include: (filePath: string) => boolean,
-  isCurrent: () => boolean
-): Promise<string[]> {
-  const files: string[] = [];
-  const pending = [...roots];
-  while (pending.length && isCurrent()) {
-    const directory = pending.pop();
-    if (!directory) {
-      continue;
-    }
-    const entries = await fs.promises.readdir(directory, {
-      withFileTypes: true,
-    });
-    for (const entry of entries) {
-      const filePath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        pending.push(filePath);
-      } else if (entry.isFile() && include(filePath)) {
-        files.push(filePath);
-      }
-    }
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  return files;
-}
-
-/** A single delivered event cannot prove that another destination is absent. */
-export async function planWatchedLibraryMoves(
+export function planWatchedLibraryMoves(
   db: LibraryDb,
   files: readonly string[],
   isCurrent: () => boolean,
-  include: (filePath: string) => boolean
+  include: (filePath: string) => boolean,
+  skipDirectory: (folderPath: string) => boolean = () => false
 ): Promise<LibraryMovePlan> {
-  const preliminary = await planLibraryMoves(db, files, isCurrent);
-  if (!(preliminary.moves.size && isCurrent())) {
-    return preliminary;
-  }
-  try {
-    const allFiles = await collectReachableMoveFiles(
-      getLibraryRootPaths(db),
-      include,
-      isCurrent
-    );
-    return await planLibraryMoves(db, allFiles, isCurrent);
-  } catch (error) {
-    log.warn({ error }, "Move destination check incomplete");
-    return { moves: new Map(), unresolved: new Set(files.map(importPathKey)) };
-  }
+  return planLibraryMoves(db, files, isCurrent, { include, skipDirectory });
 }
 
 export async function commitLibraryMove(

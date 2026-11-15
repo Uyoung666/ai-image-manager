@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  computeFullFileHash,
   computeFullFileHashSync,
   computeSampleFileHashSync,
   FULL_FILE_HASH_VERSION,
@@ -50,5 +51,42 @@ describe("full duplicate file hashing", () => {
       computeFullFileHashSync(copyPath)
     );
     expect(filesHaveSameBytesSync(firstPath, copyPath)).toBe(true);
+  });
+
+  it("rejects a canceled full hash before opening the source", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const open = vi.spyOn(fs.promises, "open");
+    try {
+      await expect(
+        computeFullFileHash(firstPath, controller.signal)
+      ).rejects.toThrow();
+      expect(open).not.toHaveBeenCalled();
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it("cancels between streaming chunks and closes the source handle", async () => {
+    const controller = new AbortController();
+    const handle = await fs.promises.open(firstPath, "r");
+    const close = vi.spyOn(handle, "close");
+    const read = handle.read.bind(handle);
+    vi.spyOn(handle, "read").mockImplementation(
+      async (...args: Parameters<typeof handle.read>) => {
+        const result = await read(...args);
+        controller.abort();
+        return result;
+      }
+    );
+    const open = vi.spyOn(fs.promises, "open").mockResolvedValueOnce(handle);
+    try {
+      await expect(
+        computeFullFileHash(firstPath, controller.signal)
+      ).rejects.toThrow();
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      open.mockRestore();
+    }
   });
 });

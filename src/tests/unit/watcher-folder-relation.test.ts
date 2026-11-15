@@ -471,10 +471,13 @@ it("defers a watcher move when another identical target exists before its add ev
   await vi.waitFor(() => expect(indexer.getWatcherStats().skipped).toBe(1));
   state.watchers[0].emit("add", second);
   await vi.waitFor(() => expect(indexer.getWatcherStats().skipped).toBe(2));
-  expect(changed).not.toHaveBeenCalled();
+  expect(changed).toHaveBeenCalledExactlyOnceWith(null, "status");
   expect(sqlite.prepare("SELECT id, path FROM photos").all()).toEqual([
     { id: originalId, path: oldPath },
   ]);
+  expect(
+    sqlite.prepare("SELECT count(*) n FROM library_move_candidates").get()
+  ).toEqual({ n: 2 });
 });
 
 it("rolls back directory discovery on a database failure instead of assigning the ancestor", async () => {
@@ -640,4 +643,167 @@ it("swallows close and state update failures from an asynchronous watcher error"
     expect.objectContaining({ phase: "close", err: closeError }),
     "Watcher: Failed to close"
   );
+});
+
+it.each([
+  false,
+  true,
+])("keeps cross-root identical destinations unresolved regardless of root scan order (%s)", async (reverse) => {
+  const originalId = await verifyFixtureFingerprint();
+  const rootB = path.join(root, "root-B");
+  const rootC = path.join(root, "root-C");
+  fs.mkdirSync(rootB);
+  fs.mkdirSync(rootC);
+  const oldPath = path.join(root, "A/photo.jpg");
+  // Register independently monitored roots before moving the photo.
+  const db = state.db as ReturnType<typeof drizzle>;
+  const { folders } = await import("@/db/schema");
+  // These paths live outside the monitored fixture root.
+  const b = path.join(path.dirname(root), `${path.basename(root)}-B`);
+  const c = path.join(path.dirname(root), `${path.basename(root)}-C`);
+  fs.mkdirSync(b);
+  fs.mkdirSync(c);
+  try {
+    db.insert(folders)
+      .values([
+        { path: b, displayName: "B" },
+        { path: c, displayName: "C" },
+      ])
+      .run();
+    const first = path.join(b, "first.jpg");
+    const second = path.join(c, "second.jpg");
+    fs.copyFileSync(oldPath, first);
+    fs.renameSync(oldPath, second);
+    for (const scope of reverse ? [c, b] : [b, c]) {
+      const result = await indexer.scanFolder(scope);
+      expect(result.moved).toBe(0);
+      expect(result.newPhotoIds).toEqual([]);
+    }
+    expect(
+      sqlite.prepare("SELECT id,path,source_status FROM photos").all()
+    ).toEqual([{ id: originalId, path: oldPath, source_status: "missing" }]);
+    expect(
+      sqlite.prepare("SELECT count(*) n FROM library_move_candidates").get()
+    ).toEqual({ n: 2 });
+  } finally {
+    // Task-owned fixtures contain only the two generated JPEG files.
+    for (const directory of [b, c]) {
+      for (const name of fs.readdirSync(directory)) {
+        fs.unlinkSync(path.join(directory, name));
+      }
+      fs.rmdirSync(directory);
+    }
+  }
+});
+
+it.each([
+  "scan",
+  "watcher",
+])("an unrelated offline root does not block a unique move through %s", async (entry) => {
+  const originalId = await verifyFixtureFingerprint();
+  const db = state.db as ReturnType<typeof drizzle>;
+  const { folders } = await import("@/db/schema");
+  db.insert(folders)
+    .values({
+      path: path.join(path.dirname(root), `${path.basename(root)}-offline`),
+      displayName: "offline",
+    })
+    .run();
+  const oldPath = path.join(root, "A/photo.jpg");
+  const target = path.join(root, "renamed.jpg");
+  fs.renameSync(oldPath, target);
+  if (entry === "scan") {
+    expect((await indexer.scanFolder(root)).moved).toBe(1);
+  } else {
+    const changed = vi.fn();
+    indexer.watchFolder(root, changed);
+    state.watchers[0].emit("add", target);
+    await vi.waitFor(() =>
+      expect(changed).toHaveBeenCalledWith(originalId, "update")
+    );
+  }
+  expect(sqlite.prepare("SELECT id,path FROM photos").all()).toEqual([
+    { id: originalId, path: target },
+  ]);
+});
+
+it("does not enumerate unselected neighbours of explicit-only sources for move matching", async () => {
+  const originalId = await verifyFixtureFingerprint();
+  const db = state.db as ReturnType<typeof drizzle>;
+  const { folders } = await import("@/db/schema");
+  // Outside the recursive monitored root, this folder is explicitly selected only.
+  const separate = path.join(
+    path.dirname(root),
+    `${path.basename(root)}-explicit`
+  );
+  fs.mkdirSync(separate);
+  try {
+    db.insert(folders)
+      .values({ path: separate, displayName: "explicit", explicitOnly: true })
+      .run();
+    const old = path.join(root, "A/photo.jpg");
+    fs.copyFileSync(old, path.join(separate, "unselected.jpg"));
+    fs.renameSync(old, path.join(root, "renamed.jpg"));
+    expect((await indexer.scanFolder(root)).moved).toBe(1);
+    expect(sqlite.prepare("SELECT id FROM photos").all()).toEqual([
+      { id: originalId },
+    ]);
+  } finally {
+    fs.unlinkSync(path.join(separate, "unselected.jpg"));
+    fs.rmdirSync(separate);
+  }
+});
+
+it("publishes incomplete move evidence and resolves it when source enumeration succeeds", async () => {
+  const originalId = await verifyFixtureFingerprint();
+  const changed = vi.fn();
+  indexer.watchFolder(root, changed);
+  const old = path.join(root, "A/photo.jpg");
+  const target = path.join(root, "renamed.jpg");
+  fs.renameSync(old, target);
+  const readdir = vi
+    .spyOn(fs.promises, "readdir")
+    .mockRejectedValue(
+      Object.assign(new Error("test access denied"), { code: "EACCES" })
+    );
+  state.watchers[0].emit("add", target);
+  await vi.waitFor(() => expect(indexer.getWatcherStats().skipped).toBe(1));
+  expect(sqlite.prepare("SELECT id,path FROM photos").all()).toEqual([
+    { id: originalId, path: old },
+  ]);
+  expect(
+    sqlite
+      .prepare("SELECT reason,target_path FROM library_move_candidates")
+      .all()
+  ).toEqual([{ reason: "incomplete", target_path: target }]);
+  readdir.mockRestore();
+  state.watchers[0].emit("add", target);
+  await vi.waitFor(() =>
+    expect(changed).toHaveBeenCalledWith(originalId, "update")
+  );
+  expect(
+    sqlite.prepare("SELECT count(*) n FROM library_move_candidates").get()
+  ).toEqual({ n: 0 });
+});
+
+it("removes obsolete candidate edges when their files disappear from a successful scan", async () => {
+  await verifyFixtureFingerprint();
+  const old = path.join(root, "A/photo.jpg");
+  const first = path.join(root, "first.jpg");
+  const second = path.join(root, "second.jpg");
+  fs.copyFileSync(old, first);
+  fs.renameSync(old, second);
+  await indexer.scanFolder(root);
+  expect(
+    sqlite.prepare("SELECT count(*) n FROM library_move_candidates").get()
+  ).toEqual({ n: 2 });
+  fs.unlinkSync(first);
+  fs.unlinkSync(second);
+  await indexer.scanFolder(root);
+  expect(
+    sqlite.prepare("SELECT count(*) n FROM library_move_candidates").get()
+  ).toEqual({ n: 0 });
+  expect(sqlite.prepare("SELECT count(*) n FROM photos").get()).toEqual({
+    n: 1,
+  });
 });

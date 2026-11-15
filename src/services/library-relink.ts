@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { and, count, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { folders, photos } from "@/db/schema";
 import { invalidateFoldersCache } from "@/utils/folder-paths";
@@ -36,7 +36,7 @@ import { preserveRelinkThumbnail } from "./thumbnailer";
 type Db = ReturnType<typeof getDatabase>;
 type Photo = typeof photos.$inferSelect;
 type Folder = typeof folders.$inferSelect;
-type RelinkStatus =
+export type RelinkStatus =
   | "matched"
   | "unverified"
   | "missing"
@@ -47,6 +47,21 @@ type RelinkStatus =
 const EXPIRATION_MS = 600_000;
 const MAX_INSPECTIONS = 12;
 
+export interface RelinkWork {
+  isCurrent?: () => boolean;
+  onProgress?: (progress: {
+    processed: number;
+    total: number;
+    phase: "checking" | "validating" | "saving";
+  }) => void;
+  signal?: AbortSignal;
+}
+function checkWork(work?: RelinkWork) {
+  work?.signal?.throwIfAborted();
+  if (work?.isCurrent && !work.isCurrent()) {
+    throw new Error("RELINK_STALE");
+  }
+}
 interface FileEvidence {
   ctimeMs: number;
   hash: string;
@@ -92,13 +107,14 @@ export function currentLibraryHash(
 }
 
 export async function readLibraryFileEvidence(
-  filePath: string
+  filePath: string,
+  signal?: AbortSignal
 ): Promise<FileEvidence | null> {
   const before = await fs.lstat(filePath);
   if (!before.isFile() || before.isSymbolicLink()) {
     return null;
   }
-  const hash = await hashLibraryFile(filePath);
+  const hash = await hashLibraryFile(filePath, 1, signal);
   const after = await fs.lstat(filePath);
   if (
     !(hash && after.isFile()) ||
@@ -131,8 +147,10 @@ async function inspectCandidate(
   roots: readonly string[],
   photo: Photo,
   newPath: string,
-  targetRoot: string
+  targetRoot: string,
+  work?: RelinkWork
 ): Promise<Candidate> {
+  checkWork(work);
   const base = { photo, newPath };
   const owner = targetOwner(db, newPath);
   if (owner !== undefined && owner !== photo.id) {
@@ -153,7 +171,8 @@ async function inspectCandidate(
       targetRoot,
       path.relative(targetRoot, newPath)
     );
-    const evidence = await readLibraryFileEvidence(newPath);
+    const evidence = await readLibraryFileEvidence(newPath, work?.signal);
+    checkWork(work);
     if (!evidence) {
       return { ...base, status: "inaccessible" };
     }
@@ -171,6 +190,7 @@ async function inspectCandidate(
       status: expectedHash ? "matched" : "unverified",
     };
   } catch (error) {
+    checkWork(work);
     return {
       ...base,
       status:
@@ -212,10 +232,21 @@ function rememberInspection(inspection: Inspection) {
   return inspectionPage(token, inspection, 0);
 }
 
-function inspectionPage(token: string, inspection: Inspection, offset: number) {
+function inspectionPage(
+  token: string,
+  inspection: Inspection,
+  offset: number,
+  status?: RelinkStatus
+) {
+  const ordered = [...inspection.candidates].sort(
+    (a, b) => Number(a.status === "matched") - Number(b.status === "matched")
+  );
+  const visible = status
+    ? ordered.filter((item) => item.status === status)
+    : ordered;
   return {
     token,
-    items: inspection.candidates
+    items: visible
       .slice(offset, offset + 100)
       .map(({ photo, newPath, status }) => ({
         photoId: photo.id,
@@ -223,7 +254,8 @@ function inspectionPage(token: string, inspection: Inspection, offset: number) {
         newPath,
         status,
       })),
-    total: inspection.candidates.length,
+    total: visible.length,
+    expiresAt: inspection.expiresAt,
     canApply: canApplyInspection(inspection),
     unverifiedPhotoIds: inspection.candidates
       .filter(({ status }) => status === "unverified")
@@ -260,13 +292,18 @@ function currentInspection(token: string): Inspection {
   return inspection;
 }
 
-export function getRelinkInspection(token: string, offset: number) {
-  return inspectionPage(token, currentInspection(token), offset);
+export function getRelinkInspection(
+  token: string,
+  offset: number,
+  status?: RelinkStatus
+) {
+  return inspectionPage(token, currentInspection(token), offset, status);
 }
 
 export async function inspectPhotoRelink(
   photoId: number,
-  selectedPath: string
+  selectedPath: string,
+  work?: RelinkWork
 ) {
   const db = getDatabase();
   const photo = db
@@ -291,8 +328,11 @@ export async function inspectPhotoRelink(
     getLibraryRootPaths(db),
     photo,
     newPath,
-    path.dirname(newPath)
+    path.dirname(newPath),
+    work
   );
+  checkWork(work);
+  work?.onProgress?.({ processed: 1, total: 1, phase: "checking" });
   return rememberInspection({
     db,
     candidates: [candidate],
@@ -321,7 +361,8 @@ function folderConflict(db: Db, oldRoot: string, newRoot: string): boolean {
 
 export async function inspectFolderRelink(
   folderId: number,
-  selectedPath: string
+  selectedPath: string,
+  work?: RelinkWork
 ) {
   const db = getDatabase();
   const root = db.select().from(folders).where(eq(folders.id, folderId)).get();
@@ -337,24 +378,55 @@ export async function inspectFolderRelink(
     .from(folders)
     .where(libraryPathCondition(folders.path, root.path))
     .all();
-  const records = db
-    .select()
-    .from(photos)
-    .where(libraryPathCondition(photos.path, root.path))
-    .all();
+  const total =
+    db
+      .select({ value: count() })
+      .from(photos)
+      .where(libraryPathCondition(photos.path, root.path))
+      .get()?.value ?? 0;
   const roots = getLibraryRootPaths(db);
   const candidates: Candidate[] = [];
-  for (const photo of records) {
-    candidates.push(
-      await inspectCandidate(
-        db,
-        roots,
-        photo,
-        path.join(newPath, path.relative(root.path, photo.path)),
-        newPath
+  let cursor = 0;
+  work?.onProgress?.({ processed: 0, total, phase: "checking" });
+  for (;;) {
+    checkWork(work);
+    const batch = db
+      .select()
+      .from(photos)
+      .where(
+        and(
+          libraryPathCondition(photos.path, root.path),
+          sql`${photos.id} > ${cursor}`
+        )
       )
-    );
+      .orderBy(photos.id)
+      .limit(100)
+      .all();
+    if (!batch.length) {
+      break;
+    }
+    for (const photo of batch) {
+      checkWork(work);
+      candidates.push(
+        await inspectCandidate(
+          db,
+          roots,
+          photo,
+          path.join(newPath, path.relative(root.path, photo.path)),
+          newPath,
+          work
+        )
+      );
+      cursor = photo.id;
+      work?.onProgress?.({
+        processed: candidates.length,
+        total,
+        phase: "checking",
+      });
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
   }
+  checkWork(work);
   return rememberInspection({
     db,
     candidates,
@@ -520,9 +592,13 @@ function updateRelocatedCounts(
   }
 }
 
-async function preserveMatchedPreviews(candidates: Candidate[]) {
+async function preserveMatchedPreviews(
+  candidates: Candidate[],
+  work?: RelinkWork
+) {
   const previews = new Map<number, string>();
   for (const candidate of candidates) {
+    checkWork(work);
     if (candidate.status !== "matched") {
       continue;
     }
@@ -538,11 +614,29 @@ async function preserveMatchedPreviews(candidates: Candidate[]) {
   return previews;
 }
 
+export function captureLibraryRelink(token: string) {
+  const inspection = currentInspection(token);
+  return {
+    total: inspection.candidates.length,
+    scope: inspection.folder
+      ? { folderId: inspection.folder.root.id }
+      : { photoIds: inspection.candidates.map((item) => item.photo.id) },
+    apply: (confirmedPhotoIds: number[], work?: RelinkWork) =>
+      applyLibraryRelink(token, confirmedPhotoIds, work, inspection),
+  };
+}
+
 export async function applyLibraryRelink(
   token: string,
-  confirmedPhotoIds: number[]
+  confirmedPhotoIds: number[],
+  work?: RelinkWork,
+  admittedInspection?: Inspection
 ) {
-  const inspection = currentInspection(token);
+  const inspection = admittedInspection ?? currentInspection(token);
+  checkWork(work);
+  if (inspection.db !== getDatabase()) {
+    throw new Error("RELINK_STALE");
+  }
   const { db, folder, candidates } = inspection;
   if (applying || (folder && (isImportQueueBusy() || isIndexing()))) {
     throw new Error("RELINK_BUSY");
@@ -566,15 +660,27 @@ export async function applyLibraryRelink(
         : candidates.flatMap(({ photo, newPath }) => [photo.path, newPath]),
       async () => {
         const roots = getLibraryRootPaths(db);
-        const previews = await preserveMatchedPreviews(candidates);
+        const previews = await preserveMatchedPreviews(candidates, work);
+        let processed = 0;
+        work?.onProgress?.({
+          processed,
+          total: candidates.length,
+          phase: "validating",
+        });
         for (const previous of candidates) {
           const checked = await inspectCandidate(
             db,
             roots,
             previous.photo,
             previous.newPath,
-            folder?.newPath ?? path.dirname(previous.newPath)
+            folder?.newPath ?? path.dirname(previous.newPath),
+            work
           );
+          work?.onProgress?.({
+            processed: ++processed,
+            total: candidates.length,
+            phase: "validating",
+          });
           if (
             checked.status !== previous.status ||
             !sameEvidence(previous.evidence, checked.evidence)
@@ -582,7 +688,10 @@ export async function applyLibraryRelink(
             throw new Error("RELINK_STALE");
           }
         }
-        currentInspection(token);
+        checkWork(work);
+        if (db !== getDatabase()) {
+          throw new Error("RELINK_STALE");
+        }
         if (folder) {
           if (isImportQueueBusy() || isIndexing()) {
             throw new Error("RELINK_BUSY");
@@ -590,7 +699,15 @@ export async function applyLibraryRelink(
           await unwatchFolder(folder.root.path);
           detachedWatcher = true;
         }
-        currentInspection(token);
+        checkWork(work);
+        if (db !== getDatabase()) {
+          throw new Error("RELINK_STALE");
+        }
+        work?.onProgress?.({
+          processed: candidates.length,
+          total: candidates.length,
+          phase: "saving",
+        });
         db.transaction(() => {
           for (const candidate of candidates) {
             ensureCurrent(db, candidate);

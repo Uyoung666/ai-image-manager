@@ -23,6 +23,8 @@ import {
 } from "@/services/file-hash";
 import {
   applyLibraryRelink,
+  captureLibraryRelink,
+  getRelinkInspection,
   inspectFolderRelink,
   inspectPhotoRelink,
 } from "@/services/library-relink";
@@ -245,4 +247,49 @@ it("rejects expired tokens and a switched database", async () => {
   const second = await inspectFolderRelink(1, target);
   state.db = drizzle(sqlite);
   await expect(applyLibraryRelink(second.token, [])).rejects.toThrow("EXPIRED");
+});
+
+it("cancels a folder inspection before accepting a preview or changing catalogue paths", async () => {
+  await fs.rename(path.join(source, "one.jpg"), path.join(target, "one.jpg"));
+  const controller = new AbortController();
+  await expect(
+    inspectFolderRelink(1, target, {
+      signal: controller.signal,
+      onProgress: ({ processed }) => {
+        if (processed === 1) {
+          controller.abort();
+        }
+      },
+    })
+  ).rejects.toThrow();
+  expect(db.select().from(folders).get()?.path).toBe(source);
+  expectRelationships();
+});
+
+it("admits an unexpired preview then completes revalidation after its display deadline", async () => {
+  await fs.rename(path.join(source, "one.jpg"), path.join(target, "one.jpg"));
+  const preview = await inspectFolderRelink(1, target);
+  const admitted = captureLibraryRelink(preview.token);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(preview.expiresAt + 1);
+  await expect(admitted.apply([])).resolves.toEqual({ updated: 1 });
+  clock.mockRestore();
+  expectRelationships();
+});
+
+it("filters inspection details without changing whole-inspection confirmation requirements", async () => {
+  db.insert(photos)
+    .values({
+      id: 2,
+      path: path.join(source, "missing.jpg"),
+      filename: "missing.jpg",
+      folderId: 1,
+    })
+    .run();
+  await fs.rename(path.join(source, "one.jpg"), path.join(target, "one.jpg"));
+  const preview = await inspectFolderRelink(1, target);
+  const missing = getRelinkInspection(preview.token, 0, "missing");
+  expect(missing.total).toBe(1);
+  expect(missing.items).toMatchObject([{ photoId: 2, status: "missing" }]);
+  expect(missing.counts.matched).toBe(1);
+  expect(missing.canApply).toBe(true);
 });

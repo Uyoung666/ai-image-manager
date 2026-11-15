@@ -284,10 +284,12 @@ export function filesHaveSameBytesSync(
 /** Async counterpart used by the Electron IPC scan so file I/O does not block
  * the main process while the full hash is being calculated. */
 export async function computeFullFileHash(
-  filePath: string
+  filePath: string,
+  signal?: AbortSignal
 ): Promise<string | null> {
   let handle: FileHandle | undefined;
   try {
+    signal?.throwIfAborted();
     handle = await fsp.open(filePath, "r");
     const before = await handle.stat();
     const hash = crypto.createHash("sha256");
@@ -295,6 +297,7 @@ export async function computeFullFileHash(
     let position = 0;
 
     while (position < before.size) {
+      signal?.throwIfAborted();
       const { bytesRead } = await handle.read(
         buffer,
         0,
@@ -309,8 +312,10 @@ export async function computeFullFileHash(
     }
 
     const after = await handle.stat();
+    signal?.throwIfAborted();
     return sameFileMetadata(before, after) ? hash.digest("hex") : null;
   } catch {
+    signal?.throwIfAborted();
     return null;
   } finally {
     await handle?.close().catch(() => undefined);
