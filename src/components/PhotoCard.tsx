@@ -527,11 +527,21 @@ export const PhotoCard = memo(function PhotoCard({
         e.preventDefault();
         onDoubleClick(id);
       } else if (e.key === " ") {
-        e.preventDefault();
-        onClick(id, e as unknown as React.MouseEvent);
+        if (e.target !== e.currentTarget) {
+          e.stopPropagation();
+        } else if (
+          !isSelected ||
+          e.altKey ||
+          e.ctrlKey ||
+          e.metaKey ||
+          e.shiftKey
+        ) {
+          e.preventDefault();
+          onClick(id, e as unknown as React.MouseEvent);
+        }
       }
     },
-    [id, onClick, onDoubleClick]
+    [id, isSelected, onClick, onDoubleClick]
   );
 
   const handleImageError = useCallback(() => {

@@ -737,7 +737,7 @@ describe("photo grid click focus", () => {
     });
   }
 
-  it("preserves Space selection without requesting mouse click focus", () => {
+  it("selects an unselected photo with Space without requesting mouse click focus", () => {
     const view = render(
       <PhotoGrid
         {...props}
@@ -747,9 +747,9 @@ describe("photo grid click focus", () => {
     );
     clickPhoto(photoCard(view.container));
     expect(grid.latestRequest).not.toBeNull();
-    fireEvent.keyDown(photoCard(view.container), { key: " " });
+    fireEvent.keyDown(photoCard(view.container, 2), { key: " " });
     expect(props.onSelect).toHaveBeenLastCalledWith(
-      1,
+      2,
       expect.objectContaining({ type: "keydown" })
     );
     expect(grid.latestRequest).toBeNull();

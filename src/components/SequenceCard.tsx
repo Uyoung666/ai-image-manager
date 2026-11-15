@@ -185,8 +185,18 @@ export const SequenceCard = memo(function SequenceCard({
         if (event.key === "Enter") {
           onOpenDetails(sequence.id);
         } else if (event.key === " ") {
-          event.preventDefault();
-          onClick(photo.id, event as unknown as React.MouseEvent);
+          if (event.target !== event.currentTarget) {
+            event.stopPropagation();
+          } else if (
+            !isSelected ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey
+          ) {
+            event.preventDefault();
+            onClick(photo.id, event as unknown as React.MouseEvent);
+          }
         }
       }}
       ref={gallery.ref}

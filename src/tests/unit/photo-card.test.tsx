@@ -1,6 +1,15 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
 import { LibraryPhotoStatusBadge } from "@/components/LibraryPhotoStatus";
 import { PhotoCard } from "@/components/PhotoCard";
 import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
@@ -234,6 +243,45 @@ describe("PhotoCard", () => {
     render(<PhotoCard {...baseProps} isSelected={true} />);
     const svg = document.querySelector("svg[viewBox='0 0 12 12']");
     expect(svg).toBeInTheDocument();
+  });
+
+  it("leaves plain Space on a selected card for quick preview", () => {
+    render(<PhotoCard {...baseProps} isSelected />);
+    const card = screen.getByRole("option");
+
+    expect(fireEvent.keyDown(card, { key: " " })).toBe(true);
+    expect(baseProps.onClick).not.toHaveBeenCalled();
+
+    expect(fireEvent.keyDown(card, { key: " ", ctrlKey: true })).toBe(false);
+    expect(baseProps.onClick).toHaveBeenCalledExactlyOnceWith(
+      1,
+      expect.objectContaining({ ctrlKey: true })
+    );
+  });
+
+  it("lets Space activate the selected card's favorite button without opening preview", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    const onToggleFavorite = vi.fn();
+    const onGalleryKeyDown = vi.fn();
+    window.addEventListener("keydown", onGalleryKeyDown);
+    onTestFinished(() =>
+      window.removeEventListener("keydown", onGalleryKeyDown)
+    );
+    render(
+      <PhotoCard
+        {...baseProps}
+        isSelected
+        onToggleFavorite={onToggleFavorite}
+      />
+    );
+    act(() => screen.getByRole("button", { name: "favorite" }).focus());
+
+    await user.keyboard(" ");
+
+    expect(onToggleFavorite).toHaveBeenCalledExactlyOnceWith(1);
+    expect(onGalleryKeyDown).not.toHaveBeenCalled();
+    expect(baseProps.onClick).not.toHaveBeenCalled();
   });
 
   it("shows the recently viewed marker without selecting the card", () => {

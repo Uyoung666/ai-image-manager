@@ -336,6 +336,42 @@ test("keeps keywords when relaxing EXIF and parsed time conditions", async () =>
 });
 
 for (const size of SIZES) {
+  test(`${size.width}x${size.height} opens quick preview with Space on a focused selection`, async () => {
+    await app.evaluate(({ BrowserWindow }, requested) => {
+      BrowserWindow.getAllWindows()[0].setSize(
+        requested.width,
+        requested.height
+      );
+    }, size);
+    await navigate("/");
+    await page.getByRole("button", { name: PHOTO_MODE }).click();
+    const cards = page.locator('[data-photo-id][role="option"]');
+    const first = cards.first();
+    const second = cards.nth(1);
+    await first.focus();
+    await page.keyboard.press("Control+a");
+    await expect(first).toHaveAttribute("aria-selected", "true");
+    await expect(second).toHaveAttribute("aria-selected", "true");
+    await expect(first).toBeFocused();
+
+    await page.keyboard.press("Space");
+    const preview = page.getByRole("dialog", {
+      name: "Quick preview",
+      exact: true,
+    });
+    await expect(preview).toBeFocused();
+    await expect(preview.getByRole("img")).toHaveCSS("opacity", "1");
+    await expect(first).toHaveAttribute("aria-selected", "true");
+    await expect(second).toHaveAttribute("aria-selected", "true");
+    await assertBounds();
+
+    await page.keyboard.press("Space");
+    await expect(preview).toHaveCount(0);
+    await expect(first).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(first).toHaveAttribute("aria-selected", "false");
+  });
+
   test(`${size.width}x${size.height} keeps view controls, preview navigation and selection scope accessible`, async () => {
     await app.evaluate(
       ({ BrowserWindow }, requested) => {

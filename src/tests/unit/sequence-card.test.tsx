@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { SequenceCard } from "@/components/SequenceCard";
 import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
 import type { PhotoSequence } from "@/types/photo-sequence";
@@ -398,5 +399,46 @@ describe("SequenceCard", () => {
       }
     );
     expect(onOpenDetails).toHaveBeenCalledExactlyOnceWith(sequence.id);
+  });
+
+  it("selects a sequence on the first Space and yields Space once selected", () => {
+    const onClick = vi.fn();
+    const { rerender } = render(
+      <SequenceCard {...coverProps} onClick={onClick} />
+    );
+    const card = screen.getByRole("button", { name: "sequenceCardLabel" });
+
+    expect(fireEvent.keyDown(card, { key: " " })).toBe(false);
+    expect(onClick).toHaveBeenCalledExactlyOnceWith(
+      sequence.photo.id,
+      expect.anything()
+    );
+
+    rerender(<SequenceCard {...coverProps} isSelected onClick={onClick} />);
+    expect(fireEvent.keyDown(card, { key: " " })).toBe(true);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets Space activate the selected sequence's expand button without opening preview", async () => {
+    const user = userEvent.setup();
+    const onToggleExpand = vi.fn();
+    const onGalleryKeyDown = vi.fn();
+    window.addEventListener("keydown", onGalleryKeyDown);
+    onTestFinished(() =>
+      window.removeEventListener("keydown", onGalleryKeyDown)
+    );
+    render(
+      <SequenceCard
+        {...coverProps}
+        isSelected
+        onToggleExpand={onToggleExpand}
+      />
+    );
+    act(() => screen.getByRole("button", { name: "sequenceExpand" }).focus());
+
+    await user.keyboard(" ");
+
+    expect(onToggleExpand).toHaveBeenCalledExactlyOnceWith(sequence.id);
+    expect(onGalleryKeyDown).not.toHaveBeenCalled();
   });
 });
