@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -11,7 +12,10 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LibraryPhotoStatusBadge } from "@/components/LibraryPhotoStatus";
 import { LibraryRelinkPreview } from "@/components/LibraryRelinkPreview";
-import { LibrarySettingsPhoto } from "@/components/LibrarySettingsPhoto";
+import {
+  LibrarySettingsPhoto,
+  type PhotoCheckState,
+} from "@/components/LibrarySettingsPhoto";
 import {
   LibraryAttentionLink,
   LibraryPhotoNotice,
@@ -77,6 +81,48 @@ const photo = {
   refreshError: null,
   pendingMoveCount: 0,
 };
+
+it("keeps the check label and only shows a spinner for a longer wait", () => {
+  vi.useFakeTimers();
+  try {
+    const card = (checkState?: PhotoCheckState) => (
+      <QueryClientProvider client={client}>
+        <LibrarySettingsPhoto
+          busy={checkState === "checking"}
+          checkState={checkState}
+          onCheck={vi.fn()}
+          onRelink={vi.fn()}
+          onUpdated={vi.fn()}
+          photo={photo}
+        />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(card());
+    const name = "libraryReliability.checkFile";
+    const button = screen.getByRole("button", { name });
+    const label = within(button).getByText(name);
+    const spinner = () => button.querySelector("svg");
+    rerender(card("checking"));
+    expect(button).toHaveAttribute("aria-busy", "true");
+    act(() => vi.advanceTimersByTime(100));
+    expect(spinner()).toBeNull();
+    rerender(card("done"));
+    act(() => vi.advanceTimersByTime(200));
+    expect(spinner()).toBeNull();
+    expect(label).toBeVisible();
+
+    rerender(card("checking"));
+    act(() => vi.advanceTimersByTime(200));
+    expect(spinner()).toBeInTheDocument();
+    expect(screen.getByRole("button", { name })).toBe(button);
+    expect(within(button).getByText(name)).toBe(label);
+    rerender(card("done"));
+    expect(spinner()).toBeNull();
+    expect(label).toBeVisible();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 it("shows a global settings link on faults and removes it after recovery", async () => {
   actions.getAttention.mockResolvedValue({ attentionCount: 0 });

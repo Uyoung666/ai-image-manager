@@ -236,7 +236,8 @@ function LibrarySettingsPage() {
           {expanded && (
             <section
               aria-label={t("libraryReliability.tab.photos")}
-              className="min-w-0 space-y-3"
+              className="min-w-0 space-y-3 [&[data-inline-check=true]_article_button:disabled]:opacity-100"
+              data-inline-check={photoChecks.running}
             >
               <Button onClick={() => setScope()} variant="ghost">
                 {t("libraryReliability.backToSources")}
@@ -534,7 +535,7 @@ function checkPollInterval(task?: Task | null) {
   if (task?.status !== "queued" && task?.status !== "running") {
     return false;
   }
-  return 800;
+  return singlePhotoCheckId(task) === undefined ? 800 : 120;
 }
 
 function checkOutcome(task: Task): PhotoCheckState {

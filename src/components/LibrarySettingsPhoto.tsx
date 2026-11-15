@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Check, CircleAlert, LoaderCircle } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { libraryReliabilityActions as actions } from "@/actions/library-reliability";
 import { LibraryPathText } from "@/components/LibraryPathText";
@@ -252,16 +252,26 @@ export function LibrarySettingsPhoto({
 }
 
 function CheckLabel({ checking, label }: { checking: boolean; label: string }) {
+  const [showSpinner, setShowSpinner] = useState(false);
+  useEffect(() => {
+    if (!checking) {
+      setShowSpinner(false);
+      return;
+    }
+    const delay = setTimeout(() => setShowSpinner(true), 180);
+    return () => clearTimeout(delay);
+  }, [checking]);
+  const spinning = checking && showSpinner;
   return (
-    <>
-      {checking && (
+    <span className="relative inline-grid min-w-0 place-items-center">
+      <span className={spinning ? "opacity-0" : undefined}>{label}</span>
+      {spinning && (
         <LoaderCircle
           aria-hidden="true"
-          className="size-3.5 animate-spin motion-reduce:animate-none"
+          className="absolute size-3.5 animate-spin motion-reduce:animate-none"
         />
       )}
-      {label}
-    </>
+    </span>
   );
 }
 
