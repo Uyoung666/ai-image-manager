@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -126,6 +127,70 @@ it("discovers and cancels a check that began before entering settings", async ()
   await waitFor(() =>
     expect(state.cancelTask).toHaveBeenCalledWith("existing")
   );
+});
+it("keeps both card results when a restored photo drops out and another is checked", async () => {
+  state.search = { folderId: 1 };
+  const restored = { id: 7, filename: "restored.jpg", sourceStatus: "missing" };
+  const missing = { id: 8, filename: "missing.jpg", sourceStatus: "missing" };
+  state.getPhotos.mockResolvedValue({
+    total: 2,
+    offset: 0,
+    limit: 20,
+    items: [restored, missing],
+  });
+  state.reconcile
+    .mockResolvedValueOnce({ taskId: "first" })
+    .mockResolvedValueOnce({ taskId: "second" });
+  const first = Promise.withResolvers<unknown>();
+  const second = Promise.withResolvers<unknown>();
+  state.getTask.mockImplementation((id: string) =>
+    id === "first" ? first.promise : second.promise
+  );
+  mount();
+  const [firstCard, secondCard] = await screen.findAllByRole("article");
+  fireEvent.click(
+    within(firstCard).getByRole("button", { name: "Check original file" })
+  );
+  await screen.findByText("checking");
+  expect(state.reconcile).toHaveBeenCalledWith({ photoIds: [7] });
+  expect(
+    screen.queryByRole("region", { name: "libraryReliability.task" })
+  ).not.toBeInTheDocument();
+  state.getPhotos.mockResolvedValue({
+    total: 1,
+    offset: 0,
+    limit: 20,
+    items: [missing],
+  });
+  first.resolve({
+    taskId: "first",
+    kind: "check",
+    scope: { photoIds: [7] },
+    status: "done",
+    errorCount: 0,
+    photoStatus: { sourceStatus: "available", refreshStatus: "ready" },
+  });
+  await within(firstCard).findByText("done");
+  expect(within(firstCard).getByText("restored.jpg")).toBeVisible();
+  fireEvent.click(
+    within(secondCard).getByRole("button", { name: "Check original file" })
+  );
+  await within(secondCard).findByText("checking");
+  expect(state.reconcile).toHaveBeenLastCalledWith({ photoIds: [8] });
+  expect(within(firstCard).getByText("done")).toBeVisible();
+  second.resolve({
+    taskId: "second",
+    kind: "check",
+    scope: { photoIds: [8] },
+    status: "done",
+    errorCount: 0,
+    photoStatus: { sourceStatus: "missing", refreshStatus: "ready" },
+  });
+  await within(secondCard).findByText("done");
+  expect(within(firstCard).getByText("done")).toBeVisible();
+  expect(
+    screen.queryByRole("region", { name: "libraryReliability.task" })
+  ).not.toBeInTheDocument();
 });
 it("shows affected roots without duplicate child cards or status filters", async () => {
   state.getHealth.mockResolvedValue({

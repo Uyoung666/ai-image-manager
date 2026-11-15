@@ -129,7 +129,20 @@ function LibrarySettingsPage() {
     setTaskId(undefined);
     await refresh();
   }
-  const busy = [starting, running, taskId && task.isPending].some(Boolean);
+  const photoChecks = usePhotoChecks(task.data, taskId, task.isError);
+  const busy = [
+    starting,
+    running,
+    taskId && task.isPending,
+    photoChecks.running,
+  ].some(Boolean);
+  const photoView = JSON.stringify([
+    search.folderId,
+    search.photoId,
+    search.unassigned,
+    query,
+    offset,
+  ]);
   const setScope = (folderId?: number, unassigned?: boolean) => {
     setOffset(0);
     setQuery("");
@@ -242,21 +255,31 @@ function LibrarySettingsPage() {
               )}
               <LibraryPhotoResults
                 busy={busy}
+                checks={photoChecks.entries}
                 data={photos.data}
                 fetching={photos.isFetching}
                 latestTask={task.data}
                 offset={offset}
-                onCheck={(photo) =>
-                  run(() => actions.reconcile({ photoIds: [photo.id] }))
+                onCheck={(photo, index) =>
+                  photoChecks.start(photo, index, photoView, () =>
+                    run(
+                      () => actions.reconcile({ photoIds: [photo.id] }),
+                      () => undefined
+                    )
+                  )
                 }
                 onFolder={(folderId) => setScope(folderId)}
                 onOffset={setOffset}
                 onRelink={(photoId, candidatePath) =>
                   run(() => actions.beginRelink({ photoId, candidatePath }))
                 }
-                onUpdated={refresh}
+                onUpdated={(id) => {
+                  photoChecks.clear(id);
+                  refresh();
+                }}
                 pending={photos.isPending}
                 photoId={search.photoId}
+                view={photoView}
               />
             </section>
           )}
@@ -367,6 +390,14 @@ function positiveId(value: unknown) {
 
 type PhotoPage = Awaited<ReturnType<typeof actions.getPhotos>>;
 type PhotoRow = PhotoPage["items"][number];
+interface PhotoCheck {
+  index: number;
+  photo: PhotoRow;
+  reportedStatus?: PhotoRow["sourceStatus"];
+  status: PhotoCheckState;
+  taskId?: string;
+  view: string;
+}
 
 function LibraryPhotoResults({
   data,
@@ -380,7 +411,9 @@ function LibraryPhotoResults({
   onRelink,
   onFolder,
   onUpdated,
+  checks,
   latestTask,
+  view,
 }: {
   data?: PhotoPage;
   pending: boolean;
@@ -389,11 +422,13 @@ function LibraryPhotoResults({
   offset: number;
   onOffset: (offset: number) => void;
   busy: boolean;
-  onCheck: (photo: PhotoRow) => void;
+  onCheck: (photo: PhotoRow, index: number) => void;
   onRelink: (photoId: number, candidatePath?: string) => void;
   onFolder: (folderId?: number) => void;
-  onUpdated: () => void;
+  onUpdated: (photoId: number) => void;
+  checks: ReadonlyMap<number, PhotoCheck>;
   latestTask?: Task | null;
+  view: string;
 }) {
   const { t } = useTranslation();
   if (pending) {
@@ -402,7 +437,7 @@ function LibraryPhotoResults({
   if (!data) {
     return null;
   }
-  const items = data.items;
+  const items = includeCheckedPhotos(data.items, checks, view);
   const latestPhotoId = singlePhotoCheckId(latestTask);
   return (
     <>
@@ -424,20 +459,25 @@ function LibraryPhotoResults({
           )}
         </p>
       )}
-      {items.map((photo) => {
+      {items.map((photo, index) => {
+        const saved = checks.get(photo.id);
         const latest = photo.id === latestPhotoId ? latestTask : undefined;
         return (
           <LibrarySettingsPhoto
             busy={busy}
-            checkedSourceStatus={latest?.photoStatus?.sourceStatus}
-            checkState={latest ? checkOutcome(latest) : undefined}
+            checkedSourceStatus={
+              saved?.reportedStatus ?? latest?.photoStatus?.sourceStatus
+            }
+            checkState={
+              saved?.status ?? (latest ? checkOutcome(latest) : undefined)
+            }
             key={photo.id}
-            onCheck={() => onCheck(photo)}
+            onCheck={() => onCheck(photo, index)}
             onFolder={
               photoId ? () => onFolder(photo.folderId ?? undefined) : undefined
             }
             onRelink={(candidatePath) => onRelink(photo.id, candidatePath)}
-            onUpdated={onUpdated}
+            onUpdated={() => onUpdated(photo.id)}
             photo={photo}
           />
         );
@@ -507,6 +547,90 @@ function checkOutcome(task: Task): PhotoCheckState {
   return task.status === "done" && task.errorCount === 0 && task.photoStatus
     ? "done"
     : "failed";
+}
+
+function usePhotoChecks(
+  task?: Task | null,
+  selectedTaskId?: string,
+  taskError = false
+) {
+  const [entries, setEntries] = useState(() => new Map<number, PhotoCheck>());
+  const tracked = [...entries.values()].find(
+    (entry) => entry.status === "checking"
+  );
+  useEffect(() => {
+    if (!tracked?.taskId || tracked.taskId !== selectedTaskId) {
+      return;
+    }
+    const report = task?.taskId === tracked.taskId ? task : undefined;
+    const waitingStatus = taskError ? "failed" : "checking";
+    const status = report ? checkOutcome(report) : waitingStatus;
+    if (status === "checking") {
+      return;
+    }
+    setEntries((previous) => {
+      if (previous.get(tracked.photo.id) !== tracked) {
+        return previous;
+      }
+      return new Map(previous).set(tracked.photo.id, {
+        ...tracked,
+        photo: { ...tracked.photo, ...report?.photoStatus },
+        status,
+        reportedStatus: report?.photoStatus?.sourceStatus,
+      });
+    });
+  }, [tracked, task, selectedTaskId, taskError]);
+  async function start(
+    photo: PhotoRow,
+    index: number,
+    view: string,
+    launch: () => Promise<{ taskId: string } | null>
+  ) {
+    const entry: PhotoCheck = { photo, index, view, status: "checking" };
+    setEntries((previous) => new Map(previous).set(photo.id, entry));
+    const result = await launch();
+    setEntries((previous) =>
+      new Map(previous).set(
+        photo.id,
+        result
+          ? { ...entry, taskId: result.taskId }
+          : { ...entry, status: "failed" }
+      )
+    );
+  }
+  function clear(id: number) {
+    setEntries((previous) => {
+      if (!previous.has(id)) {
+        return previous;
+      }
+      const next = new Map(previous);
+      next.delete(id);
+      return next;
+    });
+  }
+  return { entries, start, clear, running: Boolean(tracked) };
+}
+
+function includeCheckedPhotos(
+  items: PhotoRow[],
+  checks: ReadonlyMap<number, PhotoCheck>,
+  view: string
+) {
+  const visible = new Set(items.map((photo) => photo.id));
+  const kept = [...checks.values()].filter(
+    (check) =>
+      check.view === view &&
+      !visible.has(check.photo.id) &&
+      (check.status === "checking" || check.reportedStatus === "available")
+  );
+  if (!kept.length) {
+    return items;
+  }
+  const combined = [...items];
+  for (const check of kept.sort((a, b) => a.index - b.index)) {
+    combined.splice(check.index, 0, check.photo);
+  }
+  return combined;
 }
 
 function UnassignedSource({
