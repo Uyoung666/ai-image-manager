@@ -110,25 +110,15 @@ The queue scans supported extensions, reads basic information and EXIF, creates 
 
 The app records the selected folder and watches for later changes. New or changed files enter incremental processing. If a file cannot be found, its record, manual tags, favorites, albums and culling history remain in the library.
 
-### Library sources and relinking
+### Library sources and recovery
 
-Open **Library sources** in Settings → Storage to check source availability and relocate folders. The gallery shows a highlighted disk icon (hover for the affected count) only when the library or current folder source has offline, missing, inaccessible or failed-refresh photos. Source status filtering lives inside the search filter panel; active filters remain visible and removable. Healthy photo details keep maintenance under the **File actions** ellipsis beside the file-location heading. Affected photos show a matching recovery action and **View recovery options**.
+Open **Settings > Library sources** to see affected sources grouped by folder. A disconnected drive is shown as offline, without an error warning; cached previews remain available. Connect the device and check again, or choose its new location if it moved. Photo details and previews link directly to the affected photo.
 
-The **Photos needing attention** list shows cached previews, filenames, paths and issue types, 20 per page. Filter by issue type or use a folder's **View affected photos** action; **Manage** opens recovery actions for that photo. **Check original file** reports progress and the final source status at the recorded path. It does not open the photo or search other locations; use **Relink** after a move.
+Choose a new location, review the matching summary, and confirm. Files whose identity cannot be verified require explicit confirmation; conflicts prevent relinking. Originals are not moved. Unfinished previews and unclosed task results remain available when you return during the same app session. Expired previews can be checked again.
 
-Offline sources retain photo records, favorites, manual tags, albums and culling history. Existing cached previews remain viewable. Reconnect the disk or network share and check again. Missing means the source root is accessible but the file is absent. Inaccessible indicates a permission or I/O error.
+Retry an incomplete update after restoring access. Paused AI work waits until you resume it in AI Index settings. Each affected photo card shows its available actions. For a confirmed missing photo, choose **Remove missing record** on the card and review the affected relationships before confirming.
 
-Relink a single file from photo details, or select a new folder in Library sources. Inspect the preview before confirming. Full hash matches preserve identity. Older records without trustworthy hashes require explicit confirmation and a metadata/AI refresh. Conflicting paths, different contents and existing originals block relinking. Previews expire after ten minutes and must be regenerated after restart or source changes.
-
-External moves are linked automatically only when the old file is confirmed missing, a full hash matches and the mapping is unique. Copies remain separate. Same-path changes preserve manual organization while refreshing derived data. Stale vectors stop participating in search. Previous face confirmations and culling decisions require review.
-
-If a photo shows a refresh failure, make its source accessible and select **Refresh content** in photo details. The app queues the photo's content tasks again. If AI indexing is paused or stopped, the AI work waits until you resume indexing.
-
-Restoring a face backup preserves its content history and the current AI stop setting. Results from an older photo version remain historical and require fresh detection and review.
-
-Removing missing records displays affected relationships before removing catalogue entries. Restore from trash can recover the record while its original remains offline. Permanent cleanup verifies the original's identity and leaves unverifiable or replaced files pending.
-
-An upgrade creates a consistent `data/backups/pre-library-reliability-*.db` backup. Source and fingerprint backfill runs in the background. The first fingerprint records the current original. To regenerate historical AI results, use **Rebuild AI Index** in **Settings → AI Index**. To roll back the app version, close it and restore a compatible backup.
+Changed culling results remain historical. Use **Review again** to create a separate curation task for ready photos without changing the old decisions.
 
 ### 3. Read import progress
 
@@ -953,7 +943,7 @@ The normal release package includes the models required by the current version. 
 
 ### What happens if a photo is moved?
 
-The app cannot reliably follow every external move. The old record may become invalid. Clean invalid records under **Settings → Storage/Indexing**, then add the new folder.
+The app retains the original photo identity and organisation when a source disappears. Open **Settings → Library sources** to check the source and relink the photo or folder. Ambiguous moves require confirmation. Preview the relationship impact before explicitly removing a confirmed missing record.
 
 ### Where are the database and thumbnails?
 
