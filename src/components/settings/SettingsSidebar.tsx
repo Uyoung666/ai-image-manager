@@ -7,6 +7,7 @@ import { Brain } from "@/components/icons/brain";
 import { Cloud } from "@/components/icons/cloud";
 import { Compass } from "@/components/icons/compass";
 import { ConnectIcon } from "@/components/icons/connect";
+import { FolderDotIcon } from "@/components/icons/folder-dot";
 import { HardDrive } from "@/components/icons/hard-drive";
 import { IconMotionTrigger } from "@/components/icons/icon-motion";
 import { Image } from "@/components/icons/image";
@@ -84,6 +85,14 @@ const NAV_ITEMS: NavItem[] = [
       "\u6570\u636e \u6027\u80fd \u7f13\u5b58 \u7f29\u7565\u56fe \u6e05\u7406 \u5b64\u7acb \u7d22\u5f15 \u65e0\u6548 \u6570\u636e\u5e93 \u6570\u636e\u76ee\u5f55 \u8fc1\u79fb cache thumbnail orphan index database directory clean storage",
     labelKey: "settingsStorage",
     to: "/settings/storage",
+  },
+  {
+    groupKey: "settingsGroupData",
+    icon: FolderDotIcon,
+    keywords:
+      "图库来源 离线 缺失 文件夹 重新关联 library sources offline missing relink",
+    labelKey: "libraryReliability.title",
+    to: "/settings/library",
   },
   {
     groupKey: "settingsGroupData",
@@ -209,6 +218,8 @@ export function SettingsSidebar() {
                           state: {
                             cullSettingsReturn:
                               location.state.cullSettingsReturn,
+                            libraryReturnIndex:
+                              location.state.libraryReturnIndex,
                           },
                         });
                       }}

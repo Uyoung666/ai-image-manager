@@ -1,6 +1,7 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/noNoninteractiveElementInteractions: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: scoped component lint cleanup preserves existing UI behavior
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, ArrowRight, X } from "lucide-react";
 import {
   type MouseEvent,
@@ -73,6 +74,10 @@ export function QuickPreview({
     ensureGalleryPhotos([photo]).catch(() => undefined);
   }, [photo]);
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
+  const returnIndex = useLocation({
+    select: (location) => location.state.__TSR_index,
+  });
   const reduceMotion = useReducedMotion();
   const containerRef = useRef<HTMLDivElement>(null);
   const [previewMenu, setPreviewMenu] = useState<PreviewMenuState>({
@@ -231,8 +236,19 @@ export function QuickPreview({
               setPreviewMenu({
                 open: true,
                 photoPath: photo.path,
+                sourceUnavailable: isLibrarySourceUnavailable(
+                  photo.sourceStatus
+                ),
                 x: e.clientX,
                 y: e.clientY,
+              });
+            }}
+            onResolve={() => {
+              finishClose();
+              navigate({
+                to: "/settings/library",
+                search: { photoId: photo.id },
+                state: { libraryReturnIndex: returnIndex },
               });
             }}
             photo={photo}
@@ -345,8 +361,10 @@ function PreviewControl({
 function QuickPreviewImage({
   photo,
   onContextMenu,
+  onResolve,
 }: {
   photo: QuickPreviewPhoto;
+  onResolve: () => void;
   onContextMenu: (event: MouseEvent<HTMLImageElement>) => void;
 }) {
   const { t } = useTranslation();
@@ -354,6 +372,7 @@ function QuickPreviewImage({
   const [loaded, setLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [srcKey, setSrcKey] = useState(0);
+  const unavailable = isLibrarySourceUnavailable(photo.sourceStatus);
   return (
     <div className="relative flex min-h-0 max-w-full items-center justify-center">
       {imgError ? (
@@ -368,26 +387,32 @@ function QuickPreviewImage({
           <button
             className="rounded-[6px] bg-white/10 px-3 py-1.5 text-[12px] text-white/80 hover:bg-white/20"
             onClick={() => {
+              if (unavailable) {
+                onResolve();
+                return;
+              }
               setImgError(false);
               setLoaded(false);
               setSrcKey((key) => key + 1);
             }}
             type="button"
           >
-            {t("retry")}
+            {t(unavailable ? "libraryReliability.goToSettings" : "retry")}
           </button>
         </div>
       ) : (
         <img
           alt={photo.filename}
           className={`max-h-[72dvh] min-h-0 max-w-[90dvw] rounded-[8px] object-contain [@media(max-height:560px)]:max-h-[calc(100dvh-9rem)] ${reduceMotion ? "" : "transition-opacity duration-200"} ${loaded ? "opacity-100" : "opacity-0"}`}
-          draggable
+          draggable={!unavailable}
           height={photo.height ?? 1}
           key={srcKey}
           onContextMenu={onContextMenu}
           onDragStart={(e) => {
             e.preventDefault();
-            window.electronAPI?.startDrag?.(photo.path);
+            if (!unavailable) {
+              window.electronAPI?.startDrag?.(photo.path);
+            }
           }}
           onError={() => setImgError(true)}
           onLoad={() => setLoaded(true)}
@@ -407,6 +432,11 @@ function QuickPreviewImage({
           }
           width={photo.width ?? 1}
         />
+      )}
+      {loaded && unavailable && (
+        <p className="absolute bottom-2 rounded bg-popover/90 px-2 py-1 text-popover-foreground text-xs">
+          {t("libraryReliability.detail.cached")}
+        </p>
       )}
       {!(loaded || imgError) && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

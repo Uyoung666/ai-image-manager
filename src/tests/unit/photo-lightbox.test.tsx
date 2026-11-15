@@ -874,3 +874,12 @@ describe("PhotoLightbox", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => vi.fn(),
+  useLocation: ({
+    select,
+  }: {
+    select: (location: { state: { __TSR_index: number } }) => unknown;
+  }) => select({ state: { __TSR_index: 0 } }),
+}));

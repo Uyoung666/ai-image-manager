@@ -175,3 +175,38 @@ describe("QuickPreview", () => {
     expect(open).toHaveBeenCalledOnce();
   });
 });
+
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => vi.fn(),
+  useLocation: ({
+    select,
+  }: {
+    select: (location: { state: { __TSR_index: number } }) => unknown;
+  }) => select({ state: { __TSR_index: 0 } }),
+}));
+
+it("does not drag unavailable originals and replaces futile retries with source recovery", () => {
+  const startDrag = vi.fn();
+  window.electronAPI = {
+    ...window.electronAPI,
+    startDrag,
+  } as typeof window.electronAPI;
+  render(
+    <QuickPreview
+      onClose={vi.fn()}
+      onNavigate={vi.fn()}
+      photo={{ ...photo, sourceStatus: "offline" }}
+    />
+  );
+  const image = screen.getByRole("img");
+  expect(image).toHaveAttribute("draggable", "false");
+  fireEvent.dragStart(image);
+  expect(startDrag).not.toHaveBeenCalled();
+  fireEvent.error(image);
+  expect(
+    screen.queryByRole("button", { name: "retry" })
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "libraryReliability.goToSettings" })
+  ).toBeVisible();
+});

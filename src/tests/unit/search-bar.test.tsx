@@ -158,28 +158,13 @@ describe("SearchBar", () => {
       ] as never);
   });
 
-  it("moves source status inside filters and keeps its removable chip visible", async () => {
+  it("keeps source management out of the photo search filter panel", async () => {
     const user = userEvent.setup();
-    const onSearch = vi.fn();
-    render(
-      <ControlledSearchBar
-        initialFilters={{ libraryStatus: "missing" }}
-        onSearch={onSearch}
-      />
-    );
+    render(<ControlledSearchBar onSearch={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "exifFilterTitle" }));
     expect(
       screen.queryByLabelText("libraryReliability.filter")
     ).not.toBeInTheDocument();
-    expect(screen.getByText("libraryReliability.status.missing")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "exifFilterTitle" }));
-    expect(screen.getByLabelText("libraryReliability.filter")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "exifFilterTitle" }));
-    await user.click(
-      screen.getByRole("button", {
-        name: "移除筛选条件 libraryReliability.status.missing",
-      })
-    );
-    await waitFor(() => expect(onSearch).toHaveBeenCalled());
     expect(
       screen.queryByText("libraryReliability.status.missing")
     ).not.toBeInTheDocument();

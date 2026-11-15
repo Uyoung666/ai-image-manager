@@ -38,14 +38,6 @@ export function SearchActiveFilters({
           )}
           {hasActiveFilters && (
             <div className="flex max-h-24 min-w-0 flex-1 basis-0 flex-wrap items-center gap-1.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
-              {filters.libraryStatus && (
-                <FilterChip
-                  label={t(
-                    `libraryReliability.status.${filters.libraryStatus}`
-                  )}
-                  onRemove={() => onRemoveFilter("libraryStatus")}
-                />
-              )}
               {filters.dateFrom && (
                 <FilterChip
                   label={t("filterFrom", { value: filters.dateFrom })}

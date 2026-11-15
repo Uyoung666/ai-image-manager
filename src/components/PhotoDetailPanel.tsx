@@ -28,9 +28,9 @@ import {
 import { photoTagActions } from "@/actions/photo-tags";
 import { FolderOpen } from "@/components/icons/folder-open";
 import { IconMotionTrigger } from "@/components/icons/icon-motion";
-import { LibraryPhotoControls } from "@/components/LibraryPhotoControls";
+import { LibraryPathText } from "@/components/LibraryPathText";
 import { isLibrarySourceUnavailable } from "@/components/LibraryPhotoStatus";
-import { LibraryPathText } from "@/components/LibraryRelinkButton";
+import { LibraryPhotoNotice } from "@/components/LibrarySourceLinks";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SmoothInput } from "@/components/ui/smooth-input";
 import {
@@ -103,6 +103,7 @@ interface PhotoDetailPanelProps {
   onClose: () => void;
   onNavigate?: (direction: "prev" | "next") => void;
   onOpenExplorer: (path: string) => void;
+  onResolveSource?: (photoId: number) => void;
   onReturnToSequence?: () => void;
   onWidthChange?: (width: number) => void;
   photo: PhotoDetail | null;
@@ -152,6 +153,7 @@ export function PhotoDetailPanel({
   photo,
   onClose,
   onNavigate,
+  onResolveSource,
   onOpenExplorer,
   onReturnToSequence,
   onWidthChange,
@@ -884,7 +886,15 @@ export function PhotoDetailPanel({
           onScroll={updateBottomFade}
           ref={contentScrollRef}
         >
-          <LibraryPhotoControls key={displayPhoto.id} photo={displayPhoto} />
+          <LibraryPhotoNotice
+            onResolve={onResolveSource}
+            photo={displayPhoto}
+            showingCache={Boolean(
+              previewUrl &&
+                loadedPreviewUrl === previewUrl &&
+                failedPreview !== previewUrl
+            )}
+          />
           {/* Basic Info */}
           <section>
             <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
@@ -1323,11 +1333,6 @@ export function PhotoDetailPanel({
               <h4 className="font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
                 {t("filePath")}
               </h4>
-              <LibraryPhotoControls
-                key={`file-${displayPhoto.id}`}
-                photo={displayPhoto}
-                variant="menu"
-              />
             </div>
             <div className="mb-2 min-w-0 text-[11px]">
               <LibraryPathText path={dirPath} />

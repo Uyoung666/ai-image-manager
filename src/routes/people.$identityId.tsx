@@ -1424,6 +1424,15 @@ function PersonDetailPage() {
               }}
               onNavigate={navigateDetail}
               onOpenExplorer={handleOpenExplorer}
+              onResolveSource={(photoId) =>
+                navigate({
+                  to: "/settings/library",
+                  search: { photoId },
+                  state: (previous) => ({
+                    libraryReturnIndex: previous.__TSR_index,
+                  }),
+                })
+              }
               onReturnToSequence={
                 returnSequence
                   ? () => {

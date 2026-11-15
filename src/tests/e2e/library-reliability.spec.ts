@@ -16,8 +16,9 @@ const SIZES = [
   { width: 1280, height: 800, zoomFactor: 1.5 },
 ];
 const PRE_RELIABILITY_MIGRATION = 61;
+const MISSING_STATUS = /^Missing(?:\s|$)/;
 const WEAK_EVIDENCE = /content unverified/;
-const LIBRARY_ATTENTION = /photos in this library need attention/;
+const LIBRARY_ATTENTION = /photos have disconnected sources/;
 const REMOVE_MISSING = "Remove missing record";
 const CACHE_CLEARED = /^Cleared [1-9]\d* cached files and freed /;
 
@@ -48,7 +49,7 @@ async function expectViewportBounds(page: Page) {
     await page.evaluate(() => {
       const visible = [
         ...document.querySelectorAll<HTMLElement>(
-          "main, [role=dialog], [data-slot=popover-content], [role=menu]"
+          "main, [role=dialog], [role=alertdialog], [data-slot=popover-content], [role=menu], [data-surface=settings-panel]"
         ),
       ].filter((element) => {
         const bounds = element.getBoundingClientRect();
@@ -57,10 +58,18 @@ async function expectViewportBounds(page: Page) {
       return {
         overflow: document.documentElement.scrollWidth > innerWidth + 1,
         dialogOverflow: visible
-          .filter((element) => element.matches('[data-slot="dialog-content"]'))
+          .filter((element) =>
+            element.matches(
+              '[data-slot="dialog-content"], [role="alertdialog"], [data-surface="settings-panel"]'
+            )
+          )
           .some((element) => element.scrollWidth > element.clientWidth + 1),
         controlsInside: visible
-          .filter((element) => element.matches('[data-slot="dialog-content"]'))
+          .filter((element) =>
+            element.matches(
+              '[data-slot="dialog-content"], [role="alertdialog"], [data-surface="settings-panel"]'
+            )
+          )
           .every((dialog) => {
             const bounds = dialog.getBoundingClientRect();
             return [
@@ -77,15 +86,19 @@ async function expectViewportBounds(page: Page) {
                 );
               });
           }),
-        inside: visible.every((element) => {
-          const bounds = element.getBoundingClientRect();
-          return (
-            bounds.left >= -1 &&
-            bounds.top >= -1 &&
-            bounds.right <= innerWidth + 1 &&
-            bounds.bottom <= innerHeight + 1
-          );
-        }),
+        inside: visible
+          .filter(
+            (element) => !element.matches('[data-surface="settings-panel"]')
+          )
+          .every((element) => {
+            const bounds = element.getBoundingClientRect();
+            return (
+              bounds.left >= -1 &&
+              bounds.top >= -1 &&
+              bounds.right <= innerWidth + 1 &&
+              bounds.bottom <= innerHeight + 1
+            );
+          }),
       };
     })
   ).toEqual({
@@ -97,6 +110,16 @@ async function expectViewportBounds(page: Page) {
 }
 
 async function captureWindow(app: ElectronApplication, filename: string) {
+  const window = await app.firstWindow();
+  await window.evaluate(async () => {
+    const animations = document
+      .getAnimations()
+      .filter(
+        (animation) =>
+          animation.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY
+      );
+    await Promise.allSettled(animations.map((animation) => animation.finished));
+  });
   // Electron zoom changes CSS pixels. Capture the full native client area.
   const screenshot = await app.evaluate(async ({ BrowserWindow }) => {
     const image = await BrowserWindow.getAllWindows()[0].capturePage();
@@ -420,7 +443,7 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
           bounds.zoomFactor ?? 1
         );
       }, size);
-      const attentionTrigger = page.getByRole("button", {
+      const attentionTrigger = page.getByRole("link", {
         name: LIBRARY_ATTENTION,
       });
       await expect(attentionTrigger).toHaveText("");
@@ -431,59 +454,107 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
           .filter({ hasText: LIBRARY_ATTENTION })
       ).toBeVisible();
       await attentionTrigger.click();
-      const health = page.getByRole("dialog", {
-        name: "Library sources",
-        exact: true,
-      });
-      await expect(health).toBeVisible();
       await expect(
-        page
-          .locator('[data-slot="tooltip-content"]')
-          .filter({ hasText: LIBRARY_ATTENTION })
-      ).not.toBeVisible();
-      const issueList = health.getByRole("region", {
-        name: "Photos needing attention",
-      });
-      await expect(
-        issueList.getByText("photo.jpg", { exact: true })
+        page.getByRole("heading", { name: "Library sources", exact: true })
       ).toBeVisible();
-      await expect(
-        issueList.getByText(oldPhoto, { exact: true })
-      ).toBeVisible();
-      await expect(health.getByText("Offline fixture")).toBeVisible();
-      await expectViewportBounds(page);
-      const sizeLabel = `${size.width}-${"zoomFactor" in size ? size.zoomFactor : 1}`;
-      await issueList.getByRole("button", { name: "Manage photo.jpg" }).click({
-        trial: true,
-      });
-      await issueList.getByRole("combobox", { name: "Issue type" }).click();
-      const issuesMenu = page.getByRole("listbox");
-      await expect(issuesMenu).toBeInViewport({ ratio: 1 });
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      const sizeLabel = `${size.width}-${size.zoomFactor ?? 1}`;
+      await expect(page.getByRole("combobox")).toHaveCount(0);
       await expectViewportBounds(page);
       await captureWindow(app, `library-sources-${sizeLabel}.png`);
-      await issuesMenu.getByRole("option", { name: "All issues" }).click();
-      await expect(issuesMenu).toHaveCount(0);
-      await health.getByRole("button", { name: "Relink", exact: true }).click();
-      const relink = page.getByRole("dialog", { name: "Relink", exact: true });
+      const sourceList = page.getByRole("region", {
+        name: "Source folders",
+        exact: true,
+      });
+      await expect(
+        sourceList.getByText("Offline fixture", { exact: true })
+      ).toBeVisible();
+      await sourceList
+        .getByRole("button", { name: "View affected photos", exact: true })
+        .click();
+      const offlinePhotos = page.getByRole("region", { name: "Photo status" });
+      await expect(
+        offlinePhotos.getByRole("button", { name: "Check again", exact: true })
+      ).toBeVisible();
+      await expect(
+        offlinePhotos.getByRole("button", {
+          name: "Choose new location",
+          exact: true,
+        })
+      ).toBeVisible();
+      await expect(
+        offlinePhotos.getByRole("button", { name: REMOVE_MISSING })
+      ).toHaveCount(0);
+      await expectViewportBounds(page);
+      await offlinePhotos
+        .getByRole("button", { name: "Back to sources", exact: true })
+        .click();
+      await sourceList
+        .getByRole("button", { name: "Choose new location", exact: true })
+        .click();
+      const relink = page.getByRole("region", {
+        name: "Choose new location",
+        exact: true,
+      });
       await expect(relink).toBeVisible();
       await expect(relink.getByText(newPhoto, { exact: true })).toBeVisible();
       await expect(
-        relink.getByRole("button", { name: "Confirm", exact: true })
-      ).toBeDisabled();
-      await relink.getByRole("checkbox", { name: WEAK_EVIDENCE }).check();
+        relink.getByText("Previous location", { exact: true })
+      ).toBeVisible();
+      // Leave after inspection completes: the preview must survive route remounts.
+      await page.getByTestId("settings-back").click();
+      await page.getByRole("link", { name: LIBRARY_ATTENTION }).click();
+      await expect(relink).toBeVisible();
+      if (size.width === 720) {
+        await page.evaluate(() =>
+          window.__e2eNavigate?.("/settings/appearance")
+        );
+        await page
+          .getByRole("combobox", { name: "Language", exact: true })
+          .click();
+        await page
+          .getByRole("option", { name: "\u4e2d\u6587 (zh)", exact: true })
+          .click();
+        await expect(page.locator("html")).toHaveAttribute("lang", "zh");
+        await page.evaluate(() => localStorage.setItem("theme", "dark"));
+        await page.reload();
+        await page.waitForFunction(() => Boolean(window.__e2eNavigate));
+        await page.evaluate(() => window.__e2eNavigate?.("/settings/library"));
+        await expect(page.getByRole("checkbox")).toBeVisible();
+        await expectViewportBounds(page);
+        await captureWindow(app, "library-relink-zh-dark-720.png");
+        await page.evaluate(() =>
+          window.__e2eNavigate?.("/settings/appearance")
+        );
+        await page
+          .getByRole("combobox", { name: "\u8bed\u8a00", exact: true })
+          .click();
+        await page
+          .getByRole("option", { name: "English (en)", exact: true })
+          .click();
+        await expect(page.locator("html")).toHaveAttribute("lang", "en");
+        await page.evaluate(() => localStorage.setItem("theme", "light"));
+        await page.reload();
+        await page.waitForFunction(() => Boolean(window.__e2eNavigate));
+        await page.evaluate(() => window.__e2eNavigate?.("/settings/library"));
+        await expect(relink).toBeVisible();
+      }
       const confirm = relink.getByRole("button", {
-        name: "Confirm",
+        name: "Update library locations",
         exact: true,
       });
+      await expect(confirm).toBeDisabled();
+      await relink.getByRole("checkbox", { name: WEAK_EVIDENCE }).check();
       await expect(confirm).toBeEnabled();
+      await confirm.scrollIntoViewIfNeeded();
+      await confirm.click({ trial: true });
       await expect(confirm).toBeInViewport({ ratio: 1 });
       await expectViewportBounds(page);
       await captureWindow(app, `library-relink-${sizeLabel}.png`);
-      await page.keyboard.press("Escape");
+      await relink.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(relink).toHaveCount(0);
-      await page.keyboard.press("Escape");
-      await expect(health).toHaveCount(0);
-      await page.waitForTimeout(450);
+      await page.getByTestId("settings-back").click();
+      await expect(page.locator('[data-photo-id="1"]').first()).toBeVisible();
       await expect(
         page
           .locator('[data-slot="tooltip-content"]')
@@ -491,18 +562,18 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
       ).not.toBeVisible();
       await page.mouse.move(0, 0);
     }
-    await page.getByRole("button", { name: LIBRARY_ATTENTION }).click();
+    await page.getByRole("link", { name: LIBRARY_ATTENTION }).click();
     await page
-      .getByRole("dialog", { name: "Library sources", exact: true })
-      .getByRole("button", { name: "Relink", exact: true })
+      .getByRole("region", { name: "Source folders", exact: true })
+      .getByRole("button", { name: "Choose new location", exact: true })
       .click();
-    await page
-      .getByRole("dialog", { name: "Relink", exact: true })
-      .getByRole("checkbox", { name: WEAK_EVIDENCE })
-      .check();
-    await page
-      .getByRole("dialog", { name: "Relink", exact: true })
-      .getByRole("button", { name: "Confirm", exact: true })
+    const relink = page.getByRole("region", {
+      name: "Choose new location",
+      exact: true,
+    });
+    await relink.getByRole("checkbox", { name: WEAK_EVIDENCE }).check();
+    await relink
+      .getByRole("button", { name: "Update library locations", exact: true })
       .click();
     await expect
       .poll(() => query("SELECT path,is_favorite FROM photos WHERE id=1")[0])
@@ -524,12 +595,12 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
         { timeout: 30_000 }
       )
       .toBe(1);
-    await page.keyboard.press("Escape");
     await expect(
-      page.getByRole("button", { name: LIBRARY_ATTENTION })
+      page.getByRole("region", { name: "Choose new location", exact: true })
     ).toHaveCount(0);
+    await page.getByTestId("settings-back").click();
     await expect(
-      page.getByRole("button", { name: "Library sources", exact: true })
+      page.getByRole("link", { name: LIBRARY_ATTENTION })
     ).toHaveCount(0);
     await expect(
       page.getByLabel("Filter by source status", { exact: true })
@@ -547,46 +618,35 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
       const healthyDetail = page.locator(
         '.photo-detail-panel-shell [data-surface="inspector"]'
       );
-      if (!(await healthyDetail.isVisible())) {
+      if ((await healthyDetail.count()) === 0) {
         await page.locator('[data-photo-id="1"][role="option"]').click();
       }
+      await expect
+        .poll(async () => (await healthyDetail.boundingBox())?.width ?? 0)
+        .toBeGreaterThan(200);
+      await expect(
+        healthyDetail.getByText("photo.jpg", { exact: true })
+      ).toBeVisible();
       await expect(
         healthyDetail.getByRole("button", {
-          name: "View recovery options",
+          name: "Resolve in settings",
           exact: true,
         })
       ).toHaveCount(0);
-      const fileActions = healthyDetail.getByRole("button", {
-        name: "File actions",
-        exact: true,
-      });
-      await expect(fileActions).toHaveText("");
-      await fileActions.hover();
       await expect(
-        page
-          .locator('[data-slot="tooltip-content"]')
-          .filter({ hasText: "File actions" })
-      ).toBeVisible();
-      await fileActions.click();
+        healthyDetail.getByRole("button", { name: "File actions", exact: true })
+      ).toHaveCount(0);
       await expect(
-        page.getByRole("button", { name: "Check original file", exact: true })
-      ).toBeVisible();
-      const checkFile = page.getByRole("button", {
-        name: "Check original file",
-        exact: true,
-      });
-      await expect(checkFile).toBeInViewport();
-      await checkFile.click({ trial: true });
+        healthyDetail.getByRole("button", {
+          name: "Check original file",
+          exact: true,
+        })
+      ).toHaveCount(0);
       await expectViewportBounds(page);
-      await page.screenshot({
-        path: test
-          .info()
-          .outputPath(
-            `simplified-detail-${size.width}-${size.zoomFactor ?? 1}.png`
-          ),
-      });
-      await page.keyboard.press("Escape");
-      await expect(healthyDetail).toBeVisible();
+      await captureWindow(
+        app,
+        `simplified-detail-${size.width}-${size.zoomFactor ?? 1}.png`
+      );
     }
     await app.close();
     const keptOriginal = path.join(root, "original-outside-library.jpg");
@@ -634,66 +694,60 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
     const detail = page.locator(
       '.photo-detail-panel-shell [data-surface="inspector"]'
     );
-    await detail
-      .getByRole("button", { name: "File actions", exact: true })
-      .click();
-    await page
-      .getByRole("button", { name: "Check original file", exact: true })
-      .click();
     await expect
       .poll(() => query("SELECT source_status FROM photos WHERE id=1"))
       .toEqual([{ source_status: "missing" }]);
     await expect(
-      page.getByText("Check complete: Missing.", { exact: true })
-    ).toBeVisible();
-    const checkedPopup = page.locator(
-      '[data-slot="popover-content"][data-state="open"]'
-    );
-    await expect(checkedPopup).not.toContainText("&#x2F;");
-    if (
-      await page
-        .locator('[data-slot="popover-content"][data-state="open"]')
-        .count()
-    ) {
-      await page.keyboard.press("Escape");
-    }
-    await expect(detail).toBeVisible();
+      detail.getByRole("button", { name: "File actions", exact: true })
+    ).toHaveCount(0);
     await detail
-      .locator(":scope > div")
-      .nth(1)
-      .getByRole("button")
-      .last()
+      .getByRole("button", { name: "Resolve in settings", exact: true })
       .click();
-    await expect(detail).not.toBeVisible();
-    await page.getByRole("button", { name: LIBRARY_ATTENTION }).click();
-    const issuesDialog = page.getByRole("dialog", {
-      name: "Library sources",
+    await expect(
+      page.getByRole("heading", { name: "Library sources", exact: true })
+    ).toBeVisible();
+    const statusList = page.getByRole("region", {
+      name: "Photo status",
       exact: true,
     });
-    const issuesList = issuesDialog.getByRole("region", {
-      name: "Photos needing attention",
+    await expect(
+      statusList.getByText("photo.jpg", { exact: true })
+    ).toBeVisible();
+    await expect(statusList.getByText(MISSING_STATUS)).toBeVisible();
+    const remove = statusList.getByRole("button", {
+      name: REMOVE_MISSING,
+      exact: true,
     });
-    await expect(
-      issuesList.getByText("photo.jpg", { exact: true })
-    ).toBeVisible();
-    await issuesList
-      .getByRole("button", { name: "Manage photo.jpg", exact: true })
+    for (const size of SIZES) {
+      await app.evaluate(({ BrowserWindow }, bounds) => {
+        const window = BrowserWindow.getAllWindows()[0];
+        window.setContentSize(bounds.width, bounds.height);
+        window.webContents.setZoomFactor(bounds.zoomFactor ?? 1);
+      }, size);
+      await expect(
+        statusList.getByRole("button", {
+          name: "Check original file",
+          exact: true,
+        })
+      ).toBeVisible();
+      await expect(
+        statusList.getByRole("button", {
+          name: "Choose new location",
+          exact: true,
+        })
+      ).toBeVisible();
+      await remove.click({ trial: true });
+      await expectViewportBounds(page);
+    }
+    await statusList
+      .getByRole("button", { name: "Check original file", exact: true })
       .click();
     await expect(
-      issuesList.getByRole("button", { name: "Relink", exact: true })
+      statusList.getByText("Check complete: Missing.", { exact: true })
     ).toBeVisible();
-    await page.keyboard.press("Escape");
-    await photoCard.click();
-    await expect(detail).toBeVisible();
-    await detail
-      .getByRole("button", { name: "View recovery options", exact: true })
-      .click();
-    const remove = page
-      .getByRole("dialog", { name: "View recovery options", exact: true })
-      .getByRole("button", {
-        name: REMOVE_MISSING,
-        exact: true,
-      });
+    await expect(
+      page.getByRole("region", { name: "Library maintenance task" })
+    ).toHaveCount(0);
     await remove.click();
     const previewRemoval = page.getByRole("alertdialog", {
       name: REMOVE_MISSING,
@@ -708,6 +762,7 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
         "1 tags · 1 albums · 1 faces · 1 culling entries"
       )
     ).toBeVisible();
+    await expectViewportBounds(page);
     await previewRemoval
       .getByRole("button", { name: "Cancel", exact: true })
       .click();
@@ -716,8 +771,14 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
     expect(fs.existsSync(managedPreview)).toBe(true);
     await remove.click();
     await previewRemoval
-      .getByRole("button", { name: "Confirm", exact: true })
+      .getByRole("button", { name: REMOVE_MISSING, exact: true })
       .click();
+    await expect(
+      statusList.getByText(
+        "This photo was removed from the catalogue. Return to the list."
+      )
+    ).toBeVisible();
+    await page.getByTestId("settings-back").click();
     await expect(photoCard).toHaveCount(0);
     expect(query("SELECT id,path,is_favorite FROM photos")).toEqual([
       { id: 2, path: otherPhoto, is_favorite: 1 },

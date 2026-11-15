@@ -26,6 +26,7 @@ import { Route as SettingsUpdateRouteImport } from './routes/settings.update'
 import { Route as SettingsStorageRouteImport } from './routes/settings.storage'
 import { Route as SettingsSequencesRouteImport } from './routes/settings.sequences'
 import { Route as SettingsPluginsRouteImport } from './routes/settings.plugins'
+import { Route as SettingsLibraryRouteImport } from './routes/settings.library'
 import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsCullArchiveRouteImport } from './routes/settings.cull-archive'
 import { Route as SettingsCloudSyncRouteImport } from './routes/settings.cloud-sync'
@@ -125,6 +126,11 @@ const SettingsPluginsRoute = SettingsPluginsRouteImport.update({
   path: '/plugins',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsLibraryRoute = SettingsLibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsDiagnosticsRoute = SettingsDiagnosticsRouteImport.update({
   id: '/diagnostics',
   path: '/diagnostics',
@@ -209,6 +215,7 @@ export interface FileRoutesByFullPath {
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
   '/settings/cull-archive': typeof SettingsCullArchiveRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
+  '/settings/library': typeof SettingsLibraryRoute
   '/settings/plugins': typeof SettingsPluginsRoute
   '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
@@ -240,6 +247,7 @@ export interface FileRoutesByTo {
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
   '/settings/cull-archive': typeof SettingsCullArchiveRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
+  '/settings/library': typeof SettingsLibraryRoute
   '/settings/plugins': typeof SettingsPluginsRoute
   '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
@@ -272,6 +280,7 @@ export interface FileRoutesById {
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
   '/settings/cull-archive': typeof SettingsCullArchiveRoute
   '/settings/diagnostics': typeof SettingsDiagnosticsRoute
+  '/settings/library': typeof SettingsLibraryRoute
   '/settings/plugins': typeof SettingsPluginsRoute
   '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
@@ -305,6 +314,7 @@ export interface FileRouteTypes {
     | '/settings/cloud-sync'
     | '/settings/cull-archive'
     | '/settings/diagnostics'
+    | '/settings/library'
     | '/settings/plugins'
     | '/settings/sequences'
     | '/settings/storage'
@@ -336,6 +346,7 @@ export interface FileRouteTypes {
     | '/settings/cloud-sync'
     | '/settings/cull-archive'
     | '/settings/diagnostics'
+    | '/settings/library'
     | '/settings/plugins'
     | '/settings/sequences'
     | '/settings/storage'
@@ -367,6 +378,7 @@ export interface FileRouteTypes {
     | '/settings/cloud-sync'
     | '/settings/cull-archive'
     | '/settings/diagnostics'
+    | '/settings/library'
     | '/settings/plugins'
     | '/settings/sequences'
     | '/settings/storage'
@@ -510,6 +522,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsPluginsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/library': {
+      id: '/settings/library'
+      path: '/library'
+      fullPath: '/settings/library'
+      preLoaderRoute: typeof SettingsLibraryRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/diagnostics': {
       id: '/settings/diagnostics'
       path: '/diagnostics'
@@ -640,6 +659,7 @@ interface SettingsRouteChildren {
   SettingsCloudSyncRoute: typeof SettingsCloudSyncRoute
   SettingsCullArchiveRoute: typeof SettingsCullArchiveRoute
   SettingsDiagnosticsRoute: typeof SettingsDiagnosticsRoute
+  SettingsLibraryRoute: typeof SettingsLibraryRoute
   SettingsPluginsRoute: typeof SettingsPluginsRoute
   SettingsSequencesRoute: typeof SettingsSequencesRoute
   SettingsStorageRoute: typeof SettingsStorageRoute
@@ -657,6 +677,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsCloudSyncRoute: SettingsCloudSyncRoute,
   SettingsCullArchiveRoute: SettingsCullArchiveRoute,
   SettingsDiagnosticsRoute: SettingsDiagnosticsRoute,
+  SettingsLibraryRoute: SettingsLibraryRoute,
   SettingsPluginsRoute: SettingsPluginsRoute,
   SettingsSequencesRoute: SettingsSequencesRoute,
   SettingsStorageRoute: SettingsStorageRoute,

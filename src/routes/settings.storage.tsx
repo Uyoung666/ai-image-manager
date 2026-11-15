@@ -1,10 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check, Copy } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { LibraryHealthDialog } from "@/components/LibraryHealthDialog";
 import { DataDirSection } from "@/components/settings/DataDirSection";
 import { SettingRow } from "@/components/settings/setting-row";
 import { SettingsPageShell } from "@/components/settings/settings-page-shell";
@@ -19,6 +18,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -336,10 +336,15 @@ function StorageSettingsPage() {
           )}
 
           <SettingRow
-            action={<LibraryHealthDialog />}
+            action={
+              <Button asChild variant="outline">
+                <Link to="/settings/library">
+                  {t("libraryReliability.openSettings")}
+                </Link>
+              </Button>
+            }
             className="mt-3"
-            description={t("libraryReliability.description")}
-            title={t("libraryReliability.title")}
+            title={t("settingsIndexDbLocation")}
           >
             {indexStats ? (
               <div className="space-y-1">

@@ -1,6 +1,8 @@
 {
   "appName": "AI Image Manager",
   "libraryReliability": {
+    "unassignedSource": "Other locations",
+    "unassignedReview": "View affected photos ({{count}})",
     "issueList": "Photos needing attention",
     "issueAll": "All issues",
     "issueFilter": "Issue type",
@@ -43,17 +45,17 @@
     "description": "Check storage locations and photo availability, and relink files when needed.",
     "empty": "No library folders have been added.",
     "check": "Check again",
-    "retryRefresh": "Refresh content",
+    "retryRefresh": "Retry update",
     "refreshQueued": "Refresh queued.",
-    "relink": "Relink",
+    "relink": "Choose new location",
     "relinkDescription": "Review matches before updating file locations in the library.",
     "relinkBlocked": "This location has conflicts. Choose a different location.",
     "relinkUpdated": "Updated {{count}} photo records.",
     "relinkWeak": "Confirm this file belongs to the original photo (content unverified)",
-    "relinkWeakAll": "Confirm all {{count}} mappings with insufficient evidence (content unverified)",
+    "relinkWeakAll": "I checked these {{count}} files and confirm they are the original photos (content unverified).",
     "relinkStatus": {
       "matched": "Content matches",
-      "unverified": "Insufficient evidence",
+      "unverified": "Needs your confirmation",
       "missing": "Missing at destination",
       "mismatch": "Different content",
       "conflict": "Path conflict",
@@ -75,11 +77,11 @@
       "inaccessible": "Inaccessible"
     },
     "taskStatus": {
-      "queued": "Waiting",
-      "running": "Checking",
-      "done": "Check complete",
+      "queued": "Queued",
+      "running": "In progress",
+      "done": "Complete",
       "cancelled": "Cancelled",
-      "failed": "Check failed"
+      "failed": "Incomplete"
     },
     "progress": "{{status}} · {{processed}} / {{total}}",
     "historyReview": "Content changed. Review the earlier decision.",
@@ -87,7 +89,90 @@
     "cullNeedsReviewHint": "This photo has changed. Its previous culling result is preserved as history. Review the updated photo before batch cleanup.",
     "cullDeleteSkipped": "{{count}} changed photos were kept for review.",
     "faceNeedsReview": "This photo has changed. Confirm this person again. The previous recognition is preserved.",
-    "staleFaces": "{{count}} previous face records need review because their photos have changed."
+    "staleFaces": "{{count}} previous face records need review because their photos have changed.",
+    "attentionLink": "{{count}} photos need attention. Open library settings",
+    "goToSettings": "Resolve in settings",
+    "openSettings": "Open library sources",
+    "filterMoved": "Source status filters have moved to Library sources in Settings. Other search criteria were retained.",
+    "summary": "{{total}} photos · {{attentionCount}} need attention",
+    "scope": "Source scope",
+    "allSources": "All sources",
+    "search": "Search filename or path",
+    "photoGone": "This photo was removed from the catalogue. Return to the list.",
+    "task": "Library maintenance task",
+    "subfolders": "Expand or collapse subfolders",
+    "manageFolder": "Manage parent folder",
+    "moreActions": "More actions",
+    "regenerateAnalysis": "Regenerate analysis",
+    "inspectCandidate": "Check this location",
+    "removalDone": "Missing record removed.",
+    "oldLocation": "Previous location",
+    "newLocation": "New location",
+    "applyRelink": "Update library locations",
+    "detail": {
+      "offline": "The original storage location is unavailable.",
+      "missing": "The photo is missing from its previous location. It may have moved or been renamed.",
+      "inaccessible": "The original cannot be read. Check the device or access permissions.",
+      "failed": "Photo content updates are incomplete.",
+      "cached": "Showing the cached preview."
+    },
+    "tab": {
+      "photos": "Photo status",
+      "folders": "Source folders"
+    },
+    "phase": {
+      "checking": "Checking files",
+      "validating": "Validating files",
+      "saving": "Saving"
+    },
+    "manageStatus": {
+      "attention": "Needs attention",
+      "all": "All photos",
+      "move": "Relink needs confirmation"
+    },
+    "candidateReason": {
+      "ambiguous": "Multiple files have matching contents. Confirm the location.",
+      "incomplete": "Source checks were incomplete. Review this candidate."
+    },
+    "errors": {
+      "RELINK_EXPIRED": "The preview expired. Check the new location again.",
+      "RELINK_STALE": "Files or records changed. Check again.",
+      "RELINK_CONFLICT": "The location conflicts with library records. Choose another.",
+      "RELINK_BUSY": "Wait for the current import or relink task.",
+      "LIBRARY_TASK_BUSY": "A library task is running. View its progress.",
+      "RELINK_CONFIRMATION_REQUIRED": "Confirm mappings with unverified contents.",
+      "LIBRARY_FOLDER_NOT_FOUND": "The folder no longer exists. Choose another scope.",
+      "RELINK_NOT_FOUND": "The record no longer exists. Return to the list.",
+      "LIBRARY_REMOVAL_STALE": "Photo status changed. Preview removal again.",
+      "LIBRARY_REMOVAL_EXPIRED": "The removal confirmation expired. Preview again.",
+      "RELINK_UNSUPPORTED_FILE": "Choose a supported image file.",
+      "EACCES": "Access denied. Check permissions.",
+      "EPERM": "Operation denied. Check permissions or file locks.",
+      "ENOENT": "File not found. Check its location.",
+      "ETIMEDOUT": "Source timed out. Check the connection and retry."
+    },
+    "errorRange": "Errors {{from}}–{{to}} of {{total}}",
+    "truncatedErrors": "Details are retained for the first {{count}} errors.",
+    "checkAll": "Check all sources",
+    "checkConnection": "Check connection",
+    "offlineLink": "{{count}} photos have disconnected sources",
+    "offlineCount": "{{count}} photos offline",
+    "sourceSummary": "{{count}} need attention / {{offline}} offline",
+    "backToSources": "Back to sources",
+    "showMatched": "Show {{count}} matched photos",
+    "errorCount": "{{count}} items incomplete. Show details",
+    "taskKind": {
+      "check": "Source check",
+      "inspectRelink": "Check new location",
+      "applyRelink": "Relink photos",
+      "retryUpdates": "Retry photo updates"
+    },
+    "reviewAgain": "Review again",
+    "reviewName": "{{name}} (review again)",
+    "reviewUnavailable": "{{count}} photos are not ready. Restore their sources or wait for updates.",
+    "retryLocation": "Check this location again",
+    "waitingAi": "Updates will continue after you resume AI indexing.",
+    "recovered": "Restored. You can continue browsing."
   },
   "shootingProjects": "Shooting projects",
   "shootingProject": {

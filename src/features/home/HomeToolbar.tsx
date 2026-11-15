@@ -3,7 +3,7 @@ import type { ComponentProps, Ref } from "react";
 import { useTranslation } from "react-i18next";
 import { IconMotionTrigger } from "@/components/icons/icon-motion";
 import { SlidersHorizontal } from "@/components/icons/sliders-horizontal";
-import { LibraryHealthDialog } from "@/components/LibraryHealthDialog";
+import { LibraryAttentionLink } from "@/components/LibrarySourceLinks";
 import {
   GRID_COLUMN_WIDTH_MAX,
   GRID_COLUMN_WIDTH_MIN,
@@ -23,13 +23,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { LibraryStatusFilter } from "@/types/library-reliability";
 import type { SearchResponse } from "@/types/photo";
 import type { DashboardReturnTarget } from "@/utils/dashboard-data";
 
 interface HomeToolbarProps {
   dashboardReturnTarget: DashboardReturnTarget | null;
-  folderId?: number | null;
   galleryContextLabel: string;
   galleryScrolled: boolean;
   gridColumnWidth: number;
@@ -38,7 +36,6 @@ interface HomeToolbarProps {
   handleSequenceModeChange: (mode: "photos" | "sequences") => void;
   handleSortChange: (field: SortField, order: SortOrder) => void;
   inert: boolean;
-  libraryStatus?: LibraryStatusFilter;
   onDashboardReturn: () => void;
   onRetry: () => void;
   onShowSuggestions: () => void;
@@ -60,8 +57,6 @@ interface HomeToolbarProps {
   totalPhotos: number;
 }
 export function HomeToolbar({
-  folderId,
-  libraryStatus,
   toolbarRef,
   inert,
   right,
@@ -175,7 +170,6 @@ export function HomeToolbar({
               </button>
               <button
                 className={`rounded px-2 py-1 ${sequenceMode === "sequences" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                disabled={Boolean(libraryStatus)}
                 onClick={() => handleSequenceModeChange("sequences")}
                 type="button"
               >
@@ -207,10 +201,7 @@ export function HomeToolbar({
                 })}
               </button>
             )}
-            <LibraryHealthDialog
-              attentionOnly
-              folderId={folderId ?? undefined}
-            />
+            <LibraryAttentionLink />
             <SortDropdown
               onChange={handleSortChange}
               order={sortOrder}

@@ -33,6 +33,7 @@ import { BrowseSessionProvider } from "@/contexts/BrowseSessionContext";
 import { ImportDropProvider } from "@/contexts/import-drop-context";
 import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
 import { SidebarFilterProvider } from "@/contexts/SidebarFilterContext";
+import { useLibraryChange } from "@/hooks/use-library-change";
 import BaseLayout from "@/layouts/base-layout";
 import { isBenignRendererErrorMessage } from "@/utils/renderer-error-filter";
 import {
@@ -54,6 +55,7 @@ function RouteSuspense() {
 }
 
 function Root() {
+  useLibraryChange();
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();

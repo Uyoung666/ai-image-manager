@@ -19,7 +19,6 @@ import {
 import { photoListingActions } from "@/actions/photo-listing";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyStateCard } from "@/components/EmptyStateCard";
-import { LIBRARY_HEALTH_QUERY } from "@/components/LibraryHealthDialog";
 import { isLibrarySourceUnavailable } from "@/components/LibraryPhotoStatus";
 import type { MasonryGridHandle } from "@/components/MasonryGrid";
 import { clearImageLoadCache } from "@/components/PhotoCard";
@@ -195,7 +194,6 @@ function HomePage() {
   const searchMode = filter.appliedSearch?.mode ?? null;
   const imageSearchPath = filter.appliedSearch?.imagePath ?? null;
   const searchFilters = filter.appliedSearch?.filters ?? {};
-  const libraryStatus = searchFilters.libraryStatus;
   const [showDrillBanner, setShowDrillBanner] = useState(false);
   const [drillDownFilters, setDrillDownFilters] = useState<ExifFilters>();
   const [dashboardReturnTarget, setDashboardReturnTarget] =
@@ -251,10 +249,9 @@ function HomePage() {
   );
   const colorHex = filter.appliedSearch?.colorHex ?? null;
   const [lightboxIndex, setLightboxIndex] = useState(-1);
-  const [preferredSequenceMode, setSequenceMode] = useState<
-    "photos" | "sequences"
-  >(() => getBrowseSession("home-search").sequenceMode);
-  const sequenceMode = libraryStatus ? "photos" : preferredSequenceMode;
+  const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">(
+    () => getBrowseSession("home-search").sequenceMode
+  );
   const gridRef = useRef<MasonryGridHandle>(null);
   const displayedSequenceModeRef = useRef<"photos" | "sequences">("photos");
   const gallerySurfaceRef = useRef<HTMLDivElement>(null);
@@ -593,14 +590,6 @@ function HomePage() {
     const handler = (event: MessageEvent) => {
       if (event.data?.channel === "file-change") {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
-        // refetchType: "active" — 仅重取当前视口活跃的页面，
-        // 杜绝 chokidar 事件触发所有已加载页（如 50 页）同时 IPC 请求的雪崩
-        queryClient.invalidateQueries({
-          queryKey: ["photos"],
-          refetchType: "active",
-        });
-        queryClient.invalidateQueries({ queryKey: ["folders"] });
-        queryClient.invalidateQueries({ queryKey: LIBRARY_HEALTH_QUERY });
         if (isSearching) {
           if (searchMode === "image") {
             clearTimeout(imageRefresh);
@@ -616,14 +605,6 @@ function HomePage() {
       }
       if (event.data?.channel === "ai-embedding-done") {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
-        queryClient.invalidateQueries({
-          queryKey: ["photos"],
-          refetchType: "active",
-        });
-        queryClient.invalidateQueries({
-          queryKey: ["libraryHealth"],
-          refetchType: "active",
-        });
       }
       if (event.data?.channel === "ai-status-changed") {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
@@ -664,8 +645,7 @@ function HomePage() {
     tagIds: filter.activeTagIds.length > 0 ? filter.activeTagIds : undefined,
     tagMode: filter.tagMode,
     favoriteOnly: filter.favoriteOnly || undefined,
-    libraryStatus,
-    ungroupedOnly: sequenceMode === "photos" && !libraryStatus,
+    ungroupedOnly: sequenceMode === "photos",
     sort: sortField,
     order: sortOrder,
     enabled: !isSearching,
@@ -676,7 +656,6 @@ function HomePage() {
     filter.activeTagIds,
     filter.tagMode,
     filter.favoriteOnly,
-    libraryStatus,
     sortField,
     sortOrder,
     sequenceMode,
@@ -1215,7 +1194,6 @@ function HomePage() {
       (filter.favoriteOnly ?? false) ? "fav" : "",
       sortField ?? "date",
       sortOrder ?? "desc",
-      libraryStatus,
     ]
       .filter(Boolean)
       .join("-");
@@ -1229,7 +1207,6 @@ function HomePage() {
     filter.activeFolderId,
     filter.activeTagIds,
     filter.favoriteOnly,
-    libraryStatus,
     sortField,
     sortOrder,
   ]);
@@ -2522,7 +2499,6 @@ function HomePage() {
       <div className="relative flex h-full min-w-0 flex-col">
         <HomeToolbar
           dashboardReturnTarget={dashboardReturnTarget}
-          folderId={filter.activeFolderId}
           galleryContextLabel={galleryContextLabel}
           galleryScrolled={galleryScrolled}
           gridColumnWidth={gridColumnWidth}
@@ -2531,7 +2507,6 @@ function HomePage() {
           handleSequenceModeChange={handleSequenceModeChange}
           handleSortChange={handleSortChange}
           inert={compactDetailOverlay && detailOverlayOpen}
-          libraryStatus={libraryStatus}
           onDashboardReturn={() =>
             navigate({ to: "/dashboard", search: dashboardReturnTarget ?? {} })
           }
@@ -2557,24 +2532,29 @@ function HomePage() {
               order: sortOrder,
             },
             onLoadSearchPreset: (preset) => {
+              const { libraryStatus: sourceStatus, ...filters } =
+                preset.filters;
+              if (sourceStatus) {
+                toast.info(t("libraryReliability.filterMoved"), {
+                  id: "library-filter-moved",
+                });
+              }
               if (preset.search) {
                 handleSortChange(preset.search.sort, preset.search.order);
                 handleSearch(
                   preset.search.query,
-                  preset.filters,
+                  filters,
                   preset.search.colorHex ?? ""
                 );
               } else {
-                handleSearch(filter.searchDraft.query, preset.filters);
+                handleSearch(filter.searchDraft.query, filters);
               }
             },
             activeTagIds: filter.activeTagIds,
             aiStatus: aiStatus ?? null,
             colorHex: colorHex ?? undefined,
             drillDownFilters,
-            filters: searchMode
-              ? filter.searchDraft.filters
-              : { ...filter.searchDraft.filters, libraryStatus },
+            filters: filter.searchDraft.filters,
             imageSearchActive: searchMode === "image",
             imageSearchReference:
               searchMode === "image" && imageSearchPath
@@ -2800,6 +2780,14 @@ function HomePage() {
                   },
                   onNavigate: navigateDetail,
                   onOpenExplorer: handleOpenExplorer,
+                  onResolveSource: (photoId) =>
+                    navigate({
+                      to: "/settings/library",
+                      search: { photoId },
+                      state: (previous) => ({
+                        libraryReturnIndex: previous.__TSR_index,
+                      }),
+                    }),
                   onReturnToSequence: sequenceReturnTarget
                     ? () => {
                         if (detailPhoto) {

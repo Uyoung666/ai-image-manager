@@ -10,6 +10,7 @@ import { Image } from "@/components/icons/image";
 interface PreviewMenuState {
   open: boolean;
   photoPath: string | null;
+  sourceUnavailable?: boolean;
   x: number;
   y: number;
 }
@@ -111,10 +112,13 @@ export function PreviewContextMenu({
       ref={ref}
       style={{ ...position, zIndex: 99_999 }}
     >
-      <IconMotionTrigger asChild disabled={!menu.photoPath}>
+      <IconMotionTrigger
+        asChild
+        disabled={!menu.photoPath || menu.sourceUnavailable}
+      >
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
-          disabled={!menu.photoPath}
+          disabled={!menu.photoPath || menu.sourceUnavailable}
           onClick={async () => {
             if (menu.photoPath) {
               try {
@@ -159,10 +163,13 @@ export function PreviewContextMenu({
           {t("copyPath")}
         </button>
       </IconMotionTrigger>
-      <IconMotionTrigger asChild disabled={!menu.photoPath}>
+      <IconMotionTrigger
+        asChild
+        disabled={!menu.photoPath || menu.sourceUnavailable}
+      >
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
-          disabled={!menu.photoPath}
+          disabled={!menu.photoPath || menu.sourceUnavailable}
           onClick={() => {
             if (menu.photoPath) {
               onOpenExplorer(menu.photoPath);

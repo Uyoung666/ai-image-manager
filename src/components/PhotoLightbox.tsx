@@ -1,3 +1,4 @@
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ChevronLeft,
   ChevronRight,
@@ -154,6 +155,10 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 }: PhotoLightboxProps) {
   useSyncExternalStore(subscribeGalleryData, getGalleryDataVersion);
   const { t } = useTranslation();
+  const navigateToSettings = useNavigate();
+  const returnIndex = useLocation({
+    select: (location) => location.state.__TSR_index,
+  });
   const reduceMotion = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -909,6 +914,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         setPreviewMenu({
           open: true,
           photoPath: photo.path,
+          sourceUnavailable: isLibrarySourceUnavailable(photo.sourceStatus),
           x: event.clientX,
           y: event.clientY,
         });
@@ -1134,7 +1140,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             <div className="flex max-w-full flex-col items-center gap-3 text-center [grid-area:1/1]">
               <ImageIcon className="h-10 w-10 text-white/25" />
               <p className="text-[13px] text-white/65">
-                {t("imageLoadFailed")}
+                {t(
+                  sourceUnavailable
+                    ? "libraryReliability.previewUnavailable"
+                    : "imageLoadFailed"
+                )}
               </p>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1149,14 +1159,30 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <div className="flex flex-wrap justify-center gap-2">
                 <button
                   className="lightbox-secondary-button"
-                  onClick={retryImage}
+                  onClick={() => {
+                    if (sourceUnavailable) {
+                      requestClose();
+                      navigateToSettings({
+                        to: "/settings/library",
+                        search: { photoId: photo.id },
+                        state: { libraryReturnIndex: returnIndex },
+                      });
+                    } else {
+                      retryImage();
+                    }
+                  }}
                   type="button"
                 >
-                  {t("retry")}
+                  {t(
+                    sourceUnavailable
+                      ? "libraryReliability.goToSettings"
+                      : "retry"
+                  )}
                 </button>
                 <IconMotionTrigger asChild>
                   <button
                     className="lightbox-secondary-button"
+                    disabled={sourceUnavailable}
                     onClick={() => {
                       ipc.client.shell
                         .openInExplorer({ path: photo.path })
@@ -1170,6 +1196,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 </IconMotionTrigger>
               </div>
             </div>
+          )}
+          {sourceUnavailable && !imageError && (
+            <p className="absolute bottom-2 rounded bg-popover/90 px-2 py-1 text-popover-foreground text-xs">
+              {t("libraryReliability.detail.cached")}
+            </p>
           )}
           {frames.map((frame) => (
             <img

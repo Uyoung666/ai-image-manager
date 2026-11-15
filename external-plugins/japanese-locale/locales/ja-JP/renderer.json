@@ -8,6 +8,8 @@
   "aboutProductPreviewHint": "クリックして写真を広げる・まとめる",
   "appName": "AI Image Manager",
   "libraryReliability": {
+    "unassignedSource": "その他の保存場所",
+    "unassignedReview": "影響のある写真を表示（{{count}} 枚）",
     "issueList": "対応が必要な写真",
     "issueAll": "すべての問題",
     "issueFilter": "問題の種類",
@@ -83,10 +85,10 @@
     },
     "taskStatus": {
       "queued": "待機中",
-      "running": "確認中",
-      "done": "確認完了",
+      "running": "処理中",
+      "done": "完了",
       "cancelled": "キャンセル済み",
-      "failed": "確認失敗"
+      "failed": "未完了"
     },
     "progress": "{{status}} · {{processed}} / {{total}} 件",
     "historyReview": "内容が変更されました。以前の判定を見直してください。",
@@ -94,7 +96,90 @@
     "cullNeedsReviewHint": "この写真は変更されています。以前の選別結果は履歴に保存されています。一括削除の前に、更新された写真を確認してください。",
     "cullDeleteSkipped": "変更された写真 {{count}} 枚を再確認用に保持しました。",
     "faceNeedsReview": "この写真は変更されています。この人物を再確認してください。以前の認識結果は保持されます。",
-    "staleFaces": "写真の変更により、以前の顔認識記録 {{count}} 件の再確認が必要です。"
+    "staleFaces": "写真の変更により、以前の顔認識記録 {{count}} 件の再確認が必要です。",
+    "attentionLink": "{{count}} 枚の写真に対応が必要です。設定を開く",
+    "goToSettings": "設定で対応",
+    "openSettings": "ライブラリの場所を開く",
+    "filterMoved": "場所の状態フィルターは設定に移動しました。他の検索条件は保持されます。",
+    "summary": "{{total}} 枚 · {{attentionCount}} 枚に対応が必要",
+    "scope": "場所の範囲",
+    "allSources": "すべての場所",
+    "search": "ファイル名またはパスを検索",
+    "photoGone": "この写真はライブラリから削除されました。一覧に戻ってください。",
+    "task": "ライブラリ管理タスク",
+    "subfolders": "サブフォルダーを展開・折りたたむ",
+    "manageFolder": "親フォルダーを管理",
+    "moreActions": "その他の操作",
+    "regenerateAnalysis": "解析を再生成",
+    "inspectCandidate": "この場所を確認",
+    "removalDone": "見つからない写真の記録を削除しました。",
+    "oldLocation": "以前の場所",
+    "newLocation": "新しい場所",
+    "applyRelink": "ライブラリの場所を更新",
+    "detail": {
+      "offline": "元ファイルの保存場所に接続できません。",
+      "missing": "以前の場所に写真がありません。移動や名前の変更を確認してください。",
+      "inaccessible": "元ファイルを読み取れません。デバイスや権限を確認してください。",
+      "failed": "写真内容の更新が完了していません。",
+      "cached": "キャッシュのプレビューを表示中。"
+    },
+    "tab": {
+      "photos": "写真の状態",
+      "folders": "保存先フォルダー"
+    },
+    "phase": {
+      "checking": "確認中",
+      "validating": "ファイルを再確認中",
+      "saving": "保存中"
+    },
+    "manageStatus": {
+      "attention": "対応が必要",
+      "all": "すべての写真",
+      "move": "再リンクの確認待ち"
+    },
+    "candidateReason": {
+      "ambiguous": "同じ内容の候補が複数あります。場所を確認してください。",
+      "incomplete": "保存場所の確認が不完全です。候補を確認してください。"
+    },
+    "errors": {
+      "RELINK_EXPIRED": "プレビューの有効期限が切れました。再確認してください。",
+      "RELINK_STALE": "ファイルが変更されました。再確認してください。",
+      "RELINK_CONFLICT": "場所が競合しています。別の場所を選択してください。",
+      "RELINK_BUSY": "別のタスクの完了を待ってください。",
+      "LIBRARY_TASK_BUSY": "実行中のタスクを確認してください。",
+      "RELINK_CONFIRMATION_REQUIRED": "未検証の対応を確認してください。",
+      "LIBRARY_FOLDER_NOT_FOUND": "フォルダーが見つかりません。",
+      "RELINK_NOT_FOUND": "写真が見つかりません。",
+      "LIBRARY_REMOVAL_STALE": "状態が変更されました。",
+      "LIBRARY_REMOVAL_EXPIRED": "確認の有効期限が切れました。",
+      "RELINK_UNSUPPORTED_FILE": "対応する画像を選択してください。",
+      "EACCES": "アクセス権限を確認してください。",
+      "EPERM": "アクセス権限を確認してください。",
+      "ENOENT": "ファイルが見つかりません。",
+      "ETIMEDOUT": "接続がタイムアウトしました。"
+    },
+    "errorRange": "エラー {{from}}–{{to}} / {{total}} 件",
+    "truncatedErrors": "最初の {{count}} 件の詳細を保持しています。",
+    "checkAll": "すべての保存場所を確認",
+    "retryLocation": "この場所を再確認",
+    "checkConnection": "接続を確認",
+    "offlineLink": "{{count}} 枚の写真の保存場所が未接続です",
+    "offlineCount": "{{count}} 枚がオフライン",
+    "sourceSummary": "要対応 {{count}} 枚 / オフライン {{offline}} 枚",
+    "backToSources": "保存場所の一覧に戻る",
+    "showMatched": "一致した {{count}} 枚を表示",
+    "errorCount": "未完了 {{count}} 件の詳細を表示",
+    "taskKind": {
+      "check": "保存場所の確認",
+      "inspectRelink": "新しい場所の確認",
+      "applyRelink": "写真の再リンク",
+      "retryUpdates": "写真の更新を再試行"
+    },
+    "reviewAgain": "選別をやり直す",
+    "reviewName": "{{name}}（再選別）",
+    "reviewUnavailable": "{{count}} 枚は準備中です。保存場所を接続するか、更新完了をお待ちください。",
+    "waitingAi": "AI インデックスを再開すると更新が続行されます。",
+    "recovered": "復旧しました。引き続き閲覧できます。"
   },
   "shootingProjects": "撮影プロジェクト",
   "shootingProject": {

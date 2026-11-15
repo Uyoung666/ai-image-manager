@@ -418,7 +418,8 @@ export function useHomeSearch({
     // paramColorHex 未传时沿用当前 state（保留钻取来的色彩筛选）
     const effectiveColorHex =
       paramColorHex === undefined ? colorHex : paramColorHex;
-    const hasFilters = filters && Object.values(filters).some((v) => v);
+    const { libraryStatus: _legacyStatus, ...browseFilters } = filters ?? {};
+    const hasFilters = Object.values(browseFilters).some(Boolean);
     const hasColorHex = !!effectiveColorHex;
 
     if (!(query.trim() || hasFilters || hasColorHex)) {
@@ -446,7 +447,7 @@ export function useHomeSearch({
     pendingSemanticRefreshRef.current = null;
     const startTime = performance.now();
     const nextSearchMode = resolveSearchMode(query, effectiveColorHex);
-    const appliedFilters = filters ?? {};
+    const appliedFilters = browseFilters;
     filter.applySearch({
       colorHex: effectiveColorHex ?? undefined,
       filters: appliedFilters,
@@ -471,14 +472,14 @@ export function useHomeSearch({
     try {
       const searchParams = buildHomeSearchParams(
         query,
-        filters,
+        browseFilters,
         effectiveColorHex
       );
 
       // Preserve normalized parameters for relevance-bounded pagination.
       lastSearchParamsRef.current = {
         query,
-        filters,
+        filters: browseFilters,
         colorHex: effectiveColorHex ?? undefined,
       };
 
@@ -513,7 +514,7 @@ export function useHomeSearch({
         pendingSemanticRefreshRef.current = {
           generation: gen,
           query,
-          filters,
+          filters: browseFilters,
           colorHex: effectiveColorHex ?? undefined,
         };
       } else {

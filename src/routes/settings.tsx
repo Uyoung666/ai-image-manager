@@ -4,6 +4,7 @@ import {
   redirect,
   useLocation,
   useNavigate,
+  useRouter,
 } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { useRef } from "react";
@@ -19,6 +20,8 @@ function SettingsLayout() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const router = useRouter();
+  const returnIndex = useRef(location.state.libraryReturnIndex).current;
   const backToCull = useRef(location.state.cullSettingsReturn === true).current;
   const backLabel = t(backToCull ? "cullProject.back" : "settingsBackHome");
 
@@ -37,12 +40,22 @@ function SettingsLayout() {
             <button
               className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
               data-testid="settings-back"
-              onClick={() =>
+              onClick={() => {
+                const distance =
+                  location.state.__TSR_index - (returnIndex ?? -1);
+                if (
+                  returnIndex !== undefined &&
+                  distance > 0 &&
+                  router.history.canGoBack()
+                ) {
+                  router.history.go(-distance);
+                  return;
+                }
                 navigate({
                   to: backToCull ? "/cull" : "/",
                   state: { cullSettingsReturn: false },
-                })
-              }
+                });
+              }}
               type="button"
             >
               <ArrowLeft className="h-5 w-5" />

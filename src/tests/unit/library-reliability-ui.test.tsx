@@ -5,215 +5,154 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import {
-  readSearchPresets,
-  writeSearchPresets,
-} from "@/actions/search-presets";
-import { LibraryHealthDialog } from "@/components/LibraryHealthDialog";
-import { LibraryPhotoControls } from "@/components/LibraryPhotoControls";
 import { LibraryPhotoStatusBadge } from "@/components/LibraryPhotoStatus";
-import { LibraryRelinkButton } from "@/components/LibraryRelinkButton";
-import { buildSearchFilterParams } from "@/utils/search-filter-params";
+import { LibraryRelinkPreview } from "@/components/LibraryRelinkPreview";
+import { LibrarySettingsPhoto } from "@/components/LibrarySettingsPhoto";
+import {
+  LibraryAttentionLink,
+  LibraryPhotoNotice,
+} from "@/components/LibrarySourceLinks";
+import type { RelinkPreview } from "@/routes/settings.library";
 
-const REMOVAL_LINKS = /libraryReliability.removeLinks/;
+const CACHED_TEXT = /libraryReliability.detail.cached/;
+const NEW_LOCATION_TEXT = /libraryReliability.newLocation/;
 
 const actions = vi.hoisted(() => ({
-  getHealth: vi.fn(),
-  getIssues: vi
-    .fn()
-    .mockResolvedValue({ total: 0, offset: 0, limit: 20, items: [] }),
-  reconcile: vi.fn(),
-  getTask: vi.fn(),
-  cancelTask: vi.fn(),
-  inspectPhotoRelink: vi.fn(),
-  inspectFolderRelink: vi.fn(),
-  getRelinkInspection: vi.fn(),
-  applyRelink: vi.fn(),
+  getAttention: vi.fn(),
+  getMoveCandidates: vi.fn(),
+  retryRefresh: vi.fn(),
   inspectMissingRemoval: vi.fn(),
   removeMissing: vi.fn(),
-  retryRefresh: vi.fn(),
+  getRelinkInspection: vi.fn(),
 }));
 vi.mock("@/actions/library-reliability", () => ({
   libraryReliabilityActions: actions,
 }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@tanstack/react-router", () => ({
+  useLocation: ({
+    select,
+  }: {
+    select: (location: { state: { __TSR_index: number } }) => number;
+  }) => select({ state: { __TSR_index: 4 } }),
+  Link: ({
+    to,
+    state,
+    ...props
+  }: {
+    to: string;
+    state: { libraryReturnIndex: number };
+  }) => <a {...props} data-return-index={state.libraryReturnIndex} href={to} />,
+}));
 
-beforeEach(() => vi.clearAllMocks());
-afterEach(cleanup);
-
-it("preserves source status through a saved search and IPC filter conversion", () => {
-  const filters = { libraryStatus: "missing", isoMin: "100" } as const;
-  writeSearchPresets([{ name: "Missing files", createdAt: 1, filters }]);
-  const saved = readSearchPresets();
-  expect(saved[0].filters).toEqual(filters);
-  expect(buildSearchFilterParams(saved[0].filters)).toEqual({
-    libraryStatus: "missing",
-    isoMin: 100,
-  });
-  localStorage.clear();
+let client: QueryClient;
+beforeEach(() => {
+  vi.clearAllMocks();
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  actions.getMoveCandidates.mockResolvedValue([]);
 });
-
-it("keeps healthy cards quiet and labels unavailable or stale content", () => {
-  const { rerender } = render(
-    <LibraryPhotoStatusBadge refreshStatus="ready" sourceStatus="available" />
-  );
-  expect(
-    screen.queryByText("libraryReliability.status.available")
-  ).not.toBeInTheDocument();
-  rerender(
-    <LibraryPhotoStatusBadge refreshStatus="ready" sourceStatus="offline" />
-  );
-  expect(screen.getByText("libraryReliability.status.offline")).toHaveAttribute(
-    "tabindex",
-    "0"
-  );
-  rerender(
-    <LibraryPhotoStatusBadge refreshStatus="failed" sourceStatus="available" />
-  );
-  expect(screen.getByText("libraryReliability.status.failed")).toBeVisible();
-});
-
-it("requires explicit confirmation for weak evidence across all relink pages", async () => {
-  actions.inspectPhotoRelink.mockResolvedValue({
-    token: "preview",
-    items: [
-      {
-        photoId: 1,
-        oldPath: "old.jpg",
-        newPath: "new.jpg",
-        status: "unverified",
-      },
-    ],
-    unverifiedPhotoIds: [1, 101],
-    total: 101,
-    canApply: true,
-    counts: { unverified: 2 },
-  });
-  actions.getRelinkInspection.mockResolvedValue({
-    token: "preview",
-    items: [
-      {
-        photoId: 101,
-        oldPath: "old-101.jpg",
-        newPath: "new-101.jpg",
-        status: "unverified",
-      },
-    ],
-    unverifiedPhotoIds: [1, 101],
-    total: 101,
-    canApply: true,
-    counts: { unverified: 2 },
-  });
-  actions.applyRelink.mockResolvedValue({ updated: 2 });
-  render(<LibraryRelinkButton target={{ photoId: 1 }} />);
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.relink" })
-  );
-  const confirm = await screen.findByRole("button", { name: "confirm" });
-  expect(confirm).toBeDisabled();
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.nextPage" })
-  );
-  await screen.findByText("new-101.jpg");
-  expect(actions.getRelinkInspection).toHaveBeenCalledWith("preview", 100);
-  const all = screen.getAllByRole("checkbox")[0];
-  fireEvent.click(all);
-  expect(confirm).toBeEnabled();
-  fireEvent.click(confirm);
-  await waitFor(() =>
-    expect(actions.applyRelink).toHaveBeenCalledWith("preview", [1, 101])
-  );
-});
-
-it("shows a missing-record impact before removing it from the catalogue", async () => {
-  actions.inspectMissingRemoval.mockResolvedValue({
-    token: "remove",
-    photoIds: [7],
-    links: { tags: 2, albums: 1, faces: 1, cull: 1 },
-  });
-  actions.removeMissing.mockResolvedValue({ removed: 1 });
-  render(
-    <LibraryPhotoControls
-      photo={{ id: 7, sourceStatus: "missing", refreshStatus: "ready" }}
-    />
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.resolve" })
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.remove" })
-  );
-  const confirm = await screen.findByRole("button", { name: "confirm" });
-  expect(actions.removeMissing).not.toHaveBeenCalled();
-  expect(screen.getByText(REMOVAL_LINKS)).toBeVisible();
-  fireEvent.click(confirm);
-  await waitFor(() =>
-    expect(actions.removeMissing).toHaveBeenCalledWith("remove")
-  );
-});
-
-it("loads library health only after opening and allows a check to be cancelled", async () => {
-  actions.getHealth.mockResolvedValue({
-    total: 2,
-    unavailable: 1,
-    pending: 0,
-    failed: 0,
-    folders: [],
-    counts: {
-      available: 1,
-      offline: 1,
-      missing: 0,
-      inaccessible: 0,
-      unverified: 0,
-    },
-  });
-  actions.reconcile.mockResolvedValue({ taskId: "task" });
-  actions.getTask.mockResolvedValue({
-    taskId: "task",
-    status: "running",
-    total: 2,
-    processed: 1,
-    errors: [],
-  });
-  actions.cancelTask.mockResolvedValue({ status: "cancelled" });
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  render(
-    <QueryClientProvider client={client}>
-      <LibraryHealthDialog folderId={5} />
-    </QueryClientProvider>
-  );
-  expect(actions.getHealth).not.toHaveBeenCalled();
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.title" })
-  );
-  await screen.findByRole("button", { name: "libraryReliability.check" });
-  expect(actions.getHealth).toHaveBeenCalledWith(5);
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.check" })
-  );
-  fireEvent.click(await screen.findByRole("button", { name: "cancel" }));
-  await waitFor(() => expect(actions.cancelTask).toHaveBeenCalledWith("task"));
+afterEach(() => {
+  cleanup();
   client.clear();
 });
+function mount(children: ReactNode) {
+  return render(
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+}
+const photo = {
+  id: 7,
+  folderId: 1,
+  filename: "photo.jpg",
+  path: "D:/photos/photo.jpg",
+  thumbnailPath: null,
+  sourceStatus: "missing" as const,
+  refreshStatus: "ready" as const,
+  sourceCheckedAt: null,
+  sourceAvailableAt: null,
+  sourceErrorCode: null,
+  refreshError: null,
+  pendingMoveCount: 0,
+};
 
-it("hides healthy and ordinary pending detail notices and badges", () => {
+it("shows a global settings link on faults and removes it after recovery", async () => {
+  actions.getAttention.mockResolvedValue({ attentionCount: 0 });
+  mount(<LibraryAttentionLink />);
+  await waitFor(() => expect(actions.getAttention).toHaveBeenCalledOnce());
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  actions.getAttention.mockResolvedValue({ attentionCount: 2 });
+  await client.invalidateQueries({ queryKey: ["libraryHealth"] });
+  const link = await screen.findByRole("link", {
+    name: "libraryReliability.attentionLink",
+  });
+  expect(link).toHaveAttribute("href", "/settings/library");
+  expect(link).toHaveAttribute("data-return-index", "4");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  actions.getAttention.mockResolvedValue({ attentionCount: 0 });
+  await client.invalidateQueries({ queryKey: ["libraryHealth"] });
+  await waitFor(() =>
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+  );
+});
+
+it("keeps normal and pending details quiet and sends the affected photo to settings", () => {
+  const resolve = vi.fn();
   const { rerender } = render(
-    <LibraryPhotoControls
-      photo={{ id: 1, sourceStatus: "available", refreshStatus: "ready" }}
+    <LibraryPhotoNotice
+      onResolve={resolve}
+      photo={{ id: 7, sourceStatus: "available", refreshStatus: "ready" }}
+      showingCache={false}
     />
   );
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
   rerender(
-    <LibraryPhotoControls
-      photo={{ id: 1, sourceStatus: "unverified", refreshStatus: "pending" }}
+    <LibraryPhotoNotice
+      onResolve={resolve}
+      photo={{ id: 7, sourceStatus: "unverified", refreshStatus: "pending" }}
+      showingCache={false}
     />
   );
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
   rerender(
+    <LibraryPhotoNotice
+      onResolve={resolve}
+      photo={photo}
+      showingCache={false}
+    />
+  );
+  expect(screen.getByText("libraryReliability.detail.missing")).toBeVisible();
+  expect(
+    screen.queryByText("libraryReliability.detail.cached")
+  ).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("button", { name: "libraryReliability.goToSettings" })
+  );
+  expect(resolve).toHaveBeenCalledExactlyOnceWith(7);
+  expect(screen.getAllByRole("button")).toHaveLength(1);
+});
+
+it("mentions cache only after a usable cached preview is shown", () => {
+  const { rerender } = render(
+    <LibraryPhotoNotice
+      photo={{ ...photo, sourceStatus: "offline" }}
+      showingCache={false}
+    />
+  );
+  expect(screen.queryByText(CACHED_TEXT)).not.toBeInTheDocument();
+  rerender(
+    <LibraryPhotoNotice
+      photo={{ ...photo, sourceStatus: "offline" }}
+      showingCache
+    />
+  );
+  expect(screen.getByText(CACHED_TEXT)).toBeVisible();
+});
+
+it("keeps healthy cards quiet while marking real faults", () => {
+  const { rerender } = render(
     <LibraryPhotoStatusBadge
       refreshStatus="pending"
       sourceStatus="unverified"
@@ -222,194 +161,198 @@ it("hides healthy and ordinary pending detail notices and badges", () => {
   expect(
     screen.queryByText("libraryReliability.status.pending")
   ).not.toBeInTheDocument();
+  rerender(
+    <LibraryPhotoStatusBadge refreshStatus="ready" sourceStatus="missing" />
+  );
+  expect(screen.getByText("libraryReliability.status.missing")).toHaveAttribute(
+    "tabindex",
+    "0"
+  );
 });
 
-it("keeps maintenance behind file actions and never offers missing removal for offline sources", () => {
-  render(
-    <LibraryPhotoControls
-      photo={{ id: 1, sourceStatus: "offline", refreshStatus: "ready" }}
-      variant="menu"
+it("keeps offline recovery safe and sends a missing photo to relinking", () => {
+  const check = vi.fn(),
+    relink = vi.fn();
+  const props = {
+    busy: false,
+    onUpdated: vi.fn(),
+    onCheck: check,
+    onRelink: relink,
+    onFolder: vi.fn(),
+  };
+  const { rerender } = mount(
+    <LibrarySettingsPhoto
+      {...props}
+      photo={{ ...photo, sourceStatus: "offline" }}
     />
   );
+  fireEvent.click(
+    screen.getByRole("button", { name: "libraryReliability.check" })
+  );
+  expect(check).toHaveBeenCalledOnce();
   expect(
-    screen.queryByRole("button", { name: "libraryReliability.checkFile" })
-  ).not.toBeInTheDocument();
-  const fileActions = screen.getByRole("button", {
-    name: "libraryReliability.fileActions",
-  });
-  expect(fileActions.textContent).toBe("");
-  fireEvent.click(fileActions);
-  expect(
-    screen.getByRole("button", { name: "libraryReliability.checkFile" })
+    screen.getByRole("button", { name: "libraryReliability.relink" })
   ).toBeVisible();
   expect(
     screen.queryByRole("button", { name: "libraryReliability.remove" })
   ).not.toBeInTheDocument();
+  rerender(
+    <QueryClientProvider client={client}>
+      <LibrarySettingsPhoto {...props} photo={photo} />
+    </QueryClientProvider>
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "libraryReliability.relink" })
+  );
+  expect(relink).toHaveBeenCalled();
 });
 
-it("shows a single scoped attention entry and removes it after recovery", async () => {
-  const healthy = {
-    total: 1,
-    unavailable: 0,
-    pending: 1,
-    failed: 0,
-    attentionCount: 0,
-    folders: [],
+it("previews missing-record relationship loss before removal", async () => {
+  actions.inspectMissingRemoval.mockResolvedValue({
+    token: "remove",
+    photoIds: [7],
+    links: { tags: 2, albums: 1, faces: 1, cull: 1 },
+  });
+  actions.removeMissing.mockResolvedValue({ removed: 1 });
+  mount(
+    <LibrarySettingsPhoto
+      busy={false}
+      onCheck={vi.fn()}
+      onFolder={vi.fn()}
+      onRelink={vi.fn()}
+      onUpdated={vi.fn()}
+      photo={photo}
+    />
+  );
+  expect(
+    screen.getByRole("button", { name: "libraryReliability.checkFile" })
+  ).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", { name: "libraryReliability.remove" })
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  expect(dialog).toHaveTextContent("libraryReliability.removeLinks");
+  expect(actions.removeMissing).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "libraryReliability.remove" })
+  );
+  await waitFor(() =>
+    expect(actions.removeMissing).toHaveBeenCalledWith("remove")
+  );
+});
+
+it("requires all weak evidence confirmation before applying", () => {
+  const preview: RelinkPreview = {
+    token: "preview",
+    expiresAt: Date.now() + 600_000,
+    total: 101,
+    canApply: true,
+    unverifiedPhotoIds: [1, 101],
     counts: {
-      available: 1,
-      unverified: 0,
-      offline: 0,
+      matched: 0,
+      unverified: 2,
       missing: 0,
+      mismatch: 0,
+      conflict: 0,
       inaccessible: 0,
     },
-  };
-  actions.getHealth.mockResolvedValue(healthy);
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  render(
-    <QueryClientProvider client={client}>
-      <LibraryHealthDialog attentionOnly folderId={5} />
-    </QueryClientProvider>
-  );
-  await waitFor(() => expect(actions.getHealth).toHaveBeenCalledWith(5));
-  expect(screen.queryByRole("button")).not.toBeInTheDocument();
-  actions.getHealth.mockResolvedValue({
-    ...healthy,
-    attentionCount: 1,
-    failed: 1,
-  });
-  await client.invalidateQueries({ queryKey: ["libraryHealth"] });
-  const attention = await screen.findByRole("button", {
-    name: "libraryReliability.attention",
-  });
-  expect(attention.textContent).toBe("");
-  actions.getHealth.mockResolvedValue(healthy);
-  await client.invalidateQueries({ queryKey: ["libraryHealth"] });
-  await waitFor(() =>
-    expect(screen.queryByRole("button")).not.toBeInTheDocument()
-  );
-  client.clear();
-});
-
-it("tracks a file check to completion and shows its actual missing result", async () => {
-  actions.reconcile.mockResolvedValue({ taskId: "photo-check" });
-  actions.getTask.mockResolvedValue({
-    status: "done",
-    errors: [],
-    photoStatus: { sourceStatus: "missing" },
-  });
-  render(
-    <LibraryPhotoControls
-      photo={{ id: 7, sourceStatus: "missing", refreshStatus: "ready" }}
-      variant="menu"
-    />
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.fileActions" })
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.checkFile" })
-  );
-  await waitFor(() =>
-    expect(actions.getTask).toHaveBeenCalledWith("photo-check")
-  );
-  await screen.findByText("libraryReliability.checkResult");
-  expect(
-    screen.getByRole("button", { name: "libraryReliability.checkFile" })
-  ).toBeEnabled();
-});
-
-it("lists affected filenames and offers their recovery actions without searching the gallery", async () => {
-  actions.getHealth.mockResolvedValue({
-    attentionCount: 1,
-    total: 1,
-    unavailable: 1,
-    failed: 0,
-    pending: 0,
-    counts: {},
-    folders: [],
-  });
-  actions.getIssues.mockResolvedValue({
-    total: 1,
-    offset: 0,
-    limit: 20,
     items: [
       {
-        id: 7,
-        filename: "missing-photo.jpg",
-        path: "D:/source/missing-photo.jpg",
-        sourceStatus: "missing",
-        refreshStatus: "ready",
+        photoId: 1,
+        oldPath: "old.jpg",
+        newPath: "new.jpg",
+        status: "unverified",
       },
     ],
-  });
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
+  };
+  const apply = vi.fn();
   render(
-    <QueryClientProvider client={client}>
-      <LibraryHealthDialog />
-    </QueryClientProvider>
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.title" })
-  );
-  await screen.findByText("missing-photo.jpg");
-  expect(screen.getByText("D:/source/missing-photo.jpg")).toBeVisible();
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.managePhoto" })
-  );
-  expect(
-    screen.getByRole("button", { name: "libraryReliability.relink" })
-  ).toBeVisible();
-  client.clear();
-});
-
-it.each([
-  "failed",
-  "cancelled",
-] as const)("reports %s checks instead of silently finishing", async (status) => {
-  actions.reconcile.mockResolvedValue({ taskId: "photo-check" });
-  actions.getTask.mockResolvedValue({
-    status,
-    errors: status === "failed" ? ["EACCES"] : [],
-    photoStatus: null,
-  });
-  render(
-    <LibraryPhotoControls
-      photo={{ id: 7, sourceStatus: "missing", refreshStatus: "ready" }}
-      variant="menu"
+    <LibraryRelinkPreview
+      busy={false}
+      onApply={apply}
+      onChange={vi.fn()}
+      onClose={vi.fn()}
+      preview={preview}
     />
   );
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.fileActions" })
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.checkFile" })
-  );
-  await screen.findByText(`libraryReliability.checkState.${status}`);
-  expect(
-    screen.getByRole("button", { name: "libraryReliability.checkFile" })
-  ).toBeEnabled();
+  const submit = screen.getByRole("button", {
+    name: "libraryReliability.applyRelink",
+  });
+  expect(submit).toBeDisabled();
+  expect(screen.getByText("libraryReliability.oldLocation")).toBeVisible();
+  expect(screen.getByText(NEW_LOCATION_TEXT)).toBeVisible();
+  fireEvent.click(screen.getAllByRole("checkbox")[0]);
+  expect(submit).toBeEnabled();
+  fireEvent.click(submit);
+  expect(apply).toHaveBeenCalledWith([1, 101]);
 });
 
-it("shows a check submission failure and allows retry", async () => {
-  actions.reconcile.mockRejectedValueOnce(new Error("LIBRARY_TASK_BUSY"));
+it("treats offline sources neutrally and never retries updates before restoring access", async () => {
+  actions.getAttention.mockResolvedValue({
+    attentionCount: 0,
+    offlineCount: 3,
+  });
+  const check = vi.fn();
+  mount(
+    <>
+      <LibraryAttentionLink />
+      <LibrarySettingsPhoto
+        busy={false}
+        onCheck={check}
+        onFolder={vi.fn()}
+        onRelink={vi.fn()}
+        onUpdated={vi.fn()}
+        photo={{ ...photo, sourceStatus: "offline", refreshStatus: "failed" }}
+      />
+    </>
+  );
+  const link = await screen.findByRole("link", {
+    name: "libraryReliability.offlineLink",
+  });
+  expect(link.parentElement).not.toHaveClass("text-warning");
+  expect(
+    screen.queryByRole("button", { name: "libraryReliability.retryRefresh" })
+  ).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("button", { name: "libraryReliability.check" })
+  );
+  expect(check).toHaveBeenCalledOnce();
+  expect(actions.retryRefresh).not.toHaveBeenCalled();
+});
+it("blocks expired previews and offers a fresh inspection", () => {
+  const retry = vi.fn();
+  const preview: RelinkPreview = {
+    token: "expired",
+    expiresAt: Date.now() - 1,
+    total: 1,
+    canApply: true,
+    unverifiedPhotoIds: [],
+    counts: {
+      matched: 1,
+      unverified: 0,
+      missing: 0,
+      mismatch: 0,
+      conflict: 0,
+      inaccessible: 0,
+    },
+    items: [{ photoId: 1, oldPath: "old", newPath: "new", status: "matched" }],
+  };
   render(
-    <LibraryPhotoControls
-      photo={{ id: 7, sourceStatus: "missing", refreshStatus: "ready" }}
-      variant="menu"
+    <LibraryRelinkPreview
+      busy={false}
+      onApply={vi.fn()}
+      onChange={vi.fn()}
+      onClose={vi.fn()}
+      onRetry={retry}
+      preview={preview}
     />
   );
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.fileActions" })
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "libraryReliability.checkFile" })
-  );
-  await screen.findByText("libraryReliability.checkState.failed");
   expect(
-    screen.getByRole("button", { name: "libraryReliability.checkFile" })
-  ).toBeEnabled();
+    screen.getByRole("button", { name: "libraryReliability.applyRelink" })
+  ).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "libraryReliability.retryLocation" })
+  );
+  expect(retry).toHaveBeenCalledOnce();
+  expect(screen.queryByText("old")).not.toBeInTheDocument();
 });
