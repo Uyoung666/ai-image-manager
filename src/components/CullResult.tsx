@@ -5,7 +5,9 @@
 // biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/correctness/useImageSize: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
+
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   CheckCircle2,
@@ -484,6 +486,8 @@ export function CullResult({
 }: CullResultProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [reviewing, setReviewing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [updating, setUpdating] = useState<Set<number>>(new Set());
   const isDuel = session.mode !== "curate";
@@ -1047,6 +1051,62 @@ export function CullResult({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+      {!project &&
+        session.items.some((item) => item.photo.needsContentReview) && (
+          <div className="flex flex-wrap items-center gap-2 border-border border-b p-3 text-xs">
+            <span>{t("libraryReliability.cullNeedsReview")}</span>
+            <button
+              className="rounded border border-input px-2 py-1 text-primary"
+              disabled={reviewing}
+              onClick={async () => {
+                setReviewing(true);
+                try {
+                  const changed = session.items
+                    .filter((item) => item.photo.needsContentReview)
+                    .map((item) => item.photo.id);
+                  const records = await ipc.client.photos.getPhotosByIds({
+                    ids: changed,
+                  });
+                  const ready = records.filter(
+                    (photo) =>
+                      photo.sourceStatus === "available" &&
+                      photo.refreshStatus === "ready"
+                  );
+                  if (ready.length < changed.length) {
+                    toast.info(
+                      t("libraryReliability.reviewUnavailable", {
+                        count: changed.length - ready.length,
+                      })
+                    );
+                  }
+                  if (!ready.length) {
+                    return;
+                  }
+                  const created = await cullActions.createSession({
+                    name: t("libraryReliability.reviewName", {
+                      name: session.name,
+                    }).slice(0, 200),
+                    mode: "curate",
+                    photoIds: ready.map((photo) => photo.id),
+                  });
+                  if (created) {
+                    navigate({
+                      to: "/cull/$sessionId",
+                      params: { sessionId: String(created.id) },
+                    });
+                  }
+                } catch {
+                  toast.error(t("cullActionFailed"));
+                } finally {
+                  setReviewing(false);
+                }
+              }}
+              type="button"
+            >
+              {t("libraryReliability.reviewAgain")}
+            </button>
+          </div>
+        )}
       {/* Summary bar — stats row */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-border border-b px-3 py-1.5 sm:px-4">
         <span className="min-w-0 text-[12px] text-muted-foreground">

@@ -205,7 +205,7 @@ export const createSession = os
       allPhotoIds = loadActivePhotoIds(allPhotoIds);
     }
 
-    if (allPhotoIds.length < 2) {
+    if (allPhotoIds.length < (input.mode === "curate" ? 1 : 2)) {
       throw new Error("至少需要 2 张照片才能创建选片会话");
     }
 
