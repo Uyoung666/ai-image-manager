@@ -8,6 +8,7 @@ export const LIBRARY_SOURCE_STATUSES = [
 
 export type LibrarySourceStatus = (typeof LIBRARY_SOURCE_STATUSES)[number];
 export type LibraryRefreshStatus = "ready" | "pending" | "failed";
+export type LibraryRefreshMode = "retry" | "preview" | "analysis";
 export type LibraryStatusFilter = LibrarySourceStatus | "pending" | "failed";
 
 export interface LibraryPhotoStatus {

@@ -1157,6 +1157,7 @@ async function initColorTable(db: LanceConnection): Promise<void> {
 }
 
 interface ColorVectorEntry {
+  analysisGeneration?: number;
   b: number;
   contentRevision?: number;
   g: number;
@@ -1170,9 +1171,12 @@ export function upsertColorVector(
   r: number,
   g: number,
   b: number,
-  contentRevision = 0
+  contentRevision = 0,
+  analysisGeneration?: number
 ): Promise<void> {
-  return upsertColorVectors([{ photoId, r, g, b, contentRevision }]);
+  return upsertColorVectors([
+    { photoId, r, g, b, contentRevision, analysisGeneration },
+  ]);
 }
 
 export function upsertColorVectors(entries: ColorVectorEntry[]): Promise<void> {
@@ -1190,6 +1194,9 @@ export function upsertColorVectors(entries: ColorVectorEntry[]): Promise<void> {
         eq(photos.id, entry.photoId),
         isNull(photos.deletedAt),
         eq(photos.contentRevision, entry.contentRevision ?? 0),
+        entry.analysisGeneration === undefined
+          ? undefined
+          : eq(photos.analysisGeneration, entry.analysisGeneration),
         eq(photos.metadataRevision, photos.contentRevision)
       );
     const current = entries.filter((entry) =>

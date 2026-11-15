@@ -81,6 +81,23 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe("AI readiness for index migration", () => {
+  it("excludes previous same-content analysis while a newer generation is pending", async () => {
+    db.update(photos)
+      .set({
+        analysisGeneration: 1,
+        embeddingRevision: -1,
+        isAiProcessed: false,
+      })
+      .where(eq(photos.id, 1))
+      .run();
+    const readiness = await getAiReadiness({ loadModel: false });
+    expect(readiness).toMatchObject({
+      indexedPhotos: 7,
+      pendingPhotos: 1,
+      coverageState: "partial",
+    });
+    expect(fixture.count.mock.calls[0][0]).toContain("photo_id NOT IN (1)");
+  });
   it.each<VectorCompatibility>([
     "fingerprint-mismatch",
     "missing-fingerprint",

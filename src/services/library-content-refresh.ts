@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, exists, isNull, lt, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import {
   advancedExifData,
@@ -11,6 +11,7 @@ import {
   photos,
   photoTags,
 } from "@/db/schema";
+import type { LibraryRefreshMode } from "@/types/library-reliability";
 import { createLogger } from "@/utils/logger";
 import { resetEmbeddingRefreshRetry } from "./ai/embedding-refresh-retries";
 import { FULL_FILE_HASH_VERSION } from "./file-hash";
@@ -20,10 +21,14 @@ import { invalidateVectorSearch } from "./search-revision";
 
 const log = createLogger("library-content-refresh");
 const MAX_ATTEMPTS = 4;
+type RefreshDb = ReturnType<typeof getDatabase>;
+type RefreshJob = typeof libraryRefreshJobs.$inferSelect;
+type RefreshPhase = RefreshJob["phase"];
 let generation = 0;
 let running = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let active: Promise<void> | undefined;
+let refreshRequestId = Date.now();
 
 function preparePhotoReader(db: ReturnType<typeof getDatabase>) {
   return db
@@ -36,6 +41,11 @@ function preparePhotoReader(db: ReturnType<typeof getDatabase>) {
       sourceMtimeMs: photos.sourceMtimeMs,
       sourceCtimeMs: photos.sourceCtimeMs,
       refreshStatus: photos.refreshStatus,
+      metadataRevision: photos.metadataRevision,
+      embeddingRevision: photos.embeddingRevision,
+      colorRevision: photos.colorRevision,
+      isAiProcessed: photos.isAiProcessed,
+      embeddingRefreshAttempts: photos.embeddingRefreshAttempts,
       sourceHash: photos.sourceHash,
       sourceHashVersion: photos.sourceHashVersion,
       sourceHashFileRevision: photos.sourceHashFileRevision,
@@ -136,15 +146,31 @@ async function publish(id: number): Promise<void> {
 }
 
 function queueRefresh(
-  tx: Pick<ReturnType<typeof getDatabase>, "insert">,
+  tx: Pick<RefreshDb, "insert">,
   photoId: number,
-  contentRevision: number
+  contentRevision: number,
+  phase: RefreshPhase = "metadata",
+  repairPreview = false
 ): void {
+  refreshRequestId = Math.max(Date.now(), refreshRequestId + 1);
   tx.insert(libraryRefreshJobs)
-    .values({ photoId, contentRevision })
+    .values({
+      photoId,
+      contentRevision,
+      phase,
+      repairPreview,
+      requestId: refreshRequestId,
+    })
     .onConflictDoUpdate({
       target: libraryRefreshJobs.photoId,
-      set: { contentRevision, attempts: 0, retryAt: 0 },
+      set: {
+        contentRevision,
+        phase,
+        repairPreview,
+        requestId: refreshRequestId,
+        attempts: 0,
+        retryAt: 0,
+      },
     })
     .run();
 }
@@ -310,50 +336,142 @@ export async function observeLibraryPhoto(
   return accepted;
 }
 
-export async function retryLibraryPhotoRefresh(id: number): Promise<boolean> {
+export async function retryLibraryPhotoRefresh(
+  id: number,
+  mode: LibraryRefreshMode = "retry"
+): Promise<boolean> {
   const requestedGeneration = generation;
   const db = getDatabase();
   const row = readPhoto(db, id);
   if (!row || row.deletedAt !== null || row.sourceStatus !== "available") {
     return false;
   }
-  const accepted = await observeLibraryPhoto(id, row.path, { force: true });
+  const accepted = await observeLibraryPhoto(id, row.path);
+  const stat = await fs.stat(row.path).catch(() => null);
   const { requestAutoIndexPhotoRetry } = await import("./ai-index-scheduler");
   if (requestedGeneration !== generation || db !== getDatabase()) {
     return false;
   }
-  if (accepted) {
-    requestAutoIndexPhotoRetry(id);
-    return true;
-  }
   const latest = readPhoto(db, id);
-  if (!latest || latest.path !== row.path) {
+  if (
+    !(stat?.isFile() && latest && sameFileState(latest, fileState(stat))) ||
+    latest.path !== row.path ||
+    latest.sourceStatus !== "available" ||
+    latest.deletedAt !== null
+  ) {
     return false;
   }
   const updated = db.transaction((tx) => {
-    const result = tx
-      .update(photos)
+    const job = tx
+      .select()
+      .from(libraryRefreshJobs)
+      .where(eq(libraryRefreshJobs.photoId, id))
+      .get();
+    const phase = getRequestedPhase(mode, latest, job);
+    const retryAi =
+      mode === "analysis" ||
+      (mode === "retry" &&
+        (latest.embeddingRevision !== latest.contentRevision ||
+          !latest.isAiProcessed ||
+          latest.embeddingRefreshAttempts > 0 ||
+          latest.faceRefreshPending));
+    if (!(phase || retryAi || accepted)) {
+      return false;
+    }
+    tx.update(photos)
       .set({
-        refreshStatus: "pending",
-        refreshError: null,
-        ...resetEmbeddingRefreshRetry,
-        faceRefreshAttempts: 0,
-        faceRefreshRetryAt: 0,
-        faceProcessingError: null,
+        ...(phase
+          ? { refreshStatus: "pending" as const, refreshError: null }
+          : {}),
+        ...(retryAi
+          ? {
+              ...resetEmbeddingRefreshRetry,
+              faceRefreshAttempts: 0,
+              faceRefreshRetryAt: 0,
+              faceProcessingError: null,
+            }
+          : {}),
+        ...(mode === "analysis"
+          ? {
+              analysisGeneration: sql`${photos.analysisGeneration} + 1`,
+              isAiProcessed: false,
+              embeddingRevision: -1,
+              colorRevision: -1,
+              faceRefreshPending:
+                latest.isFaceProcessed || latest.faceRefreshPending,
+              isFaceProcessed: false,
+            }
+          : {}),
       })
       .where(stillCurrent(latest))
       .run();
-    if (result.changes === 1) {
-      queueRefresh(tx, id, latest.contentRevision);
+    if (mode === "analysis") {
+      tx.delete(advancedExifData).where(eq(advancedExifData.photoId, id)).run();
+      tx.delete(photoTags)
+        .where(
+          and(
+            eq(photoTags.photoId, id),
+            eq(photoTags.origin, "auto"),
+            eq(photoTags.userConfirmed, false)
+          )
+        )
+        .run();
     }
-    return result.changes === 1;
+    if (phase) {
+      queueRefresh(
+        tx,
+        id,
+        latest.contentRevision,
+        phase,
+        mode === "preview" || (job?.repairPreview ?? false)
+      );
+    }
+    return { retryAi };
   });
   if (updated) {
-    requestAutoIndexPhotoRetry(id);
+    if (mode === "analysis") {
+      invalidateVectorSearch();
+    }
+    if (updated.retryAi) {
+      requestAutoIndexPhotoRetry(id);
+    }
     scheduleRefresh(0);
     await publish(id);
   }
-  return updated;
+  return Boolean(updated);
+}
+
+function getRequestedPhase(
+  mode: LibraryRefreshMode,
+  photo: NonNullable<ReturnType<typeof readPhoto>>,
+  job?: RefreshJob
+): RefreshPhase | undefined {
+  if (mode === "analysis") {
+    return "metadata";
+  }
+  if (job?.contentRevision === photo.contentRevision) {
+    if (mode === "preview" && job.phase === "color") {
+      return "metadata";
+    }
+    if (
+      job.requestId === 0 &&
+      photo.metadataRevision === photo.contentRevision
+    ) {
+      // The old queue did not record the point at which SQLite committed.
+      return "color";
+    }
+    return job.phase;
+  }
+  if (
+    photo.metadataRevision !== photo.contentRevision ||
+    photo.refreshStatus === "failed"
+  ) {
+    return "metadata";
+  }
+  if (photo.colorRevision !== photo.contentRevision) {
+    return mode === "preview" ? "metadata" : "color";
+  }
+  return mode === "preview" ? "preview" : undefined;
 }
 
 function scheduleRefresh(delay: number): void {
@@ -384,7 +502,7 @@ function nextRefresh() {
     .innerJoin(photos, eq(photos.id, libraryRefreshJobs.photoId))
     .where(
       and(
-        eq(photos.refreshStatus, "pending"),
+        lt(libraryRefreshJobs.attempts, MAX_ATTEMPTS),
         eq(photos.sourceStatus, "available"),
         isNull(photos.deletedAt),
         eq(libraryRefreshJobs.contentRevision, photos.contentRevision)
@@ -424,14 +542,24 @@ async function refreshOne(
   expectedGeneration: number
 ): Promise<void> {
   const db = getDatabase();
-  const match = stillCurrent(row);
+  const match = and(
+    stillCurrent(row),
+    eq(photos.analysisGeneration, row.analysisGeneration),
+    exists(
+      db
+        .select({ id: libraryRefreshJobs.photoId })
+        .from(libraryRefreshJobs)
+        .where(jobMatch(job))
+    )
+  );
+  const isCurrent = () =>
+    expectedGeneration === generation &&
+    db === getDatabase() &&
+    Boolean(db.select({ id: photos.id }).from(photos).where(match).get());
   try {
     const { preparePhotoRecord } = await import("./indexer");
     const { deleteDuelPreview } = await import("./thumbnailer");
-    if (
-      expectedGeneration !== generation ||
-      !db.select({ id: photos.id }).from(photos).where(match).get()
-    ) {
+    if (!isCurrent()) {
       return;
     }
     const before = await fs.stat(row.path);
@@ -441,10 +569,29 @@ async function refreshOne(
       }
       return;
     }
-    await deleteDuelPreview(row.path);
-    const prepared = await preparePhotoRecord(row.path, row.folderId);
+    if (job.phase === "color") {
+      await publishColor(row);
+      if (!isCurrent()) {
+        return;
+      }
+      db.transaction((tx) => {
+        tx.update(photos)
+          .set({ refreshStatus: "ready", refreshError: null })
+          .where(match)
+          .run();
+        tx.delete(libraryRefreshJobs).where(jobMatch(job)).run();
+      });
+      await publish(row.id);
+      return;
+    }
+    if (job.phase === "metadata") {
+      await deleteDuelPreview(row.path);
+    }
+    const prepared = await preparePhotoRecord(row.path, row.folderId, {
+      repairPreview: job.phase === "preview" || job.repairPreview,
+    });
     const after = await fs.stat(row.path);
-    if (expectedGeneration !== generation) {
+    if (!isCurrent()) {
       return;
     }
     if (!sameFileState(row, fileState(after))) {
@@ -474,51 +621,63 @@ async function refreshOne(
       if (
         tx
           .update(photos)
-          .set({
-            colorBucket,
-            colorSpace,
-            dominantColors,
-            fileDate,
-            fileSize,
-            format,
-            hasAlpha,
-            height,
-            phash,
-            thumbnailPath,
-            thumbnailSize,
-            width,
-            metadataRevision: row.contentRevision,
-            refreshStatus: "ready",
-            refreshError: null,
-          })
+          .set(
+            job.phase === "preview"
+              ? {
+                  thumbnailPath,
+                  thumbnailSize,
+                  refreshStatus: "ready",
+                  refreshError: null,
+                }
+              : {
+                  colorBucket,
+                  colorSpace,
+                  dominantColors,
+                  fileDate,
+                  fileSize,
+                  format,
+                  hasAlpha,
+                  height,
+                  phash,
+                  thumbnailPath,
+                  thumbnailSize,
+                  width,
+                  metadataRevision: row.contentRevision,
+                  refreshStatus: "pending",
+                  refreshError: null,
+                }
+          )
           .where(match)
           .run().changes !== 1
       ) {
         return false;
       }
-      tx.delete(exifData).where(eq(exifData.photoId, row.id)).run();
-      if (prepared.exifRecord) {
-        tx.insert(exifData)
-          .values({ ...prepared.exifRecord, photoId: row.id })
+      if (job.phase === "preview") {
+        tx.delete(libraryRefreshJobs).where(jobMatch(job)).run();
+      } else {
+        tx.delete(exifData).where(eq(exifData.photoId, row.id)).run();
+        if (prepared.exifRecord) {
+          tx.insert(exifData)
+            .values({ ...prepared.exifRecord, photoId: row.id })
+            .run();
+        }
+        tx.update(libraryRefreshJobs)
+          .set({
+            phase: "color",
+            repairPreview: false,
+            attempts: 0,
+            retryAt: 0,
+          })
+          .where(jobMatch(job))
           .run();
       }
       return true;
     });
     if (committed) {
-      await publishRefresh(row, dominantColors);
-      if (expectedGeneration === generation && db === getDatabase()) {
-        db.delete(libraryRefreshJobs)
-          .where(
-            and(
-              eq(libraryRefreshJobs.photoId, row.id),
-              eq(libraryRefreshJobs.contentRevision, row.contentRevision)
-            )
-          )
-          .run();
-      }
+      await publishPreparedPhoto(job, row, thumbnailPath);
     }
   } catch (err) {
-    if (expectedGeneration !== generation) {
+    if (!isCurrent()) {
       return;
     }
     const attempts = job.attempts + 1;
@@ -528,12 +687,7 @@ async function refreshOne(
       }
       tx.update(libraryRefreshJobs)
         .set({ attempts, retryAt: Date.now() + 1000 * 2 ** attempts })
-        .where(
-          and(
-            eq(libraryRefreshJobs.photoId, row.id),
-            eq(libraryRefreshJobs.contentRevision, job.contentRevision)
-          )
-        )
+        .where(jobMatch(job))
         .run();
       tx.update(photos)
         .set({
@@ -554,19 +708,23 @@ async function refreshOne(
   }
 }
 
-async function publishRefresh(
-  row: typeof photos.$inferSelect,
-  colors: string | null
-): Promise<void> {
-  const { scheduleAdvancedExifEnrichment } = await import("./advanced-exif");
-  const { requestAutoIndex } = await import("./ai-index-scheduler");
-  scheduleAdvancedExifEnrichment();
-  requestAutoIndex("content-refresh");
-  await publish(row.id);
-  if (colors) {
+function jobMatch(job: RefreshJob) {
+  return and(
+    eq(libraryRefreshJobs.photoId, job.photoId),
+    eq(libraryRefreshJobs.contentRevision, job.contentRevision),
+    eq(libraryRefreshJobs.requestId, job.requestId)
+  );
+}
+
+async function publishColor(row: typeof photos.$inferSelect): Promise<void> {
+  if (row.dominantColors) {
     const { upsertColorVector } = await import("./ai/vector-db");
     const primary = (
-      JSON.parse(colors) as Array<{ r: number; g: number; b: number }>
+      JSON.parse(row.dominantColors) as Array<{
+        r: number;
+        g: number;
+        b: number;
+      }>
     )[0];
     if (primary) {
       await upsertColorVector(
@@ -574,15 +732,85 @@ async function publishRefresh(
         primary.r,
         primary.g,
         primary.b,
-        row.contentRevision
+        row.contentRevision,
+        row.analysisGeneration
       );
+      return;
     }
   }
+  getDatabase()
+    .update(photos)
+    .set({ colorRevision: row.contentRevision })
+    .where(
+      and(
+        stillCurrent(row),
+        eq(photos.analysisGeneration, row.analysisGeneration)
+      )
+    )
+    .run();
 }
 
 export function startLibraryContentRefresh(): void {
   running = true;
+  recoverRefreshJobs();
   scheduleRefresh(0);
+}
+
+function recoverRefreshJobs(): void {
+  const db = getDatabase();
+  db.transaction((tx) => {
+    tx.update(libraryRefreshJobs)
+      .set({ phase: "color" })
+      .where(
+        and(
+          eq(libraryRefreshJobs.requestId, 0),
+          exists(
+            tx
+              .select({ id: photos.id })
+              .from(photos)
+              .where(
+                and(
+                  eq(photos.id, libraryRefreshJobs.photoId),
+                  eq(
+                    photos.contentRevision,
+                    libraryRefreshJobs.contentRevision
+                  ),
+                  eq(photos.metadataRevision, photos.contentRevision)
+                )
+              )
+          )
+        )
+      )
+      .run();
+    tx.update(photos)
+      .set({ refreshStatus: "pending" })
+      .where(
+        and(
+          eq(photos.refreshStatus, "ready"),
+          exists(
+            tx
+              .select({ id: libraryRefreshJobs.photoId })
+              .from(libraryRefreshJobs)
+              .where(
+                and(
+                  eq(libraryRefreshJobs.photoId, photos.id),
+                  eq(
+                    libraryRefreshJobs.contentRevision,
+                    photos.contentRevision
+                  ),
+                  lt(libraryRefreshJobs.attempts, MAX_ATTEMPTS)
+                )
+              )
+          )
+        )
+      )
+      .run();
+    tx.run(
+      sql.raw(
+        "INSERT INTO library_refresh_jobs (photo_id, content_revision, phase, request_id) SELECT id, content_revision, 'color', 1 FROM photos WHERE deleted_at IS NULL AND metadata_revision = content_revision AND color_revision <> content_revision AND dominant_colors IS NOT NULL ON CONFLICT(photo_id) DO NOTHING"
+      )
+    );
+  });
 }
 
 export function wakeLibraryContentRefresh(): void {
@@ -595,4 +823,26 @@ export async function stopLibraryContentRefresh(): Promise<void> {
   clearTimeout(timer);
   timer = undefined;
   await active;
+}
+
+async function publishPreparedPhoto(
+  job: RefreshJob,
+  row: typeof photos.$inferSelect,
+  thumbnailPath: string | null
+) {
+  if ((job.phase === "preview" || job.repairPreview) && thumbnailPath) {
+    const { finishPreviewRepair } = await import("./thumbnailer");
+    await finishPreviewRepair(row.path, thumbnailPath).catch(
+      (error: unknown) => {
+        log.warn({ error, photoId: row.id }, "Old preview cleanup deferred");
+      }
+    );
+  }
+  if (job.phase === "metadata") {
+    const { scheduleAdvancedExifEnrichment } = await import("./advanced-exif");
+    const { requestAutoIndex } = await import("./ai-index-scheduler");
+    scheduleAdvancedExifEnrichment();
+    requestAutoIndex("content-refresh");
+  }
+  await publish(row.id);
 }

@@ -30,6 +30,7 @@ vi.mock("@/utils/gallery-image-observer", () => ({
   observeGalleryImage: () => () => undefined,
 }));
 vi.mock("@/utils/local-media-url", () => ({
+  previewRepairVersion: () => "",
   toGalleryThumbnailUrl: (
     id: number,
     edge: number,

@@ -100,6 +100,7 @@ export const photos = sqliteTable(
     sourceHashFileRevision: integer("source_hash_file_revision"),
     fileRevision: integer("file_revision").notNull().default(0),
     contentRevision: integer("content_revision").notNull().default(0),
+    analysisGeneration: integer("analysis_generation").notNull().default(0),
     metadataRevision: integer("metadata_revision").notNull().default(0),
     embeddingRevision: integer("embedding_revision").notNull().default(0),
     embeddingRefreshAttempts: integer("embedding_refresh_attempts")
@@ -623,6 +624,24 @@ export const pluginAssets = sqliteTable(
   })
 );
 
+export const libraryMoveCandidates = sqliteTable(
+  "library_move_candidates",
+  {
+    photoId: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    targetPathKey: text("target_path_key").notNull(),
+    targetPath: text("target_path").notNull(),
+    fileRevision: integer("file_revision").notNull(),
+    sourceMissingAt: integer("source_missing_at").notNull(),
+    reason: text("reason", { enum: ["ambiguous", "incomplete"] }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.photoId, table.targetPathKey] }),
+    targetIdx: index("idx_library_move_target").on(table.targetPathKey),
+  })
+);
+
 export const libraryRefreshJobs = sqliteTable("library_refresh_jobs", {
   photoId: integer("photo_id")
     .primaryKey()
@@ -630,6 +649,13 @@ export const libraryRefreshJobs = sqliteTable("library_refresh_jobs", {
       onDelete: "cascade",
     }),
   contentRevision: integer("content_revision").notNull(),
+  requestId: integer("request_id").notNull().default(0),
+  phase: text("phase", { enum: ["metadata", "color", "preview"] })
+    .notNull()
+    .default("metadata"),
+  repairPreview: integer("repair_preview", { mode: "boolean" })
+    .notNull()
+    .default(false),
   attempts: integer("attempts").notNull().default(0),
   retryAt: integer("retry_at").notNull().default(0),
 });

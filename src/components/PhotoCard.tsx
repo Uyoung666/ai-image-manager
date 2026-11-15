@@ -25,6 +25,7 @@ import type { SearchMatch } from "@/types/photo";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import type { ImagePriority } from "@/utils/image-scheduler";
 import {
+  previewRepairVersion,
   toGalleryThumbnailUrl,
   toLocalMediaUrl,
 } from "@/utils/local-media-url";
@@ -323,7 +324,7 @@ export const PhotoCard = memo(function PhotoCard({
   const managed = Boolean(toGalleryThumbnailUrl(id, 256));
   const gallery = useGalleryThumbnail({
     id,
-    version: `${id}:${width}:${height}:${retryCount}${sourceUnavailable ? ":cached" : ""}`,
+    version: `${id}:${width}:${height}:${retryCount}${previewRepairVersion(thumbnailPath)}${sourceUnavailable ? ":cached" : ""}`,
     sourceVersion: thumbnailVersion,
     sourceKey: path,
     sourceAspect: width > 0 && height > 0 ? width / height : 0,

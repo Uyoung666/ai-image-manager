@@ -477,6 +477,13 @@
       "when": 1794184840314,
       "tag": "0067_library_embedding_refresh_retries",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1794708618412,
+      "tag": "0068_library_recovery_tasks",
+      "breakpoints": true
     }
   ]
 }

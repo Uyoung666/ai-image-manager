@@ -25,6 +25,7 @@ const state = vi.hoisted(() => ({
   prepare: vi.fn(),
   publish: vi.fn(),
   retryAi: vi.fn(),
+  color: vi.fn(),
 }));
 vi.mock("@/db", () => ({ getDatabase: () => state.db }));
 vi.mock("@/services/library-moves", () => ({ hashLibraryFile: state.hash }));
@@ -33,7 +34,11 @@ vi.mock("@/services/library-change", () => ({
 }));
 vi.mock("@/services/indexer", () => ({ preparePhotoRecord: state.prepare }));
 vi.mock("@/services/import-queue", () => ({ isImportQueueBusy: () => false }));
-vi.mock("@/services/thumbnailer", () => ({ deleteDuelPreview: vi.fn() }));
+vi.mock("@/services/thumbnailer", () => ({
+  finishPreviewRepair: vi.fn().mockResolvedValue(undefined),
+  deleteDuelPreview: vi.fn(),
+}));
+vi.mock("@/services/ai/vector-db", () => ({ upsertColorVector: state.color }));
 vi.mock("@/services/advanced-exif", () => ({
   scheduleAdvancedExifEnrichment: vi.fn(),
 }));
@@ -89,6 +94,126 @@ beforeEach(async () => {
     })
     .run();
   state.hash.mockResolvedValue("new-hash");
+  state.color.mockResolvedValue(undefined);
+});
+
+it("resumes the color step after the legacy queue committed metadata and stopped", async () => {
+  db.update(photos)
+    .set({
+      contentRevision: 1,
+      metadataRevision: 1,
+      colorRevision: 0,
+      refreshStatus: "ready",
+      dominantColors: '[{"r":1,"g":2,"b":3}]',
+    })
+    .run();
+  db.insert(libraryRefreshJobs)
+    .values({ photoId: 1, contentRevision: 1 })
+    .run();
+  startLibraryContentRefresh();
+  await vi.waitFor(() =>
+    expect(db.select().from(libraryRefreshJobs).all()).toEqual([])
+  );
+  expect(state.color).toHaveBeenCalledWith(1, 1, 2, 3, 1, 0);
+  expect(state.prepare).not.toHaveBeenCalled();
+  expect(db.select().from(photos).get()?.refreshStatus).toBe("ready");
+});
+
+it("keeps a failed color publish durable without regenerating metadata on retry", async () => {
+  db.update(photos)
+    .set({
+      contentRevision: 1,
+      metadataRevision: 1,
+      colorRevision: 0,
+      refreshStatus: "ready",
+      dominantColors: '[{"r":1,"g":2,"b":3}]',
+    })
+    .run();
+  db.insert(libraryRefreshJobs)
+    .values({ photoId: 1, contentRevision: 1 })
+    .run();
+  state.color.mockRejectedValueOnce(new Error("color store unavailable"));
+  startLibraryContentRefresh();
+  await vi.waitFor(() =>
+    expect(db.select().from(libraryRefreshJobs).get()?.attempts).toBe(1)
+  );
+  await stopLibraryContentRefresh();
+  expect(db.select().from(libraryRefreshJobs).get()?.phase).toBe("color");
+  expect(db.select().from(photos).get()?.refreshStatus).toBe("pending");
+  db.update(libraryRefreshJobs).set({ retryAt: 0 }).run();
+  startLibraryContentRefresh();
+  await vi.waitFor(() =>
+    expect(db.select().from(libraryRefreshJobs).all()).toEqual([])
+  );
+  expect(state.prepare).not.toHaveBeenCalled();
+});
+
+it("rebuilds analysis at the same content revision and rejects the previous task generation", async () => {
+  const previous = db.select().from(photos).get();
+  if (!previous) {
+    throw new Error("Missing fixture");
+  }
+  expect(await retryLibraryPhotoRefresh(1, "analysis")).toBe(true);
+  expect(db.select().from(photos).get()).toMatchObject({
+    contentRevision: 0,
+    analysisGeneration: 1,
+    isAiProcessed: false,
+    isFaceProcessed: false,
+    faceRefreshPending: true,
+    embeddingRevision: -1,
+  });
+  expect(
+    db.select().from(photos).where(photoWorkVersionMatch(previous)).get()
+  ).toBeUndefined();
+  expect(state.retryAi).toHaveBeenCalledWith(1);
+});
+
+it("repairs the preview through an explicit bypass without invalidating valid AI", async () => {
+  expect(await retryLibraryPhotoRefresh(1, "preview")).toBe(true);
+  state.prepare.mockResolvedValue({
+    photoRecord: { thumbnailPath: "repaired.webp", thumbnailSize: "42x42" },
+    exifRecord: null,
+  });
+  startLibraryContentRefresh();
+  await vi.waitFor(() =>
+    expect(db.select().from(libraryRefreshJobs).all()).toEqual([])
+  );
+  expect(state.prepare).toHaveBeenCalledWith(source, null, {
+    repairPreview: true,
+  });
+  expect(db.select().from(photos).get()).toMatchObject({
+    thumbnailPath: "repaired.webp",
+    isAiProcessed: true,
+    contentRevision: 0,
+    analysisGeneration: 0,
+  });
+  expect(state.retryAi).not.toHaveBeenCalled();
+});
+
+it("discards an in-flight preview after a newer repair request replaces it", async () => {
+  await retryLibraryPhotoRefresh(1, "preview");
+  let resolve!: (value: unknown) => void;
+  state.prepare.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      })
+  );
+  startLibraryContentRefresh();
+  await vi.waitFor(() => expect(state.prepare).toHaveBeenCalled());
+  await retryLibraryPhotoRefresh(1, "preview");
+  resolve({
+    photoRecord: { thumbnailPath: "obsolete.webp" },
+    exifRecord: null,
+  });
+  await stopLibraryContentRefresh();
+  expect(db.select().from(photos).get()?.thumbnailPath).not.toBe(
+    "obsolete.webp"
+  );
+  expect(db.select().from(libraryRefreshJobs).get()).toMatchObject({
+    photoId: 1,
+    phase: "preview",
+  });
 });
 
 afterEach(async () => {

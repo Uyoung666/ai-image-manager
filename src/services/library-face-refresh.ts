@@ -8,6 +8,7 @@ import { getSetting } from "./settings-manager";
 const MAX_ATTEMPTS = 4;
 type RefreshDatabase = ReturnType<typeof getDatabase>;
 interface FaceRefreshRow {
+  analysisGeneration: number;
   attempts: number;
   error: string | null;
   fileRevision: number;
@@ -30,6 +31,7 @@ function currentAttempt(row: FaceRefreshRow, attempts: number) {
     eq(photos.id, row.id),
     eq(photos.contentRevision, row.revision),
     eq(photos.fileRevision, row.fileRevision),
+    eq(photos.analysisGeneration, row.analysisGeneration),
     eq(photos.faceRefreshAttempts, attempts),
     eq(photos.faceRefreshPending, true)
   );
@@ -171,6 +173,7 @@ export async function refreshChangedPhotoFaces(
   while (!isStopped(signal, db)) {
     const rows = db
       .select({
+        analysisGeneration: photos.analysisGeneration,
         id: photos.id,
         revision: photos.contentRevision,
         fileRevision: photos.fileRevision,

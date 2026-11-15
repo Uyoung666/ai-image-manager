@@ -797,10 +797,14 @@ async function runBatchSuggestTags(
   mode: BatchTagMode = "append"
 ): Promise<{ tagged: number; skipped: number }> {
   const db = getDatabase();
-  const revisions = new Map<number, number>();
+  const revisions = new Map<number, { revision: number; generation: number }>();
   for (let index = 0; index < photoIds.length; index += 500) {
     for (const row of db
-      .select({ id: photos.id, revision: photos.contentRevision })
+      .select({
+        id: photos.id,
+        revision: photos.contentRevision,
+        generation: photos.analysisGeneration,
+      })
       .from(photos)
       .where(
         and(
@@ -810,7 +814,7 @@ async function runBatchSuggestTags(
         )
       )
       .all()) {
-      revisions.set(row.id, row.revision);
+      revisions.set(row.id, row);
     }
   }
 
@@ -959,18 +963,19 @@ async function runBatchSuggestTags(
           }
 
           const changed = db.transaction((tx) => {
-            const revision = revisions.get(photoId);
+            const version = revisions.get(photoId);
             if (
               db !== getDatabase() ||
-              revision === undefined ||
+              version === undefined ||
               !tx
                 .select({ id: photos.id })
                 .from(photos)
                 .where(
                   and(
                     eq(photos.id, photoId),
-                    eq(photos.contentRevision, revision),
-                    eq(photos.embeddingRevision, revision),
+                    eq(photos.contentRevision, version.revision),
+                    eq(photos.embeddingRevision, version.revision),
+                    eq(photos.analysisGeneration, version.generation),
                     isNull(photos.deletedAt)
                   )
                 )

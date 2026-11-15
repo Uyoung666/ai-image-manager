@@ -5,6 +5,12 @@ import { scheduleImage } from "./image-scheduler";
 
 const DISPLAY_PIPELINE_VERSION = 2;
 const MEDIA_PRELOAD_CONCURRENCY = 4;
+const REPAIRED_PREVIEW = /-r-([a-f0-9]{16})\.webp$/i;
+
+export function previewRepairVersion(thumbnailPath?: string | null): string {
+  const repair = thumbnailPath?.match(REPAIRED_PREVIEW)?.[1];
+  return repair ? `:repair-${repair}` : "";
+}
 
 export function toGalleryThumbnailUrl(
   id: number,

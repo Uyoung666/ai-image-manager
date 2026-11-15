@@ -20,7 +20,10 @@ import {
   listPhotoFaces,
   reviewFace,
 } from "@/ipc/faces/handlers";
-import { getCurrentFaceIdentityCentroid } from "@/services/face-detector";
+import {
+  getCurrentFaceIdentityCentroid,
+  persistFacePhoto,
+} from "@/services/face-detector";
 
 let sqlite: Database.Database;
 let db: ReturnType<typeof drizzle>;
@@ -78,4 +81,65 @@ it("rejects review mutations for an obsolete detected face", async () => {
     call(reviewFace, { faceVectorId: 1, action: "reject" })
   ).rejects.toThrow();
   expect(db.select().from(faceVectors).get()?.isRejected).toBe(false);
+});
+
+it("updates a same-content confirmed face without duplicating or detaching its identity", () => {
+  db.update(photos)
+    .set({ analysisGeneration: 1, isFaceProcessed: false })
+    .run();
+  db.transaction(() =>
+    persistFacePhoto(
+      db,
+      {
+        id: 1,
+        faces: [
+          {
+            faceIndex: 0,
+            bbox: { x: 0.2, y: 0.3, width: 0.4, height: 0.5 },
+            confidence: 0.99,
+            embedding: [0.8, 0.2],
+          },
+        ],
+      },
+      0
+    )
+  );
+  expect(db.select().from(faceVectors).all()).toHaveLength(1);
+  expect(db.select().from(faceVectors).get()).toMatchObject({
+    id: 1,
+    contentRevision: 0,
+    bboxX: 0.2,
+    bboxY: 0.3,
+    embedding: "[0.8,0.2]",
+  });
+  expect(db.select().from(faceIdentityMembers).get()).toMatchObject({
+    identityId: 1,
+    faceVectorId: 1,
+  });
+});
+
+it("keeps an earlier confirmed face as history when detection belongs to new content", () => {
+  db.update(photos).set({ contentRevision: 1 }).run();
+  db.transaction(() =>
+    persistFacePhoto(
+      db,
+      {
+        id: 1,
+        faces: [
+          {
+            faceIndex: 0,
+            bbox: { x: 0.2, y: 0.3, width: 0.4, height: 0.5 },
+            confidence: 0.99,
+            embedding: [0.8, 0.2],
+          },
+        ],
+      },
+      1
+    )
+  );
+  expect(db.select().from(faceVectors).all()).toHaveLength(2);
+  expect(db.select().from(faceIdentityMembers).get()).toMatchObject({
+    identityId: 1,
+    faceVectorId: 1,
+  });
 });

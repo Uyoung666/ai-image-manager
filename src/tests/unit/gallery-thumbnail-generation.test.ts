@@ -97,6 +97,44 @@ afterEach(async () => {
   });
 });
 describe("physical gallery thumbnail generation", () => {
+  it("repairs a cached preview by bypassing both memory and disk cache", async () => {
+    const before = await generateThumbnail(original);
+    await sharp({
+      create: { width: 512, height: 256, channels: 3, background: "#ff0000" },
+    })
+      .webp()
+      .toFile(before.thumbnailPath);
+    const repaired = await generateThumbnail(original, "md", { force: true });
+    expect(repaired.thumbnailPath).not.toBe(before.thumbnailPath);
+    expect(fs.existsSync(before.thumbnailPath)).toBe(true);
+    const pixel = await sharp(
+      await fs.promises.readFile(repaired.thumbnailPath)
+    )
+      .raw()
+      .toBuffer();
+    expect(pixel[2]).toBeGreaterThan(pixel[0]);
+    const stat = fs.statSync(original);
+    const evidence = {
+      thumbnailPath: repaired.thumbnailPath,
+      metadataRevision: 0,
+      contentRevision: 0,
+      sourceSize: stat.size,
+      sourceMtimeMs: stat.mtimeMs,
+      sourceCtimeMs: stat.ctimeMs,
+    };
+    const physical = await generateGalleryThumbnail(
+      original,
+      256,
+      undefined,
+      0,
+      undefined,
+      false,
+      false,
+      evidence
+    );
+    const physicalPixels = await sharp(physical.thumbnailPath).raw().toBuffer();
+    expect(physicalPixels[2]).toBeGreaterThan(physicalPixels[0]);
+  });
   it("serves a relinked HEIF viewport from its preview without reading the original again", async () => {
     const input = path.join(runtime.root, "source.heic");
     await fs.promises.copyFile(heifFixturePath, input);

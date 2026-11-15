@@ -37,9 +37,11 @@ import {
   readValidatedThumbnail,
 } from "./thumbnail-validation";
 
+const WEBP_SUFFIX = /\.webp$/;
+const REPAIRED_PREVIEW_SUFFIX = /-r-[a-f0-9]{16}\.webp$/i;
 const log = createLogger("thumbnailer");
 const MANAGED_THUMBNAIL_EXTENSION =
-  /^(?:[a-f0-9]{32}\.(?:webp|jpg)|g-[a-f0-9]{32}-[a-f0-9]{32}-(?:256|512|1024|2048|v5-(?:sm|md|lg)-[1-3])\.webp)$/i;
+  /^(?:[a-f0-9]{32}\.(?:webp|jpg)|g-[a-f0-9]{32}-[a-f0-9]{32}-(?:256|512|1024|2048|v5-(?:sm|md|lg)-[1-3](?:-r-[a-f0-9]{16})?)\.webp)$/i;
 const HEIF_FILE_EXTENSION = /\.hei[cf]$/i;
 const HEIF_SOURCE_PREFIX = /^h-[a-f0-9]{32}-/;
 const GALLERY_SOURCE_PREFIX = /^g-[a-f0-9]{32}-/;
@@ -115,6 +117,7 @@ interface ThumbnailResult {
 }
 interface ThumbnailOptions {
   expectedIdentity?: string;
+  force?: boolean;
   input?: string | Buffer;
   orientation?: ExifOrientation;
   prepared?: boolean;
@@ -708,8 +711,14 @@ export async function generateThumbnail(
   const source = await fs.promises.stat(imagePath);
   const identity = thumbnailSourceIdentity(source);
   assertThumbnailSource(source, scope, options.expectedIdentity ?? identity);
-  const thumbPath = getVersionedThumbnailPath(imagePath, size, identity);
-  const cached = memoryCache?.get(thumbPath);
+  const basePath = getVersionedThumbnailPath(imagePath, size, identity);
+  const thumbPath = options.force
+    ? basePath.replace(
+        WEBP_SUFFIX,
+        `-r-${crypto.randomBytes(8).toString("hex")}.webp`
+      )
+    : basePath;
+  const cached = options.force ? undefined : memoryCache?.get(thumbPath);
   if (cached) {
     diskAccessLog.set(path.basename(thumbPath), Date.now());
     return cached;
@@ -717,7 +726,10 @@ export async function generateThumbnail(
 
   const existing = inFlightThumbnails.get(thumbPath);
   if (existing) {
-    return existing;
+    if (!options.force) {
+      return existing;
+    }
+    await existing.catch(() => undefined);
   }
   const promise = readOrGenerateThumbnail(
     imagePath,
@@ -729,7 +741,8 @@ export async function generateThumbnail(
   );
   inFlightThumbnails.set(thumbPath, promise);
   try {
-    return await promise;
+    const result = await promise;
+    return result;
   } finally {
     if (inFlightThumbnails.get(thumbPath) === promise) {
       inFlightThumbnails.delete(thumbPath);
@@ -758,7 +771,9 @@ async function readOrGenerateThumbnail(
   scope: number,
   options: ThumbnailOptions
 ): Promise<ThumbnailResult> {
-  const cached = await readGalleryVariant(thumbPath, identity);
+  const cached = options.force
+    ? null
+    : await readGalleryVariant(thumbPath, identity);
   if (!cached) {
     return doGenerate(imagePath, size, thumbPath, identity, scope, options);
   }
@@ -978,6 +993,20 @@ function ownedLegacyPreviewPath(
   source: fs.Stats,
   evidence?: LegacyThumbnailEvidence
 ): string | undefined {
+  const repaired = repairedPreviewPath(
+    imagePath,
+    thumbnailSourceIdentity(source),
+    evidence?.thumbnailPath
+  );
+  if (
+    repaired &&
+    evidence?.metadataRevision === evidence?.contentRevision &&
+    evidence?.sourceSize === source.size &&
+    evidence?.sourceMtimeMs === source.mtimeMs &&
+    evidence?.sourceCtimeMs === source.ctimeMs
+  ) {
+    return repaired;
+  }
   const legacy = getThumbnailPath(imagePath, "md");
   if (
     evidence?.thumbnailPath === legacy &&
@@ -991,6 +1020,47 @@ function ownedLegacyPreviewPath(
     return legacy;
   }
   return undefined;
+}
+
+function repairedPreviewPath(
+  imagePath: string,
+  identity: string,
+  candidate?: string | null
+) {
+  const base = getVersionedThumbnailPath(imagePath, "md", identity).slice(
+    0,
+    -5
+  );
+  return candidate &&
+    isStoredThumbnailName(candidate) &&
+    candidate.startsWith(`${base}-r-`) &&
+    REPAIRED_PREVIEW_SUFFIX.test(candidate)
+    ? candidate
+    : undefined;
+}
+
+/** Retire older variants only after the new preview is committed to its photo. */
+export async function finishPreviewRepair(
+  imagePath: string,
+  repairedPath: string
+): Promise<void> {
+  if (!(thumbnailDir && isStoredThumbnailName(repairedPath))) {
+    return;
+  }
+  await ensureGalleryVariantIndex();
+  const prefix = gallerySourcePrefix(imagePath);
+  const identity = path
+    .basename(repairedPath)
+    .slice(prefix.length, prefix.length + 32);
+  for (const name of [...(galleryVariantNames.get(prefix) ?? [])]) {
+    const cachedPath = path.join(thumbnailDir, name);
+    if (
+      name.startsWith(`${prefix}${identity}-`) &&
+      cachedPath !== repairedPath
+    ) {
+      await removeUnreferencedThumbnail(cachedPath);
+    }
+  }
 }
 
 /** Caller must prove full-content equality before transferring a preview. */
@@ -1013,12 +1083,20 @@ export async function preserveRelinkThumbnail(
     mtimeMs: evidence.sourceMtimeMs,
     ctimeMs: evidence.sourceCtimeMs,
   });
-  const expected = getVersionedThumbnailPath(
+  const canonical = getVersionedThumbnailPath(
     previousPath,
     "md",
     previousIdentity
   );
-  if (evidence.thumbnailPath !== expected) {
+  const expected =
+    evidence.thumbnailPath === canonical
+      ? canonical
+      : repairedPreviewPath(
+          previousPath,
+          previousIdentity,
+          evidence.thumbnailPath
+        );
+  if (!expected) {
     return undefined;
   }
   try {
@@ -1070,7 +1148,13 @@ async function galleryPreview(
     const existing =
       legacy ?? getVersionedThumbnailPath(imagePath, "md", identity);
     const stats = await fs.promises.stat(existing);
-    if (!previewMatchesSource(stats, source, !!legacy)) {
+    if (
+      !previewMatchesSource(
+        stats,
+        source,
+        existing === getThumbnailPath(imagePath, "md")
+      )
+    ) {
       return undefined;
     }
     const { metadata: meta, buffer } = await readValidatedThumbnail(
@@ -1117,7 +1201,16 @@ export async function getGalleryThumbnailHint(
   const preview =
     legacy ?? getVersionedThumbnailPath(photo.path, "md", identity);
   const previewStat = await readStat(preview);
-  if (!(previewStat && previewMatchesSource(previewStat, source, !!legacy))) {
+  if (
+    !(
+      previewStat &&
+      previewMatchesSource(
+        previewStat,
+        source,
+        preview === getThumbnailPath(photo.path, "md")
+      )
+    )
+  ) {
     return undefined;
   }
   // The managed preview filename encodes this physical size. Do not read
@@ -1150,9 +1243,18 @@ export async function generateGalleryThumbnail(
   signal?.throwIfAborted();
   const identity = thumbnailSourceIdentity(source);
   assertThumbnailSource(source, scope, identity);
+  const ownedPreview = ownedLegacyPreviewPath(
+    imagePath,
+    source,
+    legacyEvidence
+  );
+  const repairIdentity =
+    ownedPreview && REPAIRED_PREVIEW_SUFFIX.test(ownedPreview)
+      ? `-r-${ownedPreview.slice(-21, -5)}`
+      : "";
   const target = path.join(
     thumbnailDir,
-    `${gallerySourcePrefix(imagePath)}${identity}-${edge}.webp`
+    `${gallerySourcePrefix(imagePath)}${identity}${repairIdentity}-${edge}.webp`
   );
   // A browser decode failure can leave readable container metadata. Repair
   // bypasses both cached representations and atomically replaces this tier.

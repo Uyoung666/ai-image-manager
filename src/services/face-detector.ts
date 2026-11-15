@@ -570,7 +570,7 @@ export function selectReplaceableFaceResults(
   });
 }
 
-function persistFacePhoto(
+export function persistFacePhoto(
   db: ReturnType<typeof getDatabase>,
   photo: FaceDetectionResult,
   contentRevision: number
@@ -589,7 +589,11 @@ function persistFacePhoto(
       .run();
   }
   const confirmedIds = db
-    .select({ id: faceVectors.id })
+    .select({
+      id: faceVectors.id,
+      revision: faceVectors.contentRevision,
+      faceIndex: faceVectors.faceIndex,
+    })
     .from(faceVectors)
     .innerJoin(
       faceIdentityMembers,
@@ -605,20 +609,43 @@ function persistFacePhoto(
         eq(faceIdentities.isConfirmed, true)
       )
     )
-    .all()
-    .map((row) => row.id);
+    .all();
+  const currentConfirmed = new Map(
+    confirmedIds
+      .filter((row) => row.revision === contentRevision)
+      .map((row) => [row.faceIndex, row.id])
+  );
   db.delete(faceVectors)
     .where(
       and(
         eq(faceVectors.photoId, photo.id),
         confirmedIds.length
-          ? notInArray(faceVectors.id, confirmedIds)
+          ? notInArray(
+              faceVectors.id,
+              confirmedIds.map((row) => row.id)
+            )
           : undefined
       )
     )
     .run();
   let insertedCount = 0;
   for (const face of photo.faces) {
+    const confirmed = currentConfirmed.get(face.faceIndex);
+    if (confirmed !== undefined) {
+      db.update(faceVectors)
+        .set({
+          bboxX: face.bbox.x,
+          bboxY: face.bbox.y,
+          bboxWidth: face.bbox.width,
+          bboxHeight: face.bbox.height,
+          confidence: face.confidence,
+          embedding: face.embedding ? JSON.stringify(face.embedding) : null,
+        })
+        .where(eq(faceVectors.id, confirmed))
+        .run();
+      insertedCount++;
+      continue;
+    }
     const inserted = db
       .insert(faceVectors)
       .values({

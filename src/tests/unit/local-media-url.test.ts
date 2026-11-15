@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import { getHttpPortSync } from "@/utils/http-port";
 import {
+  previewRepairVersion,
   toDuelPreviewUrl,
   toGalleryThumbnailUrl,
   toHttpMediaUrl,
@@ -14,6 +15,20 @@ vi.mock("@/utils/http-port", () => ({
 }));
 
 describe("local media URL cache version", () => {
+  it("changes gallery request versions after preview repair without changing source identity", () => {
+    const source = "accepted-source";
+    const repaired = "C:\\cache\\g-identity-v5-md-1-r-0123456789abcdef.webp";
+    const before = toGalleryThumbnailUrl(7, 256, "7", source);
+    const after = toGalleryThumbnailUrl(
+      7,
+      256,
+      `7${previewRepairVersion(repaired)}`,
+      source
+    );
+    expect(after).not.toBe(before);
+    expect(new URL(after).searchParams.get("rv")).toBe(source);
+    expect(previewRepairVersion("C:\\cache\\ordinary.webp")).toBe("");
+  });
   it("encodes optional source revisions without changing the original file path", () => {
     const file = "C:\\photos\\same name.jpg";
     const revision = "C:\\cache\\new & preview.webp";

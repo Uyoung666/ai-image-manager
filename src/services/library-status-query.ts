@@ -8,7 +8,7 @@ import { embeddingRefreshFailed } from "./ai/embedding-refresh-retries";
 
 export const libraryRefreshStatus = sql<LibraryRefreshStatus>`CASE
   WHEN ${photos.refreshStatus} = 'failed' OR ${embeddingRefreshFailed} OR (${photos.faceRefreshPending} = 1 AND ${photos.faceRefreshAttempts} >= 4 AND ${photos.faceProcessingError} IS NOT NULL) THEN 'failed'
-  WHEN ${photos.refreshStatus} = 'ready' AND (${photos.embeddingRevision} <> ${photos.contentRevision} OR ${photos.faceRefreshPending} = 1) THEN 'pending'
+  WHEN ${photos.refreshStatus} = 'ready' AND (${photos.embeddingRevision} <> ${photos.contentRevision} OR ${photos.faceRefreshPending} = 1 OR (${photos.dominantColors} IS NOT NULL AND ${photos.colorRevision} <> ${photos.contentRevision})) THEN 'pending'
   ELSE ${photos.refreshStatus} END`;
 
 export const libraryStatusColumns = {

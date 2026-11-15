@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
 import type { PhotoSequence } from "@/types/photo-sequence";
 import {
+  previewRepairVersion,
   toGalleryThumbnailUrl,
   toLocalMediaUrl,
 } from "@/utils/local-media-url";
@@ -76,7 +77,7 @@ export const SequenceCard = memo(function SequenceCard({
   const managed = Boolean(toGalleryThumbnailUrl(photo.id, 256));
   const gallery = useGalleryThumbnail({
     id: photo.id,
-    version: `${photo.id}:${photo.width}:${photo.height}`,
+    version: `${previewRepairVersion(photo.thumbnailPath)}${photo.id}:${photo.width}:${photo.height}`,
     sourceVersion: photo.thumbnailVersion,
     sourceKey: photo.path,
     sourceAspect:

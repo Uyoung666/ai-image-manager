@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 
@@ -13,6 +13,7 @@ export const aiSourceReady = and(
 );
 
 export const photoWorkVersionColumns = {
+  analysisGeneration: photos.analysisGeneration,
   id: photos.id,
   path: photos.path,
   fileRevision: photos.fileRevision,
@@ -23,6 +24,7 @@ export const photoWorkVersionColumns = {
 };
 
 export interface PhotoWorkVersion {
+  analysisGeneration?: number;
   contentRevision: number;
   fileRevision: number;
   id: number;
@@ -97,6 +99,7 @@ export function photoWorkVersionMatch(version: PhotoWorkVersion) {
     aiSourceReady,
     eq(photos.id, version.id),
     eq(photos.path, version.path),
+    eq(photos.analysisGeneration, version.analysisGeneration ?? 0),
     eq(photos.fileRevision, version.fileRevision),
     eq(photos.contentRevision, version.contentRevision)
   );
@@ -135,6 +138,7 @@ export function lancePhotoRevisionFilter(
     .where(
       or(
         sql`${photos.contentRevision} > 0`,
+        ne(completed, photos.contentRevision),
         sql`${photos.deletedAt} IS NOT NULL`
       )
     )
