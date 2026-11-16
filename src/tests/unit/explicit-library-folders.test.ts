@@ -13,7 +13,12 @@ import {
   startWatching,
   stopWatching,
 } from "@/services/indexer";
-import { stopThumbnailer } from "@/services/thumbnailer";
+import { thumbnailSourceIdentity } from "@/services/thumbnail-identity";
+import {
+  generateThumbnail,
+  initThumbnailer,
+  stopThumbnailer,
+} from "@/services/thumbnailer";
 import { getFolderPaths, invalidateFoldersCache } from "@/utils/folder-paths";
 import { TestRuntime } from "../helpers/test-runtime";
 
@@ -27,7 +32,7 @@ vi.mock("@/services/background-file-watcher", () => ({
   createBackgroundWatcher: state.watch,
 }));
 vi.mock("@/services/color-extractor", () => ({
-  extractDominantColors: async () => [],
+  extractDominantColors: async () => "[]",
 }));
 vi.mock("@/services/dedup-service", () => ({
   checkNewPhotoDuplicates: vi.fn(),
@@ -40,7 +45,9 @@ vi.mock("@/services/raw-preview", () => ({
 
 let runtime: TestRuntime;
 let source: string;
+const previousSharpCache = sharp.cache();
 beforeEach(() => {
+  sharp.cache(false);
   vi.clearAllMocks();
   runtime = new TestRuntime("explicit-library-folders");
   state.dataPath = path.join(runtime.root, "profile");
@@ -57,6 +64,11 @@ afterEach(async () => {
   invalidateFoldersCache();
   vi.unstubAllEnvs();
   expect(runtime.cleanup().status).toBe("deleted");
+  sharp.cache({
+    memory: previousSharpCache.memory.max,
+    files: previousSharpCache.files.max,
+    items: previousSharpCache.items.max,
+  });
 });
 
 it("indexes only confirmed files with their folder tree and skips watching them after restart", async () => {
@@ -143,4 +155,84 @@ it("repairs older unassigned imports once without scanning siblings or restoring
   expect(db.select().from(photos).all()).toHaveLength(2);
   expect(getFolderPaths()).toEqual([]);
   expect(state.watch).not.toHaveBeenCalled();
+});
+
+it("imports new pixels without replacing a moved photo's preview when source stats collide", async () => {
+  const file = path.join(source, "reused.jpg");
+  const moved = path.join(runtime.root, "moved.jpg");
+  const images = await Promise.all(
+    ["#ff0000", "#0000ff"].map((background) =>
+      sharp({ create: { width: 64, height: 64, channels: 3, background } })
+        .jpeg()
+        .toBuffer()
+    )
+  );
+  const length = Math.max(...images.map((image) => image.length));
+  const padded = images.map((image) =>
+    Buffer.concat([image, Buffer.alloc(length - image.length)])
+  );
+  fs.writeFileSync(file, padded[0]);
+  const firstStat = await fs.promises.stat(file);
+  const db = getDatabase();
+  initThumbnailer();
+  const first = await generateThumbnail(file);
+  fs.renameSync(file, moved);
+  const previous = db
+    .insert(photos)
+    .values({
+      path: moved,
+      filename: "moved.jpg",
+      thumbnailPath: first.thumbnailPath,
+      isFavorite: true,
+    })
+    .returning()
+    .get();
+  fs.writeFileSync(file, padded[1]);
+  const stat = fs.promises.stat.bind(fs.promises);
+  const fixed = vi
+    .spyOn(fs.promises, "stat")
+    .mockImplementation(async (target) => {
+      const result = await stat(target);
+      return String(target) === file
+        ? Object.assign(result, {
+            mtimeMs: firstStat.mtimeMs,
+            ctimeMs: firstStat.ctimeMs,
+          })
+        : result;
+    });
+  try {
+    expect(thumbnailSourceIdentity(await fs.promises.stat(file))).toBe(
+      thumbnailSourceIdentity(firstStat)
+    );
+    expect(
+      await indexExplicitPhotoFiles([file], undefined, source)
+    ).toMatchObject({
+      added: 1,
+      failed: 0,
+    });
+    const imported = db
+      .select()
+      .from(photos)
+      .where(eq(photos.path, file))
+      .get();
+    expect(imported?.thumbnailPath).toBeTruthy();
+    expect(imported?.thumbnailPath).not.toBe(first.thumbnailPath);
+    const pixels = await sharp(imported?.thumbnailPath ?? "")
+      .raw()
+      .toBuffer();
+    expect(pixels[0]).toBeLessThan(15);
+    expect(pixels[2]).toBeGreaterThan(240);
+    expect(
+      (await sharp(first.thumbnailPath).raw().toBuffer())[0]
+    ).toBeGreaterThan(240);
+    expect(
+      db.select().from(photos).where(eq(photos.id, previous.id)).get()
+    ).toMatchObject({
+      path: moved,
+      thumbnailPath: first.thumbnailPath,
+      isFavorite: true,
+    });
+  } finally {
+    fixed.mockRestore();
+  }
 });

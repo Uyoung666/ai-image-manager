@@ -710,7 +710,9 @@ export async function preparePhotoRecord(
   let thumb: Awaited<ReturnType<typeof generateThumbnail>>;
   try {
     thumb = await generateThumbnail(filePath, "md", {
-      force: options.repairPreview,
+      // New and refreshed records need current pixels even when filesystem
+      // timestamps collide with a preview retained by another photo.
+      force: true,
       expectedIdentity: thumbnailSourceIdentity(stat),
       input: meta.thumbnailInput,
       prepared: meta.thumbnailPrepared,

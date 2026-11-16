@@ -95,6 +95,7 @@ async function launch() {
     const url = candidate.url();
     return url.startsWith("http:") || url.startsWith("file:");
   }) as Page;
+  await page.waitForLoadState("load");
   await page.addInitScript(() => {
     localStorage.setItem("lang", "en");
     localStorage.setItem("ui.reduceMotion", "false");
@@ -624,6 +625,7 @@ for (const size of SIZES) {
       await group
         .getByRole("button", { name: "Expand sequence photos", exact: true })
         .click();
+      await page.mouse.move(0, 0);
       const tray = page.locator('[data-sequence-tray-id="1"]');
       await expect(tray).toBeVisible();
       await expect(
@@ -631,6 +633,10 @@ for (const size of SIZES) {
       ).toHaveCount(0);
       const first = tray.locator('[data-photo-id="1"][role="option"]');
       await expect(first).toBeVisible();
+      await first.evaluate((element) => {
+        // Center within the scroll area, below the overlay toolbar.
+        element.scrollIntoView({ block: "center", behavior: "instant" });
+      });
       await first.dblclick();
       await expect(lightbox).toBeVisible();
       const thumbnailToggle = lightbox.getByRole("button", {

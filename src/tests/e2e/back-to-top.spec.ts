@@ -31,6 +31,7 @@ async function launch() {
       fs.appendFileSync(path.join(root, "electron.log"), data)
     );
   page = await app.firstWindow();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.waitForLoadState("load");
   await page.addInitScript(() => {
     localStorage.setItem("lang", "en");
@@ -156,6 +157,15 @@ test.beforeEach(async () => {
 });
 
 test("records near and distant back to top", async () => {
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-reduced-motion",
+    "false"
+  );
+  expect(
+    await page.evaluate(
+      () => window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    )
+  ).toBe(false);
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setSize(1280, 800)
   );
@@ -182,7 +192,14 @@ test("records near and distant back to top", async () => {
       }, screens);
       await page.waitForTimeout(350);
       return gallery.evaluate(async (el, distance) => {
-        const trigger = { top: el.scrollTop, height: el.clientHeight };
+        const trigger = {
+          top: el.scrollTop,
+          height: el.clientHeight,
+          reducedMotion: document.documentElement.dataset.reducedMotion,
+          systemReducedMotion: window.matchMedia(
+            "(prefers-reduced-motion: reduce)"
+          ).matches,
+        };
         // If the progress bar changed the viewport, reposition and settle before
         // activating the button. A pending scrollend can cancel the animation.
         if (Math.abs(trigger.top - distance * trigger.height) > 2) {

@@ -7,6 +7,7 @@ import { thumbnailSourceIdentity } from "@/services/thumbnail-identity";
 import {
   clearThumbnailDiskCache,
   deletePhotoThumbnails,
+  finishPreviewRepair,
   generateDuelPreview,
   generateGalleryThumbnail,
   generateThumbnail,
@@ -99,6 +100,7 @@ afterEach(async () => {
 describe("physical gallery thumbnail generation", () => {
   it("repairs a cached preview by bypassing both memory and disk cache", async () => {
     const before = await generateThumbnail(original);
+    const previousVariant = await generateGalleryThumbnail(original, 256);
     await sharp({
       create: { width: 512, height: 256, channels: 3, background: "#ff0000" },
     })
@@ -134,6 +136,11 @@ describe("physical gallery thumbnail generation", () => {
     );
     const physicalPixels = await sharp(physical.thumbnailPath).raw().toBuffer();
     expect(physicalPixels[2]).toBeGreaterThan(physicalPixels[0]);
+    await finishPreviewRepair(original, repaired.thumbnailPath);
+    expect(fs.existsSync(previousVariant.thumbnailPath)).toBe(false);
+    expect(fs.existsSync(physical.thumbnailPath)).toBe(true);
+    await deletePhotoThumbnails(original);
+    expect(fs.existsSync(physical.thumbnailPath)).toBe(false);
   });
   it("serves a relinked HEIF viewport from its preview without reading the original again", async () => {
     const input = path.join(runtime.root, "source.heic");

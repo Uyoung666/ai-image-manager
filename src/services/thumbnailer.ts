@@ -41,7 +41,7 @@ const WEBP_SUFFIX = /\.webp$/;
 const REPAIRED_PREVIEW_SUFFIX = /-r-[a-f0-9]{16}\.webp$/i;
 const log = createLogger("thumbnailer");
 const MANAGED_THUMBNAIL_EXTENSION =
-  /^(?:[a-f0-9]{32}\.(?:webp|jpg)|g-[a-f0-9]{32}-[a-f0-9]{32}-(?:256|512|1024|2048|v5-(?:sm|md|lg)-[1-3](?:-r-[a-f0-9]{16})?)\.webp)$/i;
+  /^(?:[a-f0-9]{32}\.(?:webp|jpg)|g-[a-f0-9]{32}-[a-f0-9]{32}-(?:(?:r-[a-f0-9]{16}-)?(?:256|512|1024|2048)|v5-(?:sm|md|lg)-[1-3](?:-r-[a-f0-9]{16})?)\.webp)$/i;
 const HEIF_FILE_EXTENSION = /\.hei[cf]$/i;
 const HEIF_SOURCE_PREFIX = /^h-[a-f0-9]{32}-/;
 const GALLERY_SOURCE_PREFIX = /^g-[a-f0-9]{32}-/;
@@ -1039,6 +1039,12 @@ function repairedPreviewPath(
     : undefined;
 }
 
+function galleryRepairSuffix(preview?: string): string {
+  return preview && REPAIRED_PREVIEW_SUFFIX.test(preview)
+    ? preview.slice(-24, -5)
+    : "";
+}
+
 /** Retire older variants only after the new preview is committed to its photo. */
 export async function finishPreviewRepair(
   imagePath: string,
@@ -1052,10 +1058,14 @@ export async function finishPreviewRepair(
   const identity = path
     .basename(repairedPath)
     .slice(prefix.length, prefix.length + 32);
+  const repairSuffix = galleryRepairSuffix(repairedPath);
   for (const name of [...(galleryVariantNames.get(prefix) ?? [])]) {
     const cachedPath = path.join(thumbnailDir, name);
     if (
       name.startsWith(`${prefix}${identity}-`) &&
+      !(
+        repairSuffix && name.startsWith(`${prefix}${identity}${repairSuffix}-`)
+      ) &&
       cachedPath !== repairedPath
     ) {
       await removeUnreferencedThumbnail(cachedPath);
@@ -1189,15 +1199,15 @@ export async function getGalleryThumbnailHint(
   legacyEvidence?: LegacyThumbnailEvidence
 ): Promise<GalleryThumbnailEdge | undefined> {
   const identity = thumbnailSourceIdentity(source);
+  const legacy = ownedLegacyPreviewPath(photo.path, source, legacyEvidence);
   const target = path.join(
     thumbnailDir,
-    `${gallerySourcePrefix(photo.path)}${identity}-${edge}.webp`
+    `${gallerySourcePrefix(photo.path)}${identity}${galleryRepairSuffix(legacy)}-${edge}.webp`
   );
   const targetStat = await readStat(target);
   if (targetStat) {
     return edge;
   }
-  const legacy = ownedLegacyPreviewPath(photo.path, source, legacyEvidence);
   const preview =
     legacy ?? getVersionedThumbnailPath(photo.path, "md", identity);
   const previewStat = await readStat(preview);
@@ -1248,13 +1258,9 @@ export async function generateGalleryThumbnail(
     source,
     legacyEvidence
   );
-  const repairIdentity =
-    ownedPreview && REPAIRED_PREVIEW_SUFFIX.test(ownedPreview)
-      ? `-r-${ownedPreview.slice(-21, -5)}`
-      : "";
   const target = path.join(
     thumbnailDir,
-    `${gallerySourcePrefix(imagePath)}${identity}${repairIdentity}-${edge}.webp`
+    `${gallerySourcePrefix(imagePath)}${identity}${galleryRepairSuffix(ownedPreview)}-${edge}.webp`
   );
   // A browser decode failure can leave readable container metadata. Repair
   // bypasses both cached representations and atomically replaces this tier.

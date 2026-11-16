@@ -89,6 +89,7 @@ async function launch() {
       fs.appendFileSync(path.join(root, "electron.log"), data)
     );
   page = await app.firstWindow();
+  await page.waitForLoadState("load");
   await page.addInitScript(() => {
     localStorage.setItem("lang", "en");
     localStorage.setItem("ui.reduceMotion", "false");

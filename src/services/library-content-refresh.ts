@@ -830,7 +830,7 @@ async function publishPreparedPhoto(
   row: typeof photos.$inferSelect,
   thumbnailPath: string | null
 ) {
-  if ((job.phase === "preview" || job.repairPreview) && thumbnailPath) {
+  if (thumbnailPath) {
     const { finishPreviewRepair } = await import("./thumbnailer");
     await finishPreviewRepair(row.path, thumbnailPath).catch(
       (error: unknown) => {

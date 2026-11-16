@@ -8,6 +8,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import sharp from "sharp";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { photos } from "@/db/schema";
+import { thumbnailSourceIdentity } from "@/services/thumbnail-identity";
 import {
   deletePhotoThumbnails,
   deleteUnreferencedThumbnail,
@@ -162,6 +163,11 @@ it.each([
   const red = async (file: string) => (await sharp(file).raw().toBuffer())[0];
   await fs.promises.mkdir(path.dirname(original));
   await writeSource(original, "#ff0000");
+  // Distinct bytes can have equal size and timestamps on a coarse filesystem.
+  await fs.promises.utimes(original, new Date(0), new Date(0));
+  const originalIdentity = thumbnailSourceIdentity(
+    await fs.promises.stat(original)
+  );
   initThumbnailer();
   const first =
     generation === "v5"
@@ -176,6 +182,9 @@ it.each([
     .prepare("UPDATE photos SET path=?, thumbnail_path=? WHERE id=1")
     .run(moved, first);
   await writeSource(original, "#0000ff");
+  expect(thumbnailSourceIdentity(await fs.promises.stat(original))).not.toBe(
+    originalIdentity
+  );
   await makePreviewNewerThanSource(original, first);
 
   const online = await generateGalleryThumbnail(original, 256);
