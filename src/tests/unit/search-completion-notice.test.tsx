@@ -17,4 +17,20 @@ describe("partial search results notice", () => {
     expect(retry).toHaveBeenCalledOnce();
     unmount();
   });
+
+  it("keeps the inline message readable and exposes a single retry action", () => {
+    const retry = vi.fn();
+    render(<SearchCompletionNotice inline onRetry={retry} />);
+
+    const status = screen.getByRole("status");
+    expect(status).not.toHaveClass("border-b", "flex-wrap");
+    expect(status.querySelector('[data-slot="tooltip-trigger"]')).toHaveClass(
+      "truncate"
+    );
+    expect(
+      status.querySelector('[data-slot="tooltip-trigger"]')
+    ).toHaveAttribute("tabindex", "0");
+    fireEvent.click(screen.getByRole("button"));
+    expect(retry).toHaveBeenCalledOnce();
+  });
 });

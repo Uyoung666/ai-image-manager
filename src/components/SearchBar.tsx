@@ -752,9 +752,9 @@ export const SearchBar = memo(
         >
           <div className="home-toolbar-inner px-3 py-2">
             {/* Search input row */}
-            <div className="home-toolbar-primary-row flex min-h-9 min-w-0 flex-wrap items-center gap-2">
+            <div className="home-toolbar-primary-row flex min-h-9 min-w-0 items-center gap-2 overflow-x-auto px-0.5 py-px">
               {leadingContent && (
-                <div className="home-toolbar-context min-w-0 flex-shrink-0">
+                <div className="home-toolbar-context min-w-0">
                   {leadingContent}
                 </div>
               )}
@@ -1021,7 +1021,7 @@ export const SearchBar = memo(
                   </Tooltip>
                 )}
               {trailingContent && (
-                <div className="home-toolbar-actions ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+                <div className="home-toolbar-actions ml-auto flex items-center justify-end gap-2 whitespace-nowrap">
                   {trailingContent}
                 </div>
               )}

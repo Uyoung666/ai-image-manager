@@ -1128,6 +1128,7 @@ function AlbumDetailPage() {
             expandedSequence={sequenceView.expandedSequence}
             expandedSequenceComplete={sequenceView.expandedSequenceComplete}
             expandingSequenceId={sequenceView.expandingSequenceId}
+            glassToolbar
             inlineDetailPhotoId={
               compactDetailOverlay ? undefined : (detailPhoto?.id ?? null)
             }

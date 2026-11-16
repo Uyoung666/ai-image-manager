@@ -134,18 +134,23 @@ export function HomeToolbar({
         }
         filterBarTrailingContent={
           showDrillBanner ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="min-h-8 rounded-[4px] px-1.5 text-[11px] text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-ring"
-                  onClick={resetDrillDown}
-                  type="button"
-                >
-                  {t("drillDownReset")}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("drillDownResetHint")}</TooltipContent>
-            </Tooltip>
+            <>
+              {searchIncomplete && (
+                <SearchCompletionNotice inline onRetry={onRetry} />
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="ml-auto min-h-8 shrink-0 whitespace-nowrap rounded-[4px] px-1.5 text-[11px] text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-ring"
+                    onClick={resetDrillDown}
+                    type="button"
+                  >
+                    {t("drillDownReset")}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("drillDownResetHint")}</TooltipContent>
+              </Tooltip>
+            </>
           ) : undefined
         }
         leadingContent={
@@ -160,7 +165,7 @@ export function HomeToolbar({
         }
         trailingContent={
           <>
-            <div className="flex min-w-0 flex-wrap rounded-md border border-border p-0.5 text-[11px]">
+            <div className="flex rounded-md border border-border p-0.5 text-[11px]">
               <button
                 className={`rounded px-2 py-1 ${sequenceMode === "photos" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
                 onClick={() => handleSequenceModeChange("photos")}
@@ -267,7 +272,9 @@ export function HomeToolbar({
           </>
         }
       />
-      {searchIncomplete && <SearchCompletionNotice onRetry={onRetry} />}
+      {searchIncomplete && !showDrillBanner && (
+        <SearchCompletionNotice onRetry={onRetry} />
+      )}
       {searchMode === "text" &&
         !aiStatus?.rebuildRequired &&
         searchSemantic &&

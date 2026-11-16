@@ -30,14 +30,18 @@ export function SearchActiveFilters({
       {(hasActiveFilters ||
         filterBarLeadingContent ||
         filterBarTrailingContent) && (
-        <div className="mt-2 flex min-w-0 max-w-full flex-wrap items-start gap-1.5">
+        <div
+          className={`mt-2 flex min-w-0 max-w-full items-start gap-1.5 ${filterBarTrailingContent ? "" : "flex-wrap"}`}
+        >
           {filterBarLeadingContent && (
             <div className="flex min-h-8 shrink-0 items-center border-border border-r pr-2">
               {filterBarLeadingContent}
             </div>
           )}
           {hasActiveFilters && (
-            <div className="flex max-h-24 min-w-0 flex-1 basis-0 flex-wrap items-center gap-1.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
+            <div
+              className={`flex max-h-24 flex-1 basis-0 flex-wrap items-center gap-1.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5 ${filterBarTrailingContent ? "min-w-[min(5rem,15%)]" : "min-w-0"}`}
+            >
               {filters.dateFrom && (
                 <FilterChip
                   label={t("filterFrom", { value: filters.dateFrom })}
@@ -148,7 +152,9 @@ export function SearchActiveFilters({
             </button>
           )}
           {filterBarTrailingContent && (
-            <div className="ml-auto flex min-h-8 shrink-0 items-center">
+            <div
+              className={`ml-auto flex min-h-8 min-w-0 items-center gap-2 ${hasActiveFilters ? "" : "flex-1"}`}
+            >
               {filterBarTrailingContent}
             </div>
           )}

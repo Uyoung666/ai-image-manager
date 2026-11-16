@@ -756,6 +756,7 @@
   right: 0;
   left: 0;
   z-index: 40;
+  container: home-toolbar / inline-size;
   background: var(--gallery-canvas);
   transition:
     background-color 160ms ease,
@@ -763,7 +764,8 @@
     backdrop-filter 160ms ease;
 }
 
-.home-gallery-toolbar-layer.is-scrolled {
+.home-gallery-toolbar-layer.is-scrolled,
+.gallery-glass-toolbar.is-scrolled {
   background: color-mix(in srgb, var(--gallery-canvas) 82%, transparent);
   box-shadow: 0 8px 24px -20px rgb(0 0 0 / 0.75);
   -webkit-backdrop-filter: blur(12px) saturate(1.2);
@@ -774,7 +776,8 @@
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5);
 }
 
-.light .home-gallery-toolbar-layer.is-scrolled {
+.light .home-gallery-toolbar-layer.is-scrolled,
+.light .gallery-glass-toolbar.is-scrolled {
   background: color-mix(in srgb, var(--gallery-canvas) 86%, transparent);
 }
 
@@ -1018,12 +1021,6 @@
   white-space: nowrap;
 }
 
-@media (max-width: 980px) {
-  .home-search-result-summary {
-    display: none;
-  }
-}
-
 .home-toolbar-context {
   max-width: 220px;
 }
@@ -1042,7 +1039,11 @@
   background: color-mix(in srgb, var(--card) 98%, transparent);
 }
 
-.home-toolbar-actions {
+.home-toolbar-primary-row {
+  scrollbar-width: thin;
+}
+
+.home-toolbar-primary-row > :not(.home-toolbar-context, .home-search-form) {
   flex-shrink: 0;
 }
 
@@ -1088,14 +1089,6 @@
     right: 0 !important;
   }
 
-  .home-grid-size-control {
-    display: none;
-  }
-
-  .home-grid-size-trigger {
-    display: inline-flex;
-  }
-
   .photo-detail-panel-backdrop {
     position: absolute;
     inset: 0;
@@ -1133,31 +1126,29 @@
   }
 }
 
-@media (max-width: 980px) {
-  .home-toolbar-compact-context {
-    display: flex;
-  }
-
-  .home-toolbar-primary-row {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: thin;
-  }
-
-  .home-toolbar-actions {
-    flex-wrap: nowrap;
-  }
-
-  .home-toolbar-context,
-  .home-image-search-label {
+@container home-toolbar (width < 900px) {
+  .home-image-search-label,
+  .home-search-result-summary,
+  .home-grid-size-control,
+  .home-filter-summary {
     display: none;
+  }
+
+  .home-grid-size-trigger {
+    display: inline-flex;
   }
 
   .home-toolbar-actions {
     gap: 2px;
   }
+}
 
-  .home-filter-summary {
+@container home-toolbar (width < 720px) {
+  .home-toolbar-compact-context {
+    display: flex;
+  }
+
+  .home-toolbar-context {
     display: none;
   }
 }

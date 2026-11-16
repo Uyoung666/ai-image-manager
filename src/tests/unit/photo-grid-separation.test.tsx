@@ -70,6 +70,16 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("photo grid separation", () => {
+  it("enables the gallery glass toolbar for album grids only when requested", () => {
+    const { container, rerender } = render(<PhotoGrid {...props} />);
+    const toolbar = () => container.querySelector(".page-toolbar");
+    expect(toolbar()).toBeInTheDocument();
+    expect(toolbar()).not.toHaveClass("gallery-glass-toolbar");
+
+    rerender(<PhotoGrid {...props} glassToolbar />);
+    expect(toolbar()).toHaveClass("gallery-glass-toolbar");
+  });
+
   it("offers sequence navigation for a library containing only sequence members", () => {
     const changeMode = vi.fn();
     render(

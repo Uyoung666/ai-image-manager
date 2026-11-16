@@ -116,6 +116,7 @@ interface PhotoGridProps {
   expandingSequenceId?: number | null;
   faceOverlayByPhotoId?: ReadonlyMap<number, FaceOverlay[]>;
   faceOverlaysVisible?: boolean;
+  glassToolbar?: boolean;
   /** MasonryGrid 命令式 ref，用于原子化滚动定位 */
   gridRef?: React.RefObject<MasonryGridHandle | null>;
   /** 是否还有更多数据可加载（对应 infinite scroll 的 hasNextPage） */
@@ -1089,6 +1090,7 @@ export const PhotoGrid = memo(
     recentlyViewedPulseActive = false,
     recentlyViewedPulseKey = 0,
     showToolbar = true,
+    glassToolbar = false,
     topInset = 0,
     restoreGateReady = true,
     sequences = [],
@@ -2362,13 +2364,11 @@ export const PhotoGrid = memo(
           }
         }}
       >
-        {/* Floating glass toolbar — 悬浮毛玻璃工具条 */}
-        {/* Masonry grid */}
         {showToolbar && (
           <div
             className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex items-center justify-between border-b px-4 py-2 ${
               isToolbarScrolled ? "is-scrolled" : ""
-            }`}
+            } ${glassToolbar ? "gallery-glass-toolbar" : ""}`}
             onClick={(event) => event.stopPropagation()}
             ref={toolbarRef}
           >
@@ -2600,7 +2600,10 @@ export const PhotoGrid = memo(
     if (prevProps.hasMore !== nextProps.hasMore) {
       return false;
     }
-    if (prevProps.showToolbar !== nextProps.showToolbar) {
+    if (
+      prevProps.showToolbar !== nextProps.showToolbar ||
+      prevProps.glassToolbar !== nextProps.glassToolbar
+    ) {
       return false;
     }
     if (prevProps.showGroupHeaders !== nextProps.showGroupHeaders) {
