@@ -181,6 +181,7 @@ jobs:
       shell: pwsh
       run: |
         node scripts/setup-wix-toolset.mjs
+        if ($LASTEXITCODE -ne 0) { throw "WiX setup failed" }
         $wixPath = Join-Path $env:LOCALAPPDATA "AIImageManagerBuildTools\wix-3.14.0"
         if (-not (Test-Path -LiteralPath (Join-Path $wixPath "candle.exe"))) {
           throw "WiX candle.exe was not installed"

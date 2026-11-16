@@ -215,6 +215,15 @@ describe("stable release workflow gates", () => {
     }
   });
 
+  it("stops the WiX setup step before probing executables if installation fails", () => {
+    const step = jobs.package.steps.find(
+      (entry) => entry.name === "Install and verify WiX Toolset"
+    );
+    expect(step.run).toContain(
+      'node scripts/setup-wix-toolset.mjs\nif ($LASTEXITCODE -ne 0) { throw "WiX setup failed" }'
+    );
+  });
+
   it("runs four independent single-worker shards without rebuilding", () => {
     expect(jobs.e2e.strategy).toEqual({
       "fail-fast": false,

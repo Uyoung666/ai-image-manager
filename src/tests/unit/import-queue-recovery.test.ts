@@ -421,12 +421,22 @@ describe("durable import recovery", () => {
   });
 
   it("lets an explicit import bypass the background wait without duplicate scanning", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    state.foregroundBusy = true;
     const queue = await import("@/services/import-queue");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Unrelated timers must not affect assertions about the queue's 100ms retry.
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const clear = vi.spyOn(globalThis, "clearTimeout");
+    const unrelated = setTimeout(() => undefined, 1000);
+    const backgroundTimers = () =>
+      timers.mock.calls.flatMap(([, delay], index) =>
+        delay === 100 ? [timers.mock.results[index].value] : []
+      );
+    state.foregroundBusy = true;
     queue.enqueueImport("background", "background");
     await tick();
-    expect(vi.getTimerCount()).toBe(1);
+    expect(backgroundTimers()).toHaveLength(1);
+    const [backgroundWait] = backgroundTimers();
+
     const scan = Promise.withResolvers<ReturnType<typeof result>>();
     state.scan.mockReturnValueOnce(scan.promise);
     queue.enqueueImport("explicit");
@@ -441,15 +451,23 @@ describe("durable import recovery", () => {
       folderPath: "explicit",
       status: "scanning",
     });
-    expect(vi.getTimerCount()).toBe(0);
+    expect(clear).toHaveBeenCalledWith(backgroundWait);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(state.scan).toHaveBeenCalledTimes(1);
+    expect(backgroundTimers()).toHaveLength(1);
+
     scan.resolve(result());
     await tick();
     expect(state.scan).toHaveBeenCalledTimes(1);
     expect(queue.getImportQueueStatus().pending).toMatchObject([
       { source: "background", status: "queued" },
     ]);
+    expect(backgroundTimers()).toHaveLength(2);
+    const nextBackgroundWait = backgroundTimers()[1];
     await queue.stopImports();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(clear).toHaveBeenCalledWith(nextBackgroundWait);
+    expect(clear).not.toHaveBeenCalledWith(unrelated);
+    clearTimeout(unrelated);
   });
 
   it("wakes a queued background root immediately when the user explicitly imports it", async () => {

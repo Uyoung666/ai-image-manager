@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const WIX_VERSION = "3.14.0.8606";
 const WIX_DOWNLOAD_URL =
@@ -52,20 +53,20 @@ async function downloadArchive() {
   fs.writeFileSync(WIX_ARCHIVE, Buffer.from(await response.arrayBuffer()));
 }
 
-function extractArchive() {
+export function extractArchive(archive, destination) {
   const result = spawnSync(
     "powershell.exe",
     [
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      "Expand-Archive -LiteralPath $env:AIM_WIX_ARCHIVE -DestinationPath $env:AIM_WIX_DESTINATION -Force",
+      "$ErrorActionPreference = 'Stop'; Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Archive/Microsoft.PowerShell.Archive.psd1') -Force; Expand-Archive -LiteralPath $env:AIM_WIX_ARCHIVE -DestinationPath $env:AIM_WIX_DESTINATION -Force",
     ],
     {
       env: {
         ...process.env,
-        AIM_WIX_ARCHIVE: WIX_ARCHIVE,
-        AIM_WIX_DESTINATION: WIX_DIRECTORY,
+        AIM_WIX_ARCHIVE: archive,
+        AIM_WIX_DESTINATION: destination,
       },
       stdio: "inherit",
       windowsHide: true,
@@ -104,11 +105,16 @@ async function main() {
   }
 
   fs.mkdirSync(WIX_DIRECTORY, { recursive: true });
-  extractArchive();
+  extractArchive(WIX_ARCHIVE, WIX_DIRECTORY);
   if (!cachedToolsetIsReady()) {
     throw new Error(`WiX ${WIX_VERSION} was extracted but cannot be executed`);
   }
   console.log(`[wix] WiX ${WIX_VERSION} is ready at ${WIX_DIRECTORY}`);
 }
 
-await main();
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+) {
+  await main();
+}
