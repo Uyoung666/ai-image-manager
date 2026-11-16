@@ -21,7 +21,14 @@ let env: Record<string, string>;
 
 async function launch() {
   app = await launchTestApp(root, {
-    args: ["-r", path.join(root, "isolation.cjs"), "--e2e", path.resolve(".")],
+    args: [
+      // Media emulation does not enable Chromium's native scroll animator.
+      "--enable-smooth-scrolling",
+      "-r",
+      path.join(root, "isolation.cjs"),
+      "--e2e",
+      path.resolve("."),
+    ],
     env,
     recordVideo: { dir: path.join(root, "video"), size: sizes[2] },
   });
@@ -157,6 +164,13 @@ test.beforeEach(async () => {
 });
 
 test("records near and distant back to top", async () => {
+  const animationSettings = await app.evaluate(
+    ({ app, systemPreferences }) => ({
+      chromium: process.versions.chrome,
+      enabledBySwitch: app.commandLine.hasSwitch("enable-smooth-scrolling"),
+      ...systemPreferences.getAnimationSettings(),
+    })
+  );
   await expect(page.locator("html")).toHaveAttribute(
     "data-reduced-motion",
     "false"
@@ -221,6 +235,7 @@ test("records near and distant back to top", async () => {
         }[] = [];
         const start = performance.now();
         button.click();
+        const topAfterClick = el.scrollTop;
         await new Promise<void>((resolve) => {
           function sample() {
             const content =
@@ -247,7 +262,7 @@ test("records near and distant back to top", async () => {
           }
           requestAnimationFrame(sample);
         });
-        return { frames, trigger };
+        return { frames, trigger, topAfterClick };
       }, screens);
     };
     let recording = await recordAtDistance();
@@ -263,7 +278,7 @@ test("records near and distant back to top", async () => {
     expect(trigger.top > 4 * trigger.height).toBe(screens > 4);
     fs.writeFileSync(
       test.info().outputPath(`frames-${screens}.json`),
-      JSON.stringify(frames)
+      JSON.stringify({ animationSettings, ...recording })
     );
     expect(await gallery.evaluate((el) => el.scrollTop)).toBe(0);
     expect(
