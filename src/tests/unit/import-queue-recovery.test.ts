@@ -92,6 +92,25 @@ function scanProgress(): IndexProgress[] {
     .map(([, payload]) => payload);
 }
 
+function trackQueueTimers(fakePerformance = false) {
+  vi.useFakeTimers({
+    toFake: fakePerformance
+      ? ["setTimeout", "clearTimeout", "performance"]
+      : ["setTimeout", "clearTimeout"],
+  });
+  const schedule = vi.spyOn(globalThis, "setTimeout");
+  const clear = vi.spyOn(globalThis, "clearTimeout");
+  // Exercise the queue while another timer is pending on the same fake clock.
+  const unrelated = setTimeout(() => undefined, 1000);
+  const registrations = () =>
+    schedule.mock.calls.flatMap(([callback, delay], index) =>
+      delay === 100
+        ? [{ callback, handle: schedule.mock.results[index].value }]
+        : []
+    );
+  return { registrations, clear, unrelated };
+}
+
 describe("durable import recovery", () => {
   afterEach(async () => {
     // Retire scheduled immediates and continuations before the next test resets
@@ -141,7 +160,7 @@ describe("durable import recovery", () => {
   });
 
   it("broadcasts only the latest indexing progress when the 100ms window expires", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const timers = trackQueueTimers(true);
     const scan = Promise.withResolvers<ReturnType<typeof result>>();
     let report!: (value: IndexProgress) => void;
     state.scan.mockImplementationOnce((_root, onProgress) => {
@@ -157,7 +176,8 @@ describe("durable import recovery", () => {
       report(progress("indexing", scanned));
     }
     expect(scanProgress()).toEqual([progress("indexing", 1)]);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(timers.registrations()).toHaveLength(1);
+    const scheduledProgress = timers.registrations()[0].handle;
     await vi.advanceTimersByTimeAsync(99);
     expect(scanProgress()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
@@ -165,7 +185,8 @@ describe("durable import recovery", () => {
       progress("indexing", 1),
       progress("indexing", 500),
     ]);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(timers.clear).toHaveBeenCalledWith(scheduledProgress);
+    expect(timers.registrations()).toHaveLength(1);
     scan.resolve(result());
     await tick();
     expect(queue.getImportQueueStatus()).toMatchObject({
@@ -175,7 +196,7 @@ describe("durable import recovery", () => {
   });
 
   it("broadcasts phase changes and complete counts immediately while clearing pending updates", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const timers = trackQueueTimers(true);
     const scan = Promise.withResolvers<ReturnType<typeof result>>();
     let report!: (value: IndexProgress) => void;
     state.scan.mockImplementationOnce((_root, onProgress) => {
@@ -187,15 +208,17 @@ describe("durable import recovery", () => {
     await tick();
     report(progress("scanning", 0));
     report(progress("scanning", 100));
-    expect(vi.getTimerCount()).toBe(1);
+    expect(timers.registrations()).toHaveLength(1);
+    const scanningTimer = timers.registrations()[0].handle;
     report(progress("indexing", 1));
     expect(scanProgress()).toEqual([
       progress("scanning", 0),
       progress("indexing", 1),
     ]);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(timers.clear).toHaveBeenCalledWith(scanningTimer);
     report(progress("indexing", 499));
-    expect(vi.getTimerCount()).toBe(1);
+    expect(timers.registrations()).toHaveLength(2);
+    const indexingTimer = timers.registrations()[1].handle;
     const complete = progress("complete", 500, "photos/最后一张.jpg");
     report(complete);
     expect(scanProgress()).toEqual([
@@ -203,7 +226,8 @@ describe("durable import recovery", () => {
       progress("indexing", 1),
       complete,
     ]);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(timers.clear).toHaveBeenCalledWith(indexingTimer);
+    expect(timers.registrations()).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1000);
     expect(scanProgress()).toHaveLength(3);
     scan.resolve({ ...result(), skipped: 3 });
@@ -222,7 +246,7 @@ describe("durable import recovery", () => {
     "failed",
     "cancelled",
   ] as const)("flushes the latest progress and cancels its timer before the next import after %s", async (status) => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const timers = trackQueueTimers(true);
     const first = Promise.withResolvers<ReturnType<typeof result>>();
     const next = Promise.withResolvers<ReturnType<typeof result>>();
     let reportNext!: (value: IndexProgress) => void;
@@ -246,7 +270,8 @@ describe("durable import recovery", () => {
     queue.enqueueImport("next");
     await tick();
     expect(scanProgress()).toEqual([initial]);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(timers.registrations()).toHaveLength(1);
+    const firstTimer = timers.registrations()[0].handle;
     if (status === "failed") {
       first.reject(new Error("controlled scan failure"));
     } else {
@@ -258,7 +283,7 @@ describe("durable import recovery", () => {
     }
     await tick();
     expect(scanProgress()).toEqual([initial, latest, nextInitial]);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(timers.clear).toHaveBeenCalledWith(firstTimer);
     expect(queue.getImportQueueStatus()).toMatchObject({
       current: { folderPath: "next", status: "scanning" },
       history: [{ folderPath: "first", status }],
@@ -271,15 +296,17 @@ describe("durable import recovery", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(scanProgress()).toEqual([initial, latest, nextInitial]);
     reportNext(nextLatest);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(scanProgress()).toEqual([initial, latest, nextInitial, nextLatest]);
+    expect(timers.registrations()).toHaveLength(1);
     const finalPending = progress("indexing", 3, "next/末尾.jpg");
     reportNext(finalPending);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(timers.registrations()).toHaveLength(2);
+    const nextTimer = timers.registrations()[1].handle;
     next.resolve(result());
     await tick();
     const expected = [initial, latest, nextInitial, nextLatest, finalPending];
     expect(scanProgress()).toEqual(expected);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(timers.clear).toHaveBeenCalledWith(nextTimer);
     await vi.advanceTimersByTimeAsync(1000);
     expect(scanProgress()).toEqual(expected);
     expect(queue.getImportQueueStatus()).toMatchObject({
@@ -394,7 +421,7 @@ describe("durable import recovery", () => {
   });
 
   it("keeps background checks queued with one short retry while the library is active", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const timers = trackQueueTimers();
     state.foregroundBusy = true;
     const queue = await import("@/services/import-queue");
     queue.enqueueImport("background-a", "background");
@@ -406,36 +433,33 @@ describe("durable import recovery", () => {
       history: [],
     });
     expect(state.scan).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(1);
-    await vi.advanceTimersByTimeAsync(100);
+    expect(timers.registrations()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(timers.registrations()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(state.scan).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(1);
+    expect(timers.registrations()).toHaveLength(2);
     state.foregroundBusy = false;
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(state.scan).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     expect(state.scan.mock.calls.map(([root]) => root)).toEqual([
       path.resolve("background-a"),
       path.resolve("background-b"),
     ]);
     expect(queue.getImportQueueStatus().pending).toEqual([]);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(timers.registrations()).toHaveLength(2);
+    expect(timers.clear).not.toHaveBeenCalledWith(timers.unrelated);
   });
 
   it("lets an explicit import bypass the background wait without duplicate scanning", async () => {
     const queue = await import("@/services/import-queue");
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    // Unrelated timers must not affect assertions about the queue's 100ms retry.
-    const timers = vi.spyOn(globalThis, "setTimeout");
-    const clear = vi.spyOn(globalThis, "clearTimeout");
-    const unrelated = setTimeout(() => undefined, 1000);
-    const backgroundTimers = () =>
-      timers.mock.calls.flatMap(([, delay], index) =>
-        delay === 100 ? [timers.mock.results[index].value] : []
-      );
+    const timers = trackQueueTimers();
     state.foregroundBusy = true;
     queue.enqueueImport("background", "background");
     await tick();
-    expect(backgroundTimers()).toHaveLength(1);
-    const [backgroundWait] = backgroundTimers();
+    expect(timers.registrations()).toHaveLength(1);
+    const backgroundWait = timers.registrations()[0].handle;
 
     const scan = Promise.withResolvers<ReturnType<typeof result>>();
     state.scan.mockReturnValueOnce(scan.promise);
@@ -451,10 +475,10 @@ describe("durable import recovery", () => {
       folderPath: "explicit",
       status: "scanning",
     });
-    expect(clear).toHaveBeenCalledWith(backgroundWait);
+    expect(timers.clear).toHaveBeenCalledWith(backgroundWait);
     await vi.advanceTimersByTimeAsync(100);
     expect(state.scan).toHaveBeenCalledTimes(1);
-    expect(backgroundTimers()).toHaveLength(1);
+    expect(timers.registrations()).toHaveLength(1);
 
     scan.resolve(result());
     await tick();
@@ -462,22 +486,22 @@ describe("durable import recovery", () => {
     expect(queue.getImportQueueStatus().pending).toMatchObject([
       { source: "background", status: "queued" },
     ]);
-    expect(backgroundTimers()).toHaveLength(2);
-    const nextBackgroundWait = backgroundTimers()[1];
+    expect(timers.registrations()).toHaveLength(2);
+    const nextBackgroundWait = timers.registrations()[1].handle;
     await queue.stopImports();
-    expect(clear).toHaveBeenCalledWith(nextBackgroundWait);
-    expect(clear).not.toHaveBeenCalledWith(unrelated);
-    clearTimeout(unrelated);
+    expect(timers.clear).toHaveBeenCalledWith(nextBackgroundWait);
+    expect(timers.clear).not.toHaveBeenCalledWith(timers.unrelated);
   });
 
   it("wakes a queued background root immediately when the user explicitly imports it", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const timers = trackQueueTimers();
     state.foregroundBusy = true;
     const queue = await import("@/services/import-queue");
     const root = path.resolve("promoted-root");
     const original = queue.enqueueImport(root, "background");
     await tick();
-    expect(vi.getTimerCount()).toBe(1);
+    expect(timers.registrations()).toHaveLength(1);
+    const backgroundWait = timers.registrations()[0].handle;
     const promoted = queue.enqueueImport(root);
     expect(promoted.id).toBe(original.id);
     await tick();
@@ -486,27 +510,31 @@ describe("durable import recovery", () => {
       expect.any(Function),
       { background: false }
     );
-    expect(vi.getTimerCount()).toBe(0);
+    expect(timers.clear).toHaveBeenCalledWith(backgroundWait);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(state.scan).toHaveBeenCalledTimes(1);
+    expect(timers.registrations()).toHaveLength(1);
   });
 
   it("retires a background retry across a profile stop without disturbing the new timer", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const timers = vi.spyOn(globalThis, "setTimeout");
+    const timers = trackQueueTimers();
     state.foregroundBusy = true;
     const queue = await import("@/services/import-queue");
     queue.enqueueImport("old-profile", "background");
     await tick();
-    const oldRetry = timers.mock.calls.find(([, delay]) => delay === 100)?.[0];
-    expect(typeof oldRetry).toBe("function");
+    expect(timers.registrations()).toHaveLength(1);
+    const [oldRetry] = timers.registrations();
     await queue.stopImports();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(timers.clear).toHaveBeenCalledWith(oldRetry.handle);
     state.settings.set("imports.unfinishedRoots", "[]");
     queue.resumeInterruptedImports();
     queue.enqueueImport("new-profile", "background");
     await tick();
-    expect(vi.getTimerCount()).toBe(1);
-    (oldRetry as () => void)();
-    expect(vi.getTimerCount()).toBe(1);
+    expect(timers.registrations()).toHaveLength(2);
+    const newRetry = timers.registrations()[1].handle;
+    oldRetry.callback();
+    expect(timers.registrations()).toHaveLength(2);
+    expect(timers.clear).not.toHaveBeenCalledWith(newRetry);
     expect(state.scan).not.toHaveBeenCalled();
     state.foregroundBusy = false;
     await vi.advanceTimersByTimeAsync(100);
