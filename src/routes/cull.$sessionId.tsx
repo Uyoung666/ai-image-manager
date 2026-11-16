@@ -523,4 +523,5 @@ export function CullSessionPage() {
 export const Route = createFileRoute("/cull/$sessionId")({
   component: CullSessionPage,
   errorComponent: RouteError,
+  remountDeps: ({ params }) => params.sessionId,
 });

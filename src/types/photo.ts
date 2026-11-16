@@ -3,6 +3,8 @@ import type {
   LibrarySourceStatus,
 } from "./library-reliability";
 
+export const MAX_PHOTO_IDS_PER_REQUEST = 1000;
+
 export type SearchMatch =
   | { kind: "color"; score: number }
   | { kind: "exact"; source: "filename" | "person" | "tag" }

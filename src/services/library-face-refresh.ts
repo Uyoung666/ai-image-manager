@@ -6,6 +6,7 @@ import { resolveFaceScanFolderIds } from "./face-scan-scope";
 import { getSetting } from "./settings-manager";
 
 const MAX_ATTEMPTS = 4;
+const BUSY_FACE_RETRY_MS = 5000;
 type RefreshDatabase = ReturnType<typeof getDatabase>;
 interface FaceRefreshRow {
   analysisGeneration: number;
@@ -129,11 +130,14 @@ async function processFaceBatch(
   db: RefreshDatabase,
   rows: FaceRefreshRow[],
   signal: AbortSignal
-): Promise<boolean> {
+): Promise<boolean | "busy"> {
   const { detectFaces, cancelFaceDetection, isFaceDetectionRunning } =
     await import("./face-detector");
-  if (isStopped(signal, db) || isFaceDetectionRunning()) {
+  if (isStopped(signal, db)) {
     return false;
+  }
+  if (isFaceDetectionRunning()) {
+    return "busy";
   }
   const claimed = claimFaceRefresh(db, rows);
   const abort = () => cancelFaceDetection();
@@ -196,7 +200,11 @@ export async function refreshChangedPhotoFaces(
       break;
     }
     cursor = rows.at(-1)?.id ?? cursor;
-    if (!(await processFaceBatch(db, rows, signal))) {
+    const result = await processFaceBatch(db, rows, signal);
+    if (result === "busy") {
+      return Date.now() + BUSY_FACE_RETRY_MS;
+    }
+    if (!result) {
       return;
     }
   }

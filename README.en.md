@@ -30,34 +30,20 @@ A local-first AI photo manager for Windows, with natural-language search, smart 
 
 AI Image Manager is designed for photographers, creators, designers, and anyone with a long-lived photo library on Windows. The workflow is built around your existing folders: index them in place, find photos with natural language, visual similarity, metadata, or folders, then organize, curate, analyze, export, or share them.
 
-## Current code version: v2.2.7
+## Current code version: v2.2.9
 
-v2.2.7 improves offline HEIC / HEIF decoding, imports and AI processing, retaining the earlier update download fix and import-free culling, search and gallery improvements. GitHub Releases identifies the available stable release.
+v2.2.9 improves how the app checks, recovers, and refreshes library sources. GitHub Releases lists the available stable release.
 
-### v2.2.7 highlights
-
-- Built-in offline HEIC / HEIF decoding supports imports, thumbnails, full previews, AI analysis and face processing without extra system codecs.
-- Improve primary-image selection, orientation and color conversion, including converting 10-bit HEIF for display and analysis; not every HEIF encoding variant is supported.
-- Reuse model input caches, reduce repeated decoding, balance batches and update AI progress per photo.
-- Distinguish decoding, model and inference failures, isolate damaged-photo errors and improve worker cleanup.
-
-### v2.2.5 highlights
-
-- Curate, compare in PK, or curate then compare directly from a card or shooting folder; save offline previews, copy kept originals with XMP, and explicitly add selected files to the library when needed.
-- Manage folder projects and library culling in one task list, with archiving, undo, restoration and confirmed archive cleanup.
-- Reuse text and image search history with configurable limits, save combined searches as presets, and explore rotating gallery themes.
-- Improve masonry loading, pagination recovery, browsing position and thumbnails; batch-edit tags with undo and remember album and export preferences.
-- Unify app icons and interaction animations, fix the Windows taskbar identity, refresh About, and provide a matching official Japanese language pack.
+- Use **Settings → Library sources** to check offline, missing, or inaccessible originals and relink a folder or an individual photo. Existing cached previews remain available while sources are offline.
+- When an original changes, the app keeps manual organization and refreshes the photo's preview, EXIF, and AI analysis. Keep earlier culling decisions as history and start a new review for affected photos that are ready.
+- Automatic discovery and AI indexing work again for watched folders. Press Space to preview a selected photo. The dashboard, search feedback, and built-in themes also received updates.
+- The updater retries writing update metadata when Windows briefly locks the file.
 
 ### Upgrading
 
-**v2.2.4 / v2.2.5 users need one manual upgrade:** these versions fail at GitHub asset redirects with “Redirect was cancelled”. Download v2.2.7 from the formal Release, exit the app, then install over the existing installation using the same Setup or MSI format; ZIP users should extract into a new directory. Keep the existing application data directory and do not uninstall with data removal. v2.2.6 fixed download redirects, so installed v2.2.6 copies can update to this release in the app. Compared with v2.2.6, v2.2.7 adds no database migration and requires no full AI index rebuild.
+Quit the app and back up its data directory first. v2.2.9 migrates an existing library database on first launch. You can normally keep using the existing AI index.
 
-When upgrading from v2.2.4, the first launch automatically migrates the database for the gallery and culling workflows. This update does not require a routine AI index rebuild. Back up the application data directory before upgrading; original photos, tags, favorites and existing culling records are preserved.
-
-When upgrading from v2.2.3 or earlier, rebuild the AI index in **Settings → AI Index** if the app reports an incompatible index. Semantic and image search are restricted until rebuilding finishes; filename, tag and person searches remain available. You do not need to import your photos again.
-
-Setup and MSI installations with the updater enabled support in-app updates. ZIP installations and MSI installations with the updater disabled require manual upgrades. Updates continue to use GitHub Releases and the Windows system proxy.
+Setup and MSI installations with the updater enabled can check for stable releases under **Settings → Software Update**. v2.2.4 and v2.2.5 require one manual upgrade because of a download redirect issue. Upgrade ZIP builds and MSI installations with the updater disabled manually. Keep your installation method and app data directory when upgrading manually. See [upgrade and backup instructions](GUIDE.en.md#upgrading-from-an-older-version).
 
 ### Interface languages
 
@@ -83,7 +69,7 @@ Download the latest stable release from [GitHub Releases](https://github.com/Uyo
 
 `Setup.exe` and `.msi` are alternative installation methods; do not install both on the same computer. Existing `Setup.exe` users should keep using in-app updates and do not need to migrate to MSI. The program installation directory contains the application itself, while the application data directory selected on first launch stores the database, thumbnails, vector index, and local models.
 
-Both installation methods receive new GitHub versions through in-app updates. Clients only see a formally published GitHub Release with a valid SemVer tag that is neither a draft nor a prerelease; an ordinary code push or a Release that remains in Draft does not trigger an update. Every Windows Release must include `RELEASES`, `*-full.nupkg`, and `*Setup.exe`, and the publishing workflow validates that payload automatically.
+Setup and MSI installations with the updater enabled receive new GitHub versions through in-app updates. Clients only see a formally published GitHub Release with a valid SemVer tag that is neither a draft nor a prerelease; an ordinary code push or a Release that remains in Draft does not trigger an update. Every Windows Release must include `RELEASES`, `*-full.nupkg`, and `*Setup.exe`, and the publishing workflow validates that payload automatically.
 
 If an earlier MSI was installed while its Auto Update feature showed a red X, install the corrected MSI over it once. From that installation onward, the app can detect, download, and apply future versions automatically.
 
@@ -93,7 +79,7 @@ Starting with the v2.2.1 formal release, GitHub Releases is the only long-term s
 
 Setup and MSI builds with the updater enabled support in-app updates. An MSI with its updater disabled and the ZIP build require manual upgrades. Close the app, run the target Setup or MSI, or extract the ZIP into a new directory; the application data directory remains in place, so photos, databases, thumbnails, vector indexes, and local models are preserved. Only formal GitHub Releases are considered; drafts and prereleases are ignored by automatic checks.
 
-The 30-day migration window for old clients that still use the COS update address starts when v2.2.1 is formally published. COS must remain available during that window, and the project will not claim that every client has migrated without telemetry. If an older client cannot reach COS, download Setup or MSI from GitHub Releases and install it manually over the existing installation. COS retirement will be announced separately after migration and download verification are complete.
+If an older client still uses the COS update address and cannot check for or download updates, download the matching installer from GitHub Releases. Install it over the existing copy and keep using the existing app data directory.
 
 On first launch, the setup flow helps you:
 
@@ -243,14 +229,14 @@ The indexer accepts 27 extensions. RAW thumbnails, previews, and AI analysis pri
 
 ## Performance reference
 
-These are the recorded performance observations for this release, rounded to whole seconds:
+These measurements come from an earlier version and are rounded to whole seconds:
 
 | Workload | Import | AI embedding | Total |
 | ---: | ---: | ---: | ---: |
 | 1,000 photos | 30 seconds | 32 seconds | **62 seconds** |
 | 10,000 JPG photos in one day | about 340 seconds (5m 40s) | about 746 seconds (12m 26s) | **about 1,086 seconds (18m 06s)** |
 
-The one-day 10,000-photo run included import, thumbnail/EXIF/hash preparation, and SigLIP embedding; derived test data was removed afterward. This is a single observation for the current release, not a guarantee for every computer, library, or image type.
+The one-day 10,000-photo run included import, thumbnail/EXIF/hash preparation, and SigLIP embedding; derived test data was removed afterward. Timing varies with hardware, library contents, and image format.
 
 ## How the app handles your data
 
@@ -267,7 +253,7 @@ Folders you choose
 Derived data lives in the application data directory; original photos remain in your folders.
 ```
 
-The app does not take ownership of or automatically migrate your original photos. If source files are moved or deleted, their index records may become invalid and can be cleaned from Settings. The database, thumbnails, vector index, models, and logs are controlled by the data-directory setting.
+Original photos stay in the locations you choose. The app retains library records and organization if a source goes offline, moves, or loses a file. Use **Settings → Library sources** to check, relink, or review the impact before removing a missing record. The app data directory holds the database, thumbnails, vector index, models, and logs.
 
 ## Privacy, network, and diagnostics
 
@@ -277,7 +263,7 @@ The app does not take ownership of or automatically migrate your original photos
 - When WebDAV/S3 is configured and an upload or share action is initiated, the corresponding data is sent to the selected service.
 - **Settings → Help & Diagnostics** creates a strictly redacted diagnostic bundle locally. It is not uploaded automatically; it leaves the device only if the user exports it or attaches it to an Issue. Native crash dumps are off by default.
 
-These statements describe the current v2.2.5 implementation. Screenshots and performance data retain their actual measurement versions and do not replace the privacy policies of connected cloud or update services.
+For connected cloud storage and update downloads, see the relevant service’s privacy policy.
 
 ## Bundled AI models and licenses
 

@@ -118,8 +118,20 @@ it("cancels only its own active detection when the scheduler pauses", async () =
   });
   state.cancel.mockClear();
   state.detecting = true;
-  await refreshChangedPhotoFaces(new AbortController().signal);
+  const now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+  const retryAt = await refreshChangedPhotoFaces(new AbortController().signal);
+  expect(retryAt).toBeGreaterThan(now);
   expect(state.cancel).not.toHaveBeenCalled();
+  expect(state.detect).toHaveBeenCalledOnce();
+  expect(db.select().from(photos).where(eq(photos.id, 1)).get()).toMatchObject({
+    faceRefreshAttempts: 0,
+    faceRefreshRetryAt: 0,
+  });
+  state.detecting = false;
+  clock.mockReturnValue(retryAt ?? now);
+  await refreshChangedPhotoFaces(new AbortController().signal);
+  expect(state.detect).toHaveBeenCalledTimes(2);
 });
 it("retains retry markers and records a failed detector without rejecting indexing", async () => {
   state.detect.mockRejectedValueOnce(new Error("detector unavailable"));

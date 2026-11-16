@@ -1,8 +1,8 @@
-# AI Image Manager v2.2.7 User Guide
+# AI Image Manager v2.2.9 User Guide
 
 > A local-first photo manager for Windows. Build an index over your existing folders, then search, organize, curate, analyze, export, and share your library.
 
-This guide follows the normal user workflow and describes v2.2.7. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
+This guide follows the normal user workflow and describes v2.2.9. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
 
 ---
 
@@ -10,6 +10,7 @@ This guide follows the normal user workflow and describes v2.2.7. GitHub Release
 
 - [Before you start](#before-you-start)
 - [Quick start](#quick-start)
+- [Library sources and recovery](#library-sources-and-recovery)
 - [Photo browsing](#photo-browsing)
 - [Search](#search)
 - [Folder navigation](#folder-navigation)
@@ -54,7 +55,7 @@ Actual timing depends on image format, dimensions, storage, system load, and har
 | 1,000 photos | 30 seconds | 32 seconds | **62 seconds** |
 | 10,000 JPG photos in one day | about 340 seconds (5m 40s) | about 746 seconds (12m 26s) | **about 1,086 seconds (18m 06s)** |
 
-The one-day 10,000-photo run included import, thumbnail/EXIF/hash preparation, and SigLIP embedding; derived test data was removed afterward. This is a single observation for the current release, not a fixed performance guarantee.
+The one-day 10,000-photo run included import, thumbnail/EXIF/hash preparation, and SigLIP embedding; derived test data was removed afterward. These measurements come from an earlier version. Timing varies with hardware, library contents, and image format.
 
 ### File formats
 
@@ -70,11 +71,13 @@ RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews r
 
 ### Upgrading from an older version
 
-**v2.2.4 / v2.2.5 users need one manual upgrade:** these versions fail at GitHub asset redirects with “Redirect was cancelled”. Download v2.2.7 from the formal Release, exit the app, then install over the existing installation using the same Setup or MSI format; ZIP users should extract into a new directory. Keep the existing application data directory and do not uninstall with data removal. v2.2.6 fixed download redirects, so installed v2.2.6 copies can update to this release in the app. Compared with v2.2.6, v2.2.7 adds no database migration and requires no full AI index rebuild.
+Quit the app and back up its data directory before upgrading. Keep the existing data directory and original photo folders. For a manual upgrade, download the matching installer from [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest) and install over your existing copy. For ZIP builds, extract the new version into a new directory and keep using the existing data directory.
 
-When upgrading from v2.2.4, the first launch automatically migrates the database for the gallery and culling workflows. This update does not require a routine AI index rebuild. Back up the application data directory before upgrading; original photos, tags, favorites and existing culling records are preserved.
-
-When upgrading from v2.2.3 or earlier, rebuild the AI index in **Settings → AI Index** if the app reports an incompatible index. Semantic and image search are restricted until rebuilding finishes; filename, tag and person searches remain available. You do not need to import your photos again.
+- **v2.2.4 and v2.2.5** report “Redirect was cancelled” when the updater follows a GitHub download redirect. Upgrade manually once. Use the same steps if you run into the download error.
+- **v2.2.8 Setup and MSI installations with the updater enabled** can check for v2.2.9 under **Settings → Software Update**. Upgrade ZIP builds and MSI installations with the updater disabled manually.
+- v2.2.9 migrates an existing library database on first launch. If the existing photos table has yet to receive the library source schema, the app saves a `pre-library-reliability-*.db` database snapshot under `data/backups/` in the app data directory before migrating. Background checks then verify sources and fill in file fingerprints in batches.
+- Source status updates as checks progress. You can normally keep using the existing AI index. When photo content changes, the app refreshes that photo as needed. If the app reports an incompatible index, follow [Index upgrades and rebuilding](#index-upgrades-and-rebuilding).
+- To return to an earlier app version, quit the app and restore a pre-upgrade backup compatible with that version. The automatic snapshot contains only the database. Use a pre-upgrade backup of the app data directory for a complete restore.
 
 ### 0. Choose an installation method
 
@@ -84,9 +87,7 @@ When upgrading from v2.2.3 or earlier, rebuild the AI index in **Settings → AI
 
 The program installation directory contains the app itself. The data directory selected during first-run onboarding contains the database, thumbnails, vector indexes, logs, and models. Changing one does not automatically change the other.
 
-Clients installed from either MSI or Setup check GitHub for updates at startup and periodically while running. Only a formally published, higher-version GitHub Release that is not a draft or prerelease is eligible; pushing code or a tag alone does not update clients. Before publishing, confirm that the Release contains `RELEASES`, a full `.nupkg`, and `Setup.exe`.
-
-If the Auto Update feature showed a red X in an earlier MSI, install the corrected MSI over that copy once before relying on automatic updates.
+A ZIP build runs after extraction. Setup and MSI installations with the updater enabled can check for newer stable releases under **Settings → Software Update**. To restore in-app updates on an older MSI installation with the updater disabled, install the newer MSI over it and enable the Auto Update component in the installer.
 
 ### 1. First-run onboarding
 
@@ -112,13 +113,26 @@ The app records the selected folder and watches for later changes. New or change
 
 ### Library sources and recovery
 
-Open **Settings > Library sources** to see affected sources grouped by folder. A disconnected drive is shown as offline, without an error warning; cached previews remain available. Connect the device and check again, or choose its new location if it moved. Photo details and previews link directly to the affected photo.
+Open **Settings → Library sources**. The source notice on the home page also opens this page. **Resolve in settings** in photo details or previews takes you directly to the affected photo. Issues are grouped by source folder. Choose **View affected photos** to see the list and search by filename or path.
 
-Choose a new location, review the matching summary, and confirm. Files whose identity cannot be verified require explicit confirmation; conflicts prevent relinking. Originals are not moved. Unfinished previews and unclosed task results remain available when you return during the same app session. Expired previews can be checked again.
+| Status | What to do |
+| --- | --- |
+| Offline | Reconnect the drive, then click **Check connection**. Cached previews remain available. |
+| Missing | The source is reachable, but the photo is absent from its recorded path. Choose a new location, or remove the record after confirming that the file is missing. |
+| Inaccessible | Restore device access or file permissions, then check again. |
+| Refresh failed | Restore access to the original and click **Retry update**. Paused AI work waits until you resume indexing. |
 
-Retry an incomplete update after restoring access. Paused AI work waits until you resume it in AI Index settings. Each affected photo card shows its available actions. For a confirmed missing photo, choose **Remove missing record** on the card and review the affected relationships before confirming.
+You can also use **Check all sources** or check a single original from its photo card. A single-photo check verifies the recorded path. The app shows a placeholder when no preview is cached, and needs the original file to export it, move it, rename it, or upload it. Use **Regenerate preview** when the card offers it after a preview failure.
 
-Changed culling results remain historical. Use **Review again** to create a separate curation task for ready photos without changing the old decisions.
+1. If a path or drive letter changes, click **Choose new location** on the source folder or photo card and select the corresponding folder or file.
+2. Review the old path, new path, and match status. A matching full content hash verifies the file. If the library lacks a reliable earlier fingerprint, check the file yourself and explicitly confirm the match. Resolve any content mismatch, path conflict, or original still present before applying the change.
+3. Click **Update library locations** to save. This changes the paths recorded in the library. The preview expires after 10 minutes. Check again if files or records change, the preview expires, or the app restarts.
+
+Checks and relink jobs continue if you leave Settings. Return during the same app session to see undismissed results or a preview awaiting confirmation. You can cancel checks and verification before saving starts. Once saving begins, wait for the result. Source statuses already updated may remain after you cancel a check.
+
+The app automatically keeps the original photo record after a move only when the old file is confirmed missing and its full hash identifies a unique match. Review any ambiguous candidates. Separate copies with identical content keep separate records. When a photo is overwritten at the same path, the app keeps manual organization and refreshes EXIF, previews, and AI analysis. Older vectors are excluded from similarity searches during refresh. Review affected face confirmations and culling decisions against the new content.
+
+For a confirmed missing photo, choose **Remove missing record** on the photo card. Review the affected tag, album, face, and culling links before confirming. This action removes a library record. See [Trash](#trash) for photos you deleted in the app.
 
 ### 3. Read import progress
 
@@ -286,7 +300,7 @@ Folder appearance is an in-app setting and does not modify directories on disk:
 3. Choose a color and icon badge.
 4. Save.
 
-If source files are moved or deleted, counts and valid records update after refresh, reindexing, or invalid-index cleanup.
+If a source moves, goes offline, or loses a file, the library updates the source status and retains its photo records and organization. Use [Library sources and recovery](#library-sources-and-recovery) to check a source, relink a file, or review the impact before removing a confirmed missing record.
 
 ---
 
@@ -310,7 +324,7 @@ Import and AI indexing are separate. After adding a new folder, prefer increment
 
 ### Index upgrades and rebuilding
 
-v2.2.7 adds no database migration or full AI index rebuild requirement over v2.2.6. Database or search-data migrations introduced in earlier versions still run when needed.
+v2.2.9 migrates the database at startup and can continue using the existing AI index. The app refreshes individual photos when their content changes and respects your AI pause setting. To regenerate older AI results on demand, use **Settings → AI Index → Rebuild AI Index**.
 
 If the app reports an incompatible older AI index, open **Settings → AI Index → Rebuild AI Index**. Semantic search and image search are unavailable while the existing index is incompatible; filename, tag and person searches remain available. Rebuilding preserves original images, manual tags and favorites, and does not require importing your photos again. Processing time depends on your library and hardware.
 
@@ -368,7 +382,7 @@ A custom model must provide:
 
 After changing models, the old vector store cannot be reused directly. A new vector index must be built and matched to the model fingerprint. An uncalibrated custom model is not used for automatic tag acceptance or duplicate-photo confirmation.
 
-This release exposes the extension foundation only. It does not provide a custom-model UI, model download flow, or bundled support in the installer. Custom model integration is a developer capability; placing model files in the `models` directory does not enable them. See the [AI Model Adapter Developer Guide](docs/AI_MODEL_ADAPTER_GUIDE.md) for the adapter protocol and acceptance requirements.
+This release exposes the extension foundation only. It does not provide a custom-model UI, model download flow, or bundled support in the installer. Custom model integration is a developer capability; placing model files in the `models` directory does not enable them.
 
 ---
 
@@ -593,7 +607,7 @@ The result view supports:
 - Moving rejected photos to the 30-day trash
 - Duplicating or deleting a culling session; deleting a session does not delete photos
 
-Culling results assist decisions and do not overwrite originals automatically.
+Earlier culling decisions remain in the session history. If a library culling result flags photos whose content changed, click **Review again** to start a separate curation session for photos whose sources are available and whose refresh is complete. Photos that are still pending are skipped, and the earlier session and decisions remain intact.
 
 ---
 
@@ -742,15 +756,13 @@ Provider permissions, encryption, access controls, costs, and privacy policies a
 
 ## Trash
 
-Deleted photos first enter the app trash for 30 days. After that, they are moved to the Windows system recycle bin; final recovery depends on the system recycle bin and later user actions.
+Deleting a photo in the app first moves its record to the app trash for 30 days by default. After that, the app attempts to move verified originals to the Windows Recycle Bin.
 
 | Action | Description |
 | --- | --- |
-| Restore | Return a photo to its original location |
-| Move to system recycle bin | End the app retention period early |
-| Empty | Move all app-trash photos to the system recycle bin |
-
-If a source file was moved or deleted outside the app, restoration to its original location may not be possible. Confirm backups and selection scope before permanent cleanup.
+| Restore | Restore the photo record to the library. If the source is offline, reconnect it to continue. |
+| Move to system recycle bin | End the app retention period early and let Windows manage the file after the app verifies its identity. |
+| Empty | Process the app trash in bulk. If the original is confirmed missing, only the trash record is cleared. Items stay pending if the photo changed, its identity cannot be verified, or its source is offline or inaccessible. |
 
 ---
 
@@ -803,8 +815,8 @@ If you want to create a plugin, read the [Plugin development guide](docs/plugin-
 - Migrate the database, thumbnails, vector index, and models
 - View thumbnail cache size and location
 - Clear the thumbnail cache
-- View database location and valid/invalid index counts
-- Clean records for source files that were moved or deleted
+- View the database location and library source status
+- Open [Library sources](#library-sources-and-recovery) to check a source, relink a location, or review the impact before removing a confirmed missing record
 
 ### GPU acceleration
 
@@ -831,7 +843,7 @@ Under **Settings → Software Update**, you can:
 - Restart to install a downloaded update
 - Open Releases for a manual download
 
-Update checks and downloads contact GitHub using the Windows system proxy. Configure a system proxy that can reach GitHub; proxy settings for model downloads or other in-app services do not configure the updater.
+Update checks and downloads contact GitHub using the Windows system proxy. If a network error occurs, check that the system proxy can reach the GitHub API, Releases, and asset download hosts, then retry or download from the Release page.
 
 ### About
 
@@ -967,7 +979,7 @@ Do not treat visual similarity as proof. Review the group, compare EXIF, sharpne
 
 ### How long do photos stay in trash?
 
-The app trash keeps them for 30 days, then moves them to the Windows system recycle bin. Recovery after manual cleanup depends on the system recycle bin and subsequent actions.
+The app trash keeps photos for 30 days by default. When the retention period ends or you empty the trash, the app moves an original to the Windows Recycle Bin only after verifying its identity. Items stay in the app trash if the original changed, its identity cannot be verified, or its source is offline or inaccessible. Recovery after a move depends on the state of the Windows Recycle Bin and any later actions.
 
 ### Why does the app connect to the network?
 

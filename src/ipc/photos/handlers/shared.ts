@@ -5,6 +5,7 @@ import {
 } from "@/lib/folder-appearance";
 import type { ScoringOptions } from "@/services/ai/query-parser";
 import { LIBRARY_SOURCE_STATUSES } from "@/types/library-reliability";
+import { MAX_PHOTO_IDS_PER_REQUEST } from "@/types/photo";
 
 const LibraryStatusSchema = z.enum([
   ...LIBRARY_SOURCE_STATUSES,
@@ -45,7 +46,7 @@ export const BatchPhotoIdsSchema = z.object({
   ids: z
     .array(z.number().int().positive())
     .min(1)
-    .max(1000)
+    .max(MAX_PHOTO_IDS_PER_REQUEST)
     .transform((ids) => [...new Set(ids)]),
 });
 export const TrashListSchema = z.object({

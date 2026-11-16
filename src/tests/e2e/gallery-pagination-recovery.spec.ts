@@ -2,7 +2,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { type ElectronApplication, expect, type Page } from "@playwright/test";
+import {
+  type ElectronApplication,
+  expect,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import sharp from "sharp";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
 
@@ -523,8 +528,7 @@ for (const [sizeIndex, size] of SIZES.entries()) {
       await page.screenshot({
         path: test.info().outputPath("tag-edit-continuity.png"),
       });
-      await page.keyboard.press("Escape");
-      await expect(inspector).toHaveCount(0);
+      await closeInspectorWithEscape(inspector);
       await assertBounds();
       fs.writeFileSync(
         test.info().outputPath("continuity.json"),
@@ -562,6 +566,16 @@ test.afterEach(async () => {
     );
   }
 });
+
+async function closeInspectorWithEscape(inspector: Locator) {
+  // Settle the last tag's tooltip before exercising the inspector shortcut.
+  await inspector
+    .getByRole("heading", { name: "Photo Detail", exact: true, level: 3 })
+    .click();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(inspector).toHaveCount(0);
+}
 
 async function assertBounds() {
   const bounds = await page.evaluate(() => {
@@ -758,8 +772,7 @@ test("keeps the final mismatching photo open for further tag edits", async () =>
   await expect(extra).toHaveCount(0);
   await expect(inspector).toBeVisible();
   await assertBounds();
-  await page.keyboard.press("Escape");
-  await expect(inspector).toHaveCount(0);
+  await closeInspectorWithEscape(inspector);
 });
 
 test("can leave during the tag-refresh debounce and return to an updated scope", async () => {

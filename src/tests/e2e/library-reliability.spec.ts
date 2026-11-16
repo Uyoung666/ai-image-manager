@@ -21,6 +21,7 @@ const WEAK_EVIDENCE = /content unverified/;
 const LIBRARY_ATTENTION = /photos have disconnected sources/;
 const REMOVE_MISSING = "Remove missing record";
 const CACHE_CLEARED = /^Cleared [1-9]\d* cached files and freed /;
+const REVIEW_NOT_READY = /photos are not ready/;
 
 function stageHistoricalMigrations(root: string): string {
   const target = path.join(root, "historical-migrations");
@@ -259,7 +260,8 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
       INSERT INTO photo_tags(photo_id,tag_id,origin,user_confirmed) VALUES(1,1,'manual',1);
       INSERT INTO albums(id,name,created_at) VALUES(1,'Preserved album',1);
       INSERT INTO album_photos(album_id,photo_id,sort_order) VALUES(1,1,0);
-      INSERT INTO cull_sessions(id,name,created_at) VALUES(1,'Preserved review',1);
+      INSERT INTO cull_sessions(id,name,created_at,status,total_photos)
+      VALUES(1,'Preserved review',1,'completed',1);
       INSERT INTO cull_session_photos(id,session_id,photo_id,rating) VALUES(11,1,1,1777);
       INSERT INTO face_vectors(id,photo_id,face_index,bbox_x,bbox_y,bbox_width,bbox_height,created_at)
       VALUES(3,1,0,0,0,1,1,1);
@@ -648,6 +650,38 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
         `simplified-detail-${size.width}-${size.zoomFactor ?? 1}.png`
       );
     }
+    await expect
+      .poll(() =>
+        query("SELECT source_status,refresh_status FROM photos WHERE id=1")
+      )
+      .toEqual([{ source_status: "available", refresh_status: "ready" }]);
+    await page.evaluate(() => window.__e2eNavigate?.("/cull/1"));
+    const reviewAgain = page.getByRole("button", {
+      name: "Review again",
+      exact: true,
+    });
+    await reviewAgain.click();
+    await expect(page.getByText(REVIEW_NOT_READY)).toBeVisible();
+    expect(query("SELECT id FROM cull_sessions")).toEqual([{ id: 1 }]);
+
+    // The fixture keeps AI paused. Record a completed analysis for this photo
+    // so the UI can exercise both the waiting and ready review paths.
+    query(
+      `UPDATE photos SET embedding_revision=content_revision,
+        color_revision=content_revision,face_refresh_pending=0 WHERE id=1`,
+      true
+    );
+    await reviewAgain.click();
+    await expect(
+      page.getByRole("heading", { name: "Preserved review (review again)" })
+    ).toBeVisible();
+    await expect(page.getByTestId("cull-curate-keep")).toBeVisible();
+    expect(
+      query(
+        "SELECT session_id,photo_id FROM cull_session_photos WHERE session_id<>1"
+      )
+    ).toEqual([{ session_id: 2, photo_id: 1 }]);
+    expectPreservedRelations();
     await app.close();
     const keptOriginal = path.join(root, "original-outside-library.jpg");
     fs.renameSync(newPhoto, keptOriginal);
@@ -682,6 +716,11 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
     await page.waitForFunction(() => Boolean(window.__e2eNavigate));
     await page.evaluate(() => window.__e2eNavigate?.("/"));
     expectPreservedRelations();
+    expect(
+      fs
+        .readdirSync(backupDirectory)
+        .filter((name) => name.startsWith("pre-library-reliability-"))
+    ).toEqual(backups);
     expect(
       query("SELECT path,content_revision FROM photos WHERE id=1")[0]
     ).toMatchObject({ path: newPhoto });
@@ -759,7 +798,7 @@ test("retains an offline catalogue, relinks its folder and explicitly removes a 
     ).toBeVisible();
     await expect(
       previewRemoval.getByText(
-        "1 tags · 1 albums · 1 faces · 1 culling entries"
+        "1 tags · 1 albums · 1 faces · 2 culling entries"
       )
     ).toBeVisible();
     await expectViewportBounds(page);

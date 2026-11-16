@@ -398,8 +398,19 @@ for (const size of SIZES) {
       await scroll.evaluate((element) => {
         element.scrollTop = 600;
       });
-      await expect(toolbar).toHaveCSS("background-color", "rgb(18, 18, 20)");
-      await expect(toolbar).toHaveCSS("backdrop-filter", "none");
+      if (collection === "albums") {
+        await expect(toolbar).toHaveCSS(
+          "background-color",
+          "color(srgb 0.0784314 0.0862745 0.101961 / 0.82)"
+        );
+        await expect(toolbar).toHaveCSS(
+          "backdrop-filter",
+          "blur(12px) saturate(1.2)"
+        );
+      } else {
+        await expect(toolbar).toHaveCSS("background-color", "rgb(18, 18, 20)");
+        await expect(toolbar).toHaveCSS("backdrop-filter", "none");
+      }
       await scroll.evaluate((element) => {
         element.scrollTop = 0;
       });

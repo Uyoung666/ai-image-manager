@@ -21,6 +21,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cullActions } from "@/actions/cull";
+import { photoListingActions } from "@/actions/photo-listing";
 import { photoOperationActions } from "@/actions/photo-operations";
 import { shootingProjectActions } from "@/actions/shooting-projects";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
@@ -1064,9 +1065,7 @@ export function CullResult({
                   const changed = session.items
                     .filter((item) => item.photo.needsContentReview)
                     .map((item) => item.photo.id);
-                  const records = await ipc.client.photos.getPhotosByIds({
-                    ids: changed,
-                  });
+                  const records = await photoListingActions.byIds(changed);
                   const ready = records.filter(
                     (photo) =>
                       photo.sourceStatus === "available" &&
