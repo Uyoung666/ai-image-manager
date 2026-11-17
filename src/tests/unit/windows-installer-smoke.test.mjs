@@ -16,6 +16,7 @@ import {
   runInstallerProcess,
   runMsiProcess,
   runPackagedE2E,
+  selectMsiUpgradeRegistration,
   terminateMsiProcess,
   terminatePackagedProcess,
 } from "../../../scripts/windows-installer-smoke.mjs";
@@ -28,6 +29,54 @@ const STARTUP_FAILURE_ERROR_PATTERN = /reported startup failure/iu;
 const FULL_FALLBACK_ERROR_PATTERN = /full fallback/iu;
 const MISSING_DELTA_ERROR_PATTERN = /exactly one downloaded/iu;
 const noOpForceKill = () => Promise.resolve();
+
+describe("historical MSI upgrade registration", () => {
+  const code = "{41F68436-23E6-42E5-87F8-014C3C772CAC}";
+  const original = {
+    DisplayVersion: "2.2.6",
+    InstallLocation: "C:\\Program Files (x86)\\AI Image Manager\\",
+    UninstallString: `MsiExec.exe /X ${code}`,
+  };
+
+  it.each([
+    "2.2.8",
+    "2.2.9",
+    "2.2.10",
+  ])("tracks the original MSI product after the application updates to %s", (version) => {
+    const upgraded = { ...original, DisplayVersion: version };
+    const cachedMsi = {
+      DisplayVersion: "2.2.6.0",
+      InstallLocation: "",
+      UninstallString: `MsiExec.exe /I${code}`,
+    };
+    expect(
+      selectMsiUpgradeRegistration([cachedMsi, upgraded], original, version)
+    ).toBe(upgraded);
+  });
+
+  it("rejects a replacement MSI or an application in another installation directory", () => {
+    const upgraded = { ...original, DisplayVersion: "2.2.10" };
+    for (const changed of [
+      {
+        UninstallString:
+          "MsiExec.exe /X {AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}",
+      },
+      { InstallLocation: "D:\\Different installation\\" },
+      { DisplayVersion: "2.2.6" },
+    ]) {
+      expect(() =>
+        selectMsiUpgradeRegistration(
+          [{ ...upgraded, ...changed }],
+          original,
+          "2.2.10"
+        )
+      ).toThrow("Expected one upgraded MSI registration");
+    }
+    expect(() =>
+      selectMsiUpgradeRegistration([upgraded, upgraded], original, "2.2.10")
+    ).toThrow("Expected one upgraded MSI registration");
+  });
+});
 
 function msiSpawnWithExit(status, recordSpawn = undefined) {
   return (command, args, options) => {

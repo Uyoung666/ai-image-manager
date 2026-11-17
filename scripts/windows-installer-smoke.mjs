@@ -20,6 +20,8 @@ import { pathToFileURL } from "node:url";
 
 const WINDOWS_EXE_PATTERN = /\.exe$/iu;
 const WINDOWS_MSI_PATTERN = /\.msi$/iu;
+const MSI_PRODUCT_CODE_PATTERN =
+  /\{[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\}/iu;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/iu;
 const VERSION_PREFIX_PATTERN = /^v/iu;
 const STABLE_VERSION_PATTERN =
@@ -1683,6 +1685,36 @@ function assertMsiAutoUpdater(product) {
   return updater;
 }
 
+export function selectMsiUpgradeRegistration(products, original, version) {
+  const productCode = original.UninstallString?.match(
+    MSI_PRODUCT_CODE_PATTERN
+  )?.[0];
+  if (!(productCode && original.InstallLocation)) {
+    throw new Error("Original MSI installation identity is incomplete");
+  }
+  const normalizeRoot = (value) =>
+    path.win32
+      .normalize(value)
+      .replace(WINDOWS_TRAILING_SLASH_PATTERN, "")
+      .toLowerCase();
+  const root = normalizeRoot(original.InstallLocation);
+  const matches = products.filter(
+    (product) =>
+      product.DisplayVersion === version &&
+      product.InstallLocation &&
+      normalizeRoot(product.InstallLocation) === root &&
+      product.UninstallString?.match(
+        MSI_PRODUCT_CODE_PATTERN
+      )?.[0]?.toLowerCase() === productCode.toLowerCase()
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `Expected one upgraded MSI registration for ${version} in the original installation: ${JSON.stringify(products)}`
+    );
+  }
+  return matches[0];
+}
+
 async function runMsiFreshSmoke(currentMsiPath, version) {
   const candidateStat = fs.statSync(currentMsiPath);
   if (!candidateStat.isFile() || candidateStat.size === 0) {
@@ -1727,7 +1759,7 @@ async function verifyMsiProductUpgrade(
   oldExecutable,
   sharedUserData,
   version,
-  normalizedOldVersion
+  oldProduct
 ) {
   const { establishHistoricalMsiUpgrade, runProductUpgradeChain } =
     await import("./release/update-product-gate.mjs");
@@ -1746,7 +1778,11 @@ async function verifyMsiProductUpgrade(
       fixture,
       full
     );
-    assertMsiInstalled(normalizedOldVersion);
+    selectMsiUpgradeRegistration(
+      registryProducts(),
+      oldProduct,
+      fixture.version
+    );
     source = history.target;
     if (process.env.AIM_MSI_NEGATIVE_CONTROL) {
       const control = JSON.parse(process.env.AIM_MSI_NEGATIVE_CONTROL);
@@ -1855,7 +1891,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         oldExecutable,
         sharedUserData,
         version,
-        normalizedOldVersion
+        oldProduct
       );
     } else {
       await runInstallerProcess(
@@ -1875,9 +1911,11 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         "ai-image-manager.exe"
       )
     );
-    const upgradedProduct = process.env.AIM_HISTORICAL_BASELINE
-      ? assertMsiInstalled(normalizedOldVersion)
-      : assertMsiInstalled(version);
+    const upgradedProduct = selectMsiUpgradeRegistration(
+      registryProducts(),
+      oldProduct,
+      version
+    );
     if (
       !fs.existsSync(retentionMarker) ||
       fs.readFileSync(retentionMarker, "utf8") !==
