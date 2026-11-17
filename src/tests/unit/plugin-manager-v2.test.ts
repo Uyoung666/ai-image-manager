@@ -1,7 +1,6 @@
 /** @vitest-environment node */
 import fs, { createWriteStream } from "node:fs";
 import { createRequire } from "node:module";
-import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -44,6 +43,7 @@ vi.mock("electron", () => ({
 
 import { PluginManager } from "@/services/plugin-manager";
 import { PluginStore } from "@/services/plugin-store";
+import { TestRuntime } from "../helpers/test-runtime";
 
 vi.mock("@/db", () => ({ getDatabase: () => database }));
 
@@ -63,6 +63,7 @@ const { ZipArchive } = createRequire(import.meta.url)("archiver") as {
 };
 
 let testRoot = "";
+let suiteRuntime: TestRuntime;
 let database: ReturnType<typeof drizzle>;
 let sqlite: Database.Database;
 let store: PluginStore;
@@ -90,17 +91,17 @@ async function writePluginArchive(
   });
 }
 
-function applySchema(): void {
+function applySchema(connection = sqlite): void {
   const sql = fs.readFileSync(
     path.join(process.cwd(), "drizzle", "0044_add_plugin_persistence.sql"),
     "utf8"
   );
   for (const statement of sql.split("--> statement-breakpoint")) {
     if (statement.trim()) {
-      sqlite.exec(statement);
+      connection.exec(statement);
     }
   }
-  sqlite.exec(`
+  connection.exec(`
     CREATE TABLE app_settings (
       key TEXT PRIMARY KEY NOT NULL,
       value TEXT NOT NULL,
@@ -110,7 +111,8 @@ function applySchema(): void {
 }
 
 beforeAll(() => {
-  testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "aim-plugin-manager-v2-"));
+  suiteRuntime = new TestRuntime("plugin-manager-v2");
+  testRoot = suiteRuntime.root;
   electronState.userData = path.join(testRoot, "user-data");
   sqlite = new Database(":memory:");
   database = drizzle(sqlite, {
@@ -145,10 +147,49 @@ beforeEach(() => {
 
 afterAll(() => {
   sqlite.close();
-  fs.rmSync(testRoot, { force: true, recursive: true });
+  expect(suiteRuntime.cleanup().status).toBe("deleted");
 });
 
 describe("PluginManager v2 persistence boundary", () => {
+  it("keeps the active plugin and saves settings after migrating and closing the old database", async () => {
+    const runtime = new TestRuntime("plugin-library-migration");
+    const oldDatabase = new Database(path.join(runtime.root, "source.db"));
+    const original = database;
+    let migratedDatabase: Database.Database | undefined;
+    try {
+      applySchema(oldDatabase);
+      database = drizzle(oldDatabase);
+      const pluginId = ASCII_OCEAN_MANIFEST.id;
+      const manager = new PluginManager([ASCII_OCEAN_MANIFEST]);
+      await manager.setEnabled(pluginId, true);
+      await manager.setSettings(pluginId, { fishCount: 40 });
+
+      const migrated = path.join(runtime.root, "destination.db");
+      await oldDatabase.backup(migrated);
+      oldDatabase.close();
+      migratedDatabase = new Database(migrated);
+      database = drizzle(migratedDatabase);
+
+      expect((await manager.list()).plugins[0]).toMatchObject({
+        enabled: true,
+        settings: { fishCount: 40 },
+      });
+      await manager.setSettings(pluginId, { fishCount: 60 });
+      const restarted = new PluginManager([ASCII_OCEAN_MANIFEST]);
+      expect((await restarted.list()).plugins[0]).toMatchObject({
+        enabled: true,
+        settings: { fishCount: 60 },
+      });
+    } finally {
+      database = original;
+      if (oldDatabase.open) {
+        oldDatabase.close();
+      }
+      migratedDatabase?.close();
+      expect(runtime.cleanup().status).toBe("deleted");
+    }
+  });
+
   it("keeps ocean disabled initially, persists settings and switches themes exclusively", async () => {
     const manager = new PluginManager(
       [NEBULA_GLASS_MANIFEST, ASCII_OCEAN_MANIFEST],

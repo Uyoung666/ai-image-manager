@@ -1,16 +1,11 @@
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
-import {
-  AlertCircle,
-  ArrowRight,
-  Cpu,
-  FolderHeart,
-  FolderOpen,
-  Zap,
-} from "lucide-react";
+import { AlertCircle, ArrowRight, Cpu, FolderHeart, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { getLibraryDirectoryInfo } from "@/actions/library-directory";
 import { GpuSettingsCard } from "@/components/gpu-settings-card";
 import LangToggle from "@/components/lang-toggle";
+import { LibraryDirectoryActions } from "@/components/settings/LibraryDirectoryActions";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
@@ -143,7 +138,6 @@ export function OnboardingOverlay() {
   const [stepAnimKey, setStepAnimKey] = useState(0);
   const [dataPath, setDataPath] = useState<string>("");
   const [isMigrating, setIsMigrating] = useState(false);
-  const [migrationError, setMigrationError] = useState<string | null>(null);
   const [gpuDetected, setGpuDetected] = useState(false);
   const [gpuEnabled, setGpuEnabled] = useState(false);
   const [gpuSettingsReady, setGpuSettingsReady] = useState(false);
@@ -173,7 +167,7 @@ export function OnboardingOverlay() {
       setNeedsOnboarding(true);
       notifyStartupOnboardingState(true);
       try {
-        const pathInfo = await ipc.client.settings.getDataPathInfo({});
+        const pathInfo = await getLibraryDirectoryInfo();
         if (!cancelled && pathInfo?.path) {
           setDataPath(pathInfo.path);
         }
@@ -189,7 +183,7 @@ export function OnboardingOverlay() {
       setNeedsOnboarding(true);
       notifyStartupOnboardingState(true);
       try {
-        const pathInfo = await ipc.client.settings.getDataPathInfo({});
+        const pathInfo = await getLibraryDirectoryInfo();
         if (!cancelled && pathInfo?.path) {
           setDataPath(pathInfo.path);
         }
@@ -233,7 +227,7 @@ export function OnboardingOverlay() {
       notifyStartupOnboardingState(true);
 
       try {
-        const pathInfo = await ipc.client.settings.getDataPathInfo({});
+        const pathInfo = await getLibraryDirectoryInfo();
         if (!cancelled && pathInfo?.path) {
           setDataPath(pathInfo.path);
         }
@@ -334,40 +328,6 @@ export function OnboardingOverlay() {
 
   // ── Handlers ──────────────────────────────────────────────────
 
-  const handleChangeDirectory = useCallback(async () => {
-    try {
-      const result = await ipc.client.shell.openFolderDialog({});
-      const newPath = (result as { path?: string }).path;
-      if (!newPath) {
-        return;
-      }
-
-      setIsMigrating(true);
-      setMigrationError(null);
-
-      const migration = (await ipc.client.settings.setDataPath({
-        newPath,
-      })) as { error?: string; ok: boolean };
-      if (!migration.ok) {
-        throw new Error(migration.error || t("dataPathSetFailed"));
-      }
-      // The home surface may have briefly queried the fresh, empty database
-      // before onboarding hid it. All cached server data belongs to the old
-      // data root, so discard it before Step 3 mounts and prefetches the
-      // selected library.
-      queryClient.clear();
-      setDataPath(newPath);
-    } catch (err) {
-      setMigrationError(
-        t("onboardingErrorMigration", {
-          error: (err as Error).message ?? String(err),
-        })
-      );
-    } finally {
-      setIsMigrating(false);
-    }
-  }, [t]);
-
   const handleGpuSettingsLoaded = useCallback(() => {
     setGpuSettingsReady(true);
   }, []);
@@ -458,45 +418,26 @@ export function OnboardingOverlay() {
                 </p>
               </div>
 
-              <div className="w-full space-y-3">
-                <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/20 px-4 py-3 sm:flex-nowrap sm:px-5 sm:py-4">
-                  <div className="min-w-0 flex-1">
+              <div className="w-full min-w-0 rounded-xl border border-border/60 bg-muted/20 px-3.5 py-3 text-left sm:px-4">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                  <div className="min-w-0 flex-[1_1_9rem]">
                     <p className="text-[11px] text-muted-foreground/70">
                       {t("onboardingStep1CurrentPath")}
                     </p>
-                    <p className="mt-1 truncate font-mono text-foreground/80 text-xs">
+                    <p className="mt-1 font-mono text-foreground/80 text-xs [overflow-wrap:anywhere]">
                       {dataPath || t("defaultPath")}
                     </p>
                   </div>
-                  <button
-                    className="ml-auto inline-flex max-w-full shrink-0 items-center justify-center gap-1.5 whitespace-normal rounded-lg border border-border bg-background px-3 py-1.5 text-center font-medium text-foreground text-xs transition-all hover:border-foreground/20 hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-                    disabled={isMigrating}
-                    onClick={handleChangeDirectory}
-                    type="button"
-                  >
-                    <FolderOpen className="h-3.5 w-3.5" />
-                    {t("onboardingStep1Change")}
-                  </button>
+                  <LibraryDirectoryActions
+                    currentPath={dataPath}
+                    onBusyChange={setIsMigrating}
+                    onboarding
+                    onChanged={(newPath) => {
+                      queryClient.clear();
+                      setDataPath(newPath);
+                    }}
+                  />
                 </div>
-
-                {isMigrating && (
-                  <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-                    <LoadingSpinner size="sm" />
-                    {t("onboardingStep1Migrating")}
-                  </div>
-                )}
-
-                {migrationError && (
-                  <div
-                    aria-live="polite"
-                    className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm"
-                  >
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span className="min-w-0 break-words">
-                      {migrationError}
-                    </span>
-                  </div>
-                )}
               </div>
 
               <button

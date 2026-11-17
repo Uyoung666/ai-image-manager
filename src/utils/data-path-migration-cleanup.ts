@@ -4,6 +4,9 @@ import { DATA_PATH_SUBDIRECTORIES } from "./data-path-destination";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const PROTECTED_EXTENSION = /\.(?:csv|xlsx)$/i;
+const LIBRARY_DATABASE = /^ai-image-manager\.db(?:-(?:wal|shm|journal))?$/i;
+const LIBRARY_BACKUP =
+  /^(?:face-backup-\d+\.json|pre-library-reliability-\d+-[a-f0-9-]+\.db)$/i;
 
 export type ProjectPreviewMigrationOwnership = Map<string, Set<string>>;
 
@@ -77,9 +80,23 @@ function assertOwnedPreviewEntry(
   refused("CLEANUP_FOREIGN_PROJECT_CONTENT", relativePath);
 }
 
+function isManagedDataEntry(relativePath: string, directory: boolean) {
+  const [first, second, ...rest] = relativePath.split(path.sep);
+  if (second) {
+    return (
+      first === "backups" &&
+      !directory &&
+      rest.length === 0 &&
+      LIBRARY_BACKUP.test(second)
+    );
+  }
+  return directory ? first === "backups" : LIBRARY_DATABASE.test(first);
+}
+
 async function inspectCleanupTree(
   target: string,
-  ownership?: ProjectPreviewMigrationOwnership
+  ownership?: ProjectPreviewMigrationOwnership,
+  checkEntry?: (relativePath: string, directory: boolean) => boolean
 ) {
   const pending = [target];
   const files: string[] = [];
@@ -99,6 +116,13 @@ async function inspectCleanupTree(
         stat.isDirectory(),
         ownership
       );
+    }
+    if (
+      checkEntry &&
+      current !== target &&
+      !checkEntry(path.relative(target, current), stat.isDirectory())
+    ) {
+      refused("CLEANUP_FOREIGN_CONTENT", current);
     }
     if (stat.isDirectory()) {
       directories.push(current);
@@ -121,7 +145,8 @@ async function inspectCleanupTree(
 export async function removeMigratedDataDirectory(
   dataRoot: string,
   directory: string,
-  projectOwnership: ProjectPreviewMigrationOwnership
+  projectOwnership: ProjectPreviewMigrationOwnership,
+  verifySourceOwnership = false
 ): Promise<void> {
   if (!(DATA_PATH_SUBDIRECTORIES as readonly string[]).includes(directory)) {
     refused("CLEANUP_INVALID_DIRECTORY", directory);
@@ -142,7 +167,10 @@ export async function removeMigratedDataDirectory(
   }
   const snapshot = await inspectCleanupTree(
     target,
-    directory === "shooting-projects" ? projectOwnership : undefined
+    directory === "shooting-projects" ? projectOwnership : undefined,
+    verifySourceOwnership && directory === "data"
+      ? isManagedDataEntry
+      : undefined
   );
   for (const filename of snapshot.files) {
     await assertSafeAncestors(filename);

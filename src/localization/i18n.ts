@@ -1439,6 +1439,46 @@ i18n.use(initReactI18next).init({
         settingsClear: "清除",
         settingsClearing: "清除中...",
         settingsCleared: "缓存已清除!",
+        libraryDirectory_manage: "管理图库",
+        libraryDirectory_environment: "运行环境",
+        libraryDirectory_dev: "开发版",
+        libraryDirectory_installed: "正式版",
+        libraryDirectory_profile: "用户配置目录",
+        libraryDirectory_scope:
+          "切换图库后，已安装插件和日志仍保存在当前环境的用户配置目录。",
+        libraryDirectory_create_title: "新建空白图库",
+        libraryDirectory_create_hint:
+          "选择一个空文件夹，新建并切换到独立图库。",
+        libraryDirectory_open_title: "打开已有图库",
+        libraryDirectory_open_hint: "打开图库根目录，保留当前图库。",
+        libraryDirectory_migrate_title: "迁移当前图库",
+        libraryDirectory_migrate_hint:
+          "复制当前图库数据到空文件夹并切换。照片原件仍在原位置。",
+        libraryDirectory_target: "目标路径",
+        libraryDirectory_cleanup: "迁移成功后清理旧位置中的图库数据",
+        libraryDirectory_cleanupWarning:
+          "已切换到新图库。以下旧目录未能完全清理。",
+        libraryDirectory_rollbackWarning:
+          "以下目录中可能保留了本次尝试写入的数据。",
+        libraryDirectory_alreadyOpen: "这个图库已经打开。",
+        "libraryDirectory_progress_stopping-services": "正在暂停图库服务…",
+        "libraryDirectory_progress_starting-services": "正在打开目标图库…",
+        libraryDirectory_progress_cleaning: "正在清理旧图库数据…",
+        libraryDirectory_error_busy: "已有图库目录操作正在进行，请稍后再试。",
+        libraryDirectory_error_invalidPath: "请选择另一个有效的本地文件夹。",
+        libraryDirectory_error_nestedPath:
+          "当前图库和目标图库不能位于彼此的子目录中。",
+        libraryDirectory_error_notEmpty: "目标文件夹不为空。请选择空文件夹。",
+        libraryDirectory_error_notLibrary:
+          "未找到可读取的图库。请选择包含有效图库数据库的根目录。",
+        libraryDirectory_error_unavailable:
+          "无法访问文件夹或读取图库配置，请检查访问权限后重试。",
+        libraryDirectory_error_stopFailed: "无法暂停图库服务，请稍后再试。",
+        libraryDirectory_error_copyFailed: "复制图库数据失败，已恢复原图库。",
+        libraryDirectory_error_startFailed: "无法启动目标图库，已恢复原图库。",
+        libraryDirectory_error_saveFailed: "无法保存图库路径，已恢复原图库。",
+        libraryDirectory_error_restoreFailed:
+          "无法恢复图库服务。请重启应用并检查目录权限。",
         dataDirectory: "数据目录",
         currentPath: "当前路径",
         defaultPath: "（默认）",

@@ -1,23 +1,15 @@
-import fs from "node:fs";
-import fsp from "node:fs/promises";
-import path from "node:path";
 import { os } from "@orpc/server";
 import { eq, sql } from "drizzle-orm";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import { z } from "zod";
 import { getDatabase } from "@/db";
-import {
-  duplicateCleanupPlans,
-  duplicateReviewGroups,
-  shootingProjectPhotos,
-  shootingProjects,
-} from "@/db/schema";
+import { duplicateCleanupPlans, duplicateReviewGroups } from "@/db/schema";
 import {
   getDuplicateSensitivityConfig,
   parseDuplicateSensitivity,
 } from "@/services/duplicate-sensitivity";
+import { changeLibraryDirectory } from "@/services/library-directory";
 import { notifySequencesChanged } from "@/services/photo-sequences";
-import { registry } from "@/services/registry";
 import { refreshSequenceSuggestions } from "@/services/sequence-suggestions";
 import {
   getAllSettings,
@@ -41,61 +33,15 @@ import { normalizeSequenceDetectionSettings } from "@/types/sequence-detection-s
 import {
   getDataPath,
   isDefaultDataPath,
-  setCustomDataPath,
+  isProfileOnboardingComplete,
 } from "@/utils/data-path";
-import {
-  DATA_PATH_SUBDIRECTORIES,
-  inspectDataPathDestination,
-} from "@/utils/data-path-destination";
-import {
-  projectPreviewMigrationOwnership,
-  removeMigratedDataDirectory,
-} from "@/utils/data-path-migration-cleanup";
-
-const diagLog = (msg: string) => {
-  try {
-    const dir = path.join(app.getPath("userData"), "logs");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(
-      path.join(dir, "migrate.log"),
-      `${new Date().toISOString()} ${msg}\n`,
-      { flag: "a" }
-    );
-  } catch {
-    /* best-effort */
-  }
-};
-
-type MigrateProgress =
-  | { phase: "start"; total: number }
-  | { phase: "stopping-services" }
-  | { phase: "copying"; dir: string; index: number; total: number }
-  | { phase: "copied"; dir: string; index: number; total: number }
-  | {
-      phase: "skipped";
-      dir: string;
-      index: number;
-      total: number;
-      reason: string;
-    }
-  | {
-      phase: "failed";
-      dir: string;
-      index: number;
-      total: number;
-      error: string;
-    }
-  | { phase: "done"; copied: number; errors: string[] };
-
-const sendMigrateProgress = (payload: MigrateProgress) => {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send("data-path-migrate-progress", payload);
-  }
-};
 
 export const getAppSetting = os
   .input(z.object({ key: z.string() }))
   .handler(({ input }) => {
+    if (input.key === "onboarding.completed" && isProfileOnboardingComplete()) {
+      return { key: input.key, value: "true" };
+    }
     const value = getSetting(input.key);
     if (value === null) {
       return null;
@@ -306,322 +252,50 @@ export const setAppPreference = os
     return { ok: true };
   });
 
-export const getDataPathInfo = os.handler(() => {
-  return {
-    path: getDataPath(),
-    isDefault: isDefaultDataPath(),
-  };
-});
+export const getDataPathInfo = os.handler(() => ({
+  path: getDataPath(),
+  isDefault: isDefaultDataPath(),
+  isDevelopment: !app.isPackaged,
+  profilePath: app.getPath("userData"),
+}));
 
-export const setDataPath = os
-  .input(z.object({ newPath: z.string().min(1) }))
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Data-path migration preserves validation, progress, rollback, and restart ordering.
+export const chooseDataPath = os
+  .input(z.object({ title: z.string().min(1) }))
   .handler(async ({ input }) => {
-    diagLog("setDataPath: START");
-    const oldPath = getDataPath();
-    const { newPath } = input;
-    diagLog(`setDataPath: old=${oldPath} new=${newPath}`);
-
-    // Validate new path
-    if (!fs.existsSync(newPath)) {
-      try {
-        diagLog("setDataPath: mkdir newPath");
-        fs.mkdirSync(newPath, { recursive: true });
-      } catch {
-        return { ok: false, error: "无法创建目录" };
-      }
+    const window = BrowserWindow.getFocusedWindow();
+    if (!window) {
+      return { path: null };
     }
-
-    // Check writable
-    try {
-      fs.accessSync(newPath, fs.constants.W_OK);
-    } catch {
-      return { ok: false, error: "目录不可写" };
-    }
-
-    // Same path
-    if (path.resolve(oldPath) === path.resolve(newPath)) {
-      return { ok: true, copied: 0 };
-    }
-
-    // An existing library must be connected in place instead of treated as a
-    // migration target. Other managed subdirectories are still rejected so
-    // unrelated data is never merged or overwritten.
-    const destination = inspectDataPathDestination(newPath);
-    if (destination.kind === "conflict") {
-      const dir = destination.conflictingDirectory;
-      diagLog(
-        `setDataPath: ABORT — dst subdir exists without database: ${dir}`
-      );
-      return {
-        ok: false,
-        error: `目标目录下已有 ${dir} 子目录，但未发现有效的图库数据库。请选择已有图库的根目录，或选择一个空目录`,
-      };
-    }
-    const usesExistingLibrary = destination.kind === "existing-library";
-    let previewOwnership = projectPreviewMigrationOwnership([], []);
-    if (
-      !usesExistingLibrary &&
-      fs.existsSync(path.join(oldPath, "shooting-projects"))
-    ) {
-      try {
-        const db = getDatabase();
-        previewOwnership = projectPreviewMigrationOwnership(
-          db
-            .select({ id: shootingProjects.id })
-            .from(shootingProjects)
-            .all()
-            .map((project) => project.id),
-          db
-            .select({
-              projectId: shootingProjectPhotos.projectId,
-              id: shootingProjectPhotos.id,
-              previewRelativePath: shootingProjectPhotos.previewRelativePath,
-            })
-            .from(shootingProjectPhotos)
-            .all()
-        );
-      } catch (error) {
-        return {
-          ok: false,
-          error: `无法核验拍摄项目预览归属：${(error as Error).message}`,
-        };
-      }
-    }
-    const subDirs = DATA_PATH_SUBDIRECTORIES;
-    diagLog(
-      usesExistingLibrary
-        ? `setDataPath: existing library detected at ${destination.databasePath}`
-        : "setDataPath: empty migration destination detected"
-    );
-
-    sendMigrateProgress({
-      phase: "start",
-      total: usesExistingLibrary ? 0 : subDirs.length,
+    const selection = await dialog.showOpenDialog(window, {
+      properties: ["openDirectory", "createDirectory"],
+      title: input.title,
     });
-
-    // Gracefully close all services to release file locks (DB, vector DB, etc.)
-    diagLog("setDataPath: calling registry.stop()");
-    sendMigrateProgress({ phase: "stopping-services" });
-    try {
-      await registry.stop();
-      diagLog("setDataPath: registry.stop() OK");
-    } catch (err) {
-      diagLog(
-        `setDataPath: registry.stop() FAILED: ${(err as Error)?.message}`
-      );
-      console.error(
-        "[Settings] Failed to stop services before migration:",
-        (err as Error)?.message
-      );
-      return { ok: false, error: "无法关闭后台服务，请重试" };
-    }
-
-    // Migrate data subdirectories from old to new (don't delete old data).
-    // IMPORTANT: must be async — fs.cpSync blocks the Electron main process
-    // event loop, and Windows kills the app as "Not Responding" when copying
-    // hundreds of MB (e.g. the ~300 MB models directory).
-    let copied = 0;
-    const errors: string[] = [];
-    const copiedDirs = new Set<string>();
-    const destinationDirs = new Set<string>();
-    let canCleanupOldPath = false;
-    for (let i = 0; !usesExistingLibrary && i < subDirs.length; i++) {
-      const dir = subDirs[i];
-      const index = i + 1;
-      const total = subDirs.length;
-      const src = path.join(oldPath, dir);
-      const dst = path.join(newPath, dir);
-      let srcExists = false;
-      try {
-        srcExists = fs.existsSync(src);
-      } catch {
-        srcExists = false;
-      }
-      if (!srcExists) {
-        diagLog(`setDataPath: skip ${dir} (src missing)`);
-        sendMigrateProgress({
-          phase: "skipped",
-          dir,
-          index,
-          total,
-          reason: "源目录不存在",
-        });
-        continue;
-      }
-      try {
-        diagLog(`setDataPath: copying ${dir}…`);
-        // Rollback may remove only destination directories that were absent
-        // immediately before this copy. Never delete a pre-existing user
-        // directory if a copy races with another process.
-        if (!fs.existsSync(dst)) {
-          destinationDirs.add(dst);
-        }
-        sendMigrateProgress({ phase: "copying", dir, index, total });
-        await fsp.cp(src, dst, {
-          recursive: true,
-          force: false,
-          errorOnExist: true,
-        });
-        copied++;
-        copiedDirs.add(dir);
-        diagLog(`setDataPath: copy ${dir} OK`);
-        sendMigrateProgress({ phase: "copied", dir, index, total });
-      } catch (err) {
-        const msg = (err as Error)?.message ?? String(err);
-        diagLog(`setDataPath: copy ${dir} FAILED: ${msg}`);
-        console.error(`[Settings] Failed to copy ${dir}:`, msg);
-        errors.push(`${dir}: ${msg}`);
-        sendMigrateProgress({
-          phase: "failed",
-          dir,
-          index,
-          total,
-          error: msg,
-        });
-      }
-    }
-
-    if (errors.length > 0) {
-      const rollbackErrors: string[] = [];
-      for (const dst of destinationDirs) {
-        try {
-          await removeMigratedDataDirectory(
-            newPath,
-            path.basename(dst),
-            previewOwnership
-          );
-        } catch (err) {
-          rollbackErrors.push(
-            `${path.basename(dst)}: ${(err as Error)?.message ?? String(err)}`
-          );
-        }
-      }
-      errors.push(...rollbackErrors.map((error) => `rollback: ${error}`));
-      sendMigrateProgress({ phase: "done", copied, errors });
-      // Try to bring services back up on the OLD path so the app stays usable.
-      try {
-        await registry.start();
-      } catch (err) {
-        diagLog(
-          `setDataPath: rollback registry.start() FAILED: ${(err as Error)?.message}`
-        );
-      }
-      return {
-        ok: false,
-        error: `文件迁移失败：${errors.join("; ")}`,
-      };
-    }
-
-    diagLog("setDataPath: calling setCustomDataPath");
-    setCustomDataPath(newPath);
-    diagLog("setDataPath: DONE");
-    console.log(
-      `[Settings] Data path changed: ${oldPath} → ${newPath} (${usesExistingLibrary ? "connected existing library" : `copied ${copied} dirs`})`
-    );
-
-    // Clean up the old directory's subdirs to avoid disk bloat across repeated
-    // migrations (each migration would otherwise leave a ~420MB orphan copy).
-    // SAFETY: we only ever delete the four well-known subdirs we just copied,
-    // and only if their copy succeeded — never the parent oldPath itself, never
-    // any other files the user may have placed there.
-    let cleaned = 0;
-    const cleanupErrors: string[] = [];
-    if (canCleanupOldPath) {
-      for (const dir of subDirs) {
-        const oldSub = path.join(oldPath, dir);
-        let exists = false;
-        try {
-          exists = fs.existsSync(oldSub);
-        } catch {
-          exists = false;
-        }
-        if (!exists) {
-          continue;
-        }
-        try {
-          diagLog(`setDataPath: cleanup removing old ${oldSub}`);
-          await removeMigratedDataDirectory(oldPath, dir, previewOwnership);
-          cleaned++;
-          diagLog(`setDataPath: cleanup ${dir} OK`);
-        } catch (err) {
-          const msg = (err as Error)?.message ?? String(err);
-          diagLog(`setDataPath: cleanup ${dir} FAILED: ${msg}`);
-          cleanupErrors.push(`${dir}: ${msg}`);
-        }
-      }
-      if (cleaned > 0) {
-        console.log(
-          `[Settings] Removed ${cleaned} old subdir(s) under ${oldPath}`
-        );
-      }
-    } else {
-      diagLog(
-        "setDataPath: skip cleanup (errors during copy — preserving old data)"
-      );
-    }
-
-    // Restart services in-place against the NEW path. This avoids relying on
-    // app.relaunch() (broken in `npm run dev` because forge tears down the
-    // Vite dev server when the main process exits, so the relaunched process
-    // loads a dead URL → white screen). The renderer will reload() on receipt
-    // of the "done" event and reconnect via a fresh oRPC port.
-    diagLog("setDataPath: calling registry.start()");
-    try {
-      await registry.start();
-      diagLog("setDataPath: registry.start() OK");
-    } catch (err) {
-      const msg = (err as Error)?.message ?? String(err);
-      diagLog(`setDataPath: registry.start() FAILED: ${msg}`);
-      console.error("[Settings] Failed to restart services:", msg);
-      setCustomDataPath(oldPath);
-      try {
-        await registry.start();
-      } catch (rollbackErr) {
-        diagLog(
-          `setDataPath: old-path restart FAILED: ${(rollbackErr as Error)?.message ?? rollbackErr}`
-        );
-      }
-      sendMigrateProgress({
-        phase: "done",
-        copied,
-        errors: [...errors, `服务重启失败：${msg}`],
-      });
-      return {
-        ok: false,
-        error: usesExistingLibrary
-          ? `无法打开已有图库：${msg}。已恢复原数据目录`
-          : `数据已迁移到新路径，但服务重启失败：${msg}。请手动重启应用。`,
-      };
-    }
-
-    canCleanupOldPath = true;
-    let cleanedAfterStart = 0;
-    const cleanupErrorsAfterStart: string[] = [];
-    for (const dir of copiedDirs) {
-      try {
-        await removeMigratedDataDirectory(oldPath, dir, previewOwnership);
-        cleanedAfterStart++;
-      } catch (err) {
-        cleanupErrorsAfterStart.push(
-          `${dir}: ${(err as Error)?.message ?? String(err)}`
-        );
-      }
-    }
-
-    sendMigrateProgress({ phase: "done", copied, errors });
     return {
-      ok: true,
-      adopted: usesExistingLibrary,
-      copied,
-      cleaned: cleanedAfterStart,
-      errors: errors.length > 0 ? errors : undefined,
-      cleanupErrors:
-        cleanupErrorsAfterStart.length > 0
-          ? cleanupErrorsAfterStart
-          : undefined,
+      path: selection.canceled ? null : (selection.filePaths[0] ?? null),
     };
   });
+
+export const setDataPath = os
+  .input(
+    z.discriminatedUnion("mode", [
+      z.strictObject({ mode: z.literal("create"), newPath: z.string().min(1) }),
+      z.strictObject({ mode: z.literal("open"), newPath: z.string().min(1) }),
+      z.strictObject({
+        mode: z.literal("migrate"),
+        newPath: z.string().min(1),
+        cleanupSource: z.boolean().optional(),
+      }),
+    ])
+  )
+  .handler(({ input }) =>
+    changeLibraryDirectory(input, (event) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.webContents.isDestroyed()) {
+          window.webContents.send("data-path-migrate-progress", event);
+        }
+      }
+    })
+  );
 
 export const getMirrorSettings = os.handler(() => {
   const mirror = getSetting("ai.mirror") || "auto";

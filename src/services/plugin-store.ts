@@ -332,14 +332,23 @@ function legacyMigrationCandidatesFromRows(
 }
 
 export class PluginStore {
-  private readonly db: PluginDatabase;
+  private readonly database: PluginDatabase | undefined;
 
   constructor(database?: PluginDatabase) {
+    this.database = database;
     try {
-      this.db = database ?? getDatabase();
+      if (!database) {
+        getDatabase();
+      }
     } catch (error) {
       throw storeError("database-init", error);
     }
+  }
+
+  private get db(): PluginDatabase {
+    // The manager lives across in-process library switches. Its default store
+    // must follow the active connection instead of holding the closed catalog.
+    return this.database ?? getDatabase();
   }
 
   upsertInstallation(input: PluginInstallationInput): PluginInstallationRecord {

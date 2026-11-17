@@ -66,7 +66,7 @@ export interface ServiceDescriptor {
   level: ServiceLevel;
   name: string;
   start: () => void | Promise<void>;
-  stop: () => void | Promise<void>;
+  stop: (options?: { strict?: boolean }) => void | Promise<void>;
 }
 
 export interface HealthReport {
@@ -214,6 +214,8 @@ export class ServiceRegistry {
         }
         const msg = (err as Error)?.message ?? String(err);
         if (svc.level === ServiceLevel.Critical) {
+          // Include partial initialization in the caller's shutdown/rollback.
+          this.startOrder.push(name);
           console.error(
             `[ServiceRegistry] CRITICAL service "${name}" failed: ${msg}`
           );
@@ -228,14 +230,14 @@ export class ServiceRegistry {
   }
 
   /** Stop all started services in reverse order. */
-  stop(): Promise<void> {
+  stop({ strict = false } = {}): Promise<void> {
     if (this.stopping) {
       return this.stopping;
     }
     this.lifecycleGeneration++;
     const task = Promise.resolve().then(async () => {
       await Promise.allSettled([...this.startupWork]);
-      await this.stopStartedServices();
+      await this.stopStartedServices(strict);
     });
     this.stopping = task.finally(() => {
       this.stopping = undefined;
@@ -243,24 +245,33 @@ export class ServiceRegistry {
     return this.stopping;
   }
 
-  private async stopService(svc: ServiceDescriptor): Promise<void> {
+  private async stopService(
+    svc: ServiceDescriptor,
+    strict = false
+  ): Promise<void> {
     try {
       console.log(`[ServiceRegistry] Stopping ${svc.name}…`);
-      await svc.stop();
+      await svc.stop({ strict });
     } catch (err: unknown) {
       console.warn(
         `[ServiceRegistry] Error stopping ${svc.name}:`,
         (err as Error)?.message
       );
+      if (strict) {
+        throw err;
+      }
     }
   }
 
-  private async stopStartedServices(): Promise<void> {
+  private async stopStartedServices(strict: boolean): Promise<void> {
     if (this.startOrder.includes("fileWatcher")) {
       try {
         await stopLibraryReconciliation();
       } catch (error) {
         console.warn("[ServiceRegistry] Reconciliation stop failed:", error);
+        if (strict) {
+          throw error;
+        }
       }
     }
     const toStop = [...this.startOrder].reverse();
@@ -269,7 +280,8 @@ export class ServiceRegistry {
       if (!svc) {
         continue;
       }
-      await this.stopService(svc);
+      await this.stopService(svc, strict);
+      this.startOrder = this.startOrder.filter((entry) => entry !== name);
     }
     this.startOrder = [];
   }
@@ -401,9 +413,7 @@ registry.register({
     initDatabase();
     repairUnassignedLibraryPhotos();
   },
-  stop: () => {
-    closeDatabase();
-  },
+  stop: (options) => closeDatabase(options),
   health: () => {
     try {
       const db = getDatabase();

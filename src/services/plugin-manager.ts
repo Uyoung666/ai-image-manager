@@ -1287,7 +1287,7 @@ async function loadLocaleProviderFromDirectory(
 export class PluginManager {
   private readonly builtins: NormalizedPluginManifest[];
   private readonly trustedKeys: PluginTrustedKeyring;
-  private store: PluginStore | null | undefined;
+  private store: PluginStore | undefined;
   private readonly inspections = new Map<string, InspectionState>();
   private readonly devPlugins = new Map<string, InstalledManifestEntry>();
   private developerMode = false;
@@ -1318,7 +1318,7 @@ export class PluginManager {
         { error: sanitizePluginError(error) },
         "plugin store unavailable"
       );
-      this.store = null;
+      return null;
     }
     return this.store;
   }

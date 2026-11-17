@@ -27,9 +27,9 @@ const state = vi.hoisted(() => ({
 vi.mock("@/utils/data-path", () => ({
   getDataPath: () => state.dataPath,
   isDefaultDataPath: () => false,
-  setCustomDataPath: (value: string) => {
+  persistDataPath: state.setPath,
+  setRuntimeDataPath: (value: string) => {
     state.dataPath = value;
-    state.setPath(value);
   },
 }));
 vi.mock("@/services/registry", () => ({
@@ -114,7 +114,11 @@ describe("shooting project data path migration", () => {
   it("moves the real database and independent previews and reads them at the new data path", async () => {
     const fixture = await projectFixture();
     const original = fs.readFileSync(originalPath);
-    const result = await call(setDataPath, { newPath });
+    const result = await call(setDataPath, {
+      mode: "migrate",
+      newPath,
+      cleanupSource: true,
+    });
     expect(result).toMatchObject({ ok: true, copied: 2, cleaned: 2 });
     const workspace = await getShootingProjectWorkspace(fixture.projectId);
     expect(workspace.project.id).toBe(fixture.projectId);
@@ -150,10 +154,14 @@ describe("shooting project data path migration", () => {
       "foreign.txt"
     );
     fs.writeFileSync(foreign, "user-owned sidecar");
-    const result = await call(setDataPath, { newPath });
+    const result = await call(setDataPath, {
+      mode: "migrate",
+      newPath,
+      cleanupSource: true,
+    });
     expect(result).toMatchObject({ ok: true, copied: 2, cleaned: 1 });
-    expect(result.cleanupErrors?.join(" ")).toContain(
-      "CLEANUP_FOREIGN_PROJECT_CONTENT"
+    expect(result.cleanupErrors).toContain(
+      path.join(oldPath, "shooting-projects")
     );
     expect(fs.readFileSync(foreign, "utf8")).toBe("user-owned sidecar");
     expect(
@@ -177,11 +185,17 @@ describe("shooting project data path migration", () => {
     const originalCopy = fsp.cp.bind(fsp);
     vi.spyOn(fsp, "cp").mockImplementation(async (source, target, options) => {
       await originalCopy(source, target, options);
-      if (String(source) === path.join(oldPath, "shooting-projects")) {
+      if (
+        path.dirname(String(source)) === path.join(oldPath, "shooting-projects")
+      ) {
         throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
       }
     });
-    const result = await call(setDataPath, { newPath });
+    const result = await call(setDataPath, {
+      mode: "migrate",
+      newPath,
+      cleanupSource: true,
+    });
     expect(result).toMatchObject({ ok: false });
     expect(state.dataPath).toBe(oldPath);
     expect(fs.existsSync(path.join(newPath, "shooting-projects"))).toBe(false);

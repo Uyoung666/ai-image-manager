@@ -15,6 +15,7 @@ vi.mock("@/ipc/manager", () => ({
         listPhotos: vi.fn(),
       },
       settings: {
+        chooseDataPath: vi.fn(),
         getAppSetting: vi.fn(),
         getDataPathInfo: vi.fn(),
         getGpuSettings: vi.fn(),
@@ -88,6 +89,8 @@ describe("OnboardingOverlay", () => {
     });
     vi.mocked(ipc.client.settings.getDataPathInfo).mockResolvedValue({
       isDefault: true,
+      isDevelopment: true,
+      profilePath: "C:\\OldData",
       path: "C:\\OldData",
     });
     vi.mocked(ipc.client.settings.getGpuSettings).mockResolvedValue({
@@ -95,7 +98,7 @@ describe("OnboardingOverlay", () => {
       enabled: false,
       promptShown: false,
     });
-    vi.mocked(ipc.client.shell.openFolderDialog).mockResolvedValue({
+    vi.mocked(ipc.client.settings.chooseDataPath).mockResolvedValue({
       path: "D:\\NewData",
     });
     vi.mocked(ipc.client.settings.setGpuSettings).mockResolvedValue({
@@ -133,41 +136,55 @@ describe("OnboardingOverlay", () => {
 
   it("shows a migration error and keeps the old path when the backend rejects the directory", async () => {
     vi.mocked(ipc.client.settings.setDataPath).mockResolvedValue({
-      error: "directory is not writable",
+      error: "unavailable",
       ok: false,
     });
 
     render(<OnboardingOverlay />);
 
     await screen.findByText("C:\\OldData");
-    fireEvent.click(screen.getByText("onboardingStep1Change"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "onboardingStep1Change" })
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "libraryDirectory_open_title" })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "confirm" }));
 
     expect(
-      await screen.findByText("onboardingErrorMigration")
+      await screen.findByText("libraryDirectory_error_unavailable")
     ).toBeInTheDocument();
-    expect(screen.queryByText("D:\\NewData")).not.toBeInTheDocument();
+    expect(screen.getByText("C:\\OldData")).toBeInTheDocument();
     expect(queryClient.clear).not.toHaveBeenCalled();
   });
 
   it("accepts a previously created library path", async () => {
     vi.mocked(ipc.client.settings.setDataPath).mockResolvedValue({
-      adopted: true,
       cleaned: 0,
       cleanupErrors: undefined,
       copied: 0,
-      errors: undefined,
+      path: "D:\\NewData",
       ok: true,
     });
 
     render(<OnboardingOverlay />);
 
     await screen.findByText("C:\\OldData");
-    fireEvent.click(screen.getByText("onboardingStep1Change"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "onboardingStep1Change" })
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "libraryDirectory_open_title" })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "confirm" }));
 
-    expect(await screen.findByText("D:\\NewData")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("D:\\NewData")).toBeInTheDocument();
     expect(queryClient.clear).toHaveBeenCalledOnce();
     expect(
-      screen.queryByText("onboardingErrorMigration")
+      screen.queryByText("libraryDirectory_error_unavailable")
     ).not.toBeInTheDocument();
   });
 

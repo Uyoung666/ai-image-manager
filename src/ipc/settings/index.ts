@@ -1,6 +1,7 @@
 import {
   checkGpuCapability,
   checkMirrorHealth,
+  chooseDataPath,
   getAllAppSettings,
   getAppPreferences,
   getAppSetting,
@@ -33,6 +34,7 @@ export const settings = {
   updateDuplicateSettings,
   getDataPathInfo,
   setDataPath,
+  chooseDataPath,
   getGpuSettings,
   getMirrorSettings,
   setGpuSettings,

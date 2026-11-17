@@ -307,6 +307,10 @@ npm ci
 npm run dev
 ```
 
+`npm run dev` and `npm start` use a sibling folder named `<checkout-name>-dev-data`. The first launch initializes an empty library, and later launches reuse it. Set `AI_IMAGE_MANAGER_USER_DATA_DIR` before launch to override the location.
+
+Under **Settings → Storage → Data Directory**, create an empty library, open an existing library folder, or migrate the current library to an empty folder. Migration keeps the previous library by default. If you choose cleanup, it starts after the destination library is ready. Original photos stay in place.
+
 `npm ci` rebuilds Electron native modules. Prepare development model files according to the project instructions; release builds stage only the assets listed in the approved model manifest.
 
 ### Commands

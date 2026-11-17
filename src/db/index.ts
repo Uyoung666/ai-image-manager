@@ -228,10 +228,10 @@ export function initDatabase(): ReturnType<typeof drizzle> {
   console.log(`[DB] Initializing database at: ${dbPath}`);
 
   const sqlite = new Database(dbPath);
+  sqliteConnection = sqlite;
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   sqlite.pragma("busy_timeout = 5000");
-  sqliteConnection = sqlite;
 
   // Register custom SQLite functions
   sqlite.function(
@@ -392,12 +392,16 @@ function dbDiag(msg: string) {
   }
 }
 
-export function closeDatabase(): void {
+export function closeDatabase({ strict = false } = {}): void {
   releaseGalleryResources();
   const connection = sqliteConnection;
   if (!connection) {
     dbDiag("closeDatabase: sqliteConnection already null, skip");
-    console.warn("[DB] Connection was already null/undefined, skipping close");
+    if (!strict) {
+      console.warn(
+        "[DB] Connection was already null/undefined, skipping close"
+      );
+    }
     dbInstance = null;
     return;
   }
@@ -439,6 +443,9 @@ export function closeDatabase(): void {
       "[DB] Non-fatal error during close:",
       (err as Error)?.message ?? err
     );
+    if (strict) {
+      throw err;
+    }
   } finally {
     if (closed) {
       sqliteConnection = null;

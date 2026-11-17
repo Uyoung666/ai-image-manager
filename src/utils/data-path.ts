@@ -5,9 +5,14 @@ import Store from "electron-store";
 
 let resolvedDataPath: string | null = null;
 
-let configStore: Store<{ dataPath: string }> | null = null;
+interface ProfileConfig {
+  dataPath: string;
+  onboardingCompleted?: boolean;
+}
 
-function getConfigStore(): Store<{ dataPath: string }> {
+let configStore: Store<ProfileConfig> | null = null;
+
+function getConfigStore(): Store<ProfileConfig> {
   if (!configStore) {
     configStore = new Store({
       name: "app-config",
@@ -74,11 +79,25 @@ export function getDataPath(): string {
   return resolvedDataPath;
 }
 
-export function setCustomDataPath(newPath: string): void {
-  getConfigStore().set("dataPath", newPath);
+export function setRuntimeDataPath(newPath: string): void {
   resolvedDataPath = newPath;
 }
 
+export function isProfileOnboardingComplete(): boolean {
+  return getConfigStore().get("onboardingCompleted", false);
+}
+
+export function persistDataPath(
+  newPath: string,
+  onboardingCompleted: boolean
+): void {
+  const defaultPath = app.getPath("userData");
+  getConfigStore().set({
+    dataPath: path.relative(defaultPath, newPath) === "" ? "" : newPath,
+    ...(onboardingCompleted ? { onboardingCompleted } : {}),
+  });
+}
+
 export function isDefaultDataPath(): boolean {
-  return !getConfigStore().get("dataPath", "");
+  return path.relative(getDataPath(), app.getPath("userData")) === "";
 }

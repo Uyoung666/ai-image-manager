@@ -62,6 +62,7 @@ import {
   getHttpServerPort,
   startHttpServerEarly,
 } from "@/services/http-server";
+import { isLibraryDirectoryChanging } from "@/services/library-directory";
 import { assertLibraryFileReady } from "@/services/library-file-guard";
 import { waitForLibraryForegroundIdle } from "@/services/library-foreground";
 import { MODEL_MANIFEST, verifyModelFile } from "@/services/model-downloader";
@@ -143,27 +144,13 @@ if (started) {
   app.quit();
 }
 
-// E2E runs must not share the real profile or its single-instance lock.
-// Set this before requestSingleInstanceLock() and before any userData access.
+// Bootstrap selects the profile before this module loads.
 const e2eUserDataDir = process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR;
 const isE2E =
   app.commandLine.hasSwitch("e2e") ||
   process.argv.includes("--e2e") ||
   process.env.CI === "e2e" ||
   Boolean(e2eUserDataDir);
-if (isE2E && e2eUserDataDir) {
-  app.setPath("userData", path.resolve(e2eUserDataDir));
-  app.disableHardwareAcceleration();
-}
-
-// Isolated verification env (e.g. face model upgrade A/B testing): an explicit
-// user-data override that works outside E2E runs, so the real profile and its
-// single-instance lock stay untouched. Set it, then add the same folder via
-// Settings → Storage or app-config.json dataPath.
-const devUserDataDir = process.env.AI_IMAGE_MANAGER_USER_DATA_DIR;
-if (devUserDataDir) {
-  app.setPath("userData", path.resolve(devUserDataDir));
-}
 
 // ── Single instance lock ─────────────────────────────────────────────
 const gotTheLock = app.requestSingleInstanceLock();
@@ -1796,6 +1783,9 @@ async function renderLocalMedia(resolved: string): Promise<Response> {
 async function handleLocalMediaRequest(request: {
   url: string;
 }): Promise<Response> {
+  if (isLibraryDirectoryChanging()) {
+    return new Response(null, { status: 503 });
+  }
   try {
     const encodedPath = request.url
       .slice("local-media://".length)
@@ -1897,30 +1887,48 @@ app.whenReady().then(async () => {
     }
 
     // ── Background color data backfill (non-blocking, deferred 5s) ─────
-    setTimeout(async () => {
-      try {
-        const db = getDatabase();
-        const row = db
-          .select({ value: appSettings.value })
-          .from(appSettings)
-          .where(eq(appSettings.key, "colors_migrated"))
-          .get();
-
-        if (!row || row.value !== "true") {
-          log.info("[ColorMigration] Starting background color backfill...");
-          const { runColorMigration } = await import(
-            "@/services/color-migration"
-          );
-          const result = await runColorMigration(false);
-          log.info({ result }, "[ColorMigration] Background backfill complete");
-        }
-      } catch (err) {
-        log.warn({ err }, "[ColorMigration] Startup backfill failed");
+    const startupLibraryGeneration = registry.generation;
+    setTimeout(() => {
+      if (
+        startupLibraryGeneration !== registry.generation ||
+        isLibraryDirectoryChanging()
+      ) {
+        return;
       }
+      registry
+        .runStartupWork(async () => {
+          const db = getDatabase();
+          const row = db
+            .select({ value: appSettings.value })
+            .from(appSettings)
+            .where(eq(appSettings.key, "colors_migrated"))
+            .get();
+
+          if (!row || row.value !== "true") {
+            log.info("[ColorMigration] Starting background color backfill...");
+            const { runColorMigration } = await import(
+              "@/services/color-migration"
+            );
+            const result = await runColorMigration(false);
+            log.info(
+              { result },
+              "[ColorMigration] Background backfill complete"
+            );
+          }
+        })
+        .catch((err) => {
+          log.warn({ err }, "[ColorMigration] Startup backfill failed");
+        });
     }, 5000);
 
     // MakerNote enrichment is deferred and never blocks the basic import path.
     setTimeout(() => {
+      if (
+        startupLibraryGeneration !== registry.generation ||
+        isLibraryDirectoryChanging()
+      ) {
+        return;
+      }
       import("@/services/advanced-exif")
         .then(({ scheduleAdvancedExifEnrichment }) =>
           scheduleAdvancedExifEnrichment(0)

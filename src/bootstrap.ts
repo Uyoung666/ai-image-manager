@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app, crashReporter, dialog, shell } from "electron";
+import { resolveStartupProfile } from "./utils/startup-profile";
 
 type BootstrapIncidentSource = "main-crash" | "startup-failure";
 const LINE_BREAK_PATTERN = /\r?\n/;
@@ -13,19 +14,38 @@ const isE2E =
   process.argv.includes("--e2e") ||
   process.env.CI === "e2e" ||
   Boolean(e2eUserDataDir);
-if (isE2E && e2eUserDataDir) {
-  app.setPath("userData", path.resolve(e2eUserDataDir));
-  app.disableHardwareAcceleration();
-}
-const devUserDataDir = process.env.AI_IMAGE_MANAGER_USER_DATA_DIR;
-if (devUserDataDir) {
-  app.setPath("userData", path.resolve(devUserDataDir));
-}
-
-try {
-  crashReporter.start({ uploadToServer: false, compress: false });
-} catch {
-  // Local crash dumps are best-effort; startup must continue without them.
+function initializeProfile(): boolean {
+  const profile = resolveStartupProfile({
+    appPath: app.getAppPath(),
+    e2ePath: e2eUserDataDir,
+    isE2E,
+    isPackaged: app.isPackaged,
+    overridePath: process.env.AI_IMAGE_MANAGER_USER_DATA_DIR,
+  });
+  if (profile) {
+    try {
+      fs.mkdirSync(profile, { recursive: true });
+      fs.accessSync(profile, fs.constants.W_OK);
+      app.setPath("userData", profile);
+      app.setPath("sessionData", profile);
+    } catch (error) {
+      dialog.showErrorBox(
+        "AI Image Manager",
+        `无法使用应用数据目录 / Cannot use application data directory:\n${profile}\n${String(error)}`
+      );
+      app.exit(1);
+      return false;
+    }
+  }
+  if (e2eUserDataDir) {
+    app.disableHardwareAcceleration();
+  }
+  try {
+    crashReporter.start({ uploadToServer: false, compress: false });
+  } catch {
+    // Local crash dumps are best-effort.
+  }
+  return true;
 }
 
 let handlingFatalError = false;
@@ -253,6 +273,8 @@ process.on("unhandledRejection", (reason) => {
   handleFatalError("main-crash", reason);
 });
 
-import("./main").catch((error: unknown) =>
-  handleFatalError("startup-failure", error)
-);
+if (initializeProfile()) {
+  import("./main").catch((error: unknown) =>
+    handleFatalError("startup-failure", error)
+  );
+}
