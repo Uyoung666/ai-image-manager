@@ -43,6 +43,16 @@ jobs:
           npm rebuild electron --foreground-scripts
           if ($LASTEXITCODE -ne 0) { throw "Electron probe installation failed" }
           node scripts/release/test-standard-user-launch.mjs
+      - name: Save Windows launcher diagnostics
+        if: failure() && inputs.commit != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-launcher-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .test-runtime/product-update-standard-user-*/probe.log
+            .test-runtime/product-update-standard-user-*/chromium.log
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Check Japanese against a formal release
         env:
           GH_TOKEN: ${{ github.token }}

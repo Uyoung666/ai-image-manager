@@ -42,6 +42,10 @@ public static class StandardReleaseUser {
         IntPtr token, int kind, ref SidAttributes value, int length);
 
     [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool SetTokenInformation(
+        IntPtr token, int kind, IntPtr value, int length);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool GetTokenInformation(
         IntPtr token, int kind, IntPtr value, int size, out int length);
 
@@ -57,6 +61,13 @@ public static class StandardReleaseUser {
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool SetKernelObjectSecurity(IntPtr handle, uint information, IntPtr security);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetSecurityDescriptorDacl(
+        IntPtr security, out bool present, out IntPtr dacl, out bool defaulted);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint ResumeThread(IntPtr thread);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr LocalFree(IntPtr memory);
@@ -84,6 +95,7 @@ public static class StandardReleaseUser {
 
     private const int Integrity = 25;
     private const int Privileges = 3;
+    private const int DefaultDacl = 6;
 
     private static void Require(bool result) {
         if (!result) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -137,6 +149,10 @@ public static class StandardReleaseUser {
     }
 
     private static void AllowUserTokenAccess(IntPtr token) {
+        AllowUserTokenAccess(token, IntPtr.Zero);
+    }
+
+    private static void AllowUserTokenAccess(IntPtr token, IntPtr process) {
         // The elevated runner's token DACL can grant access only to Administrators
         // and SYSTEM. After disabling Administrators, Chromium must still be able
         // to open and duplicate its own token to create sandboxed renderers.
@@ -144,18 +160,48 @@ public static class StandardReleaseUser {
             IntPtr security;
             uint size;
             Require(ConvertStringSecurityDescriptorToSecurityDescriptor(
-                "D:(A;;GA;;;" + identity.User.Value + ")(A;;GA;;;SY)",
+                "D:(A;;GA;;;" + identity.User.Value + ")(A;;GA;;;SY)S:(ML;;NW;;;ME)",
                 1, out security, out size), "Build user token DACL");
             try {
-                Require(SetKernelObjectSecurity(token, 4, security), "Set user token DACL");
+                // Lower both the token's object label and its integrity field.
+                // Chromium opens its own token with TOKEN_ALL_ACCESS.
+                Require(SetKernelObjectSecurity(token, 0x14, security), "Set user token DACL and label");
+                if (process != IntPtr.Zero)
+                    Require(SetKernelObjectSecurity(process, 0x14, security),
+                        "Set user process DACL and label");
+                bool present, defaulted;
+                IntPtr dacl;
+                Require(GetSecurityDescriptorDacl(security, out present, out dacl, out defaulted),
+                    "Read user token default DACL");
+                if (!present || dacl == IntPtr.Zero)
+                    throw new InvalidOperationException("User token DACL is missing");
+                IntPtr value = Marshal.AllocHGlobal(IntPtr.Size);
+                try {
+                    Marshal.WriteIntPtr(value, dacl);
+                    Require(SetTokenInformation(token, DefaultDacl, value, IntPtr.Size),
+                        "Set user token default DACL");
+                } finally { Marshal.FreeHGlobal(value); }
             } finally { LocalFree(security); }
         }
+    }
+
+    private static void PrepareProcessToken(IntPtr process) {
+        IntPtr primary;
+        Require(OpenProcessToken(process, 0xF01FF, out primary), "Open suspended application token");
+        try {
+            // CreateProcessAsUser can duplicate the token into a new object
+            // owned by the elevated creator. Configure that actual object
+            // before Chromium starts creating its sandboxed children.
+            AllowUserTokenAccess(primary, process);
+            VerifyToken(primary);
+        } finally { CloseHandle(primary); }
     }
 
     public static void VerifyProcess(int pid) {
         using (Process process = Process.GetProcessById(pid)) {
             IntPtr token;
-            Require(OpenProcessToken(process.Handle, 8, out token));
+            Require(OpenProcessToken(process.Handle, 0xF01FF, out token),
+                "Open application token with Chromium sandbox access");
             try { VerifyToken(token); } finally { CloseHandle(token); }
         }
     }
@@ -195,7 +241,7 @@ public static class StandardReleaseUser {
             ProcessInfo process;
             string command = "\"" + file + "\" " + arguments;
             bool started = CreateProcessAsUser(token, file, new StringBuilder(command),
-                IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, Path.GetDirectoryName(file),
+                IntPtr.Zero, IntPtr.Zero, false, 4, IntPtr.Zero, Path.GetDirectoryName(file),
                 ref startup, out process);
             if (!started && Marshal.GetLastWin32Error() == 1314) {
                 // Both APIs receive the same restricted token. This fallback covers
@@ -205,7 +251,7 @@ public static class StandardReleaseUser {
                     throw new InvalidOperationException("Could not keep the isolated test environment");
                 try {
                     Require(CreateProcessWithTokenW(token, 0, file, new StringBuilder(command),
-                        0x400, environment, Path.GetDirectoryName(file), ref startup, out process),
+                        0x404, environment, Path.GetDirectoryName(file), ref startup, out process),
                         "CreateProcessWithTokenW");
                 } finally {
                     FreeEnvironmentStringsW(environment);
@@ -213,9 +259,21 @@ public static class StandardReleaseUser {
             } else {
                 Require(started, "CreateProcessAsUser");
             }
-            CloseHandle(process.Thread);
-            CloseHandle(process.Process);
-            return process.Pid;
+            try {
+                PrepareProcessToken(process.Process);
+                if (ResumeThread(process.Thread) == UInt32.MaxValue)
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Resume standard-user application");
+                return process.Pid;
+            } catch {
+                using (Process failed = Process.GetProcessById(process.Pid)) {
+                    failed.Kill();
+                    failed.WaitForExit();
+                }
+                throw;
+            } finally {
+                CloseHandle(process.Thread);
+                CloseHandle(process.Process);
+            }
         } finally {
             if (token != IntPtr.Zero) CloseHandle(token);
             medium.Free();
