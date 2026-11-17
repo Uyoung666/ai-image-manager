@@ -193,6 +193,10 @@ describe("immutable release bundle", () => {
     ["2.2.8", "2.2.7", false],
     ["2.2.9", "2.2.7", false],
     ["2.2.9", "2.2.8", true],
+    ["2.2.10", "2.2.8", false],
+    ["2.2.10", "2.2.9", false],
+    ["2.2.11", "2.2.9", false],
+    ["2.2.11", "2.2.10", true],
   ])("publishes a usable MSI transition manifest for %s from %s (delta=%s)", async (version, baseline, hasDelta) => {
     const current = {
       ...identity,

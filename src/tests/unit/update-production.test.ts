@@ -194,7 +194,10 @@ beforeEach(async () => {
       stderr: new EventEmitter(),
       kill: vi.fn(),
     });
-    queueMicrotask(() => child.emit("exit", 0));
+    queueMicrotask(() => {
+      child.emit("exit", 0);
+      child.emit("close", 0);
+    });
     return child;
   });
   manager = await import("@/services/update-manager");
@@ -212,6 +215,7 @@ afterEach(async ({ task }) => {
   }
   manager.stopUpdateManager();
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   Object.defineProperty(process, "execPath", {
     configurable: true,
@@ -989,6 +993,7 @@ describe("GitHub download, local installer and restart transaction", () => {
   });
 
   it("installs delta and explicitly relaunches the target executable once", async () => {
+    vi.stubEnv("SQUIRREL_TEMP", undefined);
     await download();
     expect(mocks.state.updateMethod).toBe("delta");
     expect(manager.installUpdate().ok).toBe(true);
@@ -1003,6 +1008,35 @@ describe("GitHub download, local installer and restart transaction", () => {
     expect(mocks.state.installCompletedAt).toBeTruthy();
     expect(mocks.state.percent).toBeUndefined();
     expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(mocks.spawn.mock.calls[0][2].env.SQUIRREL_TEMP).toBe(
+      path.join(mocks.profile, "ai-image-manager-squirrel")
+    );
+    expect(process.env.SQUIRREL_TEMP).toBeUndefined();
+  });
+  it("preserves a configured Squirrel temporary directory", async () => {
+    const directory = path.join(runtime.root, "squirrel-override");
+    vi.stubEnv("SQUIRREL_TEMP", directory);
+    await download();
+    expect(manager.installUpdate().ok).toBe(true);
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+    expect(mocks.spawn.mock.calls[0][2].env.SQUIRREL_TEMP).toBe(directory);
+  });
+  it("reports an unusable scratch directory without starting the installer", async () => {
+    const file = path.join(runtime.root, "squirrel-temp-is-a-file");
+    await fs.writeFile(file, "not a directory");
+    vi.stubEnv("SQUIRREL_TEMP", file);
+    await download();
+    expect(manager.installUpdate().ok).toBe(true);
+    await vi.waitFor(() =>
+      expect(mocks.state).toMatchObject({
+        phase: "error",
+        message: "UPDATE_INSTALL_ACCESS_DENIED",
+      })
+    );
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).toEqual([
+      manifest.packages.delta.url,
+    ]);
   });
   it("automatically falls back only when the delta asset is missing", async () => {
     mocks.fetch.mockImplementation(async (url: string) =>
@@ -1082,6 +1116,7 @@ describe("GitHub download, local installer and restart transaction", () => {
       queueMicrotask(() => {
         child.stderr.emit("data", Buffer.from(failure));
         child.emit("exit", 1);
+        child.emit("close", 1);
       });
       return child;
     });
@@ -1101,6 +1136,7 @@ describe("GitHub download, local installer and restart transaction", () => {
       queueMicrotask(() => {
         child.stderr.emit("data", Buffer.from("Failed to apply delta patch"));
         child.emit("exit", 1);
+        child.emit("close", 1);
       });
       return child;
     });

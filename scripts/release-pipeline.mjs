@@ -1,6 +1,14 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
+import {
+  RELEASE_GATE_VERSION,
+  requiredUpgradeScenarios,
+  UPGRADE_SCENARIOS,
+  validateAcceptance,
+  validateInstallerReport,
+} from "./release/acceptance.mjs";
 import {
   assertIdentity,
   importLegacyBundle,
@@ -43,6 +51,7 @@ import {
 } from "./release/policy.mjs";
 import {
   assertPackageLockVersion,
+  compareVersions,
   parseStableVersion,
 } from "./release/semver.mjs";
 import { parseReleases } from "./release/squirrel.mjs";
@@ -91,8 +100,9 @@ async function fetchText(url) {
 
 export async function preflight() {
   const validateOnly = validationOnly();
+  const prepareCandidate = process.env.PREPARE_CANDIDATE === "true";
   const sourceRunId = process.env.SOURCE_RUN_ID || null;
-  assertBuildAllowed({ validateOnly, sourceRunId });
+  assertBuildAllowed({ validateOnly, sourceRunId, prepareCandidate });
   const version = String(process.env.RELEASE_VERSION ?? "")
     .trim()
     .replace(VERSION_PREFIX_PATTERN, "");
@@ -161,8 +171,30 @@ export async function preflight() {
     baseline,
     updateBaseUrl,
   };
+  if (compareVersions(version, "2.2.10") >= 0 && !sourceRunId) {
+    const [v226, v228, v229] = await Promise.all([
+      resolveGitHubBaseline("2.2.7"),
+      resolveGitHubBaseline("2.2.9"),
+      baseline.version === "2.2.9" ? baseline : resolveGitHubBaseline("2.2.10"),
+    ]);
+    if (
+      v226.version !== "2.2.6" ||
+      v228.version !== "2.2.8" ||
+      v229.version !== "2.2.9"
+    ) {
+      throw new Error("Required historical upgrade fixtures are missing");
+    }
+    config.upgradeFixtures = { v226, v228, v229 };
+  }
   await writeJson("release-context.json", config);
-  await output({ version, tag, commit, sourceRunId: sourceRunId ?? "" });
+  await output({
+    version,
+    tag,
+    commit,
+    baseline: baseline.tag,
+    scenarios: JSON.stringify(requiredUpgradeScenarios(config)),
+    sourceRunId: sourceRunId ?? "",
+  });
   console.log(
     `Preflight passed: ${tag} at ${commit}; source=${sourceRunId ?? "new build"}`
   );
@@ -199,6 +231,7 @@ async function resolveGitHubBaseline(version) {
     ["SETUP", "Setup.exe"],
     ["MSI", ".msi"],
     ["SQUIRREL_FULL", `-${previousVersion}-full.nupkg`],
+    ...(compareVersions(version, "2.2.10") >= 0 ? [["ZIP", ".zip"]] : []),
   ]) {
     const matches = previous.assets.filter((asset) =>
       asset.name.endsWith(suffix)
@@ -236,6 +269,24 @@ async function resolveGitHubBaseline(version) {
     sha256: baseline.AIM_OLD_SQUIRREL_FULL_SHA256,
     url: `${releaseBase}/${encodeURIComponent(baselineFull.filename)}`,
   };
+  if (previousVersion === "2.2.9") {
+    const filename = "ai-image-manager-2.2.9-delta.nupkg";
+    const delta = previous.assets.find((asset) => asset.name === filename);
+    const sha256 = sums.find(
+      (entry) => entry.relativePath === filename
+    )?.sha256;
+    if (!(delta && sha256)) {
+      throw new Error(
+        "Missing released 2.2.9 delta required for MSI regression"
+      );
+    }
+    baseline.delta = {
+      filename,
+      size: delta.size,
+      url: delta.browser_download_url,
+      sha256,
+    };
+  }
   return baseline;
 }
 
@@ -274,6 +325,9 @@ async function recover(identity) {
       runId: identity.sourceRunId,
     };
   };
+  if (source.candidate) {
+    return recoverAcceptedCandidate(identity, source, recovery, download);
+  }
   let smoke;
   let artifact;
   let sourceIdentity = null;
@@ -285,6 +339,11 @@ async function recover(identity) {
     await download(`release-smoke-${identity.version}`, smokeDirectory);
     const original = await verifyBundle(root(), identity);
     assertPublishable(original);
+    if (original.releaseGateVersion !== undefined) {
+      throw new Error(
+        "Candidate acceptance cannot be replaced by legacy recovery"
+      );
+    }
     originalManifest = original;
     originalBundleSha256 = await sha256File(path.join(root(), "bundle.json"));
     const identityArtifactName = `release-artifact-${identity.version}`;
@@ -390,22 +449,123 @@ async function recover(identity) {
   });
 }
 
-async function runInstallerValidation(identity, manifest, server) {
+async function recoverAcceptedCandidate(identity, source, recovery, download) {
+  const proofDirectory = path.join(recovery, "acceptance");
+  await download(`release-acceptance-${identity.version}`, proofDirectory);
+  const proofFile = path.join(proofDirectory, "candidate-acceptance.json");
+  await verifySourceAttestation(proofFile, source.run.head_sha);
+  const proof = await readJson(proofFile);
+  const name = `release-bundle-${identity.version}-${proof.buildId}`;
+  const artifact = await download(name, root());
+  const manifestFile = path.join(root(), "bundle.json");
+  await verifySourceAttestation(manifestFile, source.run.head_sha);
+  const manifest = await verifyBundle(root(), identity);
+  assertPublishable(manifest);
+  const digest = await sha256File(manifestFile);
+  validateAcceptance(proof, manifest, digest, artifact);
+  if (
+    proof.runId !== String(identity.sourceRunId) ||
+    manifest.toolingCommit !== source.run.head_sha ||
+    !isDeepStrictEqual(manifest.baseline, identity.baseline)
+  ) {
+    throw new Error("Candidate source or previous release has changed");
+  }
+  const smoke = await readJson(path.join(proofDirectory, "smoke-status.json"));
+  validateSmoke(smoke, manifest, digest);
+  if (
+    proof.smokeSha256 !==
+    (await sha256File(path.join(proofDirectory, "smoke-status.json")))
+  ) {
+    throw new Error("Candidate smoke evidence has changed");
+  }
+  await writeJson(
+    path.join(evidenceRoot(), "candidate-acceptance.json"),
+    proof
+  );
+  await fsp.copyFile(
+    path.join(proofDirectory, "smoke-status.json"),
+    path.join(evidenceRoot(), "smoke-status.json")
+  );
+}
+
+async function verifySourceAttestation(file, commit) {
+  await command(
+    "gh",
+    [
+      "attestation",
+      "verify",
+      file,
+      "--repo",
+      repo(),
+      "--signer-workflow",
+      `${repo()}/.github/workflows/publish.yaml`,
+      "--source-digest",
+      commit,
+    ],
+    { inherit: true }
+  );
+}
+
+function installerFixture(identity, scenario) {
+  if (scenario?.endsWith("-delta")) {
+    return {
+      baseline: identity.upgradeFixtures.v228,
+      successorMethod: "delta",
+    };
+  }
+  if (scenario?.includes("-history-")) {
+    const { v226, v228, v229 } = identity.upgradeFixtures;
+    const { full, version } = scenario.endsWith("228") ? v228 : v229;
+    const historicalBaseline = { ...full, version };
+    return {
+      baseline: v226,
+      successorMethod: "full",
+      historicalBaseline: JSON.stringify(historicalBaseline),
+      ...(version === "2.2.8" && identity.version === "2.2.10"
+        ? {
+            negativeControl: JSON.stringify({
+              ...v229.full,
+              version: v229.version,
+              delta: v229.delta,
+            }),
+          }
+        : {}),
+    };
+  }
+  return { baseline: identity.baseline, successorMethod: "full" };
+}
+
+async function runInstallerValidation(
+  identity,
+  manifest,
+  server,
+  kind,
+  scenario
+) {
   const script = path.join(import.meta.dirname, "windows-installer-smoke.mjs");
+  const { baseline, successorMethod, historicalBaseline, negativeControl } =
+    installerFixture(identity, scenario);
   const env = {
     ...process.env,
-    ...identity.baseline,
+    ...baseline,
     AIM_INSTALLER_LOCAL_FEED: "1",
     RELEASE_COMMIT: identity.commit,
     AIM_PRODUCT_UPDATE_EVIDENCE: path.join(evidenceRoot(), "product-update"),
     AIM_INSTALLER_SMOKE_LOG_DIR: path.join(evidenceRoot(), "installer-logs"),
+    AIM_PRODUCT_SUCCESSOR_METHOD: successorMethod,
+    AIM_HISTORICAL_BASELINE: historicalBaseline ?? "",
+    AIM_MSI_NEGATIVE_CONTROL: negativeControl ?? "",
   };
+  const installerKinds = [
+    ["setup", "--setup", "Setup.exe"],
+    ["msi", "--msi", ".msi"],
+  ].filter(([value]) => !kind || kind === value);
+  const productModes =
+    !scenario || scenario.endsWith("-full") ? [false, true] : [true];
   try {
-    for (const product of [false, true]) {
-      for (const [mode, option, suffix] of [
-        ["setup-upgrade", "--setup", "Setup.exe"],
-        ["msi-upgrade", "--msi", ".msi"],
-      ]) {
+    for (const product of productModes) {
+      const timeout = (product ? 45 : 8) * 60_000;
+      for (const [value, option, suffix] of installerKinds) {
         const file = manifest.files.find((record) =>
           record.relativePath.endsWith(suffix)
         );
@@ -413,7 +573,7 @@ async function runInstallerValidation(identity, manifest, server) {
           process.execPath,
           [
             script,
-            mode,
+            `${value}-upgrade`,
             option,
             path.join(root(), file.relativePath),
             "--version",
@@ -422,8 +582,8 @@ async function runInstallerValidation(identity, manifest, server) {
             server.url,
           ],
           {
-            timeoutMs: (product ? 25 : 8) * 60_000,
-            idleMs: (product ? 25 : 8) * 60_000,
+            timeoutMs: timeout,
+            idleMs: timeout,
             env: { ...env, AIM_PRODUCT_UPDATE_GATE: product ? "1" : "0" },
           }
         );
@@ -436,6 +596,25 @@ async function runInstallerValidation(identity, manifest, server) {
 
 async function smokeTest(identity) {
   const manifest = await verifyBundle(root(), identity);
+  const scenario = process.env.RELEASE_INSTALLER_SCENARIO;
+  if (scenario && !UPGRADE_SCENARIOS.includes(scenario)) {
+    throw new Error("Invalid installer scenario");
+  }
+  if (scenario === "manual") {
+    const { runManualUpgradeSmoke } = await import(
+      "./windows-installer-smoke.mjs"
+    );
+    await runManualUpgradeSmoke(root(), manifest, identity.baseline);
+    return writeJson(path.join(evidenceRoot(), "installer-report.json"), {
+      scenario,
+      status: "passed",
+      buildId: manifest.buildId,
+      bundleSha256: await sha256File(path.join(root(), "bundle.json")),
+      zip: "passed",
+      disabledMsi: "passed",
+    });
+  }
+  const kind = scenario?.split("-")[0];
   let smoke;
   if (
     manifest.files.some((file) => file.relativePath === "recovered-smoke.json")
@@ -480,7 +659,19 @@ async function smokeTest(identity) {
       );
     }
     const server = await startLocalFeed(feedDirectory);
-    await runInstallerValidation(identity, manifest, server);
+    await runInstallerValidation(identity, manifest, server, kind, scenario);
+    if (kind) {
+      return writeJson(path.join(evidenceRoot(), "installer-report.json"), {
+        kind,
+        scenario,
+        status: "passed",
+        buildId: manifest.buildId,
+        bundleSha256: await sha256File(path.join(root(), "bundle.json")),
+        product: await readJson(
+          path.join(evidenceRoot(), "product-update", `${kind}.json`)
+        ),
+      });
+    }
     const productUpdateEvidence = await Promise.all(
       ["setup", "msi"].map(async (kind) =>
         readJson(path.join(evidenceRoot(), "product-update", `${kind}.json`))
@@ -507,6 +698,138 @@ async function smokeTest(identity) {
   });
 }
 
+async function acceptCandidate(identity) {
+  const manifestFile = path.join(root(), "bundle.json");
+  const manifest = await readJson(manifestFile);
+  assertIdentity(manifest, identity);
+  const bundleSha256 = await sha256File(manifestFile);
+  const input = path.resolve("inputs");
+  const summary = await readJson(path.join(input, "e2e-summary.json"));
+  if (
+    summary.buildId !== manifest.buildId ||
+    summary.commit !== manifest.commit ||
+    summary.version !== manifest.version ||
+    manifest.testBuildSha256 !==
+      (await sha256File(path.join(input, ".vite", "release-input.json")))
+  ) {
+    throw new Error("E2E summary belongs to another candidate");
+  }
+  const installers = [];
+  for (const scenario of requiredUpgradeScenarios(manifest)) {
+    const report = await readJson(
+      path.join(
+        input,
+        "installers",
+        `release-installer-${scenario}-${manifest.buildId}`,
+        "installer-report.json"
+      )
+    );
+    validateInstallerReport(report, scenario, manifest, bundleSha256);
+    installers.push(report);
+  }
+  const localeEvidence = manifest.localeRequired
+    ? await readJson(path.join(root(), "evidence", "locale-smoke.json"))
+    : {};
+  const smoke = {
+    ...localeEvidence,
+    schemaVersion: 4,
+    version: manifest.version,
+    tag: manifest.tag,
+    commit: manifest.commit,
+    runId: process.env.GITHUB_RUN_ID,
+    bundleSha256,
+    productUpdate: "passed",
+    productUpdateEvidence: installers
+      .filter(({ scenario }) => scenario.endsWith("-full"))
+      .map(({ product }) => product),
+    setupSmoke: "passed",
+    msiSmoke: "passed",
+    msiSmokeMode: "upgrade",
+    squirrelDeltaSmoke: "passed",
+  };
+  validateSmoke(smoke, manifest, bundleSha256);
+  for (const report of installers) {
+    if (!report.product || report.scenario.endsWith("-full")) {
+      continue;
+    }
+    validateSmoke(
+      {
+        ...smoke,
+        productUpdateEvidence: smoke.productUpdateEvidence.map((entry) =>
+          entry.kind === report.kind ? report.product : entry
+        ),
+      },
+      manifest,
+      bundleSha256
+    );
+  }
+  const smokeFile = path.join(evidenceRoot(), "smoke-status.json");
+  await writeJson(smokeFile, smoke);
+  const proof = {
+    schemaVersion: RELEASE_GATE_VERSION,
+    version: manifest.version,
+    commit: manifest.commit,
+    toolingCommit: manifest.toolingCommit,
+    validateOnly: Boolean(manifest.validateOnly),
+    buildId: manifest.buildId,
+    runId: process.env.GITHUB_RUN_ID,
+    artifactId: process.env.CANDIDATE_ARTIFACT_ID,
+    artifactDigest: process.env.CANDIDATE_ARTIFACT_DIGEST,
+    bundleSha256,
+    testBuildSha256: manifest.testBuildSha256,
+    smokeSha256: await sha256File(smokeFile),
+    baseline: manifest.baseline,
+    releaseTitle: manifest.releaseTitle,
+    releaseNotes: manifest.releaseNotes,
+    unit: "passed",
+    e2eTests: summary.tests,
+    installers,
+  };
+  validateAcceptance(proof, manifest, bundleSha256);
+  await writeJson(
+    path.join(evidenceRoot(), "candidate-acceptance.json"),
+    proof
+  );
+}
+
+async function verifyPublicationEvidence(identity) {
+  const manifest = await verifyBundle(root(), identity);
+  assertPublishable(identity);
+  assertPublishable(manifest);
+  const smokeFile = path.join(evidenceRoot(), "smoke-status.json");
+  const smoke = await readJson(smokeFile);
+  const bundleSha256 = await sha256File(path.join(root(), "bundle.json"));
+  validateSmoke(smoke, manifest, bundleSha256);
+  if (manifest.releaseGateVersion !== undefined) {
+    const proof = await readJson(
+      path.join(evidenceRoot(), "candidate-acceptance.json")
+    );
+    validateAcceptance(proof, manifest, bundleSha256);
+    if (proof.smokeSha256 !== (await sha256File(smokeFile))) {
+      throw new Error("Candidate smoke evidence has changed");
+    }
+  }
+  return manifest;
+}
+
+async function runVerification(operation, identity) {
+  if (operation === "verify") {
+    return verifyBundle(root(), identity);
+  }
+  if (operation === "smoke") {
+    return smokeTest(identity);
+  }
+  if (operation === "accept") {
+    return acceptCandidate(identity);
+  }
+  await recover(identity);
+  if (
+    await fsp.stat(path.join(root(), "recovered-smoke.json")).catch(() => null)
+  ) {
+    await smokeTest(identity);
+  }
+}
+
 export async function runPipeline(operation) {
   if (operation === "preflight") {
     return preflight();
@@ -514,7 +837,9 @@ export async function runPipeline(operation) {
   const identity = await context();
   if (operation === "configure-build") {
     const baselineEnvironment = Object.fromEntries(
-      Object.entries(identity.baseline ?? {}).filter(([key]) => key !== "full")
+      Object.entries(identity.baseline ?? {}).filter(
+        ([, value]) => typeof value !== "object"
+      )
     );
     return output(
       {
@@ -528,31 +853,27 @@ export async function runPipeline(operation) {
     );
   }
   if (operation === "prepare") {
+    const buildId = process.env.RELEASE_BUILD_ID;
     return prepareBundle(
       process.env.RELEASE_MAKE ?? "out/make",
       root(),
-      identity,
+      buildId
+        ? {
+            ...identity,
+            buildId,
+            releaseGateVersion: RELEASE_GATE_VERSION,
+            testBuildSha256: await sha256File(
+              path.resolve("app/.vite/release-input.json")
+            ),
+          }
+        : identity,
       process.env.RELEASE_LOCALE ?? "dist/plugins"
     );
   }
-  if (operation === "recover") {
-    return recover(identity);
+  if (["recover", "smoke", "accept", "verify"].includes(operation)) {
+    return runVerification(operation, identity);
   }
-  if (operation === "smoke") {
-    return smokeTest(identity);
-  }
-  const manifest = await verifyBundle(root(), identity);
-  if (operation === "verify") {
-    return manifest;
-  }
-  assertPublishable(identity);
-  assertPublishable(manifest);
-  const smoke = await readJson(path.join(evidenceRoot(), "smoke-status.json"));
-  validateSmoke(
-    smoke,
-    manifest,
-    await sha256File(path.join(root(), "bundle.json"))
-  );
+  const manifest = await verifyPublicationEvidence(identity);
   if (operation === "github-stage") {
     return stageGitHub(repo(), root(), manifest);
   }

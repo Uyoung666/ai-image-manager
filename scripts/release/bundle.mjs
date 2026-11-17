@@ -460,14 +460,14 @@ function deltaBaselineVersion(entries, identity) {
 }
 
 function needsLegacyMsiFullUpdate(identity, baselineVersion) {
-  // Pre-2.2.8 MSI installs have no Squirrel full-package baseline, but those
-  // clients still select a delta. A candidate cannot repair its source client.
-  // Advertise full in the actual published manifest until the delta source has
-  // the baseline guard. Keep building/testing deltas in the raw Squirrel feed.
+  // Before 2.2.8, MSI clients could select a delta without a local base.
+  // Before 2.2.10, upgraded MSI clients also lacked a writable delta scratch path.
+  const minimumSource =
+    compareVersions(identity.version, "2.2.10") >= 0 ? "2.2.10" : "2.2.8";
   return (
     compareVersions(identity.version, "2.2.8") >= 0 &&
     baselineVersion &&
-    compareVersions(baselineVersion, "2.2.8") < 0
+    compareVersions(baselineVersion, minimumSource) < 0
   );
 }
 

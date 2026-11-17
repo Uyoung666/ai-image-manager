@@ -11,12 +11,14 @@ import previousStablePatch from "./v2.2.5";
 import previousHeifBaseline from "./v2.2.6";
 import previousStableRelease from "./v2.2.7";
 import previousUpdateRecovery from "./v2.2.8";
-import current from "./v2.2.9";
+import previousLibraryRelease from "./v2.2.9";
+import current from "./v2.2.10";
 
 export type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
 
 export const changelogEntries: ChangelogEntry[] = [
   current,
+  previousLibraryRelease,
   previousUpdateRecovery,
   previousStableRelease,
   previousHeifBaseline,

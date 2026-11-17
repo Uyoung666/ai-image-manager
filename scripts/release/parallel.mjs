@@ -184,18 +184,6 @@ async function main() {
       expected.map(({ key, file, title }) => ({ key, file, title }))
     );
     await snapshot(path.join(app, ".vite"), identity);
-    const inputs = path.join(app, "release-input");
-    await fs.cp(path.join(app, "out/make"), path.join(inputs, "make"), {
-      recursive: true,
-    });
-    if (context.localeRequired) {
-      await fs.cp(
-        path.join(app, "dist/plugins"),
-        path.join(inputs, "plugins"),
-        { recursive: true }
-      );
-    }
-    await snapshot(inputs, identity);
   } else if (operation === "test") {
     await verifyInput(path.join(app, ".vite"), identity);
     const shard = Number(shardArg);
@@ -229,7 +217,6 @@ async function main() {
     console.log(`Shard ${shard}: ${Date.now() - started}ms`);
   } else if (operation === "gate") {
     await verifyInput(path.join(app, ".vite"), identity);
-    await verifyInput(path.join(app, "release-input"), identity);
     const reports = await latestReports(
       path.join(app, "shards"),
       identity,
@@ -240,6 +227,10 @@ async function main() {
       reports,
       identity
     );
+    await write(path.join(app, "e2e-summary.json"), {
+      ...identity,
+      ...summary,
+    });
     if (process.env.GITHUB_STEP_SUMMARY) {
       await fs.appendFile(
         process.env.GITHUB_STEP_SUMMARY,

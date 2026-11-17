@@ -8,9 +8,15 @@ export function validationOnly(env = process.env) {
 
 export function assertBuildAllowed({
   validateOnly,
+  prepareCandidate,
   sourceRunId,
   existingRelease,
 }) {
+  if (prepareCandidate && (validateOnly || sourceRunId)) {
+    throw new Error(
+      "Candidate preparation, validation and recovery are mutually exclusive"
+    );
+  }
   if (validateOnly && sourceRunId) {
     throw new Error(
       "Validation-only runs must build from the tag, not recover artifacts"

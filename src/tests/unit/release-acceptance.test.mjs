@@ -1,0 +1,127 @@
+import { describe, expect, it } from "vitest";
+import {
+  UPGRADE_SCENARIOS,
+  validateAcceptance,
+} from "../../../scripts/release/acceptance.mjs";
+import { validateSourceRun } from "../../../scripts/release/github.mjs";
+
+const sha = "a".repeat(64);
+const bundle = {
+  releaseGateVersion: 1,
+  version: "2.2.10",
+  commit: "a".repeat(40),
+  toolingCommit: "b".repeat(40),
+  buildId: "123-1",
+  testBuildSha256: sha,
+  baseline: { version: "2.2.9", releaseId: 123 },
+  upgradeFixtures: {},
+  releaseTitle: "新版本",
+  releaseNotes: "修复 MSI 更新",
+};
+
+function acceptance() {
+  return {
+    ...bundle,
+    schemaVersion: 1,
+    validateOnly: false,
+    runId: "123",
+    artifactId: "456",
+    artifactDigest: sha,
+    bundleSha256: sha,
+    unit: "passed",
+    e2eTests: 10,
+    installers: UPGRADE_SCENARIOS.map((scenario) => ({
+      scenario,
+      status: "passed",
+      buildId: bundle.buildId,
+      bundleSha256: sha,
+      zip: "passed",
+      disabledMsi: "passed",
+      product: {
+        first: {
+          standardUser: true,
+          targetVersion: bundle.version,
+          sourceExecutableSha256: sha,
+        },
+        second: {
+          standardUser: true,
+          updateMethod: scenario.endsWith("-delta") ? "delta" : "full",
+        },
+        history: {
+          standardUser: true,
+          targetVersion: scenario.endsWith("228") ? "2.2.8" : "2.2.9",
+          updateMethod: "full",
+          targetExecutableSha256: sha,
+          negativeControl: { status: "reproduced" },
+        },
+      },
+    })),
+  };
+}
+
+describe("candidate acceptance", () => {
+  it("rejects evidence issued for different bytes or a different build", () => {
+    const proof = acceptance();
+    expect(() =>
+      validateAcceptance(proof, bundle, sha, {
+        id: 456,
+        digest: `sha256:${sha}`,
+      })
+    ).not.toThrow();
+    expect(() =>
+      validateAcceptance(proof, bundle, sha, {
+        id: 457,
+        digest: `sha256:${sha}`,
+      })
+    ).toThrow("verified candidate");
+    proof.installers[0].buildId = "123-2";
+    expect(() => validateAcceptance(proof, bundle, sha)).toThrow(
+      "installer report"
+    );
+  });
+
+  it("rejects missing proofs and an incremental test that used full", () => {
+    const proof = acceptance();
+    const delta = proof.installers.find(
+      (item) => item.scenario === "msi-delta"
+    );
+    delta.product.second.updateMethod = "full";
+    expect(() => validateAcceptance(proof, bundle, sha)).toThrow("msi-delta");
+    proof.installers.pop();
+    expect(() => validateAcceptance(proof, bundle, sha)).toThrow(
+      "complete installer matrix"
+    );
+  });
+
+  it("requires completed acceptance for a recovery source with a sealed candidate", () => {
+    const run = {
+      path: ".github/workflows/publish.yaml",
+      event: "workflow_dispatch",
+      status: "completed",
+    };
+    const names = [
+      "Save unverified release bundle",
+      "Attest release bundle",
+      "Attest candidate acceptance",
+      "Save candidate acceptance",
+    ];
+    const steps = names.map((name) => ({ name, conclusion: "success" }));
+    expect(validateSourceRun(run, [{ steps }])).toEqual({
+      modern: true,
+      candidate: true,
+    });
+    expect(() =>
+      validateSourceRun(run, [{ steps: steps.slice(0, 2) }])
+    ).toThrow("Attest candidate acceptance");
+    expect(() =>
+      validateSourceRun(run, [
+        {
+          steps: [
+            ...steps,
+            { name: "Mark validation-only run", conclusion: "success" },
+          ],
+        },
+      ])
+    ).toThrow("Validation-only");
+  });
+});

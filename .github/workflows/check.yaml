@@ -1,27 +1,49 @@
 name: Check
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
-
+  workflow_call:
+    inputs:
+      commit:
+        type: string
+        default: ''
+      locale_baseline:
+        type: string
+        default: ''
+permissions:
+  contents: read
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: windows-2022
+    timeout-minutes: 10
     steps:
+      - name: Preserve repository line endings
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ inputs.commit || github.sha }}
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - name: Install dependencies
-        run: npm ci
-      - name: Run check
-        shell: bash
+          cache: npm
+      - name: Install check tooling
+        run: npm ci --ignore-scripts
+      - name: Check formatting and lint
+        run: npm run check
+      - name: Check TypeScript types
+        run: npx --no-install tsc --noEmit
+      - name: Check release workflows and bundled changelog
+        run: node node_modules/vitest/vitest.mjs run src/tests/unit/release-workflow.test.mjs src/tests/unit/update-welcome-decision.test.ts -t "stable release workflow gates|shows bundled current release notes"
+      - name: Check Japanese against a formal release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCALE_BASELINE_REF: ${{ inputs.locale_baseline }}
         run: |
-          git fetch origin main --depth=1
-          mapfile -t files < <(git diff --name-only origin/main...HEAD)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No changed files to check"
-            exit 0
-          fi
-          npx ultracite check --files-ignore-unknown=true "${files[@]}"
+          if (-not $env:LOCALE_BASELINE_REF) {
+            $env:LOCALE_BASELINE_REF = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name
+            if ($LASTEXITCODE -ne 0 -or -not $env:LOCALE_BASELINE_REF) { throw "Cannot resolve formal locale baseline" }
+          }
+          npm run locale:check

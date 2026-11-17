@@ -170,33 +170,34 @@ it.skipIf(process.platform !== "win32")(
 );
 
 describe("stable release workflow gates", () => {
-  it("runs units and build from the same resolved commit in parallel", () => {
-    expect([jobs.unit.needs].flat()).toEqual(["preflight"]);
-    expect(jobs.package.needs).toEqual(["preflight"]);
-    for (const job of [jobs.unit, jobs.package]) {
-      expect(
-        job.steps.some(
-          // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is intentionally literal.
-          (step) => step.with?.ref === "${{ needs.preflight.outputs.commit }}"
-        )
-      ).toBe(true);
+  it("uses the same resolved commit for the three CI gates", () => {
+    expect(jobs.unit.needs).toEqual(["preflight", "quick"]);
+    expect(jobs.package.needs).toEqual(["preflight", "quick"]);
+    expect(jobs.unit.uses).toBe("./.github/workflows/testing.yaml");
+    expect(jobs.quick.uses).toBe("./.github/workflows/check.yaml");
+    for (const job of [jobs.unit, jobs.quick]) {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression.
+      expect(job.with.commit).toBe("${{ needs.preflight.outputs.commit }}");
     }
-    expect(jobs.unit.steps.some((step) => step.run?.includes("npm test"))).toBe(
-      true
-    );
   });
 
-  it("does not seal recoverable artifacts before the unit gate succeeds", () => {
-    expect(jobs.build.needs).toEqual(["preflight", "package", "unit", "e2e"]);
-    for (const name of ["unit", "package", "e2e"]) {
-      expect(jobs.build.if).toContain(`needs.${name}.result == 'success'`);
-      expect(jobs.build.if).toContain(`needs.${name}.result == 'skipped'`);
-    }
-    const names = jobs.build.steps.map((step) => step.name);
-    expect(names.indexOf("Seal release bundle")).toBeGreaterThan(
-      names.indexOf(
-        "Gate - complete Electron E2E against the built application"
-      )
+  it("validates independently and accepts a bundle only after all gates pass", () => {
+    expect(jobs.smoke.needs).toEqual(["preflight", "package"]);
+    expect(jobs.e2e.needs).toEqual(["preflight", "package"]);
+    expect(jobs.accept.needs).toEqual([
+      "preflight",
+      "package",
+      "unit",
+      "e2e",
+      "smoke",
+      "attest",
+    ]);
+    expect(jobs.accept.steps.map((step) => step.name)).toEqual(
+      expect.arrayContaining([
+        "Verify all candidate evidence",
+        "Attest candidate acceptance",
+        "Save candidate acceptance",
+      ])
     );
   });
 
@@ -237,7 +238,7 @@ describe("stable release workflow gates", () => {
         step.with?.["artifact-ids"]?.includes("viteArtifactId")
       )
     ).toBe(true);
-    for (const job of [jobs.e2e, jobs.build]) {
+    for (const job of [jobs.e2e, jobs.accept]) {
       const downloads = job.steps.filter((step) => step.with?.["artifact-ids"]);
       expect(downloads.length).toBeGreaterThan(0);
       for (const step of downloads) {
@@ -256,20 +257,16 @@ describe("stable release workflow gates", () => {
   });
 
   it("publishes only after all gates and reuses one verified bundle download", () => {
-    expect(jobs.github.needs).toEqual(
-      expect.arrayContaining(["preflight", "unit", "smoke", "attest"])
-    );
-    expect(jobs.github.if).toContain("needs.unit.result == 'success'");
-    expect(jobs.github.if).toContain(
-      "inputs.source_run_id != '' && needs.unit.result == 'skipped'"
-    );
+    expect(jobs.github.needs).toEqual(["preflight", "package", "accept"]);
+    expect(jobs.github.if).toContain("needs.accept.result == 'success'");
+    expect(jobs.github.if).toContain("!inputs.prepare_candidate");
     const steps = jobs.github.steps;
     expect(
-      steps.filter(
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub expression.
-        (step) => step.with?.name === "${{ env.BUNDLE_ARTIFACT_NAME }}"
-      )
+      steps.filter((step) => step.with?.path === "release-bundle")
     ).toHaveLength(1);
+    expect(
+      steps.some((step) => step.run?.includes("release-pipeline.mjs recover"))
+    ).toBe(true);
     const verify = steps.findIndex(
       (step) => step.name === "Verify immutable bundle and attestation"
     );
@@ -286,15 +283,12 @@ describe("stable release workflow gates", () => {
   it("isolates validation artifacts and marks the source run as nonrecoverable", () => {
     // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub expression.
     expect(workflow.env.VALIDATE_ONLY).toBe("${{ inputs.validate_only }}");
-    for (const name of [
-      "BUNDLE_ARTIFACT_NAME",
-      "IDENTITY_ARTIFACT_NAME",
-      "SMOKE_ARTIFACT_NAME",
-    ]) {
-      expect(workflow.env[name]).toContain(
-        "inputs.validate_only && 'validation-"
-      );
-    }
+    expect(workflow.env.BUNDLE_ARTIFACT_NAME).toContain(
+      "inputs.validate_only && 'validation-"
+    );
+    expect(
+      jobs.accept.steps.find((step) => step.id === "evidence").with.name
+    ).toContain("inputs.validate_only && 'validation-acceptance'");
     const marker = jobs.preflight.steps.find(
       (step) => step.name === "Mark validation-only run"
     );

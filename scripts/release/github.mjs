@@ -194,30 +194,43 @@ export function validateSourceRun(run, jobs) {
   ) {
     throw new Error("Validation-only runs cannot be recovery sources");
   }
-  const modern = steps.some(
-    (step) => step.name === "Save immutable release bundle"
+  const candidate = steps.some(
+    (step) => step.name === "Save unverified release bundle"
   );
-  const required = modern
-    ? [
-        "Save immutable release bundle",
-        "Attest release bundle",
-        "Save installer smoke evidence",
-      ]
-    : [
-        "Gate - static check",
-        "Gate - unit tests",
-        "Upload candidate to COS testing",
-        "Run Squirrel Setup.exe upgrade smoke",
-        "Run MSI install or auto-update smoke",
-        "Write candidate smoke evidence",
-        "Upload Squirrel candidate to COS candidate prefix",
-        "Upload immutable versioned download payload to COS",
-        "Upload candidate build for promotion",
-        "Generate SHA256 release manifest",
-        "Attest candidate artifacts",
-        "Attest flat download and checksum artifacts",
-        "Upload candidate evidence",
-      ];
+  const modern =
+    candidate ||
+    steps.some((step) => step.name === "Save immutable release bundle");
+  let required;
+  if (candidate) {
+    required = [
+      "Save unverified release bundle",
+      "Attest release bundle",
+      "Attest candidate acceptance",
+      "Save candidate acceptance",
+    ];
+  } else if (modern) {
+    required = [
+      "Save immutable release bundle",
+      "Attest release bundle",
+      "Save installer smoke evidence",
+    ];
+  } else {
+    required = [
+      "Gate - static check",
+      "Gate - unit tests",
+      "Upload candidate to COS testing",
+      "Run Squirrel Setup.exe upgrade smoke",
+      "Run MSI install or auto-update smoke",
+      "Write candidate smoke evidence",
+      "Upload Squirrel candidate to COS candidate prefix",
+      "Upload immutable versioned download payload to COS",
+      "Upload candidate build for promotion",
+      "Generate SHA256 release manifest",
+      "Attest candidate artifacts",
+      "Attest flat download and checksum artifacts",
+      "Upload candidate evidence",
+    ];
+  }
   for (const name of required) {
     if (
       steps.filter(
@@ -241,7 +254,7 @@ export function validateSourceRun(run, jobs) {
       throw new Error("Legacy recovery allows only a final handoff failure");
     }
   }
-  return { modern };
+  return candidate ? { modern, candidate } : { modern };
 }
 
 export async function sourceArtifacts(repo, runId) {

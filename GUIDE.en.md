@@ -1,8 +1,8 @@
-# AI Image Manager v2.2.9 User Guide
+# AI Image Manager v2.2.10 User Guide
 
 > A local-first photo manager for Windows. Build an index over your existing folders, then search, organize, curate, analyze, export, and share your library.
 
-This guide follows the normal user workflow and describes v2.2.9. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
+This guide follows the normal user workflow and describes v2.2.10. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
 
 ---
 
@@ -74,7 +74,7 @@ RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews r
 Quit the app and back up its data directory before upgrading. Keep the existing data directory and original photo folders. For a manual upgrade, download the matching installer from [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest) and install over your existing copy. For ZIP builds, extract the new version into a new directory and keep using the existing data directory.
 
 - **v2.2.4 and v2.2.5** report “Redirect was cancelled” when the updater follows a GitHub download redirect. Upgrade manually once. Use the same steps if you run into the download error.
-- **v2.2.8 Setup and MSI installations with the updater enabled** can check for v2.2.9 under **Settings → Software Update**. Upgrade ZIP builds and MSI installations with the updater disabled manually.
+- **Setup and MSI installations with the updater enabled** can check for v2.2.10 under **Settings → Software Update**. This release uses a full download so older clients can install the MSI update fix. Upgrade ZIP builds and MSI installations with the updater disabled manually.
 - v2.2.9 migrates an existing library database on first launch. If the existing photos table has yet to receive the library source schema, the app saves a `pre-library-reliability-*.db` database snapshot under `data/backups/` in the app data directory before migrating. Background checks then verify sources and fill in file fingerprints in batches.
 - Source status updates as checks progress. You can normally keep using the existing AI index. When photo content changes, the app refreshes that photo as needed. If the app reports an incompatible index, follow [Index upgrades and rebuilding](#index-upgrades-and-rebuilding).
 - To return to an earlier app version, quit the app and restore a pre-upgrade backup compatible with that version. The automatic snapshot contains only the database. Use a pre-upgrade backup of the app data directory for a complete restore.

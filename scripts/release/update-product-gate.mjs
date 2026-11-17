@@ -121,7 +121,8 @@ export async function repackTestSuccessorArchive(archive, version, directory) {
 export async function createTestSuccessorPackage(
   executable,
   version,
-  directory
+  directory,
+  baseline
 ) {
   await fsp.mkdir(directory, { recursive: true });
   const asar = await import("@electron/asar");
@@ -196,6 +197,14 @@ export async function createTestSuccessorPackage(
     { windowsHide: true, timeout: 300_000 }
   );
   const feed = path.join(directory, "feed");
+  if (baseline) {
+    await fsp.mkdir(feed, { recursive: true });
+    await fsp.copyFile(baseline.file, path.join(feed, baseline.info.filename));
+    await fsp.writeFile(
+      path.join(feed, "RELEASES"),
+      `${baseline.info.sha1} ${baseline.info.filename} ${baseline.info.size}\n`
+    );
+  }
   await execute(
     path.join(vendor, "Squirrel.exe"),
     [
@@ -207,7 +216,23 @@ export async function createTestSuccessorPackage(
     ],
     { windowsHide: true, timeout: 300_000 }
   );
-  const filename = `ai-image-manager-${version}-full.nupkg`;
+  const full = await describeSuccessorPackage(feed, version, "full");
+  if (!baseline) {
+    return { full };
+  }
+  const delta = await describeSuccessorPackage(feed, version, "delta");
+  if (delta.info.size >= full.info.size) {
+    throw new Error(
+      "Test successor delta must be smaller than its full package"
+    );
+  }
+  delta.info.fromVersion = baseline.version;
+  delta.info.toVersion = version;
+  return { full, delta };
+}
+
+async function describeSuccessorPackage(feed, version, kind) {
+  const filename = `ai-image-manager-${version}-${kind}.nupkg`;
   const file = path.join(feed, filename);
   const sha1 = createHash("sha1");
   for await (const chunk of fs.createReadStream(file)) {
@@ -223,6 +248,27 @@ export async function createTestSuccessorPackage(
       url: `https://github.com/${repository}/releases/download/v${version}/${filename}`,
     },
   };
+}
+
+const standardUserScript = path.join(
+  import.meta.dirname,
+  "start-standard-user.ps1"
+);
+const standardUserArgs = [
+  "-NoProfile",
+  "-NonInteractive",
+  "-ExecutionPolicy",
+  "Bypass",
+  "-File",
+  standardUserScript,
+];
+
+async function verifyStandardProcess(processInfo) {
+  await execute("powershell.exe", standardUserArgs, {
+    env: { ...process.env, AIM_STANDARD_VERIFY_PID: String(processInfo.pid) },
+    windowsHide: true,
+    timeout: 15_000,
+  });
 }
 
 async function waitFor(callback, label, timeout = 180_000) {
@@ -315,6 +361,16 @@ export async function verifyProductDownload(
       "Product did not download a package declared by the published manifest"
     );
   }
+  if (
+    method === "delta" &&
+    trace.some(
+      ({ host, url }) =>
+        host === "github.com" &&
+        url === new URL(manifest.packages.full.url).pathname
+    )
+  ) {
+    throw new Error("Delta upgrade requested the full fallback package");
+  }
   const installedPackage = path.join(installRoot, "packages", info.filename);
   if (
     (await fsp.stat(installedPackage)).size !== info.size ||
@@ -380,6 +436,43 @@ export function retentionAlbumCard(page) {
   });
 }
 
+async function installThroughProduct(
+  browser,
+  page,
+  stateFile,
+  expectInstallFailure
+) {
+  try {
+    await expectRestart(
+      browser,
+      () => page.getByRole("button", { name: INSTALL_BUTTON }).click(),
+      async () => JSON.parse(await fsp.readFile(stateFile, "utf8")).state
+    );
+  } catch (error) {
+    if (!expectInstallFailure) {
+      throw error;
+    }
+    const failure = JSON.parse(await fsp.readFile(stateFile, "utf8")).state;
+    if (
+      failure.phase !== "error" ||
+      failure.operation !== "install" ||
+      failure.updateMethod !== "delta" ||
+      !["UPDATE_INSTALL_INTERRUPTED", "UPDATE_INSTALL_ACCESS_DENIED"].includes(
+        failure.message
+      )
+    ) {
+      throw error;
+    }
+    return { status: "reproduced", message: failure.message };
+  }
+  if (expectInstallFailure) {
+    throw new Error(
+      "Original MSI delta failure was not reproduced under standard permissions"
+    );
+  }
+  return null;
+}
+
 /** Uses Chromium CDP only. Release fuses, updater code and TLS verification stay enabled. */
 async function runUpgrade(
   executable,
@@ -387,7 +480,13 @@ async function runUpgrade(
   manifest,
   packages,
   directory,
-  { expectConfirmation, seedAlbum = false }
+  {
+    expectConfirmation,
+    seedAlbum = false,
+    expectedMethod,
+    kind,
+    expectInstallFailure,
+  }
 ) {
   await fsp.mkdir(directory, { recursive: true });
   const { chromium, expect } = await import("@playwright/test");
@@ -408,6 +507,8 @@ async function runUpgrade(
     ELECTRON_RUN_AS_NODE: undefined,
     AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: undefined,
     AI_IMAGE_MANAGER_USER_DATA_DIR: profile,
+    SQUIRREL_TEMP: undefined,
+    AIM_STANDARD_VERIFY_PID: undefined,
   };
   let browser;
   let child;
@@ -424,17 +525,25 @@ async function runUpgrade(
     return chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   };
   try {
-    child = spawn(
-      executable,
-      [
-        `--proxy-server=${proxy.url}`,
-        `--remote-debugging-port=${port}`,
-        "--remote-debugging-address=127.0.0.1",
-      ],
-      { env, windowsHide: true, stdio: "ignore" }
-    );
+    const args = [
+      `--proxy-server=${proxy.url}`,
+      `--remote-debugging-port=${port}`,
+      "--remote-debugging-address=127.0.0.1",
+    ];
+    child = spawn("powershell.exe", standardUserArgs, {
+      env: {
+        ...env,
+        AIM_STANDARD_EXECUTABLE: executable,
+        AIM_STANDARD_ARGUMENTS: args.join(" "),
+        AIM_STANDARD_MSI_ROOT:
+          kind === "msi" ? path.dirname(path.dirname(target)) : undefined,
+      },
+      windowsHide: true,
+      stdio: ["ignore", "ignore", "inherit"],
+    });
     child.on("error", () => undefined);
     browser = await connect();
+    await verifyStandardProcess(await readBrowserProcess(browser));
     page = browser.contexts()[0].pages()[0];
     if (await page.evaluate(() => Boolean(window.electronAPI?.isE2E))) {
       throw new Error("Production startup bypass is enabled");
@@ -505,15 +614,25 @@ async function runUpgrade(
     if (before.version !== manifest.version || before.phase !== "downloaded") {
       throw new Error("Real updater did not download target");
     }
+    if (expectedMethod && before.updateMethod !== expectedMethod) {
+      throw new Error(
+        `Expected ${expectedMethod}, downloaded ${before.updateMethod}`
+      );
+    }
     stage = "install and automatic restart";
-    await expectRestart(
+    const reproduced = await installThroughProduct(
       browser,
-      () => page.getByRole("button", { name: INSTALL_BUTTON }).click(),
-      async () => JSON.parse(await fsp.readFile(stateFile, "utf8")).state
+      page,
+      stateFile,
+      expectInstallFailure
     );
+    if (reproduced) {
+      return reproduced;
+    }
     browser = await connect();
     page = browser.contexts()[0].pages()[0];
     targetProcess = await readBrowserProcess(browser);
+    await verifyStandardProcess(targetProcess);
     if (
       path.resolve(targetProcess.path).toLowerCase() !==
       path.resolve(target).toLowerCase()
@@ -553,6 +672,7 @@ async function runUpgrade(
     browser = await connect();
     page = browser.contexts()[0].pages()[0];
     const secondProcess = await readBrowserProcess(browser);
+    await verifyStandardProcess(secondProcess);
     if (
       secondProcess.pid === targetProcess.pid ||
       path.resolve(secondProcess.path).toLowerCase() !==
@@ -581,6 +701,7 @@ async function runUpgrade(
       target,
       targetVersion: manifest.version,
       confirmed: expectConfirmation,
+      standardUser: true,
       ...download,
       actualProcess: targetProcess,
       sourceExecutableSha256,
@@ -638,17 +759,23 @@ async function runUpgrade(
           "stop owned child",
           async () => {
             if (child && child.exitCode === null && child.signalCode === null) {
-              await new Promise((resolve, reject) => {
+              const exited = new Promise((resolve, reject) => {
                 child.once("exit", resolve);
                 child.once("error", reject);
-                try {
-                  child.kill();
-                } finally {
-                  // The cleanup deadline still observes exit; failed termination
-                  // must not keep the validation helper alive indefinitely.
-                  child.unref();
-                }
               });
+              try {
+                await execute(
+                  "taskkill.exe",
+                  ["/PID", String(child.pid), "/T", "/F"],
+                  {
+                    windowsHide: true,
+                    timeout: 5000,
+                  }
+                ).catch(() => child.kill());
+                await exited;
+              } finally {
+                child.unref();
+              }
             }
           },
         ],
@@ -664,7 +791,8 @@ export async function runProductUpgradeChain(
   profile,
   candidateVersion,
   kind,
-  stage
+  stage,
+  { retentionPrepared = false, history } = {}
 ) {
   if (process.env.AIM_PRODUCT_UPDATE_GATE !== "1") {
     throw new Error("Product update gate must be explicitly enabled");
@@ -712,7 +840,12 @@ export async function runProductUpgradeChain(
     candidate,
     packages,
     directory,
-    { expectConfirmation: true, seedAlbum: true }
+    {
+      expectConfirmation: true,
+      seedAlbum: !retentionPrepared,
+      expectedMethod: candidate.packages.delta ? undefined : "full",
+      kind,
+    }
   );
   sessions.set(kind, {
     executable,
@@ -722,9 +855,74 @@ export async function runProductUpgradeChain(
     directory,
     candidate,
     first,
+    history,
   });
   return first;
 }
+
+export async function establishHistoricalMsiUpgrade(
+  executable,
+  profile,
+  fixture,
+  fullPath,
+  deltaPath
+) {
+  await fsp.mkdir(path.resolve(".test-runtime"), { recursive: true });
+  const directory = await fsp.mkdtemp(
+    path.resolve(".test-runtime", "product-update-msi-history-")
+  );
+  const base = `https://github.com/${repository}/releases`;
+  const response = await fetch(
+    `${base}/download/v${fixture.version}/update-manifest.json`,
+    { signal: AbortSignal.timeout(30_000) }
+  );
+  if (!response.ok) {
+    throw new Error(`Historical manifest fetch failed: ${response.status}`);
+  }
+  const manifest = await response.json();
+  const full = manifest.packages?.full;
+  if (
+    manifest.version !== fixture.version ||
+    full?.filename !== fixture.filename ||
+    full?.size !== fixture.size ||
+    full?.sha256 !== fixture.sha256 ||
+    full?.sha1?.toLowerCase() !== fixture.sha1.toLowerCase()
+  ) {
+    throw new Error("Historical manifest does not match the verified baseline");
+  }
+  const delta = manifest.packages?.delta;
+  if (
+    deltaPath &&
+    (delta?.filename !== fixture.delta.filename ||
+      delta?.sha256 !== fixture.delta.sha256 ||
+      delta?.size !== fixture.delta.size ||
+      delta?.fromVersion !== "2.2.8")
+  ) {
+    throw new Error(
+      "Historical delta manifest does not match the verified fixture"
+    );
+  }
+  const history = await runUpgrade(
+    executable,
+    profile,
+    manifest,
+    {
+      [full.filename]: fullPath,
+      ...(deltaPath ? { [delta.filename]: deltaPath } : {}),
+    },
+    directory,
+    {
+      expectConfirmation: true,
+      seedAlbum: !deltaPath,
+      expectedMethod: deltaPath ? "delta" : "full",
+      kind: "msi",
+      expectInstallFailure: Boolean(deltaPath),
+    }
+  );
+  await cleanupProductArtifacts(directory);
+  return history;
+}
+
 async function finishProductChain({
   executable: _executable,
   profile,
@@ -733,6 +931,7 @@ async function finishProductChain({
   directory,
   candidate,
   first,
+  history,
 }) {
   const marker = await fsp.readFile(
     path.join(profile, "release-upgrade-marker.txt"),
@@ -742,10 +941,26 @@ async function finishProductChain({
     .split(".")
     .map((part, index) => (index === 2 ? String(Number(part) + 1) : part))
     .join(".");
+  const method = process.env.AIM_PRODUCT_SUCCESSOR_METHOD || "full";
+  if (!["full", "delta"].includes(method)) {
+    throw new Error("Invalid test successor method");
+  }
+  const baseline = candidate.packages.full;
   const next = await createTestSuccessorPackage(
     first.target,
     nextVersion,
-    path.join(directory, "successor")
+    path.join(directory, "successor"),
+    method === "delta"
+      ? {
+          version: candidateVersion,
+          file: path.join(
+            process.env.RELEASE_BUNDLE ?? "release-bundle",
+            "files",
+            baseline.filename
+          ),
+          info: baseline,
+        }
+      : undefined
   );
   const successor = {
     ...candidate,
@@ -753,15 +968,19 @@ async function finishProductChain({
     tag: `v${nextVersion}`,
     assetsBaseUrl: `https://github.com/${repository}/releases/download/v${nextVersion}`,
     releaseUrl: `https://github.com/${repository}/releases/tag/v${nextVersion}`,
-    packages: { full: next.info },
+    packages: Object.fromEntries(
+      Object.entries(next).map(([kind, record]) => [kind, record.info])
+    ),
   };
   const second = await runUpgrade(
     first.target,
     profile,
     successor,
-    { [next.info.filename]: next.file },
+    Object.fromEntries(
+      Object.values(next).map(({ info, file }) => [info.filename, file])
+    ),
     path.join(directory, "second"),
-    { expectConfirmation: true }
+    { expectConfirmation: true, expectedMethod: method, kind }
   );
   if (
     (await fsp.readFile(
@@ -784,6 +1003,7 @@ async function finishProductChain({
     status: "passed",
     first,
     second,
+    ...(history ? { history } : {}),
     testSuccessorOnly: true,
   };
   const output = path.resolve(

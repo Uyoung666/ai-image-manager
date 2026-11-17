@@ -22,6 +22,11 @@ run-name: ${{ inputs.validate_only && format('仅验证 v{0}（不发布）', in
         description: 中文发布标题（与说明一起固定到构建产物）
         required: false
         type: string
+      prepare_candidate:
+        description: 完整验证并保存候选，不公开发布
+        required: false
+        default: false
+        type: boolean
       validate_only:
         description: 仅验证构建与测试，不发布 GitHub Release
         required: false
@@ -43,6 +48,11 @@ run-name: ${{ inputs.validate_only && format('仅验证 v{0}（不发布）', in
         required: false
         default: ''
         type: string
+      prepare_candidate:
+        description: 完整验证并保存候选，不公开发布
+        required: false
+        default: false
+        type: boolean
       validate_only:
         description: 仅验证构建与测试，不发布 GitHub Release
         required: false
@@ -66,9 +76,8 @@ env:
   RELEASE_BUNDLE: ${{ github.workspace }}/release-bundle
   RELEASE_EVIDENCE: ${{ github.workspace }}/release-evidence
   VALIDATE_ONLY: ${{ inputs.validate_only }}
+  PREPARE_CANDIDATE: ${{ inputs.prepare_candidate }}
   BUNDLE_ARTIFACT_NAME: ${{ inputs.validate_only && 'validation-bundle' || 'release-bundle' }}-${{ inputs.version }}
-  IDENTITY_ARTIFACT_NAME: ${{ inputs.validate_only && 'validation-artifact' || 'release-artifact' }}-${{ inputs.version }}
-  SMOKE_ARTIFACT_NAME: ${{ inputs.validate_only && 'validation-smoke' || 'release-smoke' }}-${{ inputs.version }}
 jobs:
   preflight:
     runs-on: windows-2022
@@ -78,6 +87,8 @@ jobs:
       tag: ${{ steps.preflight.outputs.tag }}
       commit: ${{ steps.preflight.outputs.commit }}
       sourceRunId: ${{ steps.preflight.outputs.sourceRunId }}
+      baseline: ${{ steps.preflight.outputs.baseline }}
+      scenarios: ${{ steps.preflight.outputs.scenarios }}
     steps:
     - uses: actions/checkout@v6
       with:
@@ -100,35 +111,25 @@ jobs:
       with:
         name: release-context
         path: release-context.json
+        overwrite: true
         retention-days: 90
         if-no-files-found: error
-  unit:
+  quick:
     needs: preflight
     if: inputs.source_run_id == ''
-    runs-on: windows-2022
-    timeout-minutes: 25
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        ref: ${{ needs.preflight.outputs.commit }}
-        fetch-depth: 0
-    - uses: actions/setup-node@v6
-      with:
-        node-version: '22'
-        cache: npm
-    - run: npm ci
-    - uses: actions/cache@v4
-      with:
-        path: models
-        key: ${{ runner.os }}-models-all-${{ hashFiles('src/services/model-downloader.ts') }}
-    - run: node --loader ts-node/esm scripts/prepare-models.mjs
-    - name: Gate - unit tests
-      run: |
-        npm test
-        if ($LASTEXITCODE -ne 0) { throw "Release unit gate failed" }
+    uses: ./.github/workflows/check.yaml
+    with:
+      commit: ${{ needs.preflight.outputs.commit }}
+      locale_baseline: ${{ needs.preflight.outputs.baseline }}
+  unit:
+    needs: [preflight, quick]
+    if: inputs.source_run_id == ''
+    uses: ./.github/workflows/testing.yaml
+    with:
+      commit: ${{ needs.preflight.outputs.commit }}
+      skip_e2e: true
   package:
-    needs:
-    - preflight
+    needs: [preflight, quick]
     runs-on: windows-2022
     timeout-minutes: 35
     environment: release-stable
@@ -192,12 +193,6 @@ jobs:
         $wixPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         & (Join-Path $wixPath "candle.exe") -? | Select-Object -First 2
         & (Join-Path $wixPath "light.exe") -? | Select-Object -First 2
-      if: inputs.source_run_id == ''
-      working-directory: app
-    - name: Gate - static check
-      run: |-
-        npm run check
-        if ($LASTEXITCODE -ne 0) { throw "Release build gate failed" }
       if: inputs.source_run_id == ''
       working-directory: app
     - name: Gate - Japanese locale and official signed package
@@ -372,22 +367,37 @@ jobs:
         retention-days: 7
         compression-level: 0
         if-no-files-found: error
-    - id: inputs
+    - name: Seal release bundle
+      run: node tooling/scripts/release-pipeline.mjs prepare
+    - name: Save unverified release bundle
+      id: bundle
       uses: actions/upload-artifact@v4
       with:
-        name: release-input-${{ github.run_id }}-${{ github.run_attempt }}
-        path: app/release-input/
-        include-hidden-files: true
+        name: ${{ env.BUNDLE_ARTIFACT_NAME }}-${{ env.RELEASE_BUILD_ID }}
+        path: release-bundle/
         retention-days: 7
         compression-level: 0
+        if-no-files-found: error
+    - id: metadata
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-metadata-${{ env.RELEASE_BUILD_ID }}
+        path: |
+          release-bundle/bundle.json
+          release-bundle/evidence/locale-smoke.json
+        retention-days: 7
         if-no-files-found: error
     if: inputs.source_run_id == ''
     outputs:
       viteArtifactId: ${{ steps.vite.outputs.artifact-id }}
-      inputArtifactId: ${{ steps.inputs.outputs.artifact-id }}
+      bundleArtifactId: ${{ steps.bundle.outputs.artifact-id }}
+      bundleDigest: ${{ steps.bundle.outputs.artifact-digest }}
+      metadataArtifactId: ${{ steps.metadata.outputs.artifact-id }}
       buildId: ${{ github.run_id }}-${{ github.run_attempt }}
     env:
       RELEASE_BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      RELEASE_MAKE: ${{ github.workspace }}/app/out/make
+      RELEASE_LOCALE: ${{ github.workspace }}/app/dist/plugins
   e2e:
     needs:
     - preflight
@@ -472,85 +482,10 @@ jobs:
         compression-level: 0
         if-no-files-found: warn
       if: always()
-  build:
-    needs:
-    - preflight
-    - package
-    - unit
-    - e2e
-    runs-on: windows-2022
-    timeout-minutes: 60
-    environment: release-stable
-    steps:
-    - name: Preserve repository line endings
-      run: git config --global core.autocrlf false
-    - uses: actions/checkout@v6
-      with:
-        path: tooling
-        fetch-depth: 0
-    - uses: actions/setup-node@v6
-      with:
-        node-version: '22'
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-context
-        path: .
-    - name: Recover exact existing bundle
-      if: inputs.source_run_id != ''
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: node tooling/scripts/release-pipeline.mjs recover
-    - uses: actions/download-artifact@v4
-      with:
-        artifact-ids: ${{ needs.package.outputs.viteArtifactId }}
-        path: inputs/.vite
-        merge-multiple: true
-      if: inputs.source_run_id == ''
-    - uses: actions/download-artifact@v4
-      with:
-        artifact-ids: ${{ needs.package.outputs.inputArtifactId }}
-        path: inputs/release-input
-        merge-multiple: true
-      if: inputs.source_run_id == ''
-    - uses: actions/download-artifact@v4
-      if: inputs.source_run_id == ''
-      with:
-        pattern: release-shard-${{ github.run_id }}-*
-        path: inputs/shards
-    - name: Gate - complete Electron E2E against the built application
-      run: |-
-        node tooling/scripts/release/parallel.mjs gate inputs
-        if ($LASTEXITCODE -ne 0) { throw "Release validation failed" }
-      if: inputs.source_run_id == ''
-    - name: Seal release bundle
-      if: inputs.source_run_id == ''
-      run: node tooling/scripts/release-pipeline.mjs prepare
-    - name: Save immutable release bundle
-      id: bundle
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.BUNDLE_ARTIFACT_NAME }}
-        path: release-bundle/
-        retention-days: 7
-        compression-level: 0
-        if-no-files-found: error
-    - name: Record source artifact identity
-      run: '@{ validateOnly = ("${{ inputs.validate_only }}" -eq "true"); artifactId = "${{ steps.bundle.outputs.artifact-id }}"; digest = "${{ steps.bundle.outputs.artifact-digest }}"; runId = "${{ github.run_id }}"; commit = "${{ needs.preflight.outputs.commit }}"; toolingCommit = "${{ github.sha }}" } | ConvertTo-Json | Set-Content release-artifact.json'
-    - uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.IDENTITY_ARTIFACT_NAME }}
-        path: release-artifact.json
-        retention-days: 90
-        if-no-files-found: error
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && ((inputs.source_run_id == '' && needs.package.result == 'success' && needs.unit.result == 'success' && needs.e2e.result == 'success') || (inputs.source_run_id != '' && needs.package.result == 'skipped' && needs.unit.result == 'skipped' && needs.e2e.result == 'skipped')) }}
-    env:
-      RELEASE_BUILD_ID: ${{ needs.package.outputs.buildId }}
-      RELEASE_MAKE: ${{ github.workspace }}/inputs/release-input/make
-      RELEASE_LOCALE: ${{ github.workspace }}/inputs/release-input/plugins
   attest:
     needs:
     - preflight
-    - build
+    - package
     runs-on: windows-2022
     timeout-minutes: 10
     permissions:
@@ -562,17 +497,24 @@ jobs:
     steps:
     - uses: actions/download-artifact@v4
       with:
-        name: ${{ env.BUNDLE_ARTIFACT_NAME }}
+        artifact-ids: ${{ needs.package.outputs.bundleArtifactId }}
+        merge-multiple: true
         path: release-bundle
     - name: Attest release bundle
       uses: actions/attest@v4
       with:
         subject-path: release-bundle/**
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' }}
+    if: inputs.source_run_id == ''
   smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ${{ fromJSON(needs.preflight.outputs.scenarios || '["setup-full", "msi-full"]') }}
+    env:
+      RELEASE_INSTALLER_SCENARIO: ${{ matrix.scenario }}
     needs:
     - preflight
-    - build
+    - package
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
@@ -588,7 +530,8 @@ jobs:
         path: .
     - uses: actions/download-artifact@v4
       with:
-        name: ${{ env.BUNDLE_ARTIFACT_NAME }}
+        artifact-ids: ${{ needs.package.outputs.bundleArtifactId }}
+        merge-multiple: true
         path: release-bundle
     - name: Install isolated product validation tools
       run: npm ci --ignore-scripts
@@ -598,18 +541,19 @@ jobs:
       run: npm rebuild electron-winstaller --foreground-scripts
     - name: Test installers against local feed
       run: node scripts/release-pipeline.mjs smoke
-    - name: Save installer smoke evidence
+    - name: Save installer report
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.SMOKE_ARTIFACT_NAME }}
-        path: release-evidence/smoke-status.json
+        name: release-installer-${{ matrix.scenario }}-${{ needs.package.outputs.buildId }}
+        path: release-evidence/installer-report.json
+        overwrite: true
         retention-days: 90
         if-no-files-found: error
     - name: Save installer diagnostics
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        name: release-diagnostics-${{ matrix.scenario }}-${{ github.run_id }}-${{ github.run_attempt }}
         include-hidden-files: true
         path: |
           release-evidence/installer-logs/
@@ -619,14 +563,73 @@ jobs:
           .test-runtime/product-update-*/**/logs/**
         retention-days: 30
         if-no-files-found: ignore
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' }}
+    if: inputs.source_run_id == ''
+  accept:
+    needs: [preflight, package, unit, e2e, smoke, attest]
+    if: inputs.source_run_id == ''
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      RELEASE_BUILD_ID: ${{ needs.package.outputs.buildId }}
+      CANDIDATE_ARTIFACT_ID: ${{ needs.package.outputs.bundleArtifactId }}
+      CANDIDATE_ARTIFACT_DIGEST: ${{ needs.package.outputs.bundleDigest }}
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+    - uses: actions/download-artifact@v4
+      with:
+        name: release-context
+        path: .
+    - uses: actions/download-artifact@v4
+      with:
+        artifact-ids: ${{ needs.package.outputs.metadataArtifactId }}
+        merge-multiple: true
+        path: release-bundle
+    - uses: actions/download-artifact@v4
+      with:
+        artifact-ids: ${{ needs.package.outputs.viteArtifactId }}
+        merge-multiple: true
+        path: inputs/.vite
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: release-shard-${{ github.run_id }}-*
+        path: inputs/shards
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: release-installer-*-${{ needs.package.outputs.buildId }}
+        path: inputs/installers
+    - name: Gate - complete Electron E2E against the built application
+      run: node scripts/release/parallel.mjs gate inputs
+    - name: Verify all candidate evidence
+      run: node scripts/release-pipeline.mjs accept
+    - name: Attest candidate acceptance
+      uses: actions/attest@v4
+      with:
+        subject-path: release-evidence/candidate-acceptance.json
+    - name: Save candidate acceptance
+      id: evidence
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.validate_only && 'validation-acceptance' || 'release-acceptance' }}-${{ inputs.version }}
+        path: |
+          release-evidence/candidate-acceptance.json
+          release-evidence/smoke-status.json
+        overwrite: true
+        retention-days: 90
+        if-no-files-found: error
+    outputs:
+      artifactId: ${{ steps.evidence.outputs.artifact-id }}
   github:
-    if: ${{ !inputs.validate_only && !cancelled() && needs.preflight.result == 'success' && needs.smoke.result == 'success' && needs.attest.result == 'success' && (needs.unit.result == 'success' || (inputs.source_run_id != '' && needs.unit.result == 'skipped')) }}
-    needs:
-    - preflight
-    - smoke
-    - attest
-    - unit
+    if: ${{ !inputs.validate_only && !inputs.prepare_candidate && !cancelled() && needs.preflight.result == 'success' && ((inputs.source_run_id == '' && needs.accept.result == 'success') || (inputs.source_run_id != '' && needs.accept.result == 'skipped')) }}
+    needs: [preflight, package, accept]
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -641,21 +644,29 @@ jobs:
         name: release-context
         path: .
     - uses: actions/download-artifact@v4
+      if: inputs.source_run_id == ''
       with:
-        name: ${{ env.BUNDLE_ARTIFACT_NAME }}
+        artifact-ids: ${{ needs.package.outputs.bundleArtifactId }}
+        merge-multiple: true
         path: release-bundle
     - uses: actions/download-artifact@v4
+      if: inputs.source_run_id == ''
       with:
-        name: ${{ env.SMOKE_ARTIFACT_NAME }}
+        artifact-ids: ${{ needs.accept.outputs.artifactId }}
+        merge-multiple: true
         path: release-evidence
     - name: Verify immutable bundle and attestation
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |-
+      if: inputs.source_run_id == ''
+      run: |
         node scripts/release-pipeline.mjs verify
         if ($LASTEXITCODE -ne 0) { throw "Bundle verification failed" }
-        gh attestation verify release-bundle/bundle.json --repo "$env:GITHUB_REPOSITORY" --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/publish.yaml" --source-digest "$env:GITHUB_SHA"
-        if ($LASTEXITCODE -ne 0) { throw "Bundle attestation verification failed" }
+        foreach ($file in @("release-bundle/bundle.json", "release-evidence/candidate-acceptance.json")) {
+          gh attestation verify $file --repo "$env:GITHUB_REPOSITORY" --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/publish.yaml" --source-digest "$env:GITHUB_SHA"
+          if ($LASTEXITCODE -ne 0) { throw "Release attestation verification failed: $file" }
+        }
+    - name: Verify and recover original release bundle
+      if: inputs.source_run_id != ''
+      run: node scripts/release-pipeline.mjs recover
     - name: Stage GitHub release
       run: node scripts/release-pipeline.mjs github-stage
     - name: Publish verified GitHub release

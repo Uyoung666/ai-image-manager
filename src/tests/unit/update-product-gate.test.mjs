@@ -95,7 +95,16 @@ it.each([
       size: bytes.length,
       url: `https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.8/${filename}`,
     };
-    const manifest = { version: "2.2.8", packages: { [method]: info } };
+    const manifest = {
+      version: "2.2.8",
+      packages: {
+        full: {
+          ...info,
+          url: info.url.replace("-delta.nupkg", "-full.nupkg"),
+        },
+        [method]: info,
+      },
+    };
     const state = { version: "2.2.8", updateMethod: method };
     const trace = [{ host: "github.com", url: new URL(info.url).pathname }];
     await fs.mkdir(path.join(runtime.root, "packages"));
@@ -107,6 +116,20 @@ it.each([
       updateMethod: method,
       downloadedPackageSha256: info.sha256,
     });
+    if (method === "delta") {
+      const fallback = {
+        host: "github.com",
+        url: new URL(manifest.packages.full.url).pathname,
+      };
+      await expect(
+        verifyProductDownload(
+          state,
+          manifest,
+          [...trace, fallback],
+          runtime.root
+        )
+      ).rejects.toThrow("full fallback");
+    }
     await expect(
       verifyProductDownload(state, manifest, [], runtime.root)
     ).rejects.toThrow("did not download");

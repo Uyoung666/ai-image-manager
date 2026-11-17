@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { app, autoUpdater, BrowserWindow, Notification, net } from "electron";
 import {
   chooseUpdatePlan,
@@ -2197,6 +2198,35 @@ function prepareInstallBaseline(
   return Promise.resolve(update);
 }
 
+async function prepareSquirrelTemporaryDirectory(): Promise<string> {
+  const directory = path.resolve(
+    process.env.SQUIRREL_TEMP?.trim() ||
+      path.join(app.getPath("temp"), "ai-image-manager-squirrel")
+  );
+  try {
+    await fsp.mkdir(directory, { recursive: true });
+    const probePath = path.join(directory, `.aim-write-probe-${randomUUID()}`);
+    const probe = await fsp.open(probePath, "wx");
+    await probe.close();
+    await fsp.unlink(probePath);
+  } catch (error) {
+    if (classifyUpdateError(error) === "UPDATE_INSTALL_DISK_FULL") {
+      throw error;
+    }
+    throw new Error("UPDATE_INSTALL_ACCESS_DENIED", { cause: error });
+  }
+  return directory;
+}
+
+function appendInstallerOutput(output: string, value: string): string {
+  const combined = output + value;
+  if (combined.length <= MAX_INSTALL_OUTPUT_CHARS) {
+    return combined;
+  }
+  const half = (MAX_INSTALL_OUTPUT_CHARS - 5) / 2;
+  return `${combined.slice(0, Math.floor(half))} ... ${combined.slice(-Math.ceil(half))}`;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: preserve bounded cache repair and delta fallback within a single install transaction
 async function applyLocalUpdate(feedDirectory: string): Promise<void> {
   try {
@@ -2220,6 +2250,9 @@ async function applyLocalUpdate(feedDirectory: string): Promise<void> {
       update = await repairInstallCache(update);
     }
     update = await prepareInstallBaseline(update);
+    // Machine installations can write to the app folder, but not its parent
+    // where MSQ would otherwise try to unpack the delta.
+    const temporaryDirectory = await prepareSquirrelTemporaryDirectory();
     for (;;) {
       await assertUpdateInstallSpace({
         packagePath: path.join(update.feedDirectory, update.package.filename),
@@ -2227,10 +2260,10 @@ async function applyLocalUpdate(feedDirectory: string): Promise<void> {
         fullSize: update.manifest.packages.full.size,
         applicationDirectory: path.dirname(process.execPath),
         installRoot: getInstallRoot(),
-        temporaryDirectory: app.getPath("temp"),
+        temporaryDirectory,
       });
       try {
-        await runLocalSquirrelUpdate(update.feedDirectory);
+        await runLocalSquirrelUpdate(update.feedDirectory, temporaryDirectory);
         break;
       } catch (error) {
         if (
@@ -2297,7 +2330,10 @@ function terminateInstallerProcess(child: {
   child.kill();
 }
 
-async function runLocalSquirrelUpdate(feedDirectory: string): Promise<void> {
+async function runLocalSquirrelUpdate(
+  feedDirectory: string,
+  temporaryDirectory: string
+): Promise<void> {
   const executableDirectory = path.dirname(process.execPath);
   const updateExecutable = [
     path.join(executableDirectory, "Update.exe"),
@@ -2309,6 +2345,7 @@ async function runLocalSquirrelUpdate(feedDirectory: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const startedAt = Date.now();
     const child = spawn(updateExecutable, ["--update", feedDirectory], {
+      env: { ...process.env, SQUIRREL_TEMP: temporaryDirectory },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -2318,16 +2355,14 @@ async function runLocalSquirrelUpdate(feedDirectory: string): Promise<void> {
     let stdout = "";
     let stderr = "";
     let exitCode: number | null = null;
-    const appendOutput = (kind: "stderr" | "stdout", chunk: Buffer) => {
-      const value = chunk.toString("utf8");
-      if (kind === "stdout") {
-        stdout = `${stdout}${value}`.slice(-MAX_INSTALL_OUTPUT_CHARS);
-      } else {
-        stderr = `${stderr}${value}`.slice(-MAX_INSTALL_OUTPUT_CHARS);
-      }
-    };
-    child.stdout?.on("data", (chunk: Buffer) => appendOutput("stdout", chunk));
-    child.stderr?.on("data", (chunk: Buffer) => appendOutput("stderr", chunk));
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout = appendInstallerOutput(stdout, stdoutDecoder.write(chunk));
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr = appendInstallerOutput(stderr, stderrDecoder.write(chunk));
+    });
     let killGrace: ReturnType<typeof setTimeout> | undefined;
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -2361,8 +2396,10 @@ async function runLocalSquirrelUpdate(feedDirectory: string): Promise<void> {
         elapsedMs: Date.now() - startedAt,
         exitCode,
         installer: updateExecutable,
+        sourceVersion: app.getVersion(),
         stderr,
         stdout,
+        temporaryDirectory,
         targetVersion: getCurrentUpdateStatus()?.version,
         updateMethod: getCurrentUpdateStatus()?.updateMethod,
         timedOut,
@@ -2379,8 +2416,12 @@ async function runLocalSquirrelUpdate(feedDirectory: string): Promise<void> {
       }
       finish(timedOut ? new Error("UPDATE_INSTALL_TIMEOUT") : error);
     });
-    child.once("exit", (code) => {
+    child.once("exit", () => {
       ownedInstaller = null;
+    });
+    child.once("close", (code) => {
+      stdout = appendInstallerOutput(stdout, stdoutDecoder.end());
+      stderr = appendInstallerOutput(stderr, stderrDecoder.end());
       exitCode = code;
       if (settled) {
         return;
@@ -2402,10 +2443,10 @@ async function runLocalSquirrelUpdate(feedDirectory: string): Promise<void> {
           });
           finish();
         } else {
-          const output = sanitizeDiagnosticText(
-            `${stderr}\n${stdout}`.trim(),
-            1024
-          );
+          const output = [stderr, stdout]
+            .map((value) => sanitizeDiagnosticText(value.trim()))
+            .filter(Boolean)
+            .join(" ");
           finish(
             new Error(
               `Squirrel update exited with code ${code}${

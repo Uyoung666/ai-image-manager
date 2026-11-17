@@ -1721,6 +1721,60 @@ async function runMsiFreshSmoke(currentMsiPath, version) {
   );
 }
 
+async function verifyMsiProductUpgrade(
+  oldExecutable,
+  sharedUserData,
+  version,
+  normalizedOldVersion
+) {
+  const { establishHistoricalMsiUpgrade, runProductUpgradeChain } =
+    await import("./release/update-product-gate.mjs");
+  let history;
+  let source = oldExecutable;
+  if (process.env.AIM_HISTORICAL_BASELINE) {
+    const fixture = JSON.parse(process.env.AIM_HISTORICAL_BASELINE);
+    const full = await downloadVerifiedAsset(
+      fixture.url,
+      fixture.sha256,
+      ".nupkg"
+    );
+    history = await establishHistoricalMsiUpgrade(
+      oldExecutable,
+      sharedUserData,
+      fixture,
+      full
+    );
+    assertMsiInstalled(normalizedOldVersion);
+    source = history.target;
+    if (process.env.AIM_MSI_NEGATIVE_CONTROL) {
+      const control = JSON.parse(process.env.AIM_MSI_NEGATIVE_CONTROL);
+      const [controlFull, controlDelta] = await Promise.all([
+        downloadVerifiedAsset(control.url, control.sha256, ".nupkg"),
+        downloadVerifiedAsset(
+          control.delta.url,
+          control.delta.sha256,
+          ".nupkg"
+        ),
+      ]);
+      history.negativeControl = await establishHistoricalMsiUpgrade(
+        source,
+        sharedUserData,
+        control,
+        controlFull,
+        controlDelta
+      );
+    }
+  }
+  await runProductUpgradeChain(
+    source,
+    sharedUserData,
+    version,
+    "msi",
+    "first",
+    { retentionPrepared: Boolean(history), history }
+  );
+}
+
 async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
   const oldMsiUrl = requiredOption(new Map(), "old MSI", "AIM_OLD_MSI_URL");
   const oldMsiHash = requiredOption(
@@ -1795,15 +1849,11 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
     );
 
     if (process.env.AIM_PRODUCT_UPDATE_GATE === "1") {
-      const { runProductUpgradeChain } = await import(
-        "./release/update-product-gate.mjs"
-      );
-      await runProductUpgradeChain(
+      await verifyMsiProductUpgrade(
         oldExecutable,
         sharedUserData,
         version,
-        "msi",
-        "first"
+        normalizedOldVersion
       );
     } else {
       await runInstallerProcess(
@@ -1823,7 +1873,9 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         "ai-image-manager.exe"
       )
     );
-    const upgradedProduct = assertMsiInstalled(version);
+    const upgradedProduct = process.env.AIM_HISTORICAL_BASELINE
+      ? assertMsiInstalled(normalizedOldVersion)
+      : assertMsiInstalled(version);
     if (
       !fs.existsSync(retentionMarker) ||
       fs.readFileSync(retentionMarker, "utf8") !==
@@ -1948,6 +2000,122 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
     }
   }
   console.log(`AIM_INSTALLER_SMOKE_MSI_UPGRADE=passed logs=${logDirectory}`);
+}
+
+export async function runManualUpgradeSmoke(bundle, manifest, baseline) {
+  if (process.env.RUNNER_ENVIRONMENT !== "github-hosted") {
+    throw new Error(
+      "Manual MSI validation requires a disposable hosted runner"
+    );
+  }
+  const asset = (suffix) => {
+    const record = manifest.files.find((file) =>
+      file.relativePath.endsWith(suffix)
+    );
+    if (!record) {
+      throw new Error(`Missing candidate installer: ${suffix}`);
+    }
+    return path.join(bundle, record.relativePath);
+  };
+  fs.mkdirSync(path.resolve(".test-runtime"), { recursive: true });
+  const directory = fs.mkdtempSync(
+    path.resolve(".test-runtime/manual-upgrade-")
+  );
+  const profile = path.join(directory, "profile");
+  fs.mkdirSync(profile);
+  const marker = path.join(profile, "manual-upgrade-marker.txt");
+  fs.writeFileSync(marker, "retained");
+  const assertRetained = () => {
+    if (fs.readFileSync(marker, "utf8") !== "retained") {
+      throw new Error("Manual upgrade did not retain the profile marker");
+    }
+  };
+  const oldZip = await downloadVerifiedAsset(
+    baseline.AIM_OLD_ZIP_URL,
+    baseline.AIM_OLD_ZIP_SHA256,
+    ".zip"
+  );
+  const { default: extractZip } = await import("extract-zip");
+  for (const [file, version] of [
+    [oldZip, baseline.version],
+    [asset(".zip"), manifest.version],
+  ]) {
+    const target = path.join(directory, `zip-${version}`);
+    await extractZip(file, { dir: target });
+    const executable = fs
+      .readdirSync(target, { recursive: true })
+      .find(
+        (entry) => path.basename(entry).toLowerCase() === "ai-image-manager.exe"
+      );
+    if (
+      !executable ||
+      fs.existsSync(path.join(target, path.dirname(executable), "Update.exe"))
+    ) {
+      throw new Error("ZIP must contain an application without Update.exe");
+    }
+    await runPackagedE2E(
+      path.join(target, executable),
+      `launch ZIP ${version}`,
+      profile,
+      version
+    );
+    assertRetained();
+  }
+
+  const oldMsi = await downloadVerifiedAsset(
+    baseline.AIM_OLD_MSI_URL,
+    baseline.AIM_OLD_MSI_SHA256,
+    ".msi"
+  );
+  const msiexec = path.join(process.env.SystemRoot, "System32", "msiexec.exe");
+  const logDirectory = createMsiLogDirectory("ai-image-manager-msi-manual-");
+  let installed;
+  try {
+    for (const [file, version] of [
+      [oldMsi, baseline.version],
+      [asset(".msi"), manifest.version],
+    ]) {
+      await runMsiProcess(
+        msiexec,
+        [
+          "/i",
+          file,
+          "/qn",
+          "/norestart",
+          "ADDLOCAL=MainApplication",
+          "/l*vx!",
+          path.join(logDirectory, `manual-${version}.log`),
+        ],
+        `manually install MSI ${version} without AutoUpdate`
+      );
+      installed = file;
+      const product = assertMsiInstalled(version);
+      if (fs.existsSync(path.join(product.InstallLocation, "Update.exe"))) {
+        throw new Error(
+          "MSI manual installation unexpectedly contains Update.exe"
+        );
+      }
+      const executable = findInstalledExecutable(
+        product.InstallLocation,
+        version
+      );
+      await runPackagedE2E(
+        executable,
+        `launch manual MSI ${version}`,
+        profile,
+        version
+      );
+      assertRetained();
+    }
+  } finally {
+    if (installed) {
+      await runMsiProcess(
+        msiexec,
+        ["/x", installed, "/qn", "/norestart"],
+        "uninstall manual MSI"
+      );
+    }
+  }
 }
 
 async function main() {

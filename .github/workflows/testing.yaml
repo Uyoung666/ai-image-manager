@@ -5,32 +5,44 @@ on:
   pull_request:
     branches: [main]
 
+  workflow_call:
+    inputs:
+      commit:
+        type: string
+        default: ''
+      skip_e2e:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
 jobs:
   tests-unit:
-    timeout-minutes: 20
+    timeout-minutes: 30
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ inputs.commit || github.sha }}
       - uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Rebuild Electron native modules
-        run: npm run rebuild:native
       - name: Cache unit models
         uses: actions/cache@v4
         with:
           path: models
-          key: ${{ runner.os }}-models-unit-${{ hashFiles('src/services/model-downloader.ts') }}
+          key: ${{ runner.os }}-models-${{ inputs.skip_e2e && 'all' || 'unit' }}-${{ hashFiles('src/services/model-downloader.ts') }}
       - name: Prepare models for model-backed tests
         env:
-          AIM_MODEL_SCOPE: face,Xenova/siglip-base-patch16-224
+          AIM_MODEL_SCOPE: ${{ !inputs.skip_e2e && 'face,Xenova/siglip-base-patch16-224' || '' }}
         run: node --loader ts-node/esm scripts/prepare-models.mjs
       - name: Run unit tests
-        run: npm run test:unit -- run --exclude src/tests/unit/face-data-migration.test.mjs
+        run: npm test
       - name: Run AI integration tests
         run: npm run test:ai-integration
       - name: Run worker tests
@@ -44,10 +56,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Rebuild Electron native modules
-        run: npm run rebuild:native
       - name: Cache face models
         uses: actions/cache@v4
         with:
@@ -63,6 +74,7 @@ jobs:
         run: .\\node_modules\\.bin\\electron.cmd --test src/tests/unit/face-data-migration.test.mjs
 
   test-e2e:
+    if: '!inputs.skip_e2e'
     timeout-minutes: 45
     runs-on: windows-2022
     steps:
@@ -70,10 +82,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Rebuild Electron native modules
-        run: npm run rebuild:native
       - name: Cache E2E models
         uses: actions/cache@v4
         with:
