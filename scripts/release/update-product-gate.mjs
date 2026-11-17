@@ -17,6 +17,7 @@ const CLOSE_BEHAVIOR_LABEL = /^(关闭行为|Close behavior)$/;
 const QUIT_OPTION = /^(退出应用|Quit the app)$/;
 const NEW_ALBUM_BUTTON = /^(新建相册|New Album|New album)$/;
 const ALBUM_NAME_PLACEHOLDER = /相册名称|Album name/i;
+const RETENTION_ALBUM = "Product upgrade retention album";
 const CREATE_BUTTON = /^(创建|Create)$/;
 const CHECK_BUTTON = /^(检查更新|Check for Updates|Check for updates)$/;
 const INSTALL_BUTTON = /^(安装并重启|Install and restart)$/;
@@ -373,6 +374,12 @@ async function saveProductFailure(directory, profile, page, details) {
   }
 }
 
+export function retentionAlbumCard(page) {
+  return page.getByRole("link").filter({
+    has: page.getByRole("heading", { name: RETENTION_ALBUM, exact: true }),
+  });
+}
+
 /** Uses Chromium CDP only. Release fuses, updater code and TLS verification stay enabled. */
 async function runUpgrade(
   executable,
@@ -380,7 +387,7 @@ async function runUpgrade(
   manifest,
   packages,
   directory,
-  expectConfirmation
+  { expectConfirmation, seedAlbum = false }
 ) {
   await fsp.mkdir(directory, { recursive: true });
   const { chromium, expect } = await import("@playwright/test");
@@ -462,16 +469,15 @@ async function runUpgrade(
     await page.getByRole("option", { name: QUIT_OPTION }).click();
     stage = "retention album";
     await page.evaluate(() => window.__e2eNavigate("/albums"));
-    const album = "Product upgrade retention album";
-    if ((await page.getByText(album, { exact: true }).count()) === 0) {
+    if (seedAlbum) {
       await page
         .getByRole("button", { name: NEW_ALBUM_BUTTON })
         .first()
         .click();
-      await page.getByPlaceholder(ALBUM_NAME_PLACEHOLDER).fill(album);
+      await page.getByPlaceholder(ALBUM_NAME_PLACEHOLDER).fill(RETENTION_ALBUM);
       await page.getByRole("button", { name: CREATE_BUTTON }).click();
     }
-    await page.getByText(album, { exact: true }).waitFor();
+    await retentionAlbumCard(page).waitFor();
     stage = "automatic update preference";
     await page.evaluate(() => window.__e2eNavigate("/settings/update"));
     const automaticUpdates = page.getByRole("checkbox", {
@@ -557,9 +563,7 @@ async function runUpgrade(
     targetProcess = secondProcess;
     await page.waitForFunction(() => Boolean(window.__e2eNavigate));
     await page.evaluate(() => window.__e2eNavigate("/albums"));
-    await page
-      .getByText("Product upgrade retention album", { exact: true })
-      .waitFor();
+    await retentionAlbumCard(page).waitFor();
     if (
       JSON.parse(await fsp.readFile(stateFile, "utf8")).state.phase !== "idle"
     ) {
@@ -708,7 +712,7 @@ export async function runProductUpgradeChain(
     candidate,
     packages,
     directory,
-    true
+    { expectConfirmation: true, seedAlbum: true }
   );
   sessions.set(kind, {
     executable,
@@ -757,7 +761,7 @@ async function finishProductChain({
     successor,
     { [next.info.filename]: next.file },
     path.join(directory, "second"),
-    true
+    { expectConfirmation: true }
   );
   if (
     (await fsp.readFile(

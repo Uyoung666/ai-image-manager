@@ -7,6 +7,7 @@ import {
   type Browser,
   chromium,
   expect,
+  type Locator,
   type Page,
   test,
 } from "@playwright/test";
@@ -147,6 +148,25 @@ function resizeWindow(child: ChildProcess, width: number, height: number) {
     { windowsHide: true, stdio: "pipe", timeout: 15_000 }
   );
 }
+
+test("upgrade retention finds the album card while the form repeats its name", async ({
+  page,
+}) => {
+  const gatePath = "../../../scripts/release/update-product-gate.mjs";
+  const { retentionAlbumCard }: { retentionAlbumCard: (p: Page) => Locator } =
+    await import(gatePath);
+  const name = "Product upgrade retention album";
+  await page.setContent(`
+    <span aria-hidden="true" class="smooth-input__measure">${name}</span>
+    <a href="/albums/1"><h3>${name}</h3><p>2026-11-17</p></a>
+  `);
+  await expect(page.getByText(name, { exact: true })).toHaveCount(2);
+  const album = retentionAlbumCard(page);
+  await expect(album).toBeVisible();
+  await expect(album).toHaveAttribute("href", "/albums/1");
+  await album.evaluate((link) => link.remove());
+  await expect(album).toHaveCount(0);
+});
 
 for (const [version, previous] of previousExecutables) {
   test(`production startup from ${version}, update errors, sizes and second restart`, async () => {
