@@ -17,6 +17,7 @@ import {
   expectRestart,
   installedTargetPath,
   isolateHistoricalMsiControl,
+  readProductStartupCrash,
   repackTestSuccessorArchive,
   verifyProductDownload,
 } from "../../../scripts/release/update-product-gate.mjs";
@@ -35,6 +36,33 @@ const identity = {
   productUpdateGateRequired: true,
 };
 const hash = "b".repeat(64);
+
+it("reports only new startup crashes and handles rotated or absent logs", async () => {
+  const runtime = new TestRuntime("product-startup-crash");
+  const log = path.join(runtime.root, "crash.log");
+  const warning = vi
+    .spyOn(console, "error")
+    .mockImplementation(() => undefined);
+  try {
+    await fs.writeFile(log, "old incident\n");
+    expect(await readProductStartupCrash(log, "old incident\n")).toBe("");
+    expect(warning).not.toHaveBeenCalled();
+    await fs.appendFile(log, "EPERM opening startup.log\n");
+    expect(await readProductStartupCrash(log, "old incident\n")).toBe(
+      "EPERM opening startup.log\n"
+    );
+    await fs.writeFile(log, "rotated startup failure\n");
+    expect(await readProductStartupCrash(log, "old incident\n")).toBe(
+      "rotated startup failure\n"
+    );
+    expect(
+      await readProductStartupCrash(path.join(runtime.root, "absent.log"), "")
+    ).toBe("");
+  } finally {
+    warning.mockRestore();
+    runtime.cleanup();
+  }
+});
 
 it("isolates the persisted old MSI failure from the following candidate upgrade", async () => {
   const runtime = new TestRuntime("msi-control-isolation");

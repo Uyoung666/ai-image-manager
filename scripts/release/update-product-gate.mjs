@@ -431,6 +431,17 @@ async function saveProductFailure(directory, profile, page, details) {
   }
 }
 
+export async function readProductStartupCrash(file, previousCrash) {
+  const crash = await fsp.readFile(file, "utf8").catch(() => "");
+  const startupCrash = (
+    crash.startsWith(previousCrash) ? crash.slice(previousCrash.length) : crash
+  ).slice(-32_768);
+  if (startupCrash) {
+    console.error(`[product-update] new crash log: ${startupCrash}`);
+  }
+  return startupCrash;
+}
+
 export function retentionAlbumCard(page) {
   return page.getByRole("link").filter({
     has: page.getByRole("heading", { name: RETENTION_ALBUM, exact: true }),
@@ -539,6 +550,8 @@ async function runUpgrade(
   let targetProcess;
   let primaryError;
   let stage = "launch";
+  const crashFile = path.join(profile, "logs", "crash.log");
+  const previousCrash = await fsp.readFile(crashFile, "utf8").catch(() => "");
   const target = installedTargetPath(executable, manifest.version);
   const connect = async (signal) => {
     await waitFor(
@@ -747,6 +760,10 @@ async function runUpgrade(
     return result;
   } catch (error) {
     primaryError = error;
+    const startupCrash = await readProductStartupCrash(
+      crashFile,
+      previousCrash
+    );
     console.error(
       `[product-update] ${stage} failed: ${error.stack ?? String(error)}`
     );
@@ -754,6 +771,7 @@ async function runUpgrade(
       stage,
       message: String(error),
       stack: error.stack,
+      startupCrash,
       targetVersion: manifest.version,
       trace: proxy.trace,
     }).catch((diagnosticError) =>
@@ -976,6 +994,7 @@ export async function isolateHistoricalMsiControl(
   const sourceExecutableSha256 = await sha256File(executable);
   const stateSha256 = await sha256File(stateFile);
   await fsp.cp(profile, isolatedProfile, { recursive: true });
+  await allowProductProfileWrites(isolatedProfile);
   const result = await runControl(isolatedProfile);
   if (
     (await sha256File(stateFile)) !== stateSha256 ||
@@ -984,6 +1003,78 @@ export async function isolateHistoricalMsiControl(
     throw new Error("Historical MSI control changed the candidate source");
   }
   return { ...result, profileIsolated: true, sourceExecutableSha256 };
+}
+
+export async function allowProductProfileWrites(profile) {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const directory = path.resolve(profile);
+  const runtime = path.resolve(".test-runtime");
+  if (
+    !directory.startsWith(`${runtime}${path.sep}`) ||
+    path.basename(directory) !== "control-profile"
+  ) {
+    throw new Error("Profile permission change escaped the isolated control");
+  }
+  for (
+    let ancestor = directory;
+    ancestor !== path.dirname(ancestor);
+    ancestor = path.dirname(ancestor)
+  ) {
+    if ((await fsp.lstat(ancestor)).isSymbolicLink()) {
+      throw new Error("Linked profile permission target");
+    }
+  }
+  // Hosted runners copy as administrators. CREATOR OWNER can then grant the
+  // copied files only to Administrators, which our standard token disables.
+  // Grant the real user Modify on this disposable profile only, recursively;
+  // the installed application's protected parent and its token stay unchanged.
+  const script = `$ErrorActionPreference='Stop'; $root='${directory.replaceAll("'", "''")}'; if(Get-ChildItem -LiteralPath $root -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'Linked profile permission child' }; $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $grant='*'+$sid+':(OI)(CI)M'; & "$env:SystemRoot\\System32\\icacls.exe" $root /grant $grant /Q; if($LASTEXITCODE -ne 0) { throw 'Could not grant isolated profile inheritance' }; $grant='*'+$sid+':M'; & "$env:SystemRoot\\System32\\icacls.exe" $root /grant $grant /T /Q; if($LASTEXITCODE -ne 0) { throw 'Could not grant isolated profile writes' }`;
+  await execute(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      Buffer.from(script, "utf16le").toString("base64"),
+    ],
+    { windowsHide: true, timeout: 30_000 }
+  );
+  const probe = path.join(path.dirname(directory), "profile-write-probe.cjs");
+  const proof = path.join(directory, ".profile-write-proof.json");
+  await fsp.writeFile(
+    probe,
+    `const fs=require('node:fs'),path=require('node:path'); let result={status:'passed'}; try { for(const name of ['logs/startup.log','update-state.json','app-config.json']) { const file=path.join(${JSON.stringify(directory)},name); if(fs.existsSync(file)) fs.closeSync(fs.openSync(file,'r+')); } } catch(error) { result={status:'blocked',code:error.code,message:error.message}; } fs.writeFileSync(${JSON.stringify(proof)},JSON.stringify(result));`,
+    { flag: "wx" }
+  );
+  try {
+    await execute("powershell.exe", standardUserArgs, {
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+        AIM_STANDARD_VERIFY_PID: undefined,
+        AIM_STANDARD_MSI_ROOT: undefined,
+        AIM_STANDARD_EXECUTABLE: process.execPath,
+        AIM_STANDARD_ARGUMENTS: `"${probe}"`,
+      },
+      windowsHide: true,
+      timeout: 15_000,
+    });
+    const result = JSON.parse(await fsp.readFile(proof, "utf8"));
+    if (result.status !== "passed") {
+      throw new Error(
+        `Standard-user profile write probe failed: ${JSON.stringify(result)}`
+      );
+    }
+  } finally {
+    await fsp.unlink(probe);
+    await fsp.unlink(proof).catch((error) => {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    });
+  }
 }
 
 async function finishProductChain({
