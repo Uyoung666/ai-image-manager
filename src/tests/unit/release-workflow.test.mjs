@@ -170,6 +170,24 @@ it.skipIf(process.platform !== "win32")(
 );
 
 describe("stable release workflow gates", () => {
+  it("checks a real sandboxed renderer before packaging a candidate", () => {
+    const check = load(fs.readFileSync(".github/workflows/check.yaml", "utf8"));
+    const launcher = check.jobs.check.steps.find(
+      (step) => step.name === "Check Windows validation launcher"
+    );
+    expect(launcher.if).toBe("inputs.commit != ''");
+    expect(launcher.run).toContain("npm rebuild electron --foreground-scripts");
+    expect(launcher.run).toContain(
+      "node scripts/release/test-standard-user-launch.mjs"
+    );
+    const probe = fs.readFileSync(
+      "scripts/release/test-standard-user-launch.mjs",
+      "utf8"
+    );
+    expect(probe).toContain("sandbox: true");
+    expect(probe).not.toContain("--no-sandbox");
+  });
+
   it("uses the same resolved commit for the three CI gates", () => {
     expect(jobs.unit.needs).toEqual(["preflight", "quick"]);
     expect(jobs.package.needs).toEqual(["preflight", "quick"]);

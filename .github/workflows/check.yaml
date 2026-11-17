@@ -40,9 +40,9 @@ jobs:
       - name: Check Windows validation launcher
         if: inputs.commit != ''
         run: |
-          $env:AIM_STANDARD_EXECUTABLE = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-          $env:AIM_STANDARD_ARGUMENTS = '-NoProfile -NonInteractive -Command Start-Sleep -Seconds 1'
-          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/release/start-standard-user.ps1
+          npm rebuild electron --foreground-scripts
+          if ($LASTEXITCODE -ne 0) { throw "Electron probe installation failed" }
+          node scripts/release/test-standard-user-launch.mjs
       - name: Check Japanese against a formal release
         env:
           GH_TOKEN: ${{ github.token }}

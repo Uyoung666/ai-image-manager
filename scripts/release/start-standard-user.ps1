@@ -52,6 +52,16 @@ public static class StandardReleaseUser {
     private static extern bool LookupPrivilegeValue(string system, string name, out long privilege);
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(
+        string descriptor, uint revision, out IntPtr security, out uint size);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool SetKernelObjectSecurity(IntPtr handle, uint information, IntPtr security);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr memory);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool CreateProcessAsUser(
         IntPtr token, string file, StringBuilder command, IntPtr processAttributes,
         IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment,
@@ -126,6 +136,22 @@ public static class StandardReleaseUser {
         } finally { Marshal.FreeHGlobal(buffer); }
     }
 
+    private static void AllowUserTokenAccess(IntPtr token) {
+        // The elevated runner's token DACL can grant access only to Administrators
+        // and SYSTEM. After disabling Administrators, Chromium must still be able
+        // to open and duplicate its own token to create sandboxed renderers.
+        using (WindowsIdentity identity = new WindowsIdentity(token)) {
+            IntPtr security;
+            uint size;
+            Require(ConvertStringSecurityDescriptorToSecurityDescriptor(
+                "D:(A;;GA;;;" + identity.User.Value + ")(A;;GA;;;SY)",
+                1, out security, out size), "Build user token DACL");
+            try {
+                Require(SetKernelObjectSecurity(token, 4, security), "Set user token DACL");
+            } finally { LocalFree(security); }
+        }
+    }
+
     public static void VerifyProcess(int pid) {
         using (Process process = Process.GetProcessById(pid)) {
             IntPtr token;
@@ -162,6 +188,7 @@ public static class StandardReleaseUser {
             SidAttributes label = new SidAttributes { Sid = medium.AddrOfPinnedObject(), Attributes = 0x20 };
             Require(SetTokenInformation(token, Integrity, ref label,
                 Marshal.SizeOf(typeof(SidAttributes)) + mediumSid.Length), "SetTokenInformation");
+            AllowUserTokenAccess(token);
             VerifyToken(token);
             if (!String.IsNullOrEmpty(msiRoot)) VerifyMsiAccess(token, msiRoot);
             StartupInfo startup = new StartupInfo { Size = Marshal.SizeOf(typeof(StartupInfo)) };
