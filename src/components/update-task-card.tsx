@@ -8,6 +8,7 @@ import { classifyUpdateError } from "@/utils/update-error";
 import {
   canOfferFullUpdate,
   isUpdateBusy,
+  isUpdateCheckUnavailable,
   isUpdateReady,
   updatePrimaryAction,
   updateReasonKey,
@@ -45,9 +46,7 @@ function useUpdateTaskView(appVersion?: string) {
   }
   const preparingInstall = pending === "install" && !isUpdateBusy(status);
   const cooldown =
-    status.phase === "error" && primary?.command !== "check"
-      ? updateRetrySeconds(status, now)
-      : 0;
+    status.phase === "error" ? updateRetrySeconds(status, now) : 0;
   return {
     ...snapshot,
     primary,
@@ -89,7 +88,13 @@ function UpdateVersion({ view }: { view: UpdateTaskView }) {
   );
 }
 
-function UpdateTaskStatus({ view }: { view: UpdateTaskView }) {
+function UpdateTaskStatus({
+  compact,
+  view,
+}: {
+  compact: boolean;
+  view: UpdateTaskView;
+}) {
   const { t, i18n } = useTranslation();
   const { status, busy, preparingInstall, ready, reason, error, cooldown } =
     view;
@@ -118,14 +123,11 @@ function UpdateTaskStatus({ view }: { view: UpdateTaskView }) {
       )}
       {error && (
         <div
-          className="flex min-w-0 items-start gap-2 rounded-md border border-destructive/25 bg-destructive/5 p-2.5"
-          role="alert"
+          className={`flex min-w-0 items-start gap-2 rounded-md border p-2.5 ${isUpdateCheckUnavailable(status) ? "border-border bg-muted text-muted-foreground" : "border-destructive/25 bg-destructive/5 text-destructive"}`}
+          role={isUpdateCheckUnavailable(status) ? "status" : "alert"}
         >
-          <XCircle
-            aria-hidden="true"
-            className="mt-0.5 h-4 w-4 shrink-0 text-destructive"
-          />
-          <p className="min-w-0 text-[12px] text-destructive [overflow-wrap:anywhere]">
+          <XCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+          <p className="min-w-0 text-[12px] [overflow-wrap:anywhere]">
             {t(UPDATE_ERROR_KEYS[error])}
           </p>
         </div>
@@ -139,7 +141,17 @@ function UpdateTaskStatus({ view }: { view: UpdateTaskView }) {
           {t("updateUpToDate")}
         </p>
       )}
-      {status.lastCheckedAt && (
+      {!compact && status.lastCheckAttemptAt && (
+        <p className="text-[11px] text-muted-foreground">
+          {t("updateLastAttempt", {
+            time: new Date(status.lastCheckAttemptAt).toLocaleString(
+              i18n?.language
+            ),
+            interpolation: { escapeValue: false },
+          })}
+        </p>
+      )}
+      {!compact && status.lastCheckedAt && (
         <p className="text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
           {t("updateLastCheck", {
             time: new Date(status.lastCheckedAt).toLocaleString(i18n?.language),
@@ -244,7 +256,7 @@ export function UpdateTaskCard({
   return (
     <div className="min-w-0 space-y-3" data-testid="update-task-card">
       <UpdateVersion view={view} />
-      <UpdateTaskStatus view={view} />
+      <UpdateTaskStatus compact={compact} view={view} />
       <UpdateTaskActions view={view} />
       {!compact && view.status.releaseNotes && (
         <UpdateReleaseNotes

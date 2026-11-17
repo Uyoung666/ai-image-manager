@@ -31,6 +31,29 @@ afterEach(() => {
 });
 
 describe("durable update state", () => {
+  it("validates independent metadata cooldowns while accepting legacy states", async () => {
+    const { isValidUpdateState } = await import("@/services/update-state");
+    expect(isValidUpdateState({ phase: "idle" })).toBe(true);
+    expect(
+      isValidUpdateState({
+        phase: "error",
+        metadataCooldowns: {
+          api: {
+            failures: 1,
+            retryAfter: new Date().toISOString(),
+            error: "UPDATE_RATE_LIMITED",
+          },
+        },
+      })
+    ).toBe(true);
+    expect(
+      isValidUpdateState({
+        phase: "error",
+        metadataCooldowns: { api: { failures: -1, retryAfter: "invalid" } },
+      })
+    ).toBe(false);
+  });
+
   it("preserves malformed JSON before resetting the store and permits a later retry", async () => {
     mocks.construct.mockImplementationOnce(() => {
       throw new SyntaxError("Truncated JSON");

@@ -11,6 +11,7 @@ import DragWindowRegion from "@/components/drag-window-region";
 import { GlobalProgressBar } from "@/components/global-progress-bar";
 import { ImportDropLayer } from "@/components/import-drop-layer";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { LibraryCheckIndicator } from "@/components/library-check-indicator";
 import { OnboardingOverlay } from "@/components/onboarding/OnboardingOverlay";
 import {
   OnboardingProvider,
@@ -202,7 +203,12 @@ function BaseLayoutContent({ children }: { children: ReactNode }) {
               role="application"
             >
               <DragWindowRegion
-                actions={<UpdateHeaderControl />}
+                actions={
+                  <>
+                    <LibraryCheckIndicator />
+                    <UpdateHeaderControl />
+                  </>
+                }
                 immersive={isCullSession}
                 title="AI Image Manager"
               />

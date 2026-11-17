@@ -1338,7 +1338,7 @@
   "settingsUpdateReminderHint": "バックグラウンド更新の準備完了または失敗時に通知します。オフでもタイトルバーで状態を確認できます。",
   "updateStatusIdle": "現在のバージョン {{version}}",
   "updateChecking": "更新を確認中…",
-  "updateCheckUnavailable": "更新を確認できません。",
+  "updateCheckUnavailable": "更新を確認できません",
   "updateLastKnownUpToDate": "前回の正常な確認では最新版でした（{{time}}）。",
   "updateDeltaDownloaded": "差分パッケージでダウンロードしました",
   "updateUpToDate": "最新です",
@@ -1365,7 +1365,7 @@
   "updateNetworkWaiting": "ネットワークが応答していません。接続の回復を待っています…",
   "updateUseFull": "完全パッケージを使用",
   "updateRestartNow": "インストールして再起動",
-  "updateLastCheck": "最終確認：{{time}}",
+  "updateLastCheck": "最終確認成功：{{time}}",
   "updateProgressBar": "ダウンロードの進捗",
   "updateDownloadManually": "手動でダウンロード",
   "updateReleaseNotes": "リリースノート",
@@ -1384,7 +1384,7 @@
   "updateErrorInstallerUnsupported": "このインストール方法は自動更新に対応していません。手動でダウンロードしてください。",
   "updateErrorNotFound": "更新ファイルが見つかりません",
   "updateErrorPackageCorrupt": "更新パッケージの検証に失敗しました。再試行するか手動でダウンロードしてください。",
-  "updateErrorRateLimited": "GitHub の更新確認が一時的に制限されています。しばらく待ってから再試行するか、手動でダウンロードしてください。",
+  "updateErrorRateLimited": "GitHub が更新の確認を一時的に制限しています。",
   "updateErrorAccessDenied": "GitHub が更新リクエストを拒否しました。しばらくしてから再試行するか、ネットワークプロキシを確認してください。",
   "updateErrorServiceUnavailable": "GitHub の更新サービスは一時的に利用できません。しばらくしてから再試行してください。",
   "updateErrorInstallInterrupted": "更新インストールが中断されました。インストールを再試行するか、更新パッケージを再ダウンロードしてください。",
@@ -1398,6 +1398,8 @@
   "updateChangelogTitle": "リリースノート",
   "updateChangelogDescription": "各リリースの新しい体験を振り返ります。",
   "updateChangelogView": "開く",
+  "updateChangelogShowMore": "さらに表示",
+  "updateChangelogCollapse": "折りたたむ",
   "updateChangelogEmpty": "表示できるリリースノートはまだありません。",
   "whatsNewEyebrow": "AI Image Manager · 新機能",
   "whatsNewHighlights": "今回のリリースのハイライト",
@@ -2726,5 +2728,8 @@
     "dropOneFolder": "撮影フォルダーを1つずつドロップして、独立した選別タスクを作成してください。"
   },
   "aiPhotoProcessingFailed": "AI の画像処理に失敗しました",
-  "aiPhotoFailureSummary": "{{total}} 枚中 {{failed}} 枚の処理に失敗しました：画像のデコード {{decodeFailed}} 枚、モデルの初期化 {{modelFailed}} 枚、推論または結果処理 {{inferenceFailed}} 枚。成功した結果は保存されています。失敗した写真は再試行できます。"
+  "aiPhotoFailureSummary": "{{total}} 枚中 {{failed}} 枚の処理に失敗しました：画像のデコード {{decodeFailed}} 枚、モデルの初期化 {{modelFailed}} 枚、推論または結果処理 {{inferenceFailed}} 枚。成功した結果は保存されています。失敗した写真は再試行できます。",
+  "libraryChecking": "ライブラリを確認中",
+  "libraryCheckDetails": "確認中：{{folder}}、残り {{count}} フォルダー",
+  "updateLastAttempt": "最終試行：{{time}}"
 }

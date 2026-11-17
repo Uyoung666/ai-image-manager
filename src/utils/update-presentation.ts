@@ -36,6 +36,9 @@ export function updatePercent(status: UpdateStatus): number | undefined {
 }
 
 export function updateStageKey(status: UpdateStatus): string {
+  if (isUpdateCheckUnavailable(status)) {
+    return "updateCheckUnavailable";
+  }
   if (status.phase === "confirming") {
     return "updateConfirming";
   }
@@ -168,4 +171,18 @@ export function formatUpdateBytes(
     Math.floor(Math.log(Math.max(1, bytes)) / Math.log(1024))
   );
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: index > 1 ? 1 : 0 }).format(bytes / 1024 ** index)} ${units[index]}`;
+}
+
+export function isUpdateCheckUnavailable(status: UpdateStatus): boolean {
+  return (
+    status.phase === "error" &&
+    status.operation === "check" &&
+    !status.resumeInstallation &&
+    !status.transactionId &&
+    [
+      "UPDATE_RATE_LIMITED",
+      "NETWORK_ERROR",
+      "UPDATE_SERVICE_UNAVAILABLE",
+    ].includes(status.message ?? "")
+  );
 }

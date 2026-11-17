@@ -1357,7 +1357,7 @@
   "updateStatusIdle": "Current version {{version}}",
   "updateChecking": "Checking for updates...",
   "updateUpToDate": "Up to date",
-  "updateCheckUnavailable": "Updates are temporarily unavailable to check.",
+  "updateCheckUnavailable": "Unable to check updates",
   "updateLastKnownUpToDate": "The last successful check found this version up to date ({{time}}).",
   "updateFound": "New version {{version}} found",
   "updateDownloading": "Downloading...",
@@ -1385,7 +1385,7 @@
   "updateNetworkWaiting": "The network is not responding. Waiting for the connection…",
   "updateUseFull": "Use full package",
   "updateRestartNow": "Install and restart",
-  "updateLastCheck": "Last checked: {{time}}",
+  "updateLastCheck": "Last successful check: {{time}}",
   "updateProgressBar": "Download progress",
   "updateDownloadManually": "Download Manually",
   "updateReleaseNotes": "Release Notes",
@@ -1405,7 +1405,7 @@
   "updateErrorPackageCorrupt": "The update package failed verification. Retry or download it manually.",
   "updateErrorBusy": "The updater is busy. Please try again shortly.",
   "updateErrorInstallTimeout": "Installing the update timed out. Close other apps and retry, or download it manually.",
-  "updateErrorRateLimited": "GitHub is temporarily rate limited. Retry later or download manually.",
+  "updateErrorRateLimited": "GitHub is temporarily limiting update checks.",
   "updateErrorAccessDenied": "GitHub denied the update request. Retry later or check your network proxy.",
   "updateErrorServiceUnavailable": "GitHub's update service is temporarily unavailable. Retry later.",
   "updateErrorInstallInterrupted": "The update installation was interrupted. Retry the installation or download the package again.",
@@ -1416,6 +1416,8 @@
   "updateChangelogTitle": "Release Notes",
   "updateChangelogDescription": "Revisit the new experiences from each release.",
   "updateChangelogView": "Open",
+  "updateChangelogShowMore": "Show more",
+  "updateChangelogCollapse": "Show less",
   "updateChangelogEmpty": "There are no release notes to show yet.",
   "whatsNewEyebrow": "AI Image Manager · What's New",
   "whatsNewHighlights": "Highlights from this release",
@@ -2726,5 +2728,8 @@
     "dropOneFolder": "Drop one shooting folder at a time to create a separate culling task."
   },
   "aiPhotoProcessingFailed": "AI photo processing failed",
-  "aiPhotoFailureSummary": "{{failed}}/{{total}} photos failed: image decoding {{decodeFailed}}, model initialization {{modelFailed}}, inference or output processing {{inferenceFailed}}. Successful results are retained; failed photos can be retried."
+  "aiPhotoFailureSummary": "{{failed}}/{{total}} photos failed: image decoding {{decodeFailed}}, model initialization {{modelFailed}}, inference or output processing {{inferenceFailed}}. Successful results are retained; failed photos can be retried.",
+  "libraryChecking": "Checking library",
+  "libraryCheckDetails": "Checking: {{folder}}; {{count}} folders remaining",
+  "updateLastAttempt": "Last attempt: {{time}}"
 }

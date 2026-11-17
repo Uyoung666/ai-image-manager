@@ -43,7 +43,7 @@ function QueueRunningState() {
   return <output data-testid="running">{String(status.isRunning)}</output>;
 }
 
-it("keeps deferred background checks quiet while reporting user queues and active checks", async () => {
+it("keeps queued and active background checks quiet while reporting user queues", async () => {
   const view = render(
     <GlobalAiStatusProvider>
       <QueueRunningState />
@@ -77,7 +77,22 @@ it("keeps deferred background checks quiet while reporting user queues and activ
   send(null, [{ ...task, source: "user" }]);
   expect(view.getByTestId("running")).toHaveTextContent("true");
   send({ ...task, status: "scanning" }, []);
-  expect(view.getByTestId("running")).toHaveTextContent("true");
+  expect(view.getByTestId("running")).toHaveTextContent("false");
+  act(() =>
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: {
+          channel: "scan-progress",
+          source: "background",
+          taskId: 1,
+          phase: "indexing",
+          scanned: 5,
+          total: 10,
+        },
+      })
+    )
+  );
+  expect(view.getByTestId("running")).toHaveTextContent("false");
 });
 
 it("summarizes a mixed import once, including existing photos on rescan", async () => {

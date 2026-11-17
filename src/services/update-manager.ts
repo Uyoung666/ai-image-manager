@@ -749,6 +749,8 @@ function broadcast(payload: UpdatePayload) {
     ...(previous.lastCheckResult && !payload.lastCheckResult
       ? { lastCheckResult: previous.lastCheckResult }
       : {}),
+    lastCheckAttemptAt: previous.lastCheckAttemptAt,
+    metadataCooldowns: previous.metadataCooldowns,
     ...payload,
   };
   try {
@@ -979,23 +981,6 @@ function check(userInitiated = false): UpdateResult {
   if (persisted?.phase === "error" && persisted.operation === "startup") {
     return { ok: true, skipped: true };
   }
-  // A user may have changed networks since the previous rate-limit response.
-  // Keep automatic checks on cooldown while allowing an explicit new check.
-  if (
-    !userInitiated &&
-    persisted?.retryAfter &&
-    Date.parse(persisted.retryAfter) > Date.now()
-  ) {
-    const retryError = persisted.message;
-    return {
-      ok: false,
-      error:
-        retryError === "UPDATE_RATE_LIMITED" ||
-        retryError === "UPDATE_SERVICE_UNAVAILABLE"
-          ? retryError
-          : "NETWORK_ERROR",
-    };
-  }
   if (
     downloadTask ||
     installTask ||
@@ -1185,15 +1170,8 @@ async function checkGitHubUpdate(
     }
     const message = recordUpdateError(error, "github-update");
     const retryAfter =
-      error instanceof UpdateRequestError
-        ? (error.retryAfter ??
-          (message === "UPDATE_RATE_LIMITED" ||
-          message === "UPDATE_SERVICE_UNAVAILABLE"
-            ? new Date(
-                Date.now() + UPDATE_CHECK_RETRY_COOLDOWN_MS
-              ).toISOString()
-            : undefined))
-        : undefined;
+      getUpdateState().retryAfter ??
+      (error instanceof UpdateRequestError ? error.retryAfter : undefined);
     broadcast({
       transactionId: recoveryState.transactionId,
       cacheRepairs: recoveryState.cacheRepairs,
@@ -1429,7 +1407,107 @@ function restoreDownloadTask(
   };
 }
 
-async function fetchLatestGitHubRelease(): Promise<{
+class SelectedReleaseError extends Error {}
+
+function metadataFallbackAllowed(error: unknown): boolean {
+  if (error instanceof SelectedReleaseError) {
+    return false;
+  }
+  return [
+    "UPDATE_RATE_LIMITED",
+    "NETWORK_ERROR",
+    "UPDATE_SERVICE_UNAVAILABLE",
+  ].includes(classifyUpdateError(error));
+}
+
+async function fetchLatestGitHubRelease() {
+  const cooldowns = { ...getUpdateState().metadataCooldowns };
+  const available = (source: "api" | "asset") =>
+    !(Date.parse(cooldowns[source]?.retryAfter ?? "") > Date.now());
+  const save = () =>
+    broadcast({ ...getUpdateState(), metadataCooldowns: { ...cooldowns } });
+  const failed = (source: "api" | "asset", error: unknown) => {
+    const failures = (cooldowns[source]?.failures ?? 0) + 1;
+    const retryAfter =
+      error instanceof UpdateRequestError ? error.retryAfter : undefined;
+    cooldowns[source] = {
+      failures,
+      error: classifyUpdateError(error),
+      retryAfter:
+        retryAfter && Date.parse(retryAfter) > Date.now()
+          ? retryAfter
+          : new Date(
+              Date.now() +
+                Math.min(900_000, 60_000 * 2 ** Math.min(failures - 1, 4))
+            ).toISOString(),
+    };
+    save();
+  };
+  if (available("api") || available("asset")) {
+    broadcast({ ...getUpdateState(), lastCheckAttemptAt: nowISO() });
+  }
+  let primaryError: unknown = new Error(
+    cooldowns.api?.error ?? cooldowns.asset?.error ?? "UPDATE_RATE_LIMITED"
+  );
+  if (available("api")) {
+    try {
+      const result = await fetchLatestGitHubReleaseFromAPI();
+      // biome-ignore lint/performance/noDelete: absent keys are persisted as an empty cooldown map.
+      delete cooldowns.api;
+      save();
+      return result;
+    } catch (error) {
+      if (!metadataFallbackAllowed(error)) {
+        throw error;
+      }
+      primaryError = error;
+      failed("api", error);
+      recordUpdateError(error, "github-api-fallback");
+    }
+  }
+  if (available("asset")) {
+    try {
+      const response = await requestJSON(
+        `https://github.com/${GITHUB_UPDATE_REPOSITORY}/releases/latest/download/update-manifest.json`
+      );
+      const manifest = parseUpdateManifest(
+        response.value,
+        GITHUB_UPDATE_REPOSITORY
+      );
+      // biome-ignore lint/performance/noDelete: absent keys are persisted as an empty cooldown map.
+      delete cooldowns.asset;
+      save();
+      const cached = getReleaseListCache()?.releases.find(
+        (entry) => entry.tag_name === manifest.tag
+      );
+      return {
+        manifest,
+        release: { tag_name: manifest.tag, body: cached?.body ?? undefined },
+      };
+    } catch (error) {
+      failed("asset", error);
+      recordUpdateError(error, "github-asset-fallback");
+      if (!metadataFallbackAllowed(error)) {
+        throw error;
+      }
+      if (classifyUpdateError(primaryError) !== "UPDATE_RATE_LIMITED") {
+        primaryError = error;
+      }
+    }
+  }
+  const deadlines = Object.values(cooldowns)
+    .map((value) => Date.parse(value.retryAfter))
+    .filter((value) => value > Date.now());
+  broadcast({
+    ...getUpdateState(),
+    retryAfter: deadlines.length
+      ? new Date(Math.min(...deadlines)).toISOString()
+      : undefined,
+  });
+  throw primaryError;
+}
+
+async function fetchLatestGitHubReleaseFromAPI(): Promise<{
   etag?: string;
   manifest: GitHubUpdateManifest;
   release: { body?: string; tag_name: string };
@@ -1461,25 +1539,32 @@ async function fetchLatestGitHubRelease(): Promise<{
   if (!release?.tag_name) {
     return null;
   }
-  const manifestResponse = await requestJSON(
-    releaseAssetURL(
-      GITHUB_UPDATE_REPOSITORY,
-      release.tag_name,
-      "update-manifest.json"
-    )
-  );
-  const manifest = parseUpdateManifest(
-    manifestResponse.value,
-    GITHUB_UPDATE_REPOSITORY
-  );
-  if (manifest.tag !== release.tag_name) {
-    throw new Error("GitHub release and update manifest do not match");
+  try {
+    const manifestResponse = await requestJSON(
+      releaseAssetURL(
+        GITHUB_UPDATE_REPOSITORY,
+        release.tag_name,
+        "update-manifest.json"
+      )
+    );
+    const manifest = parseUpdateManifest(
+      manifestResponse.value,
+      GITHUB_UPDATE_REPOSITORY
+    );
+    if (manifest.tag !== release.tag_name) {
+      throw new Error("GitHub release and update manifest do not match");
+    }
+    return {
+      etag: response.etag,
+      manifest,
+      release: { body: release.body ?? undefined, tag_name: release.tag_name },
+    };
+  } catch (error) {
+    throw new SelectedReleaseError(
+      error instanceof Error ? error.message : String(error),
+      { cause: error }
+    );
   }
-  return {
-    etag: response.etag,
-    manifest,
-    release: { body: release.body ?? undefined, tag_name: release.tag_name },
-  };
 }
 
 interface JSONRequestOptions {
@@ -1572,12 +1657,12 @@ function retryAfterISO(headers: Record<string, string>): string | undefined {
       return new Date(date).toISOString();
     }
   }
+  if (headers["x-ratelimit-remaining"] !== "0") {
+    return undefined;
+  }
   const reset = Number(headers["x-ratelimit-reset"]);
   if (Number.isFinite(reset) && reset > 0) {
     return new Date(reset * 1000).toISOString();
-  }
-  if (headers["x-ratelimit-remaining"] === "0") {
-    return new Date(Date.now() + UPDATE_CHECK_RETRY_COOLDOWN_MS).toISOString();
   }
   return undefined;
 }

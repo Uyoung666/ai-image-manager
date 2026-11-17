@@ -1,6 +1,9 @@
 import { useNavigate } from "@tanstack/react-router";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { changelogEntries, getLocalizedText } from "@/content/changelogs";
+
+const CHANGELOG_PAGE_SIZE = 5;
 
 function formatReleaseDate(date: string, language: string): string {
   const parsed = new Date(`${date}T00:00:00`);
@@ -20,6 +23,10 @@ function formatReleaseDate(date: string, language: string): string {
 export function UpdateChangelogHistory() {
   const { i18n, t } = useTranslation();
   const navigate = useNavigate();
+  const listId = useId();
+  const [visibleCount, setVisibleCount] = useState(CHANGELOG_PAGE_SIZE);
+  const visibleEntries = changelogEntries.slice(0, visibleCount);
+  const expanded = visibleCount > CHANGELOG_PAGE_SIZE;
 
   return (
     <section className="update-changelog-history min-w-0 space-y-3">
@@ -34,13 +41,14 @@ export function UpdateChangelogHistory() {
       <div
         className="update-changelog-list overflow-hidden rounded-[8px] border border-border bg-secondary p-2 min-[480px]:p-3"
         data-surface="section-card"
+        id={listId}
       >
         {changelogEntries.length === 0 ? (
           <p className="p-4 text-[12px] text-muted-foreground">
             {t("updateChangelogEmpty")}
           </p>
         ) : (
-          changelogEntries.map((entry) => (
+          visibleEntries.map((entry) => (
             <article
               className="update-changelog-item flex min-w-0 items-center gap-3 px-2 py-2.5 min-[480px]:px-3"
               key={entry.version}
@@ -91,6 +99,34 @@ export function UpdateChangelogHistory() {
           ))
         )}
       </div>
+      {(changelogEntries.length > visibleCount || expanded) && (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {changelogEntries.length > visibleCount && (
+            <button
+              aria-controls={listId}
+              aria-expanded={expanded}
+              className="min-h-8 max-w-full rounded-md px-3 py-1.5 text-[12px] text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-ring"
+              onClick={() =>
+                setVisibleCount((count) => count + CHANGELOG_PAGE_SIZE)
+              }
+              type="button"
+            >
+              {t("updateChangelogShowMore")}
+            </button>
+          )}
+          {expanded && (
+            <button
+              aria-controls={listId}
+              aria-expanded={expanded}
+              className="min-h-8 max-w-full rounded-md px-3 py-1.5 text-[12px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+              onClick={() => setVisibleCount(CHANGELOG_PAGE_SIZE)}
+              type="button"
+            >
+              {t("updateChangelogCollapse")}
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

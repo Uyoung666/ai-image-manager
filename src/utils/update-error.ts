@@ -11,7 +11,7 @@ const HTTP_ERROR_RE =
 // access-denied response; only an explicit limit signal is classified as a
 // transient rate-limit error.
 const RATE_LIMITED_RE =
-  /rate[-_ ]?limit|too many requests|x[-_]?ratelimit|retry[-_]?after|secondary rate/i;
+  /rate[-_ ]?limit(?: exceeded|ed| reached)|too many requests|x[-_]?ratelimit[-_]?remaining\s*[:=]\s*0|secondary rate/i;
 const INSTALL_INTERRUPTED_RE =
   /install(?:ation)? interrupted|installer.*(?:crash|exit)|Squirrel update exited|UPDATE_INSTALL_INTERRUPTED/i;
 const INSTALL_PERMISSION_RE =

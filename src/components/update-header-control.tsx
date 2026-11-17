@@ -15,6 +15,7 @@ import {
 import { UpdateTaskCard } from "@/components/update-task-card";
 import { useUpdateUi, useUpdateUiActions } from "@/hooks/use-update-ui";
 import {
+  isUpdateCheckUnavailable,
   isUpdateReady,
   updatePercent,
   updateShortStageKey,
@@ -23,10 +24,11 @@ import {
 
 function updateIcon(view: {
   error: boolean;
+  unavailable: boolean;
   ready: boolean;
   installing: boolean;
 }) {
-  if (view.error) {
+  if (view.error || view.unavailable) {
     return CircleAlert;
   }
   if (view.ready) {
@@ -46,8 +48,10 @@ export function UpdateHeaderControl() {
       !["idle", "up-to-date"].includes(state.status.phase) ||
       Boolean(state.commandError || state.statusError),
     ready: isUpdateReady(state.status) && state.pending !== "install",
+    unavailable: isUpdateCheckUnavailable(state.status),
     error:
-      state.status.phase === "error" ||
+      (state.status.phase === "error" &&
+        !isUpdateCheckUnavailable(state.status)) ||
       Boolean(state.commandError || state.statusError),
     stage:
       state.pending === "install" && state.status.phase === "downloaded"

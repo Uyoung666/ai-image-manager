@@ -318,7 +318,7 @@ function cleanupCancelledImport(
 
 // ── Phase runners ───────────────────────────────────────────────────
 
-function createScanProgressReporter() {
+function createScanProgressReporter(task: ImportTask) {
   const intervalMs = 100;
   let pending: IndexProgress | undefined;
   let lastPhase: IndexProgress["phase"] | undefined;
@@ -335,7 +335,11 @@ function createScanProgressReporter() {
     lastPhase = progress.phase;
     lastSentAt = performance.now();
     for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send("scan-progress", progress);
+      win.webContents.send("scan-progress", {
+        ...progress,
+        taskId: task.id,
+        source: task.source,
+      });
     }
   };
   return {
@@ -358,7 +362,7 @@ function createScanProgressReporter() {
 }
 
 async function runScanPhase(task: ImportTask): Promise<boolean> {
-  const reporter = createScanProgressReporter();
+  const reporter = createScanProgressReporter(task);
   let result: Awaited<ReturnType<typeof scanFolderService>>;
   try {
     result = await scanFolderService(task.folderPath, reporter.report, {
@@ -533,7 +537,8 @@ export function enqueueImport(
   if (
     current &&
     importPathKey(current.folderPath) === resolvedKey &&
-    current.status === "scanning"
+    current.status === "scanning" &&
+    !(source === "user" && current.source === "background")
   ) {
     return current;
   }

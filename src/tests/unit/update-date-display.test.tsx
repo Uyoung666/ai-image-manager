@@ -21,16 +21,16 @@ const japanese = JSON.parse(
   )
 );
 const CASES = [
-  { locale: "zh", label: "上次检查：" },
-  { locale: "en", label: "Last checked: " },
-  { locale: "ja-JP", label: "最終確認：" },
+  { locale: "zh", label: "最近成功检查：" },
+  { locale: "en", label: "Last successful check: " },
+  { locale: "ja-JP", label: "最終確認成功：" },
 ].flatMap((entry) => [false, true].map((compact) => ({ ...entry, compact })));
 
 beforeEach(() => localStorage.clear());
 
 it.each(
   CASES
-)("renders date separators as text in $locale with compact=$compact", async ({
+)("shows check times in settings and hides them in the popup in $locale with compact=$compact", async ({
   locale,
   label,
   compact,
@@ -51,6 +51,7 @@ it.each(
     phase: "error",
     message: "NETWORK_ERROR",
     lastCheckedAt: CHECKED_AT,
+    lastCheckAttemptAt: "2026-11-17T11:00:00.000Z",
   });
   fixture.render(
     <I18nextProvider i18n={translations}>
@@ -59,7 +60,18 @@ it.each(
   );
   const time = new Date(CHECKED_AT).toLocaleString(locale);
   expect(time).toContain("/");
+  const lastAttempt = translations.t("updateLastAttempt", {
+    time: new Date("2026-11-17T11:00:00.000Z").toLocaleString(locale),
+    interpolation: { escapeValue: false },
+  });
+  const card = await screen.findByTestId("update-task-card");
+  if (compact) {
+    expect(card).not.toHaveTextContent(`${label}${time}`);
+    expect(card).not.toHaveTextContent(lastAttempt);
+    return;
+  }
   expect(await screen.findByText(`${label}${time}`)).toBeVisible();
+  expect(screen.getByText(lastAttempt)).toBeVisible();
   expect(screen.getByTestId("update-task-card")).not.toHaveTextContent(
     "&#x2F;"
   );

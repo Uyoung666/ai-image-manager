@@ -89,7 +89,7 @@ function progress(
 function scanProgress(): IndexProgress[] {
   return state.send.mock.calls
     .filter(([channel]) => channel === "scan-progress")
-    .map(([, payload]) => payload);
+    .map(([, { taskId: _taskId, source: _source, ...payload }]) => payload);
 }
 
 function trackQueueTimers(fakePerformance = false) {
@@ -172,6 +172,10 @@ describe("durable import recovery", () => {
     await tick();
     report(progress("indexing", 1));
     expect(scanProgress()).toEqual([progress("indexing", 1)]);
+    expect(state.send).toHaveBeenCalledWith(
+      "scan-progress",
+      expect.objectContaining({ taskId: 1, source: "user" })
+    );
     for (let scanned = 2; scanned <= 500; scanned++) {
       report(progress("indexing", scanned));
     }
@@ -491,6 +495,22 @@ describe("durable import recovery", () => {
     await queue.stopImports();
     expect(timers.clear).toHaveBeenCalledWith(nextBackgroundWait);
     expect(timers.clear).not.toHaveBeenCalledWith(timers.unrelated);
+  });
+
+  it("queues one explicit import when the same root is actively checked in background", async () => {
+    const scan = Promise.withResolvers<ReturnType<typeof result>>();
+    state.scan.mockReturnValueOnce(scan.promise);
+    const queue = await import("@/services/import-queue");
+    queue.enqueueImport("photos", "background");
+    await tick();
+    const user = queue.enqueueImport("photos");
+    expect(user.source).toBe("user");
+    expect(queue.enqueueImport("photos").id).toBe(user.id);
+    expect(queue.getImportQueueStatus().pending).toHaveLength(1);
+    scan.resolve(result());
+    await tick();
+    await tick();
+    expect(state.scan).toHaveBeenCalledTimes(2);
   });
 
   it("wakes a queued background root immediately when the user explicitly imports it", async () => {

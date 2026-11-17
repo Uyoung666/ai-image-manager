@@ -21,6 +21,10 @@ describe("update error classification", () => {
     ],
     ["HTTP/1.1 403 Forbidden", "UPDATE_ACCESS_DENIED"],
     ["HTTP_STATUS_403", "UPDATE_ACCESS_DENIED"],
+    [
+      "HTTP_STATUS_403 x-ratelimit-remaining=59 x-ratelimit-reset=123456",
+      "UPDATE_ACCESS_DENIED",
+    ],
     ["HTTP_STATUS_403 x-ratelimit-remaining=0", "UPDATE_RATE_LIMITED"],
     ["status code: 404", "UPDATE_NOT_FOUND"],
     ["HTTP_STATUS_408", "NETWORK_ERROR"],

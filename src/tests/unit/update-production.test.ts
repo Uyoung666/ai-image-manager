@@ -269,28 +269,74 @@ async function reloadManager() {
 }
 
 describe("manual checks during a server cooldown", () => {
-  it("keeps scheduled checks on cooldown but allows a single explicit retry", async () => {
+  it("does not issue requests while both metadata paths are cooling down", async () => {
+    const retryAfter = new Date(Date.now() + 2_000_000).toISOString();
     mocks.state = {
       phase: "error",
       operation: "check",
       message: "UPDATE_RATE_LIMITED",
-      retryAfter: new Date(Date.now() + 2_000_000).toISOString(),
+      metadataCooldowns: {
+        api: { retryAfter, failures: 1 },
+        asset: { retryAfter, failures: 1 },
+      },
     };
-    vi.useFakeTimers();
-    manager.startUpdateManager();
-    await vi.advanceTimersByTimeAsync(manager.UPDATE_INITIAL_DELAY_MS);
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
     expect(mocks.request).not.toHaveBeenCalled();
-    vi.useRealTimers();
+    expect(mocks.state.retryAfter).toBe(retryAfter);
+  });
 
-    expect(manager.checkForUpdatesManually()).toEqual({ ok: true });
-    expect(mocks.state).toMatchObject({ phase: "checking" });
-    expect(mocks.state.retryAfter).toBeUndefined();
-    expect(manager.checkForUpdatesManually()).toEqual({
-      ok: true,
-      skipped: true,
-    });
-    await vi.waitFor(() => expect(mocks.state.phase).toBe("downloaded"));
+  it("uses the official asset after API rate limiting and reports the current version correctly", async () => {
+    mocks.version = "2.2.4";
+    mocks.request.mockImplementationOnce(() =>
+      metadataResponse(
+        403,
+        { message: "API rate limit exceeded" },
+        { "x-ratelimit-remaining": "0" }
+      )
+    );
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("up-to-date"));
     expect(mocks.request).toHaveBeenCalledTimes(2);
+    expect(mocks.request.mock.calls[1][0].url).toContain(
+      "releases/latest/download/update-manifest.json"
+    );
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.state.lastCheckAttemptAt).toBeTruthy();
+  });
+
+  it("downloads through the official asset when the API fails", async () => {
+    mocks.request.mockImplementationOnce(() => metadataResponse(429, {}));
+    await download();
+    expect(mocks.state.version).toBe("2.2.4");
+    expect(mocks.state.metadataCooldowns?.api).toBeTruthy();
+  });
+
+  it("never falls back from an already selected release with a failing manifest", async () => {
+    mocks.request.mockImplementationOnce(() =>
+      metadataResponse(200, [{ tag_name: "v2.2.4" }])
+    );
+    mocks.request.mockImplementationOnce(() => metadataResponse(503, {}));
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves API cooldown across restart while allowing the asset route", async () => {
+    mocks.version = "2.2.4";
+    mocks.request.mockImplementationOnce(() => metadataResponse(429, {}));
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("up-to-date"));
+    const deadline = mocks.state.metadataCooldowns?.api?.retryAfter;
+    await reloadManager();
+    mocks.request.mockClear();
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("up-to-date"));
+    expect(mocks.request).toHaveBeenCalledOnce();
+    expect(mocks.request.mock.calls[0][0].url).toContain(
+      "releases/latest/download"
+    );
+    expect(mocks.state.metadataCooldowns?.api?.retryAfter).toBe(deadline);
   });
 
   it("records the new cooldown if the new request is still rate limited", async () => {
@@ -311,13 +357,16 @@ describe("manual checks during a server cooldown", () => {
         }
       )
     );
+    mocks.request.mockImplementationOnce(() =>
+      metadataResponse(503, { message: "Unavailable" })
+    );
     expect(manager.checkForUpdatesManually()).toEqual({ ok: true });
     await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
     expect(mocks.state).toMatchObject({
       message: "UPDATE_RATE_LIMITED",
-      retryAfter: new Date(reset * 1000).toISOString(),
+      retryAfter: expect.any(String),
     });
-    expect(mocks.request).toHaveBeenCalledOnce();
+    expect(mocks.request).toHaveBeenCalledTimes(2);
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
 });
@@ -436,6 +485,7 @@ describe("release list cache and downloaded cache recovery", () => {
       fullFallbackAttempted: true,
       resumeInstallation: true,
     });
+    mocks.request.mockImplementationOnce(() => metadataResponse(503, {}));
     request.emit("error", new Error("ECONNRESET"));
     await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
     mocks.state = interrupted;

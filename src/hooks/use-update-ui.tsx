@@ -25,7 +25,11 @@ import type {
   UpdateStatus,
 } from "@/types/update";
 import { classifyUpdateError } from "@/utils/update-error";
-import { isUpdateReady, type UpdateCommand } from "@/utils/update-presentation";
+import {
+  isUpdateCheckUnavailable,
+  isUpdateReady,
+  type UpdateCommand,
+} from "@/utils/update-presentation";
 
 const READY_NOTICE_KEY = "update.ready-notified-versions";
 export interface UpdateNotice {
@@ -183,7 +187,11 @@ export function createUpdateUiStore(
       (previous.phase !== "error" ||
         previous.message !== status.message ||
         previous.transactionId !== status.transactionId);
-    if (newError && (event || foreground)) {
+    if (
+      newError &&
+      !isUpdateCheckUnavailable(status) &&
+      (event || foreground)
+    ) {
       pendingError = { error: classifyUpdateError(status.message), foreground };
     } else if (status.phase !== "error") {
       pendingError = null;

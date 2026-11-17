@@ -1,6 +1,7 @@
 import { ipc } from "@/ipc/manager";
 
 export const libraryReliabilityActions = {
+  getImportQueueStatus: () => ipc.client.photos.getImportQueueStatus({}),
   retrySourceUpdates: (folderId: number) =>
     ipc.client.photos.retryLibrarySourceUpdates({ folderId }),
   getUpdateState: () => ipc.client.photos.getAiStatus({ loadModel: false }),

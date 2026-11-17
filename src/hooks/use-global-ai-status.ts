@@ -50,6 +50,8 @@ interface ScanPayload {
   channel: "scan-progress";
   phase: "scanning" | "indexing" | "complete";
   scanned: number;
+  source?: "user" | "background";
+  taskId?: number;
   total: number;
 }
 
@@ -262,7 +264,8 @@ function getQueueSnapshot(
   queue: QueueStatusPayload | null,
   queueRunning: boolean
 ) {
-  const current = queue?.current ?? null;
+  const current =
+    queue?.current?.source === "background" ? null : (queue?.current ?? null);
   // Deferred source checks remain visible in the queue without claiming that
   // foreground import work is running while the user is browsing.
   const pending =
@@ -439,7 +442,9 @@ function useGlobalAiStatusState(): GlobalAiProgress {
   const handleQueueStatus = useCallback(
     (payload: QueueStatusPayload) => {
       setQueue(payload);
-      const hasActive = payload.current !== null || payload.pending.length > 0;
+      const hasActive =
+        (payload.current !== null && payload.current.source !== "background") ||
+        payload.pending.some((task) => task.source !== "background");
       setQueueRunning(hasActive);
 
       const hasNewDoneTask = processQueueHistory(
@@ -488,6 +493,9 @@ function useGlobalAiStatusState(): GlobalAiProgress {
     [t]
   );
   const handleScanMsg = useCallback((payload: ScanPayload) => {
+    if (payload.source === "background") {
+      return;
+    }
     setScan(payload);
     if (payload.phase === "complete") {
       setTimeout(() => {
@@ -645,7 +653,20 @@ function useGlobalAiStatusState(): GlobalAiProgress {
 
   // ── Derive unified status ──────────────────────────────────────
 
-  const snap = buildSnapshot(scan, ai, face, faceRunning, queue, queueRunning);
+  const visibleScan =
+    scan &&
+    queue?.current?.source !== "background" &&
+    (scan.taskId === undefined || scan.taskId === queue?.current?.id)
+      ? scan
+      : null;
+  const snap = buildSnapshot(
+    visibleScan,
+    ai,
+    face,
+    faceRunning,
+    queue,
+    queueRunning
+  );
   return deriveStatus(snap);
 }
 

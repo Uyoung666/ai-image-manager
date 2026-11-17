@@ -63,6 +63,22 @@ describe("shared update renderer store", () => {
     expect(next.store.getSnapshot().notice).toMatchObject({ version: "2.2.5" });
   });
 
+  it("keeps unavailable metadata checks quiet even when reminders are enabled", async () => {
+    const fixture = await started();
+    fixture.emit({
+      phase: "error",
+      operation: "check",
+      message: "UPDATE_RATE_LIMITED",
+    });
+    expect(fixture.store.getSnapshot().notice).toBeNull();
+    fixture.emit({
+      phase: "error",
+      operation: "install",
+      message: "UPDATE_INSTALL_ACCESS_DENIED",
+    });
+    expect(fixture.store.getSnapshot().notice).toMatchObject({ kind: "error" });
+  });
+
   it("ignores an older snapshot when a newer refresh completes first", async () => {
     const fixture = updateUiFixture();
     let finish: (value: { phase: "idle" }) => void = () => undefined;

@@ -93,7 +93,7 @@ describe("update task actions and presentation", () => {
     expect(fixture.dependencies.check).not.toHaveBeenCalled();
   });
 
-  it("allows a manual check during a previous network's rate-limit cooldown", async () => {
+  it("disables repeated checks during the metadata cooldown", async () => {
     const fixture = await section({
       phase: "error",
       operation: "check",
@@ -101,12 +101,10 @@ describe("update task actions and presentation", () => {
       retryAfter: new Date(Date.now() + 2_000_000).toISOString(),
     });
     const retry = screen.getByRole("button", { name: "updateRetry" });
-    expect(retry).toBeEnabled();
-    expect(screen.queryByText(RETRY_COUNTDOWN)).not.toBeInTheDocument();
+    expect(retry).toBeDisabled();
+    expect(screen.queryByText(RETRY_COUNTDOWN)).toBeInTheDocument();
     fireEvent.click(retry);
-    await waitFor(() =>
-      expect(fixture.dependencies.check).toHaveBeenCalledOnce()
-    );
+    expect(fixture.dependencies.check).not.toHaveBeenCalled();
   });
 
   it("disables download retries during the server cooldown and unlocks them when it expires", async () => {

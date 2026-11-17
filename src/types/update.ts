@@ -46,10 +46,17 @@ export interface UpdateStatus {
   installerPath?: string;
   installerPid?: number;
   installStartedAt?: string;
+  lastCheckAttemptAt?: string;
   lastCheckedAt?: string;
   lastCheckResult?: "up-to-date" | "update-available";
   maxAttempts?: number;
   message?: UpdateErrorCode;
+  metadataCooldowns?: Partial<
+    Record<
+      "api" | "asset",
+      { retryAfter: string; failures: number; error?: UpdateErrorCode }
+    >
+  >;
   networkWaiting?: boolean;
   operation?: "check" | "download" | "install" | "startup";
   percent?: number;

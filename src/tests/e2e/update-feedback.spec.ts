@@ -9,6 +9,9 @@ import {
   test,
 } from "./helpers/test-runtime";
 
+const SHOW_MORE_HISTORY = /^(显示更多|Show more|さらに表示)$/;
+const COLLAPSE_HISTORY = /^(收起|Show less|折りたたむ)$/;
+const DESTRUCTIVE_CLASS = /text-destructive/;
 const RESTART_VERIFY = /^(重启并验证|Restart and verify|再起動して確認)$/;
 const RECHECK_INSTALLER =
   /^(重新核验安装进程|Check installer again|インストールプロセスを再確認)$/;
@@ -103,7 +106,7 @@ for (const locale of LOCALES) {
         "--no-sandbox",
         "--disable-gpu-sandbox",
         "--e2e",
-        path.resolve("."),
+        process.env.AIM_UPDATE_E2E_ENTRY ?? path.resolve("."),
       ],
       env: { ...env, CI: "e2e", AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: profile },
     });
@@ -234,6 +237,73 @@ for (const locale of LOCALES) {
           document.documentElement.classList.add(value);
         }, theme);
         await page.evaluate(() => window.__e2eNavigate?.("/"));
+        await page.evaluate(() => {
+          window.postMessage(
+            {
+              channel: "import-queue-status",
+              current: {
+                id: 9001,
+                source: "background",
+                status: "scanning",
+                folderPath: "C:/photos/long-folder-name-for-background-check",
+              },
+              pending: [],
+              history: [],
+            },
+            "*"
+          );
+          window.postMessage(
+            {
+              channel: "scan-progress",
+              source: "background",
+              taskId: 9001,
+              phase: "indexing",
+              scanned: 50,
+              total: 100,
+            },
+            "*"
+          );
+        });
+        await expect(page.getByTestId("library-check-indicator")).toBeVisible();
+        await expect(page.getByRole("progressbar")).toHaveCount(0);
+        await emit(page, {
+          phase: "error",
+          operation: "check",
+          message: "UPDATE_RATE_LIMITED",
+          lastCheckAttemptAt: new Date().toISOString(),
+          lastCheckedAt: CHECKED_AT,
+          retryAfter: new Date(Date.now() + 60_000).toISOString(),
+        });
+        const weakTrigger = page.getByTestId("update-header-control");
+        await expect(weakTrigger).toBeVisible();
+        await expect(weakTrigger).not.toHaveClass(DESTRUCTIVE_CLASS);
+        await expect(page.locator(ACTIVE_TOAST)).toHaveCount(0);
+        await weakTrigger.click();
+        await expect(page.getByTestId("update-details")).toBeVisible();
+        await expect(page.getByTestId("update-details")).toHaveCSS(
+          "opacity",
+          "1"
+        );
+        await assertBounds(page);
+        await screenshot(
+          app,
+          `${locale}-${size.width}-${theme}-background-check.png`
+        );
+        await page.keyboard.press("Escape");
+        await page.evaluate(() =>
+          window.postMessage(
+            {
+              channel: "import-queue-status",
+              current: null,
+              pending: [],
+              history: [],
+            },
+            "*"
+          )
+        );
+        await expect(page.getByTestId("library-check-indicator")).toHaveCount(
+          0
+        );
         await emit(page, {
           phase: "downloading",
           version: "2.2.4",
@@ -253,7 +323,7 @@ for (const locale of LOCALES) {
         const details = page.getByTestId("update-details");
         await expect(details).toBeVisible();
         await expect(details).toHaveCSS("opacity", "1");
-        await expect(details).toContainText(checkedTime);
+        await expect(details).not.toContainText(checkedTime);
         await expect(details).not.toContainText("&#x2F;");
         await expect(details.getByRole("progressbar")).toHaveAttribute(
           "aria-valuenow",
@@ -324,7 +394,7 @@ for (const locale of LOCALES) {
         });
         await expect(
           details.getByRole("button", { name: RETRY })
-        ).toBeEnabled();
+        ).toBeDisabled();
         await assertBounds(page);
         await page.keyboard.press("Escape");
         await expect(details).toBeHidden();
@@ -340,6 +410,12 @@ for (const locale of LOCALES) {
           canResume: true,
           lastCheckedAt: CHECKED_AT,
         });
+        const history = page.locator(".update-changelog-history");
+        await expect(history.getByRole("article")).toHaveCount(5);
+        await history.getByRole("button", { name: SHOW_MORE_HISTORY }).click();
+        await expect(history.getByRole("article")).toHaveCount(10);
+        await history.getByRole("button", { name: COLLAPSE_HISTORY }).click();
+        await expect(history.getByRole("article")).toHaveCount(5);
         await expect(task).toContainText(checkedTime);
         await expect(task).not.toContainText("&#x2F;");
         await expect(
@@ -351,7 +427,7 @@ for (const locale of LOCALES) {
           phase: "error",
           operation: "check",
           message: "UPDATE_RATE_LIMITED",
-          retryAfter: new Date(Date.now() + 2_000_000).toISOString(),
+          retryAfter: new Date(Date.now() - 1000).toISOString(),
         });
         const retry = task.getByRole("button", { name: RETRY });
         await expect(retry).toBeEnabled();

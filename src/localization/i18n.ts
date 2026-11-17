@@ -1684,7 +1684,7 @@ i18n.use(initReactI18next).init({
         updateStatusIdle: "当前版本 {{version}}",
         updateChecking: "正在检查更新...",
         updateUpToDate: "已是最新版本",
-        updateCheckUnavailable: "暂时无法检查更新。",
+        updateCheckUnavailable: "暂无法检查更新",
         updateLastKnownUpToDate: "上次成功检查时已是最新版（{{time}}）。",
         updateFound: "发现新版本 {{version}}",
         updateDownloading: "正在下载...",
@@ -1740,7 +1740,7 @@ i18n.use(initReactI18next).init({
         updateNetworkWaiting: "网络暂时没有响应，正在等待连接恢复…",
         updateUseFull: "改用完整包",
         updateRestartNow: "安装并重启",
-        updateLastCheck: "上次检查：{{time}}",
+        updateLastCheck: "最近成功检查：{{time}}",
         updateProgressBar: "下载进度",
         updateDevMode: "开发模式下不支持自动更新，请使用打包后的应用",
         updateDownloadManually: "手动下载",
@@ -1767,8 +1767,10 @@ i18n.use(initReactI18next).init({
         updateErrorBusy: "更新程序正忙，请稍后重试。",
         updateErrorInstallTimeout:
           "安装更新超时。请关闭其他应用后重试，或手动下载并安装。",
-        updateErrorRateLimited:
-          "GitHub 更新服务暂时繁忙，请稍后重试或手动下载。",
+        libraryChecking: "核对图库",
+        libraryCheckDetails: "正在核对：{{folder}}；剩余 {{count}} 个文件夹",
+        updateLastAttempt: "最近尝试：{{time}}",
+        updateErrorRateLimited: "GitHub 暂时限制了更新查询。",
         updateErrorAccessDenied:
           "GitHub 拒绝了更新请求，请稍后重试或检查网络代理。",
         updateErrorServiceUnavailable:
@@ -1786,6 +1788,8 @@ i18n.use(initReactI18next).init({
         updateChangelogTitle: "更新日志",
         updateChangelogDescription: "回顾每个版本带来的新体验。",
         updateChangelogView: "进入",
+        updateChangelogShowMore: "显示更多",
+        updateChangelogCollapse: "收起",
         updateChangelogEmpty: "暂时还没有可查看的更新日志。",
         whatsNewEyebrow: "AI Image Manager · What's New",
         whatsNewHighlights: "本次更新亮点",

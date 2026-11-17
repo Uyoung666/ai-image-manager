@@ -8,7 +8,7 @@ import path from "node:path";
 import { app } from "electron";
 import Store from "electron-store";
 import { recordUpdateError } from "@/services/update-error";
-import type { UpdateStatus } from "@/types/update";
+import { UPDATE_ERROR_KEYS, type UpdateStatus } from "@/types/update";
 import { classifyUpdateError } from "@/utils/update-error";
 
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -233,6 +233,7 @@ const STRING_FIELDS = new Set([
   "installCompletedAt",
   "installStartedAt",
   "lastCheckedAt",
+  "lastCheckAttemptAt",
   "message",
   "phaseStartedAt",
   "relaunchToken",
@@ -286,6 +287,24 @@ export function isValidUpdateState(value: unknown): value is UpdateStatus {
     if (BOOLEAN_FIELDS.has(key) && typeof field !== "boolean") {
       return false;
     }
+  }
+  if (
+    record.metadataCooldowns !== undefined &&
+    (!record.metadataCooldowns ||
+      typeof record.metadataCooldowns !== "object" ||
+      Array.isArray(record.metadataCooldowns) ||
+      Object.entries(record.metadataCooldowns).some(
+        ([key, entry]) =>
+          !(["api", "asset"].includes(key) && entry) ||
+          typeof entry !== "object" ||
+          !Number.isFinite(Date.parse(entry.retryAfter)) ||
+          !Number.isSafeInteger(entry.failures) ||
+          entry.failures < 1 ||
+          (entry.error !== undefined &&
+            !Object.hasOwn(UPDATE_ERROR_KEYS, entry.error))
+      ))
+  ) {
+    return false;
   }
   if (
     record.version !== undefined &&
