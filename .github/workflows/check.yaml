@@ -37,6 +37,12 @@ jobs:
         run: npx --no-install tsc --noEmit
       - name: Check release workflows and bundled changelog
         run: node node_modules/vitest/vitest.mjs run src/tests/unit/release-workflow.test.mjs src/tests/unit/update-welcome-decision.test.ts -t "stable release workflow gates|shows bundled current release notes"
+      - name: Check Windows validation launcher
+        if: inputs.commit != ''
+        run: |
+          $env:AIM_STANDARD_EXECUTABLE = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          $env:AIM_STANDARD_ARGUMENTS = '-NoProfile -NonInteractive -Command Start-Sleep -Seconds 1'
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/release/start-standard-user.ps1
       - name: Check Japanese against a formal release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -191,7 +191,7 @@ describe("shooting project latest write intent", () => {
     );
     await waitFor(() => expect(stored.browsing.currentPhotoId).toBe("b"));
     expect(mocks.saveBrowse).toHaveBeenCalledTimes(2);
-    expect(view.result.current.errorKey).toBeNull();
+    await waitFor(() => expect(view.result.current.errorKey).toBeNull());
   });
 
   it("does not replay a failed keep after a later reject succeeds and the project reopens", async () => {

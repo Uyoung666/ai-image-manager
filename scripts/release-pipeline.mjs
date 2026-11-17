@@ -604,7 +604,12 @@ async function smokeTest(identity) {
     const { runManualUpgradeSmoke } = await import(
       "./windows-installer-smoke.mjs"
     );
-    await runManualUpgradeSmoke(root(), manifest, identity.baseline);
+    await runManualUpgradeSmoke(
+      root(),
+      manifest,
+      identity.baseline,
+      path.join(evidenceRoot(), "installer-logs")
+    );
     return writeJson(path.join(evidenceRoot(), "installer-report.json"), {
       scenario,
       status: "passed",

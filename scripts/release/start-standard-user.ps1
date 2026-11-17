@@ -49,6 +49,9 @@ public static class StandardReleaseUser {
     private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool LookupPrivilegeValue(string system, string name, out long privilege);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool CreateProcessAsUser(
         IntPtr token, string file, StringBuilder command, IntPtr processAttributes,
         IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment,
@@ -70,7 +73,7 @@ public static class StandardReleaseUser {
     private static extern bool FreeEnvironmentStringsW(IntPtr environment);
 
     private const int Integrity = 25;
-    private const int Elevation = 20;
+    private const int Privileges = 3;
 
     private static void Require(bool result) {
         if (!result) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -103,9 +106,23 @@ public static class StandardReleaseUser {
             Require(GetTokenInformation(token, Integrity, buffer, size, out size), "Read token integrity");
             if (new SecurityIdentifier(Marshal.ReadIntPtr(buffer)).Value != "S-1-16-8192")
                 throw new InvalidOperationException("Expected Medium integrity");
-            Require(GetTokenInformation(token, Elevation, buffer, sizeof(int), out size), "Read token elevation");
-            if (Marshal.ReadInt32(buffer) != 0)
-                throw new InvalidOperationException("Application token is elevated");
+        } finally { Marshal.FreeHGlobal(buffer); }
+        // UAC can still report an elevated origin for a filtered runner token.
+        // Validate its actual privileges, groups, integrity and write access.
+        VerifyPrivileges(token);
+    }
+
+    private static void VerifyPrivileges(IntPtr token) {
+        long traverse;
+        Require(LookupPrivilegeValue(null, "SeChangeNotifyPrivilege", out traverse), "Look up traverse privilege");
+        int size;
+        GetTokenInformation(token, Privileges, IntPtr.Zero, 0, out size);
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try {
+            Require(GetTokenInformation(token, Privileges, buffer, size, out size), "Read token privileges");
+            int count = Marshal.ReadInt32(buffer);
+            if (count > 1 || (count == 1 && Marshal.ReadInt64(buffer, sizeof(int)) != traverse))
+                throw new InvalidOperationException("Unexpected effective privileges on application token");
         } finally { Marshal.FreeHGlobal(buffer); }
     }
 

@@ -408,7 +408,7 @@ async function expectUpdateHistoryReturnsToSettings(): Promise<void> {
   for (const version of ["2.2.0", "2.2.1", "2.2.2", "2.2.3"]) {
     const entry = currentPage
       .locator(".update-changelog-item")
-      .filter({ hasText: `v${version}` });
+      .filter({ has: currentPage.getByText(`v${version}`, { exact: true }) });
     await entry.scrollIntoViewIfNeeded();
     const expectedScrollTop = await scrollContainer.evaluate(
       (element) => (element as HTMLElement).scrollTop

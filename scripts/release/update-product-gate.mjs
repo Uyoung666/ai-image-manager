@@ -271,10 +271,11 @@ async function verifyStandardProcess(processInfo) {
   });
 }
 
-async function waitFor(callback, label, timeout = 180_000) {
+async function waitFor(callback, label, timeout = 180_000, signal = null) {
   const deadline = Date.now() + timeout;
   let lastError;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     const value = await callback().catch((error) => {
       lastError = error;
     });
@@ -517,10 +518,12 @@ async function runUpgrade(
   let primaryError;
   let stage = "launch";
   const target = installedTargetPath(executable, manifest.version);
-  const connect = async () => {
+  const connect = async (signal) => {
     await waitFor(
       async () => (await fetch(`http://127.0.0.1:${port}/json/version`)).ok,
-      "CDP"
+      "CDP",
+      180_000,
+      signal
     );
     return chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   };
@@ -541,8 +544,22 @@ async function runUpgrade(
       windowsHide: true,
       stdio: ["ignore", "ignore", "inherit"],
     });
-    child.on("error", () => undefined);
-    browser = await connect();
+    const launchFailed = new Promise((_, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code, signal) => {
+        reject(
+          new Error(
+            `Standard-user launcher exited before CDP: ${signal ?? code}`
+          )
+        );
+      });
+    });
+    const launch = new AbortController();
+    try {
+      browser = await Promise.race([connect(launch.signal), launchFailed]);
+    } finally {
+      launch.abort();
+    }
     await verifyStandardProcess(await readBrowserProcess(browser));
     page = browser.contexts()[0].pages()[0];
     if (await page.evaluate(() => Boolean(window.electronAPI?.isE2E))) {

@@ -428,8 +428,10 @@ function runInstallerProcess(
   });
 }
 
-function createMsiLogDirectory(prefix) {
-  const root = process.env.AIM_INSTALLER_SMOKE_LOG_DIR || os.tmpdir();
+function createMsiLogDirectory(
+  prefix,
+  root = process.env.AIM_INSTALLER_SMOKE_LOG_DIR || os.tmpdir()
+) {
   fs.mkdirSync(root, { recursive: true });
   const directory = fs.mkdtempSync(path.join(root, prefix));
   console.log(`[installer-smoke] MSI logs: ${directory}`);
@@ -2002,7 +2004,12 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
   console.log(`AIM_INSTALLER_SMOKE_MSI_UPGRADE=passed logs=${logDirectory}`);
 }
 
-export async function runManualUpgradeSmoke(bundle, manifest, baseline) {
+export async function runManualUpgradeSmoke(
+  bundle,
+  manifest,
+  baseline,
+  installerLogRoot
+) {
   if (process.env.RUNNER_ENVIRONMENT !== "github-hosted") {
     throw new Error(
       "Manual MSI validation requires a disposable hosted runner"
@@ -2068,8 +2075,13 @@ export async function runManualUpgradeSmoke(bundle, manifest, baseline) {
     ".msi"
   );
   const msiexec = path.join(process.env.SystemRoot, "System32", "msiexec.exe");
-  const logDirectory = createMsiLogDirectory("ai-image-manager-msi-manual-");
+  const logDirectory = createMsiLogDirectory(
+    "ai-image-manager-msi-manual-",
+    installerLogRoot
+  );
+  const manualTimeout = { timeoutMs: 5 * 60_000 };
   let installed;
+  let primaryError;
   try {
     for (const [file, version] of [
       [oldMsi, baseline.version],
@@ -2086,7 +2098,10 @@ export async function runManualUpgradeSmoke(bundle, manifest, baseline) {
           "/l*vx!",
           path.join(logDirectory, `manual-${version}.log`),
         ],
-        `manually install MSI ${version} without AutoUpdate`
+        `manually install MSI ${version} without AutoUpdate`,
+        ALLOWED_MSI_EXIT_CODES,
+        process.env,
+        manualTimeout
       );
       installed = file;
       const product = assertMsiInstalled(version);
@@ -2107,14 +2122,33 @@ export async function runManualUpgradeSmoke(bundle, manifest, baseline) {
       );
       assertRetained();
     }
-  } finally {
-    if (installed) {
-      await runMsiProcess(
-        msiexec,
-        ["/x", installed, "/qn", "/norestart"],
-        "uninstall manual MSI"
-      );
-    }
+  } catch (error) {
+    primaryError = error;
+  }
+  if (installed) {
+    await runMsiProcess(
+      msiexec,
+      [
+        "/x",
+        installed,
+        "/qn",
+        "/norestart",
+        "/l*vx!",
+        path.join(logDirectory, "manual-uninstall.log"),
+      ],
+      "uninstall manual MSI",
+      ALLOWED_MSI_EXIT_CODES,
+      process.env,
+      manualTimeout
+    ).catch((error) => {
+      if (!primaryError) {
+        throw error;
+      }
+      console.error(`[installer-smoke] manual MSI cleanup: ${error.message}`);
+    });
+  }
+  if (primaryError) {
+    throw primaryError;
   }
 }
 
