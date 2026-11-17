@@ -919,25 +919,53 @@ export async function establishHistoricalMsiUpgrade(
       "Historical delta manifest does not match the verified fixture"
     );
   }
-  const history = await runUpgrade(
-    executable,
-    profile,
-    manifest,
-    {
-      [full.filename]: fullPath,
-      ...(deltaPath ? { [delta.filename]: deltaPath } : {}),
-    },
-    directory,
-    {
-      expectConfirmation: true,
-      seedAlbum: !deltaPath,
-      expectedMethod: deltaPath ? "delta" : "full",
-      kind: "msi",
-      expectInstallFailure: Boolean(deltaPath),
-    }
-  );
+  const upgrade = (userData) =>
+    runUpgrade(
+      executable,
+      userData,
+      manifest,
+      {
+        [full.filename]: fullPath,
+        ...(deltaPath ? { [delta.filename]: deltaPath } : {}),
+      },
+      directory,
+      {
+        expectConfirmation: true,
+        seedAlbum: !deltaPath,
+        expectedMethod: deltaPath ? "delta" : "full",
+        kind: "msi",
+        expectInstallFailure: Boolean(deltaPath),
+      }
+    );
+  const history = deltaPath
+    ? await isolateHistoricalMsiControl(executable, profile, directory, upgrade)
+    : await upgrade(profile);
   await cleanupProductArtifacts(directory);
   return history;
+}
+
+export async function isolateHistoricalMsiControl(
+  executable,
+  profile,
+  directory,
+  runControl
+) {
+  // The released client's failed task persists across restarts. Give the
+  // negative control its own profile so it cannot pin the candidate test to
+  // the old manifest or replace its Check for Updates action with Resume.
+  const isolatedProfile = path.join(directory, "control-profile");
+  const stateFile = path.join(profile, "update-state.json");
+  const sourceExecutableSha256 = await sha256File(executable);
+  const stateSha256 = await sha256File(stateFile);
+  await fsp.cp(profile, isolatedProfile, { recursive: true });
+  const result = await runControl(isolatedProfile);
+  if (
+    (await sha256File(stateFile)) !== stateSha256 ||
+    (await sha256File(executable)) !== sourceExecutableSha256
+  ) {
+    throw new Error("Historical MSI control changed the candidate source");
+  }
+  return { ...result, profileIsolated: true, sourceExecutableSha256 };
 }
 
 async function finishProductChain({

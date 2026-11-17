@@ -16,6 +16,7 @@ import {
   cleanupProductSession,
   expectRestart,
   installedTargetPath,
+  isolateHistoricalMsiControl,
   repackTestSuccessorArchive,
   verifyProductDownload,
 } from "../../../scripts/release/update-product-gate.mjs";
@@ -34,6 +35,116 @@ const identity = {
   productUpdateGateRequired: true,
 };
 const hash = "b".repeat(64);
+
+it("isolates the persisted old MSI failure from the following candidate upgrade", async () => {
+  const runtime = new TestRuntime("msi-control-isolation");
+  try {
+    const executable = path.join(runtime.root, "app.exe");
+    const profile = path.join(runtime.root, "profile");
+    const directory = path.join(runtime.root, "control");
+    const healthy = JSON.stringify({ state: { phase: "idle" } });
+    await fs.mkdir(profile);
+    await fs.writeFile(executable, "released 2.2.8 executable");
+    await fs.writeFile(path.join(profile, "update-state.json"), healthy);
+    await fs.writeFile(path.join(profile, "album.db"), "retained album");
+    const result = await isolateHistoricalMsiControl(
+      executable,
+      profile,
+      directory,
+      async (isolatedProfile) => {
+        expect(isolatedProfile).not.toBe(profile);
+        expect(
+          await fs.readFile(path.join(isolatedProfile, "album.db"), "utf8")
+        ).toBe("retained album");
+        await fs.writeFile(
+          path.join(isolatedProfile, "update-state.json"),
+          JSON.stringify({
+            state: {
+              phase: "error",
+              operation: "install",
+              version: "2.2.9",
+              canResume: true,
+            },
+          })
+        );
+        return { status: "reproduced", message: "UPDATE_INSTALL_INTERRUPTED" };
+      }
+    );
+    expect(result).toEqual({
+      status: "reproduced",
+      message: "UPDATE_INSTALL_INTERRUPTED",
+      profileIsolated: true,
+      sourceExecutableSha256: createHash("sha256")
+        .update("released 2.2.8 executable")
+        .digest("hex"),
+    });
+    expect(
+      await fs.readFile(path.join(profile, "update-state.json"), "utf8")
+    ).toBe(healthy);
+    expect(await fs.readFile(path.join(profile, "album.db"), "utf8")).toBe(
+      "retained album"
+    );
+  } finally {
+    runtime.cleanup();
+  }
+});
+
+it.each([
+  "executable",
+  "state",
+])("rejects a negative control that changes the original %s", async (changed) => {
+  const runtime = new TestRuntime("msi-control-source");
+  try {
+    const executable = path.join(runtime.root, "app.exe");
+    const profile = path.join(runtime.root, "profile");
+    const state = path.join(profile, "update-state.json");
+    await fs.mkdir(profile);
+    await fs.writeFile(executable, "original executable");
+    await fs.writeFile(state, "original update state");
+    await expect(
+      isolateHistoricalMsiControl(
+        executable,
+        profile,
+        path.join(runtime.root, "control"),
+        async () => {
+          await fs.writeFile(
+            changed === "state" ? state : executable,
+            "changed"
+          );
+          return { status: "reproduced" };
+        }
+      )
+    ).rejects.toThrow("changed the candidate source");
+  } finally {
+    runtime.cleanup();
+  }
+});
+
+it("preserves an unexpected negative-control failure", async () => {
+  const runtime = new TestRuntime("msi-control-error");
+  try {
+    const executable = path.join(runtime.root, "app.exe");
+    const profile = path.join(runtime.root, "profile");
+    await fs.mkdir(profile);
+    await fs.writeFile(executable, "original executable");
+    await fs.writeFile(
+      path.join(profile, "update-state.json"),
+      "original state"
+    );
+    await expect(
+      isolateHistoricalMsiControl(
+        executable,
+        profile,
+        path.join(runtime.root, "control"),
+        () => {
+          throw new Error("unexpected installer failure");
+        }
+      )
+    ).rejects.toThrow("unexpected installer failure");
+  } finally {
+    runtime.cleanup();
+  }
+});
 
 it("reports the real installation error promptly instead of waiting for a restart", async () => {
   vi.useFakeTimers();

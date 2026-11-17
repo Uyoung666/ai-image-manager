@@ -65,7 +65,10 @@ export function validateInstallerReport(
     if (
       manifest.version === "2.2.10" &&
       scenario === "msi-history-228" &&
-      history.negativeControl?.status !== "reproduced"
+      (history.negativeControl?.status !== "reproduced" ||
+        history.negativeControl.profileIsolated !== true ||
+        history.negativeControl.sourceExecutableSha256 !==
+          history.targetExecutableSha256)
     ) {
       throw new Error("Original MSI incremental failure was not reproduced");
     }

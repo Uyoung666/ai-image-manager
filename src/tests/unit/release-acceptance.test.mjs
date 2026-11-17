@@ -52,7 +52,11 @@ function acceptance() {
           targetVersion: scenario.endsWith("228") ? "2.2.8" : "2.2.9",
           updateMethod: "full",
           targetExecutableSha256: sha,
-          negativeControl: { status: "reproduced" },
+          negativeControl: {
+            status: "reproduced",
+            profileIsolated: true,
+            sourceExecutableSha256: sha,
+          },
         },
       },
     })),
@@ -60,6 +64,22 @@ function acceptance() {
 }
 
 describe("candidate acceptance", () => {
+  it("rejects an MSI negative control that contaminated the candidate profile or executable", () => {
+    const proof = acceptance();
+    const control = proof.installers.find(
+      (item) => item.scenario === "msi-history-228"
+    ).product.history.negativeControl;
+    control.profileIsolated = false;
+    expect(() => validateAcceptance(proof, bundle, sha)).toThrow(
+      "incremental failure"
+    );
+    control.profileIsolated = true;
+    control.sourceExecutableSha256 = "c".repeat(64);
+    expect(() => validateAcceptance(proof, bundle, sha)).toThrow(
+      "incremental failure"
+    );
+  });
+
   it("rejects evidence issued for different bytes or a different build", () => {
     const proof = acceptance();
     expect(() =>
