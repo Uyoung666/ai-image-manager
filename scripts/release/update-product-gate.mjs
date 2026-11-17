@@ -437,6 +437,28 @@ export function retentionAlbumCard(page) {
   });
 }
 
+export async function waitForProductPage(browser, timeout = 180_000) {
+  const context = browser.contexts()[0];
+  if (!context) {
+    throw new Error("Product browser has no default context");
+  }
+  // Electron exposes CDP before creating its BrowserWindow. A page event alone
+  // does not prove navigation/preload/router readiness, including after restart.
+  const deadline = Date.now() + timeout;
+  const page =
+    context.pages().find((entry) => !entry.isClosed()) ??
+    (await context.waitForEvent("page", { timeout }));
+  await page.waitForFunction(
+    () => typeof window.__e2eNavigate === "function",
+    undefined,
+    { timeout: Math.max(1, deadline - Date.now()) }
+  );
+  if (await page.evaluate(() => Boolean(window.electronAPI?.isE2E))) {
+    throw new Error("Production startup bypass is enabled");
+  }
+  return page;
+}
+
 async function installThroughProduct(
   browser,
   page,
@@ -561,12 +583,8 @@ async function runUpgrade(
       launch.abort();
     }
     await verifyStandardProcess(await readBrowserProcess(browser));
-    page = browser.contexts()[0].pages()[0];
-    if (await page.evaluate(() => Boolean(window.electronAPI?.isE2E))) {
-      throw new Error("Production startup bypass is enabled");
-    }
-    stage = "startup router";
-    await page.waitForFunction(() => Boolean(window.__e2eNavigate));
+    stage = "startup renderer";
+    page = await waitForProductPage(browser);
     // Complete the real onboarding, if this isolated profile has never done so.
     stage = "first screen";
     // The released baseline replaces the entire layout during onboarding.
@@ -646,8 +664,9 @@ async function runUpgrade(
     if (reproduced) {
       return reproduced;
     }
+    stage = "automatic restart renderer";
     browser = await connect();
-    page = browser.contexts()[0].pages()[0];
+    page = await waitForProductPage(browser);
     targetProcess = await readBrowserProcess(browser);
     await verifyStandardProcess(targetProcess);
     if (
@@ -687,7 +706,7 @@ async function runUpgrade(
       page.evaluate(() => window.electronAPI.restartApp())
     );
     browser = await connect();
-    page = browser.contexts()[0].pages()[0];
+    page = await waitForProductPage(browser);
     const secondProcess = await readBrowserProcess(browser);
     await verifyStandardProcess(secondProcess);
     if (
@@ -698,7 +717,6 @@ async function runUpgrade(
       throw new Error("Ordinary restart did not start a new target process");
     }
     targetProcess = secondProcess;
-    await page.waitForFunction(() => Boolean(window.__e2eNavigate));
     await page.evaluate(() => window.__e2eNavigate("/albums"));
     await retentionAlbumCard(page).waitFor();
     if (
