@@ -5,6 +5,7 @@ import { z } from "zod";
 import { SettingsPageShell } from "@/components/settings/settings-page-shell";
 import { UpdateSection } from "@/components/settings/UpdateSection";
 import { UpdateChangelogHistory } from "@/components/settings/update-changelog-history";
+import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
@@ -13,6 +14,7 @@ function UpdateSettingsPage() {
   const { historyCount } = Route.useSearch();
   const [appVersion, setAppVersion] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { saveScrollPosition } = useScrollPosition();
   useRouteScrollRestoration(scrollRef, { restoreReady: true });
 
   useEffect(() => {
@@ -23,7 +25,17 @@ function UpdateSettingsPage() {
     <SettingsPageShell scrollRef={scrollRef} title={t("settingsGroupUpdates")}>
       <div className="space-y-6">
         <UpdateSection appVersion={appVersion} />
-        <UpdateChangelogHistory initialVisibleCount={historyCount} />
+        <UpdateChangelogHistory
+          initialVisibleCount={historyCount}
+          onOpenEntry={() => {
+            if (scrollRef.current) {
+              saveScrollPosition(
+                "/settings/update",
+                scrollRef.current.scrollTop
+              );
+            }
+          }}
+        />
       </div>
     </SettingsPageShell>
   );

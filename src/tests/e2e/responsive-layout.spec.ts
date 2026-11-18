@@ -417,11 +417,26 @@ async function expectUpdateHistoryReturnsToSettings(): Promise<void> {
     const entry = currentPage
       .locator(".update-changelog-item")
       .filter({ has: currentPage.getByText(`v${version}`, { exact: true }) });
-    await entry.scrollIntoViewIfNeeded();
-    const expectedScrollTop = await scrollContainer.evaluate(
-      (element) => (element as HTMLElement).scrollTop
-    );
-    await entry.getByRole("button").click();
+    const openEntry = entry.getByRole("button");
+    // Playwright can scroll the button during the click at narrow widths.
+    const scrollKey = "test:changelog-position";
+    await openEntry.evaluate((button, key) => {
+      button.addEventListener(
+        "click",
+        () => {
+          const scroller = button.closest(".overflow-y-auto");
+          sessionStorage.setItem(key, String(scroller?.scrollTop));
+        },
+        { capture: true, once: true }
+      );
+    }, scrollKey);
+    await openEntry.click();
+    const expectedScrollTop = await currentPage.evaluate((key) => {
+      const value = sessionStorage.getItem(key);
+      sessionStorage.removeItem(key);
+      return Number(value);
+    }, scrollKey);
+    expect(expectedScrollTop).toBeGreaterThan(0);
     await expect(currentPage.locator(".whats-new-page")).toBeVisible();
     await expect(
       currentPage.locator(".whats-new-release-visual-version")

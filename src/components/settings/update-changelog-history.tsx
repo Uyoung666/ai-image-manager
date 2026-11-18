@@ -22,8 +22,10 @@ function formatReleaseDate(date: string, language: string): string {
 
 export function UpdateChangelogHistory({
   initialVisibleCount = CHANGELOG_PAGE_SIZE,
+  onOpenEntry,
 }: {
   initialVisibleCount?: number;
+  onOpenEntry?: () => void;
 }) {
   const { i18n, t } = useTranslation();
   const navigate = useNavigate();
@@ -73,7 +75,8 @@ export function UpdateChangelogHistory({
               <button
                 aria-label={`${getLocalizedText(entry.title, i18n.language)} · ${t("updateChangelogView")}`}
                 className="cta shrink-0"
-                onClick={() =>
+                onClick={() => {
+                  onOpenEntry?.();
                   navigate({
                     to: "/whats-new",
                     search: {
@@ -81,8 +84,8 @@ export function UpdateChangelogHistory({
                       source: "settings-update",
                       version: entry.version,
                     },
-                  })
-                }
+                  });
+                }}
                 type="button"
               >
                 <span className="hover-underline-animation">
