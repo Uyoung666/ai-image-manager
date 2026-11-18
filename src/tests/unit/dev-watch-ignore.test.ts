@@ -45,4 +45,14 @@ describe("development watcher boundaries", () => {
   it("does not exclude similarly named directories outside the project", () => {
     expect(ignored(path.join(root, "..", "reports", "page.tsx"))).toBe(false);
   });
+
+  it("watches source in a checkout nested inside another project's test runtime", () => {
+    const checkout = path.join(root, ".test-runtime", "verify-push", "repo");
+    const checkoutIgnored = createDevWatchIgnored(checkout);
+
+    expect(checkoutIgnored(path.join(checkout, "src", "page.tsx"))).toBe(false);
+    expect(checkoutIgnored(path.join(checkout, "src", ".cache", "data"))).toBe(
+      true
+    );
+  });
 });
