@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { type ElectronApplication, expect, type Page } from "@playwright/test";
+import { DatabaseSync } from "node:sqlite";
+import {
+  type ElectronApplication,
+  expect,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { preparePackagedExecutable } from "./helpers/packaged-inspection";
 import {
   closeTestApp,
@@ -19,6 +25,10 @@ const SHARK_SPECIES = /^(Shark species|鲨鱼种类)$/;
 const NAVIGATION_OPACITY = /^(Navigation opacity|导航不透明度)$/;
 const EXIT_PREVIEW = /^(Exit preview|退出预览)$/;
 const RESET_ALL = /^(Reset all|全部重置)$/;
+const PHOTO_GRID = "[data-masonry-scroll]";
+const HOME_TOOLBAR = ".home-gallery-toolbar-layer";
+const ALBUM_TOOLBAR = ".page-toolbar";
+const SCROLLED_TOOLBAR = /\bis-scrolled\b/;
 const appRoot = process.env.AIM_E2E_APP_ROOT ?? path.resolve(".");
 let app: ElectronApplication;
 let page: Page;
@@ -59,6 +69,98 @@ async function bounds() {
       })
     )
     .toBe(true);
+}
+
+async function expectNavigationMaterial(toolbar: Locator, scrolled = false) {
+  await expect(toolbar).toHaveAttribute("data-surface", "toolbar");
+  const background = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.hidden = true;
+    probe.style.backgroundColor = "var(--ocean-panel)";
+    document.body.append(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  });
+  await expect(toolbar).toHaveCSS("background-color", background);
+  await expect(toolbar).toHaveCSS("backdrop-filter", "blur(11px)");
+  if (scrolled) {
+    await expect(toolbar).toHaveClass(SCROLLED_TOOLBAR);
+  }
+}
+
+async function verifyToolbarScroll(toolbar: Locator) {
+  const grid = page.locator(PHOTO_GRID);
+  await expect(grid.locator("[data-photo-id]").first()).toBeVisible();
+  await grid.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect(toolbar).not.toHaveClass(SCROLLED_TOOLBAR);
+  await expectNavigationMaterial(toolbar);
+  await grid.evaluate((element) => {
+    element.scrollTop = 100;
+  });
+  await expectNavigationMaterial(toolbar, true);
+  await bounds();
+  await grid.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect(toolbar).not.toHaveClass(SCROLLED_TOOLBAR);
+}
+
+async function expectPointerHitsBackground(x: number, y: number) {
+  await page.mouse.move(0, 0);
+  expect(
+    await page.evaluate(
+      ({ x, y }) =>
+        document.elementFromPoint(x, y)?.getAttribute("data-ocean-background"),
+      { x, y }
+    )
+  ).toBe("true");
+  await page.evaluate(() => {
+    document.documentElement.removeAttribute("data-test-background-hit");
+    window.addEventListener(
+      "pointermove",
+      ({ target }) => {
+        document.documentElement.setAttribute(
+          "data-test-background-hit",
+          String(
+            target instanceof HTMLElement &&
+              target.hasAttribute("data-ocean-background")
+          )
+        );
+      },
+      { capture: true, once: true }
+    );
+  });
+  await page.mouse.move(x, y);
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-test-background-hit",
+    "true"
+  );
+}
+
+async function expectPointerHitsPhotoGap() {
+  const gap = await page.locator(PHOTO_GRID).evaluate((grid) => {
+    const content = grid.querySelector("[data-back-to-top-content]");
+    for (const photo of grid.querySelectorAll("[data-photo-id]")) {
+      const { left, top, right, bottom } = photo.getBoundingClientRect();
+      const points = [
+        { x: right + 4, y: (top + bottom) / 2 },
+        { x: (left + right) / 2, y: bottom + 4 },
+      ];
+      for (const point of points) {
+        if (
+          content &&
+          document.elementFromPoint(point.x, point.y) === content
+        ) {
+          return point;
+        }
+      }
+    }
+    throw new Error("Expected a visible gutter next to a photo");
+  });
+  await expectPointerHitsBackground(gap.x, gap.y);
 }
 
 async function contentSurfaces() {
@@ -136,7 +238,20 @@ test.beforeAll(async ({ browserName: _browserName }, testInfo) => {
   const executable = await preparePackagedExecutable(root, testInfo.outputDir);
   const scratch = path.join(root, "scratch");
   fs.mkdirSync(scratch);
-  seedWanderLibrary(path.join(root, "profile"), { photoCount: 4 });
+  const profile = path.join(root, "profile");
+  seedWanderLibrary(profile, { photoCount: 48 });
+  const database = new DatabaseSync(
+    path.join(profile, "data", "ai-image-manager.db")
+  );
+  try {
+    database.exec(`
+      INSERT INTO albums(id,name,created_at) VALUES(1,'Ocean toolbar',1);
+      INSERT INTO albums(id,name,created_at) VALUES(2,'Empty ocean album',1);
+      INSERT INTO album_photos(album_id,photo_id) SELECT 1,id FROM photos;
+    `);
+  } finally {
+    database.close();
+  }
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>
@@ -214,6 +329,16 @@ test("starts disabled, previews without enabling, persists settings and restores
       )
     )
     .toBe("11px");
+  const opacity = page.getByRole("slider", { name: NAVIGATION_OPACITY });
+  await opacity.press("ArrowLeft");
+  await opacity.press("Tab");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document.documentElement.style.getPropertyValue("--ocean-panel-opacity")
+      )
+    )
+    .toBe("91%");
 });
 
 for (const size of [
@@ -234,6 +359,16 @@ for (const size of [
     await page
       .locator(`[data-plugin-card-id='${OCEAN}'] [data-plugin-selection]`)
       .click();
+    const settings = page.locator("[data-plugin-manager-view]");
+    const padding = await settings.evaluate((element) => {
+      const scroller = element.parentElement?.parentElement;
+      if (!scroller) {
+        throw new Error("Expected a settings scroll container");
+      }
+      const { left, top } = scroller.getBoundingClientRect();
+      return { x: left + 6, y: top + 20 };
+    });
+    await expectPointerHitsBackground(padding.x, padding.y);
     for (const light of [false, true]) {
       await page.evaluate((value) => {
         document.documentElement.classList.toggle("light", value);
@@ -301,6 +436,7 @@ for (const size of [
       await navigate("/");
       const photo = page.locator("[data-photo-id]").first();
       await expect(photo).toBeVisible();
+      await verifyToolbarScroll(page.locator(HOME_TOOLBAR));
       await photo.click();
       await expect(
         page.locator('[data-surface="inspector"]').first()
@@ -313,6 +449,12 @@ for (const size of [
       await contentSurfaces();
       await bounds();
       await page.keyboard.press("Escape");
+      await navigate("/albums/1");
+      await verifyToolbarScroll(page.locator(ALBUM_TOOLBAR));
+      await expectPointerHitsPhotoGap();
+      await navigate("/albums/2");
+      await expectNavigationMaterial(page.locator(ALBUM_TOOLBAR));
+      await bounds();
       await navigate("/cull/999999999");
       await expect(
         page.locator('[data-surface="immersive"]').first()

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AsciiRenderer } from "@/plugins/builtins/ascii-ocean/renderer";
+import { World } from "@/plugins/builtins/ascii-ocean/world";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -39,4 +40,39 @@ describe("ASCII Ocean renderer palette", () => {
     expect(computed).toHaveBeenCalledTimes(reads + 1);
     renderer.dispose();
   });
+});
+
+it("draws a hover wake on the first frame and a wider wake after a click", () => {
+  const context = {
+    beginPath: vi.fn(),
+    drawImage: vi.fn(),
+    fillRect: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    setTransform: vi.fn(),
+    stroke: vi.fn(),
+  };
+  const canvas = document.createElement("canvas");
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+    context as unknown as CanvasRenderingContext2D
+  );
+  const renderer = new AsciiRenderer(canvas);
+  renderer.resize(320, 240, 1);
+  const world = new World([], 0);
+  const dt = 0.75 / 30;
+  context.fillRect.mockClear();
+  renderer.render(world, dt);
+  expect(context.fillRect).not.toHaveBeenCalled();
+
+  world.pointer = { x: 160, y: 120, active: true };
+  renderer.render(world, dt);
+  const hoverDots = context.fillRect.mock.calls.length;
+  expect(hoverDots).toBeGreaterThan(0);
+
+  world.pointer.active = false;
+  world.splash(160, 120);
+  context.fillRect.mockClear();
+  renderer.render(world, dt);
+  expect(context.fillRect.mock.calls.length).toBeGreaterThan(hoverDots);
+  renderer.dispose();
 });

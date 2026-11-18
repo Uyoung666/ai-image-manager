@@ -114,7 +114,10 @@ function PluginsSettingsPage() {
     <PluginSettingsSlot onError={showError} slot="plugin.settings" />
   );
   return (
-    <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-[480px]:p-4">
+    <div
+      className="h-full min-w-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-[480px]:p-4"
+      data-ocean-background="true"
+    >
       <div className="mx-auto w-full min-w-0 max-w-[1120px]">
         <PluginManagerView
           activeId={activePlugin?.manifest.id ?? null}

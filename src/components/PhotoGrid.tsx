@@ -2228,7 +2228,10 @@ export const PhotoGrid = memo(
           style={{ paddingTop: showToolbar ? undefined : topInset }}
         >
           {showToolbar && (
-            <div className="page-toolbar flex items-center justify-between border-b px-4 py-2">
+            <div
+              className="page-toolbar flex items-center justify-between border-b px-4 py-2"
+              data-surface={glassToolbar ? "toolbar" : undefined}
+            >
               <Skeleton className="h-4 w-24 bg-card" />
               <div className="flex items-center gap-2">
                 {sequenceModeToggle}
@@ -2272,7 +2275,10 @@ export const PhotoGrid = memo(
           style={{ paddingTop: showToolbar ? undefined : topInset }}
         >
           {showToolbar && (
-            <div className="page-toolbar flex items-center justify-between border-b px-4 py-2">
+            <div
+              className="page-toolbar flex items-center justify-between border-b px-4 py-2"
+              data-surface={glassToolbar ? "toolbar" : undefined}
+            >
               <span className="truncate text-[12px] text-muted-foreground">
                 {t("photosCount", {
                   count: sequenceError ? 0 : displayPhotos.length,
@@ -2369,6 +2375,7 @@ export const PhotoGrid = memo(
             className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex items-center justify-between border-b px-4 py-2 ${
               isToolbarScrolled ? "is-scrolled" : ""
             } ${glassToolbar ? "gallery-glass-toolbar" : ""}`}
+            data-surface={glassToolbar ? "toolbar" : undefined}
             onClick={(event) => event.stopPropagation()}
             ref={toolbarRef}
           >

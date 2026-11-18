@@ -280,6 +280,46 @@ describe("ASCII Ocean", () => {
     expect(splash).toHaveBeenCalledTimes(1);
   });
 
+  it("restores hover after a file drag leaves the window or the window blurs", () => {
+    const active = start();
+    const background = document.createElement("div");
+    background.dataset.oceanBackground = "true";
+    const child = document.createElement("div");
+    background.append(child);
+    document.body.append(background);
+    const [world] = renderer.render.mock.lastCall as [World, number];
+    const hover = (target = background) => {
+      target.dispatchEvent(
+        new MouseEvent("pointermove", {
+          bubbles: true,
+          clientX: 20,
+          clientY: 20,
+        })
+      );
+      return world.pointer.active;
+    };
+    const enter = () =>
+      background.dispatchEvent(new Event("dragenter", { bubbles: true }));
+
+    expect(hover()).toBe(true);
+    expect(hover(child)).toBe(false);
+    enter();
+    background.dispatchEvent(
+      new MouseEvent("dragleave", { bubbles: true, relatedTarget: child })
+    );
+    expect(hover()).toBe(false);
+    child.dispatchEvent(new MouseEvent("dragleave", { bubbles: true }));
+    expect(hover()).toBe(true);
+    enter();
+    window.dispatchEvent(new Event("blur"));
+    expect(hover()).toBe(true);
+
+    active.setOptions({ ...options, interactive: false });
+    expect(hover()).toBe(false);
+    active.setOptions({ ...options, reducedMotion: true });
+    expect(hover()).toBe(false);
+  });
+
   it("stops after a render failure and reports it once", () => {
     const onError = vi.fn();
     start({}, onError);

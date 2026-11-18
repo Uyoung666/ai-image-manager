@@ -90,15 +90,16 @@ export class OceanEngine {
     window.addEventListener("pointerdown", this.pointerDown, { passive: true });
     window.addEventListener("pointerup", this.pointerUp, { passive: true });
     window.addEventListener("pointercancel", this.pointerLeave);
-    window.addEventListener("blur", this.pointerLeave);
+    window.addEventListener("blur", this.dragEnd);
     document.documentElement.addEventListener(
       "pointerleave",
       this.pointerLeave
     );
-    window.addEventListener("dragstart", this.dragStart);
-    window.addEventListener("dragenter", this.dragStart);
-    window.addEventListener("dragend", this.dragEnd);
-    window.addEventListener("drop", this.dragEnd);
+    window.addEventListener("dragstart", this.dragStart, true);
+    window.addEventListener("dragenter", this.dragStart, true);
+    window.addEventListener("dragleave", this.dragLeave, true);
+    window.addEventListener("dragend", this.dragEnd, true);
+    window.addEventListener("drop", this.dragEnd, true);
     this.resize();
     this.sync();
     document.fonts
@@ -240,7 +241,7 @@ export class OceanEngine {
   };
 
   private readonly pointerDown = (event: PointerEvent) => {
-    this.pointerStart = null;
+    this.pointerLeave();
     if (
       event.button !== 0 ||
       !this.options.interactive ||
@@ -281,6 +282,13 @@ export class OceanEngine {
     this.dragging = true;
     this.pointerLeave();
   };
+
+  private readonly dragLeave = (event: DragEvent) => {
+    const next = event.relatedTarget;
+    if (!(next instanceof Node && document.documentElement.contains(next))) {
+      this.dragEnd();
+    }
+  };
   private readonly dragEnd = () => {
     this.dragging = false;
     this.pointerLeave();
@@ -300,15 +308,16 @@ export class OceanEngine {
     window.removeEventListener("pointerdown", this.pointerDown);
     window.removeEventListener("pointerup", this.pointerUp);
     window.removeEventListener("pointercancel", this.pointerLeave);
-    window.removeEventListener("blur", this.pointerLeave);
+    window.removeEventListener("blur", this.dragEnd);
     document.documentElement.removeEventListener(
       "pointerleave",
       this.pointerLeave
     );
-    window.removeEventListener("dragstart", this.dragStart);
-    window.removeEventListener("dragenter", this.dragStart);
-    window.removeEventListener("dragend", this.dragEnd);
-    window.removeEventListener("drop", this.dragEnd);
+    window.removeEventListener("dragstart", this.dragStart, true);
+    window.removeEventListener("dragenter", this.dragStart, true);
+    window.removeEventListener("dragleave", this.dragLeave, true);
+    window.removeEventListener("dragend", this.dragEnd, true);
+    window.removeEventListener("drop", this.dragEnd, true);
     this.renderer.dispose();
     this.world.fish = [];
     this.world.sharks = [];

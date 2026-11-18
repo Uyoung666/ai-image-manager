@@ -226,7 +226,10 @@ function AlbumsContent({
   }
 
   return (
-    <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4 sm:gap-5">
+    <div
+      className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4 sm:gap-5"
+      data-ocean-background="true"
+    >
       {albums.map((album) => (
         <AlbumCard album={album} covers={covers} key={album.id} />
       ))}
@@ -407,6 +410,7 @@ export function AlbumsPage() {
       {/* Grid */}
       <div
         className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-6"
+        data-ocean-background="true"
         ref={scrollRef}
       >
         <AlbumsContent

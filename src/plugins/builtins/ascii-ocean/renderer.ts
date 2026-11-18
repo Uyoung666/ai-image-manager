@@ -555,7 +555,7 @@ export class AsciiRenderer {
       }
     }
     if (world.pointer.active) {
-      this.stamp(energy, world.pointer.x, world.pointer.y, 1, 0.08);
+      this.stamp(energy, world.pointer.x, world.pointer.y, 1, 0.9);
     }
   }
 

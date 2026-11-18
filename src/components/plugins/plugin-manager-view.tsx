@@ -1078,6 +1078,7 @@ export function PluginManagerView({
     <div
       className="flex min-w-0 max-w-full flex-col gap-4 overflow-x-hidden"
       data-layout="responsive"
+      data-ocean-background="true"
       data-plugin-manager-view="true"
       data-testid="plugin-manager-view"
     >
@@ -1192,6 +1193,7 @@ export function PluginManagerView({
 
       <div
         className="grid min-h-0 min-w-0 grid-cols-1 gap-4 min-[900px]:grid-cols-[minmax(18rem,0.85fr)_minmax(0,1.4fr)]"
+        data-ocean-background="true"
         data-plugin-manager-columns="true"
         data-testid="plugin-manager-columns"
       >
