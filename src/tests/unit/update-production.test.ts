@@ -1059,6 +1059,26 @@ describe("GitHub download, local installer and restart transaction", () => {
     expect(mocks.relaunch).not.toHaveBeenCalled();
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
+  it("uses a reconstructed MSI package for the next incremental update", async () => {
+    const directory = path.join(runtime.root, "packages");
+    const reconstructed = "ai-image-manager-2.2.3.nupkg";
+    await fs.rename(
+      path.join(directory, "ai-image-manager-2.2.3-full.nupkg"),
+      path.join(directory, reconstructed)
+    );
+    await fs.writeFile(
+      path.join(directory, "RELEASES"),
+      `${createHash("sha1").update("baseline package").digest("hex")} ${reconstructed} 16\n`
+    );
+    await download();
+    expect(mocks.state).toMatchObject({ updateMethod: "delta" });
+    expect(manager.installUpdate().ok).toBe(true);
+    await vi.waitFor(() => expect(mocks.relaunch).toHaveBeenCalledOnce());
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).toEqual([
+      manifest.packages.delta.url,
+    ]);
+  });
+
   it.each([
     "release-list",
     "baseline-package",

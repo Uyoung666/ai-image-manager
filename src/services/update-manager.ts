@@ -1042,17 +1042,23 @@ function preserveFullUpdatePlan(
 
 function hasDeltaBaseline(plan: UpdatePlan): boolean {
   const suffix = `-${plan.targetVersion}-full.nupkg`;
-  const filename = `${plan.fallback.filename.slice(0, -suffix.length)}-${plan.currentVersion}-full.nupkg`;
+  const packageBase = `${plan.fallback.filename.slice(0, -suffix.length)}-${plan.currentVersion}`;
+  const published = `${packageBase}-full.nupkg`;
+  // The MSI updater registers the full package rebuilt from a delta without
+  // the "-full" suffix.
+  const reconstructed = `${packageBase}.nupkg`;
   const directory = path.join(getInstallRoot(), "packages");
   try {
     const releases = readFileSync(path.join(directory, "RELEASES"), "utf8");
     return releases.split("\n").some((line) => {
       const entry = LOCAL_RELEASE_ENTRY_RE.exec(line.trim());
-      if (entry?.[1] !== filename) {
+      if (!entry || (entry[1] !== published && entry[1] !== reconstructed)) {
         return false;
       }
-      const baseline = statSync(path.join(directory, filename));
-      return baseline.isFile() && baseline.size === Number(entry[2]);
+      const baseline = statSync(path.join(directory, entry[1]), {
+        throwIfNoEntry: false,
+      });
+      return baseline?.isFile() && baseline.size === Number(entry[2]);
     });
   } catch {
     // Fresh MSI installations do not contain a Squirrel package baseline.

@@ -709,7 +709,7 @@ async function runUpgrade(
     }
     if (expectedMethod && before.updateMethod !== expectedMethod) {
       throw new Error(
-        `Expected ${expectedMethod}, downloaded ${before.updateMethod}`
+        `Expected ${expectedMethod}, downloaded ${before.updateMethod} (fallbackReason=${before.fallbackReason})`
       );
     }
     if (rateLimitAPI) {
