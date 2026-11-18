@@ -31,47 +31,37 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm run ci:verify -- install-runtime
       - name: Cache unit models
         uses: actions/cache@v4
         with:
           path: models
           key: ${{ runner.os }}-models-${{ inputs.skip_e2e && 'all' || 'unit' }}-${{ hashFiles('src/services/model-downloader.ts') }}
-      - name: Prepare models for model-backed tests
+      - name: Run unit, AI integration and worker tests
         env:
           AIM_MODEL_SCOPE: ${{ !inputs.skip_e2e && 'face,Xenova/siglip-base-patch16-224' || '' }}
-        run: node --loader ts-node/esm scripts/prepare-models.mjs
-      - name: Run unit tests
-        run: npm test
-      - name: Run AI integration tests
-        run: npm run test:ai-integration
-      - name: Run worker tests
-        run: npm run test:worker
+        run: npm run ci:verify -- unit
 
   test-face-migration:
     timeout-minutes: 20
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm run ci:verify -- install-runtime
       - name: Cache face models
         uses: actions/cache@v4
         with:
           path: models
           key: ${{ runner.os }}-models-face-${{ hashFiles('src/services/model-downloader.ts') }}
-      - name: Prepare models for model-backed tests
-        env:
-          AIM_MODEL_SCOPE: face
-        run: node --loader ts-node/esm scripts/prepare-models.mjs
       - name: Run face migration tests
-        env:
-          ELECTRON_RUN_AS_NODE: "1"
-        run: .\\node_modules\\.bin\\electron.cmd --test src/tests/unit/face-data-migration.test.mjs
+        run: npm run ci:verify -- face
 
   test-e2e:
     if: '!inputs.skip_e2e'
@@ -84,18 +74,14 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm run ci:verify -- install-runtime
       - name: Cache E2E models
         uses: actions/cache@v4
         with:
           path: models
           key: ${{ runner.os }}-models-all-${{ hashFiles('src/services/model-downloader.ts') }}
-      - name: Install Playwright Browsers
-        run: npx playwright install chromium --with-deps
       - name: Run Playwright tests
-        env:
-          AIM_E2E_PREPARE_MODELS: "1"
-        run: npm run test:e2e
+        run: npm run ci:verify -- e2e
       - uses: actions/upload-artifact@v4
         if: always()
         with:

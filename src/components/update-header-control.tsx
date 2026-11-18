@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { CircleAlert, CircleCheck, Download, RefreshCw } from "lucide-react";
-import { useId } from "react";
+import { useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Popover,
@@ -39,6 +39,7 @@ function updateIcon(view: {
 
 export function UpdateHeaderControl() {
   const titleId = useId();
+  const detailsRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
   const navigate = useNavigate();
   const actions = useUpdateUiActions();
@@ -108,8 +109,14 @@ export function UpdateHeaderControl() {
         className="window-buttons no-drag max-h-[min(70dvh,var(--radix-popover-content-available-height))] w-[360px] max-w-[calc(100dvw-24px)] gap-3 overflow-y-auto p-4"
         collisionPadding={12}
         data-testid="update-details"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          detailsRef.current?.focus({ preventScroll: true });
+        }}
+        ref={detailsRef}
         side="bottom"
         sideOffset={8}
+        tabIndex={-1}
       >
         <h2 className="font-semibold text-[14px]" id={titleId}>
           {t("settingsUpdate")}

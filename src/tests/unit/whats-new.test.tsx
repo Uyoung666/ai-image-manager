@@ -10,6 +10,7 @@ import {
 import { version as appVersion } from "../../../package.json";
 
 const mocks = vi.hoisted(() => ({
+  historyCount: undefined as number | undefined,
   language: "zh",
   navigate: vi.fn(),
   openExternalLink: vi.fn(),
@@ -20,7 +21,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => options,
   useNavigate: () => mocks.navigate,
-  useSearch: () => ({ source: mocks.source, version: mocks.version }),
+  useSearch: () => ({
+    historyCount: mocks.historyCount,
+    source: mocks.source,
+    version: mocks.version,
+  }),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -46,6 +51,7 @@ function getEntry() {
 
 describe("WhatsNewPage", () => {
   beforeEach(() => {
+    mocks.historyCount = undefined;
     mocks.language = "zh";
     mocks.navigate.mockReset();
     mocks.openExternalLink.mockReset();
@@ -55,6 +61,7 @@ describe("WhatsNewPage", () => {
 
   it("registers the current release before previous versions", () => {
     expect(changelogEntries.map((entry) => entry.version)).toEqual([
+      "2.2.11",
       "2.2.10",
       "2.2.9",
       "2.2.8",
@@ -178,6 +185,7 @@ describe("WhatsNewPage", () => {
 
   it("returns to update settings when opened from the update history", () => {
     mocks.source = "settings-update";
+    mocks.historyCount = 15;
     render(<WhatsNewPage />);
 
     expect(
@@ -192,6 +200,7 @@ describe("WhatsNewPage", () => {
     );
     expect(mocks.navigate).toHaveBeenCalledWith({
       replace: true,
+      search: { historyCount: 15 },
       to: "/settings/update",
     });
   });
@@ -203,6 +212,7 @@ describe("WhatsNewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "whatsNewClose" }));
     expect(mocks.navigate).toHaveBeenCalledWith({
       replace: true,
+      search: { historyCount: undefined },
       to: "/settings/update",
     });
   });
@@ -214,6 +224,7 @@ describe("WhatsNewPage", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(mocks.navigate).toHaveBeenCalledWith({
       replace: true,
+      search: { historyCount: undefined },
       to: "/settings/update",
     });
   });

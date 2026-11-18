@@ -57,7 +57,7 @@ it("opens the selected older version after expanding", () => {
   );
   expect(fixture.navigate).toHaveBeenCalledWith({
     to: "/whats-new",
-    search: { source: "settings-update", version: "2.0.3" },
+    search: { historyCount: 10, source: "settings-update", version: "2.0.3" },
   });
 });
 

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { z } from "zod";
 import { SettingsPageShell } from "@/components/settings/settings-page-shell";
 import { UpdateSection } from "@/components/settings/UpdateSection";
 import { UpdateChangelogHistory } from "@/components/settings/update-changelog-history";
@@ -9,6 +10,7 @@ import { ipc } from "@/ipc/manager";
 
 function UpdateSettingsPage() {
   const { t } = useTranslation();
+  const { historyCount } = Route.useSearch();
   const [appVersion, setAppVersion] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef, { restoreReady: true });
@@ -21,7 +23,7 @@ function UpdateSettingsPage() {
     <SettingsPageShell scrollRef={scrollRef} title={t("settingsGroupUpdates")}>
       <div className="space-y-6">
         <UpdateSection appVersion={appVersion} />
-        <UpdateChangelogHistory />
+        <UpdateChangelogHistory initialVisibleCount={historyCount} />
       </div>
     </SettingsPageShell>
   );
@@ -29,4 +31,7 @@ function UpdateSettingsPage() {
 
 export const Route = createFileRoute("/settings/update")({
   component: UpdateSettingsPage,
+  validateSearch: z.object({
+    historyCount: z.number().int().min(5).optional().catch(undefined),
+  }),
 });

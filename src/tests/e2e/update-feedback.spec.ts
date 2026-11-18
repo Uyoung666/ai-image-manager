@@ -322,6 +322,7 @@ for (const locale of LOCALES) {
         await page.keyboard.press("Enter");
         const details = page.getByTestId("update-details");
         await expect(details).toBeVisible();
+        await expect(details).toBeFocused();
         await expect(details).toHaveCSS("opacity", "1");
         await expect(details).not.toContainText(checkedTime);
         await expect(details).not.toContainText("&#x2F;");

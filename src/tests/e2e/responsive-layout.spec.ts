@@ -405,6 +405,14 @@ async function expectUpdateHistoryReturnsToSettings(): Promise<void> {
   );
   await expect(history).toBeVisible();
 
+  const showMore = history.getByRole("button", {
+    name: "Show more",
+    exact: true,
+  });
+  while (await showMore.isVisible()) {
+    await showMore.click();
+  }
+
   for (const version of ["2.2.0", "2.2.1", "2.2.2", "2.2.3"]) {
     const entry = currentPage
       .locator(".update-changelog-item")
@@ -421,6 +429,7 @@ async function expectUpdateHistoryReturnsToSettings(): Promise<void> {
 
     await currentPage.locator(".whats-new-continue").click();
     await expect(history).toBeVisible();
+    await expect(entry).toBeVisible();
     await expect
       .poll(() =>
         scrollContainer.evaluate(

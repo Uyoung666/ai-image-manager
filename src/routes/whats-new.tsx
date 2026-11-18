@@ -24,6 +24,7 @@ import appIcon from "../../assets/icon.png";
 const GITHUB_RELEASE_URL = "https://github.com/Uyoung666/ai-image-manager";
 
 const searchSchema = z.object({
+  historyCount: z.number().int().min(5).optional().catch(undefined),
   source: z.string().optional(),
   version: z.string().optional(),
 });
@@ -67,7 +68,7 @@ function ReleaseVisual({ version }: { version: string }) {
 export function WhatsNewPage() {
   const { i18n, t } = useTranslation();
   const navigate = useNavigate();
-  const { source, version } = useSearch({ from: "/whats-new" });
+  const { historyCount, source, version } = useSearch({ from: "/whats-new" });
   const entry = getChangelog(version) ?? getLatestChangelog();
   const isSettingsUpdateSource = source === SETTINGS_UPDATE_SOURCE;
   const continueLabel = isSettingsUpdateSource
@@ -78,11 +79,16 @@ export function WhatsNewPage() {
     : t("whatsNewEscapeHint");
 
   const handleContinue = useCallback(() => {
-    navigate({
-      to: isSettingsUpdateSource ? "/settings/update" : "/",
-      replace: true,
-    });
-  }, [isSettingsUpdateSource, navigate]);
+    if (isSettingsUpdateSource) {
+      navigate({
+        to: "/settings/update",
+        search: { historyCount },
+        replace: true,
+      });
+    } else {
+      navigate({ to: "/", replace: true });
+    }
+  }, [historyCount, isSettingsUpdateSource, navigate]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {

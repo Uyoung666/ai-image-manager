@@ -20,11 +20,15 @@ function formatReleaseDate(date: string, language: string): string {
   );
 }
 
-export function UpdateChangelogHistory() {
+export function UpdateChangelogHistory({
+  initialVisibleCount = CHANGELOG_PAGE_SIZE,
+}: {
+  initialVisibleCount?: number;
+}) {
   const { i18n, t } = useTranslation();
   const navigate = useNavigate();
   const listId = useId();
-  const [visibleCount, setVisibleCount] = useState(CHANGELOG_PAGE_SIZE);
+  const [visibleCount, setVisibleCount] = useState(initialVisibleCount);
   const visibleEntries = changelogEntries.slice(0, visibleCount);
   const expanded = visibleCount > CHANGELOG_PAGE_SIZE;
 
@@ -73,6 +77,7 @@ export function UpdateChangelogHistory() {
                   navigate({
                     to: "/whats-new",
                     search: {
+                      historyCount: expanded ? visibleCount : undefined,
                       source: "settings-update",
                       version: entry.version,
                     },
