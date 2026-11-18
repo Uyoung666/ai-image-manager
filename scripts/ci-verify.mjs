@@ -108,6 +108,7 @@ const groups = {
     );
     process.env.AIM_E2E_PREPARE_MODELS = "1";
     npm("run", "test:e2e");
+    node("scripts/release/parallel.mjs", "packaged-library");
   },
 };
 

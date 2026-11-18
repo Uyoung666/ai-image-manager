@@ -7,6 +7,7 @@ import {
   permittedSkip,
   snapshot,
   testsIn,
+  validatePackagedLibraryReport,
   validateReports,
   verifyInput,
 } from "../../../scripts/release/parallel.mjs";
@@ -29,6 +30,30 @@ function fixture() {
 }
 
 describe("parallel release gates", () => {
+  it("requires a real result from the packaged library isolation test", () => {
+    const test = { projectName: "chromium", status: "expected" };
+    const report = {
+      suites: [
+        {
+          specs: [
+            {
+              id: "profile-isolation",
+              file: "src/tests/e2e/library-directory.spec.ts",
+              tests: [test],
+            },
+          ],
+        },
+      ],
+    };
+    expect(validatePackagedLibraryReport(report).status).toBe("expected");
+    test.status = "skipped";
+    expect(() => validatePackagedLibraryReport(report)).toThrow(
+      "must run and pass"
+    );
+    expect(() => validatePackagedLibraryReport({ suites: [] })).toThrow(
+      "must run and pass"
+    );
+  });
   it("allows only the existing fixture-dependent skips", () => {
     expect(
       permittedSkip({

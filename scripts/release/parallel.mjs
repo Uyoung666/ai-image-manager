@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { collectFileRecords } from "./checksums.mjs";
+import { compareVersions } from "./semver.mjs";
 
 const read = async (file) => JSON.parse(await fs.readFile(file, "utf8"));
 const write = async (file, value) => {
@@ -10,6 +11,7 @@ const write = async (file, value) => {
   await fs.writeFile(file, JSON.stringify(value, null, 2));
 };
 const manifestName = "release-input.json";
+const PACKAGED_LIBRARY_TEST = "@packaged-library";
 
 export function testsIn(report) {
   const tests = [];
@@ -142,6 +144,48 @@ function playwright(app, args, env = process.env, live = false) {
   return result.stdout;
 }
 
+export function validatePackagedLibraryReport(report) {
+  const tests = testsIn(report);
+  if (
+    report.errors?.length ||
+    tests.length !== 1 ||
+    !["expected", "flaky"].includes(tests[0].status) ||
+    path.basename(tests[0].file) !== "library-directory.spec.ts"
+  ) {
+    throw new Error("Packaged library isolation test must run and pass");
+  }
+  return tests[0];
+}
+
+async function testPackagedLibrary(app) {
+  const { version, productName } = await read(path.join(app, "package.json"));
+  if (compareVersions(version, "2.2.11") < 0) {
+    return;
+  }
+  const executable = path.join(
+    app,
+    "out",
+    `${productName}-win32-x64`,
+    "ai-image-manager.exe"
+  );
+  await fs.access(executable);
+  const report = playwright(
+    app,
+    [
+      "src/tests/e2e/library-directory.spec.ts",
+      "--grep",
+      PACKAGED_LIBRARY_TEST,
+      "--workers=1",
+      "--reporter=json",
+    ],
+    { ...process.env, AIM_PACKAGED_E2E_EXECUTABLE: executable }
+  );
+  const test = validatePackagedLibraryReport(JSON.parse(report));
+  console.log(
+    `Packaged library isolation: ${test.status} (${test.duration}ms)`
+  );
+}
+
 const SHARD_NAME = /^release-shard-(\d+)-(\d+)-(\d+)$/;
 
 export async function latestReports(directory, identity, runId) {
@@ -169,6 +213,10 @@ export async function latestReports(directory, identity, runId) {
 async function main() {
   const [operation, appArg = ".", shardArg] = process.argv.slice(2);
   const app = path.resolve(appArg);
+  if (operation === "packaged-library") {
+    await testPackagedLibrary(app);
+    return;
+  }
   const context = await read(process.env.RELEASE_CONTEXT);
   const identity = {
     commit: context.commit,
@@ -177,7 +225,14 @@ async function main() {
   };
   if (operation === "stage") {
     const expected = testsIn(
-      JSON.parse(playwright(app, ["--list", "--reporter=json"]))
+      JSON.parse(
+        playwright(app, [
+          "--list",
+          "--grep-invert",
+          PACKAGED_LIBRARY_TEST,
+          "--reporter=json",
+        ])
+      )
     );
     await write(
       path.join(app, ".vite/release-tests.json"),
@@ -195,7 +250,13 @@ async function main() {
     const started = Date.now();
     playwright(
       app,
-      ["--workers=1", `--shard=${shard}/4`, "--reporter=line,json,blob"],
+      [
+        "--workers=1",
+        `--shard=${shard}/4`,
+        "--grep-invert",
+        PACKAGED_LIBRARY_TEST,
+        "--reporter=line,json,blob",
+      ],
       {
         ...process.env,
         PLAYWRIGHT_JSON_OUTPUT_FILE: path.join(output, "results.json"),

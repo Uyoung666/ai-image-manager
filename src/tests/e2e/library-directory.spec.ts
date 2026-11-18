@@ -299,7 +299,9 @@ test("keeps the onboarding library picker compact and inside the window", async 
   }
 });
 
-test("starts a fresh development profile alongside a release profile and reuses both", async () => {
+test("starts a fresh development profile alongside a release profile and reuses both", {
+  tag: "@packaged-library",
+}, async () => {
   test.setTimeout(240_000);
   test.skip(
     !process.env.AIM_PACKAGED_E2E_EXECUTABLE,

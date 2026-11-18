@@ -224,6 +224,7 @@ describe("stable release workflow gates", () => {
     const stage = names.indexOf("Stage verified release inputs");
     for (const name of [
       "Gate - packaged Japanese locale installation",
+      "Gate - packaged library profile isolation",
       "Gate - real Electron GitHub update download and resume",
       "Verify Squirrel and WiX release payload",
     ]) {

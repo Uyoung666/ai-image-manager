@@ -261,6 +261,8 @@ jobs:
       if: inputs.source_run_id == ''
       working-directory: app
       run: npx playwright install chromium --with-deps
+    - name: Gate - packaged library profile isolation
+      run: node tooling/scripts/release/parallel.mjs packaged-library app
     - name: Gate - real Electron GitHub update download and resume
       if: inputs.source_run_id == ''
       working-directory: app
