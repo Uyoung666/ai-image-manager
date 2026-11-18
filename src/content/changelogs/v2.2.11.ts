@@ -28,6 +28,14 @@ const changelog: ChangelogEntry = {
         en: "The title bar shows background library checks. Update settings show the last attempt and last successful check separately, and reveal older release notes in batches.",
       },
     },
+    {
+      icon: "zap",
+      title: { zh: "改善更新检查的可靠性", en: "Improve update checks" },
+      description: {
+        zh: "GitHub API 限流时尝试通过官方下载入口获取更新清单。已选定版本的清单要求等待时，显示倒计时并在到期后重试同一版本。",
+        en: "Try the official download endpoint for the update manifest when the GitHub API rate-limits requests. If the selected release asks you to wait, a countdown shows when you can retry that same release.",
+      },
+    },
   ],
 };
 

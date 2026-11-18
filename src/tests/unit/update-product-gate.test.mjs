@@ -19,15 +19,56 @@ import {
   isolateHistoricalMsiControl,
   readProductStartupCrash,
   repackTestSuccessorArchive,
+  verifyMetadataFallback,
   verifyProductDownload,
 } from "../../../scripts/release/update-product-gate.mjs";
 import {
   certificatePowerShellScript,
   createProductUpdateProxy,
   isDisposableWindowsRunner,
+  PRODUCT_LATEST_MANIFEST,
+  PRODUCT_RELEASE_LIST,
   selectProductRequest,
 } from "../../../scripts/release/update-product-proxy.mjs";
 import { TestRuntime } from "../helpers/test-runtime";
+
+it("verifies the hosted candidate's official manifest route after an API limit", () => {
+  const manifest = { tag: "v2.2.12", packages: {} };
+  const list = {
+    host: "api.github.com",
+    url: `${PRODUCT_RELEASE_LIST}?per_page=100`,
+  };
+  const latest = { host: "github.com", url: PRODUCT_LATEST_MANIFEST };
+  const limited = selectProductRequest(list.host, list.url, manifest, true);
+  const redirect = selectProductRequest(
+    latest.host,
+    latest.url,
+    manifest,
+    true
+  );
+  expect(limited).toMatchObject({
+    status: 429,
+    headers: { "retry-after": "60" },
+  });
+  expect(redirect).toEqual({
+    status: 302,
+    headers: {
+      location:
+        "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.12/update-manifest.json",
+    },
+  });
+  const trace = [
+    { ...list, status: limited.status },
+    { ...latest, status: redirect.status },
+  ];
+  expect(() => verifyMetadataFallback(trace)).not.toThrow();
+  expect(() => verifyMetadataFallback(trace.slice(0, 1))).toThrow(
+    "rate limiting"
+  );
+  expect(() => verifyMetadataFallback(trace.toReversed())).toThrow(
+    "rate limiting"
+  );
+});
 
 const identity = {
   version: "2.2.7",

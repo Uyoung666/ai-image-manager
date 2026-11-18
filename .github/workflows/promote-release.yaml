@@ -21,4 +21,5 @@ jobs:
     with:
       version: ${{ inputs.version }}
       source_run_id: ${{ inputs.source_run_id }}
+      publish_release: true
     secrets: inherit

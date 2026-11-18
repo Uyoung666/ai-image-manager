@@ -6,8 +6,16 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { finished } from "node:stream/promises";
 import { promisify } from "node:util";
+import {
+  expectedIncomingMethod,
+  requiresMetadataFallback,
+} from "./acceptance.mjs";
 import { sha256File } from "./checksums.mjs";
-import { createProductUpdateProxy } from "./update-product-proxy.mjs";
+import {
+  createProductUpdateProxy,
+  PRODUCT_LATEST_MANIFEST,
+  PRODUCT_RELEASE_LIST,
+} from "./update-product-proxy.mjs";
 
 const LEADING_PATH_SEPARATOR = /^[/\\]/;
 const CONTINUE_BUTTON = /^(继续|Continue)$/;
@@ -372,6 +380,17 @@ export async function verifyProductDownload(
   ) {
     throw new Error("Delta upgrade requested the full fallback package");
   }
+  const delta = manifest.packages.delta;
+  if (
+    method === "full" &&
+    delta &&
+    trace.some(
+      ({ host, url }) =>
+        host === "github.com" && url === new URL(delta.url).pathname
+    )
+  ) {
+    throw new Error("Full upgrade requested an unexpected delta package");
+  }
   const installedPackage = path.join(installRoot, "packages", info.filename);
   if (
     (await fsp.stat(installedPackage)).size !== info.size ||
@@ -382,6 +401,30 @@ export async function verifyProductDownload(
     );
   }
   return { updateMethod: method, downloadedPackageSha256: info.sha256 };
+}
+
+export function verifyMetadataFallback(trace) {
+  const limited = trace.findIndex(
+    ({ host, url, status }) =>
+      host === "api.github.com" &&
+      url.split("?")[0] === PRODUCT_RELEASE_LIST &&
+      status === 429
+  );
+  if (
+    limited === -1 ||
+    !trace
+      .slice(limited + 1)
+      .some(
+        ({ host, url, status }) =>
+          host === "github.com" &&
+          url === PRODUCT_LATEST_MANIFEST &&
+          status === 302
+      )
+  ) {
+    throw new Error(
+      "Updater did not use the official manifest after API rate limiting"
+    );
+  }
 }
 
 export async function cleanupProductSession(actions, primaryError) {
@@ -520,6 +563,7 @@ async function runUpgrade(
     expectedMethod,
     kind,
     expectInstallFailure,
+    rateLimitAPI = false,
   }
 ) {
   await fsp.mkdir(directory, { recursive: true });
@@ -528,7 +572,8 @@ async function runUpgrade(
   const proxy = await createProductUpdateProxy(
     path.join(directory, "tls"),
     manifest,
-    packages
+    packages,
+    rateLimitAPI
   );
   const reservation = await import("node:net");
   const socket = reservation.createServer();
@@ -667,6 +712,9 @@ async function runUpgrade(
         `Expected ${expectedMethod}, downloaded ${before.updateMethod}`
       );
     }
+    if (rateLimitAPI) {
+      verifyMetadataFallback(proxy.trace);
+    }
     stage = "install and automatic restart";
     const reproduced = await installThroughProduct(
       browser,
@@ -750,6 +798,8 @@ async function runUpgrade(
       targetVersion: manifest.version,
       confirmed: expectConfirmation,
       standardUser: true,
+      sourceVersion: path.basename(path.dirname(executable)).slice(4),
+      ...(rateLimitAPI ? { metadataSource: "asset-fallback" } : {}),
       ...download,
       actualProcess: targetProcess,
       sourceExecutableSha256,
@@ -896,7 +946,11 @@ export async function runProductUpgradeChain(
     {
       expectConfirmation: true,
       seedAlbum: !retentionPrepared,
-      expectedMethod: candidate.packages.delta ? undefined : "full",
+      expectedMethod: expectedIncomingMethod(
+        candidate,
+        path.basename(path.dirname(executable)).slice(4),
+        kind === "setup" || Boolean(history)
+      ),
       kind,
     }
   );
@@ -1134,7 +1188,12 @@ async function finishProductChain({
       Object.values(next).map(({ info, file }) => [info.filename, file])
     ),
     path.join(directory, "second"),
-    { expectConfirmation: true, expectedMethod: method, kind }
+    {
+      expectConfirmation: true,
+      expectedMethod: method,
+      kind,
+      rateLimitAPI: requiresMetadataFallback(candidateVersion),
+    }
   );
   if (
     (await fsp.readFile(

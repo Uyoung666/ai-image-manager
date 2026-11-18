@@ -14,15 +14,30 @@ const BYTE_RANGE = /^bytes=\d+-$/;
 const execute = promisify(execFile);
 const hosts = new Set(["github.com", "api.github.com"]);
 const repository = "/Uyoung666/ai-image-manager";
-export function selectProductRequest(host, url, manifest) {
+export const PRODUCT_RELEASE_LIST = `/repos${repository}/releases`;
+export const PRODUCT_LATEST_MANIFEST = `${repository}/releases/latest/download/update-manifest.json`;
+
+export function selectProductRequest(
+  host,
+  url,
+  manifest,
+  rateLimitAPI = false
+) {
   if (!hosts.has(host)) {
     return null;
   }
   const parsed = new URL(url, `https://${host}`);
-  if (
-    host === "api.github.com" &&
-    parsed.pathname === `/repos${repository}/releases`
-  ) {
+  if (host === "api.github.com" && parsed.pathname === PRODUCT_RELEASE_LIST) {
+    if (rateLimitAPI) {
+      return {
+        status: 429,
+        headers: {
+          "content-type": "application/json",
+          "retry-after": "60",
+        },
+        json: { message: "API rate limit exceeded" },
+      };
+    }
     return {
       json: [
         {
@@ -33,6 +48,12 @@ export function selectProductRequest(host, url, manifest) {
     };
   }
   const base = `${repository}/releases/download/${manifest.tag}/`;
+  if (host === "github.com" && parsed.pathname === PRODUCT_LATEST_MANIFEST) {
+    return {
+      status: 302,
+      headers: { location: `https://github.com${base}update-manifest.json` },
+    };
+  }
   if (host !== "github.com" || !parsed.pathname.startsWith(base)) {
     return null;
   }
@@ -121,7 +142,8 @@ async function serveProductPackage(request, response, info, file) {
 export async function createProductUpdateProxy(
   directory,
   manifest,
-  packageFiles
+  packageFiles,
+  rateLimitAPI = false
 ) {
   if (!isDisposableWindowsRunner(process.platform, process.env)) {
     throw new Error(
@@ -188,12 +210,14 @@ export async function createProductUpdateProxy(
           const selected = selectProductRequest(
             request.headers.host,
             request.url,
-            manifest
+            manifest,
+            activated && rateLimitAPI
           );
           trace.push({
             host: request.headers.host,
             url: request.url,
             range: request.headers.range,
+            status: selected?.status ?? (selected ? 200 : 404),
           });
           if (!selected) {
             response.writeHead(404).end();
@@ -204,8 +228,17 @@ export async function createProductUpdateProxy(
             response.end("[]");
             return;
           }
+          if (selected.status) {
+            response.writeHead(selected.status, selected.headers);
+          }
+          if (selected.status === 302) {
+            response.end();
+            return;
+          }
           if (selected.json) {
-            response.setHeader("content-type", "application/json");
+            if (!selected.status) {
+              response.setHeader("content-type", "application/json");
+            }
             response.end(JSON.stringify(selected.json));
             return;
           }

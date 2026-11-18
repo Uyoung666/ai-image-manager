@@ -271,22 +271,26 @@ describe("stable release workflow gates", () => {
     expect(jobs.github.if).toContain("!inputs.validate_only");
     for (const trigger of ["workflow_dispatch", "workflow_call"]) {
       expect(workflow.on[trigger].inputs.validate_only.default).toBe(false);
+      expect(workflow.on[trigger].inputs.publish_release.default).toBe(false);
     }
   });
 
   it("publishes only after all gates and reuses one verified bundle download", () => {
-    expect(jobs.github.needs).toEqual(["preflight", "package", "accept"]);
-    expect(jobs.github.if).toContain("needs.accept.result == 'success'");
+    expect(jobs.github.needs).toBe("preflight");
+    expect(jobs.github.if).toContain(
+      "inputs.publish_release && inputs.source_run_id != ''"
+    );
+    expect(jobs.github.if).toContain("needs.preflight.result == 'success'");
     expect(jobs.github.if).toContain("!inputs.prepare_candidate");
     const steps = jobs.github.steps;
     expect(
       steps.filter((step) => step.with?.path === "release-bundle")
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
       steps.some((step) => step.run?.includes("release-pipeline.mjs recover"))
     ).toBe(true);
     const verify = steps.findIndex(
-      (step) => step.name === "Verify immutable bundle and attestation"
+      (step) => step.name === "Verify and recover original release bundle"
     );
     const stage = steps.findIndex((step) => step.run?.includes("github-stage"));
     const publish = steps.findIndex((step) =>

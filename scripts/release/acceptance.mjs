@@ -1,6 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
+import { compareVersions } from "./semver.mjs";
 
-export const RELEASE_GATE_VERSION = 1;
+export const RELEASE_GATE_VERSION = 2;
+export const CURRENT_MSI_HISTORY = "msi-history-current";
 export const UPGRADE_SCENARIOS = [
   "setup-full",
   "setup-delta",
@@ -12,9 +14,35 @@ export const UPGRADE_SCENARIOS = [
 ];
 
 export function requiredUpgradeScenarios(manifest) {
+  if (
+    manifest.releaseGateVersion === RELEASE_GATE_VERSION &&
+    manifest.upgradeFixtures &&
+    compareVersions(manifest.baseline.version, "2.2.10") >= 0
+  ) {
+    return [...UPGRADE_SCENARIOS, CURRENT_MSI_HISTORY];
+  }
   return manifest.upgradeFixtures
     ? UPGRADE_SCENARIOS
     : ["setup-full", "msi-full"];
+}
+
+export function expectedIncomingMethod(candidate, sourceVersion, hasBaseline) {
+  return hasBaseline && candidate.packages.delta?.fromVersion === sourceVersion
+    ? "delta"
+    : "full";
+}
+
+function sourceVersionForScenario(scenario, manifest) {
+  switch (scenario) {
+    case "setup-delta":
+    case "msi-delta":
+    case "msi-history-228":
+      return "2.2.8";
+    case "msi-history-229":
+      return "2.2.9";
+    default:
+      return manifest.baseline.version;
+  }
 }
 const digestPrefix = /^sha256:/;
 const sha256Pattern = /^[0-9a-f]{64}$/;
@@ -25,9 +53,13 @@ export function validateInstallerReport(
   report,
   scenario,
   manifest,
-  bundleSha256
+  bundleSha256,
+  updateManifest
 ) {
-  const method = scenario.endsWith("-delta") ? "delta" : "full";
+  const method =
+    scenario.endsWith("-delta") || scenario === CURRENT_MSI_HISTORY
+      ? "delta"
+      : "full";
   if (
     report?.scenario !== scenario ||
     report.status !== "passed" ||
@@ -51,34 +83,109 @@ export function validateInstallerReport(
     throw new Error(`Missing or mismatched product upgrade: ${scenario}`);
   }
   if (scenario.includes("-history-")) {
-    const history = report.product.history;
-    const version = scenario.endsWith("228") ? "2.2.8" : "2.2.9";
+    validateMsiHistory(report.product, scenario, manifest);
+  }
+  if (manifest.releaseGateVersion === RELEASE_GATE_VERSION) {
+    const { first, second } = report.product;
+    const source = sourceVersionForScenario(scenario, manifest);
+    const expected = expectedIncomingMethod(
+      updateManifest,
+      source,
+      scenario.startsWith("setup-") || Boolean(report.product.history)
+    );
     if (
-      history?.standardUser !== true ||
-      history.targetVersion !== version ||
-      history.updateMethod !== "full" ||
-      history.targetExecutableSha256 !==
-        report.product.first.sourceExecutableSha256
+      first.sourceVersion !== source ||
+      first.updateMethod !== expected ||
+      first.downloadedPackageSha256 !==
+        updateManifest.packages[expected].sha256 ||
+      second.sourceVersion !== manifest.version ||
+      (requiresMetadataFallback(manifest.version) &&
+        second.metadataSource !== "asset-fallback")
     ) {
-      throw new Error(`Missing verified MSI installation history: ${scenario}`);
-    }
-    if (
-      manifest.version === "2.2.10" &&
-      scenario === "msi-history-228" &&
-      (history.negativeControl?.status !== "reproduced" ||
-        history.negativeControl.profileIsolated !== true ||
-        history.negativeControl.sourceExecutableSha256 !==
-          history.targetExecutableSha256)
-    ) {
-      throw new Error("Original MSI incremental failure was not reproduced");
+      throw new Error(`Unexpected update route or package: ${scenario}`);
     }
   }
 }
 
-export function validateAcceptance(proof, manifest, bundleSha256, artifact) {
+function validateMsiHistory({ first, history }, scenario, manifest) {
+  const version = sourceVersionForScenario(scenario, manifest);
   if (
-    proof?.schemaVersion !== RELEASE_GATE_VERSION ||
-    manifest.releaseGateVersion !== RELEASE_GATE_VERSION ||
+    history?.standardUser !== true ||
+    history.targetVersion !== version ||
+    history.updateMethod !== "full" ||
+    history.targetExecutableSha256 !== first.sourceExecutableSha256
+  ) {
+    throw new Error(`Missing verified MSI installation history: ${scenario}`);
+  }
+  if (
+    manifest.version === "2.2.10" &&
+    scenario === "msi-history-228" &&
+    (history.negativeControl?.status !== "reproduced" ||
+      history.negativeControl.profileIsolated !== true ||
+      history.negativeControl.sourceExecutableSha256 !==
+        history.targetExecutableSha256)
+  ) {
+    throw new Error("Original MSI incremental failure was not reproduced");
+  }
+}
+
+export function requiresMetadataFallback(version) {
+  return compareVersions(version, "2.2.11") >= 0;
+}
+
+export function formatUpgradeSummary(proof) {
+  const rows = [];
+  for (const report of proof.installers) {
+    if (report.scenario === "manual") {
+      rows.push(
+        `| ZIP / 停用更新器的 MSI | ${proof.baseline.version} → ${proof.version} | 手动升级 | 启动通过 | 通过 |`
+      );
+      continue;
+    }
+    for (const direction of [
+      report.product.history,
+      report.product.first,
+      report.product.second,
+    ]) {
+      if (!direction) {
+        continue;
+      }
+      const versions = `${direction.sourceVersion} → ${direction.targetVersion}`;
+      const method = direction.updateMethod === "delta" ? "增量" : "全量";
+      const startup = direction.confirmed ? "通过" : "待确认";
+      const restart = direction.secondLaunch === "passed" ? "通过" : "待确认";
+      const retained = direction.dataRetained === "passed" ? "通过" : "待确认";
+      rows.push(
+        `| ${report.scenario} | ${versions} | ${method} | ${startup} / ${restart} | ${retained} |`
+      );
+    }
+  }
+  return [
+    `## v${proof.version} 候选验收`,
+    "",
+    `提交 \`${proof.commit}\` · 候选运行 \`${proof.runId}\``,
+    "",
+    "| 安装场景 | 升级路径 | 实际方式 | 自动启动 / 二次启动 | 数据保留 |",
+    "| --- | --- | --- | --- | --- |",
+    ...rows,
+    "",
+    "隔离测试后继版只用于验证后续升级能力。",
+    "",
+  ].join("\n");
+}
+
+export function validateAcceptance(
+  proof,
+  manifest,
+  bundleSha256,
+  artifact,
+  updateManifest
+) {
+  if (
+    ![1, RELEASE_GATE_VERSION].includes(manifest.releaseGateVersion) ||
+    (requiresMetadataFallback(manifest.version) &&
+      manifest.releaseGateVersion !== RELEASE_GATE_VERSION) ||
+    proof?.schemaVersion !== manifest.releaseGateVersion ||
     proof.version !== manifest.version ||
     proof.commit !== manifest.commit ||
     proof.toolingCommit !== manifest.toolingCommit ||
@@ -118,7 +225,8 @@ export function validateAcceptance(proof, manifest, bundleSha256, artifact) {
       proof.installers.find((report) => report.scenario === scenario),
       scenario,
       manifest,
-      bundleSha256
+      bundleSha256,
+      updateManifest
     );
   }
 }

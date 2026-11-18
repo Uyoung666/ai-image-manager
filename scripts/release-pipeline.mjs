@@ -3,6 +3,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
+  CURRENT_MSI_HISTORY,
+  formatUpgradeSummary,
   RELEASE_GATE_VERSION,
   requiredUpgradeScenarios,
   UPGRADE_SCENARIOS,
@@ -46,6 +48,7 @@ import { startLocalFeed } from "./release/local-feed.mjs";
 import { validateLocaleSmoke } from "./release/locale.mjs";
 import {
   assertBuildAllowed,
+  assertPublicationRequested,
   assertPublishable,
   validationOnly,
 } from "./release/policy.mjs";
@@ -101,8 +104,14 @@ async function fetchText(url) {
 export async function preflight() {
   const validateOnly = validationOnly();
   const prepareCandidate = process.env.PREPARE_CANDIDATE === "true";
+  const publishRelease = process.env.PUBLISH_RELEASE === "true";
   const sourceRunId = process.env.SOURCE_RUN_ID || null;
-  assertBuildAllowed({ validateOnly, sourceRunId, prepareCandidate });
+  assertBuildAllowed({
+    validateOnly,
+    sourceRunId,
+    prepareCandidate,
+    publishRelease,
+  });
   const version = String(process.env.RELEASE_VERSION ?? "")
     .trim()
     .replace(VERSION_PREFIX_PATTERN, "");
@@ -149,6 +158,9 @@ export async function preflight() {
   const source = sourceRunId
     ? await sourceArtifacts(repo(), sourceRunId)
     : null;
+  if (source && compareVersions(version, "2.2.11") >= 0 && !source.candidate) {
+    throw new Error("Publication requires an accepted candidate run");
+  }
   let releaseNotes;
   if (validateOnly) {
     releaseNotes = `仅验证 ${tag} 的构建、测试和安装升级流程，不对外发布。`;
@@ -156,7 +168,12 @@ export async function preflight() {
     releaseNotes = await loadReleaseNotes(identity);
   }
   const existingRelease = await findRelease(repo(), tag);
-  assertBuildAllowed({ validateOnly, sourceRunId, existingRelease });
+  assertBuildAllowed({
+    validateOnly,
+    sourceRunId,
+    existingRelease,
+    publishRelease,
+  });
   const baseline = await resolveGitHubBaseline(version);
   const updateBaseUrl =
     process.env.GITHUB_UPDATE_BASE_URL ?? DEFAULT_UPDATE_BASE;
@@ -192,7 +209,12 @@ export async function preflight() {
     tag,
     commit,
     baseline: baseline.tag,
-    scenarios: JSON.stringify(requiredUpgradeScenarios(config)),
+    scenarios: JSON.stringify(
+      requiredUpgradeScenarios({
+        ...config,
+        releaseGateVersion: RELEASE_GATE_VERSION,
+      })
+    ),
     sourceRunId: sourceRunId ?? "",
   });
   console.log(
@@ -462,7 +484,13 @@ async function recoverAcceptedCandidate(identity, source, recovery, download) {
   const manifest = await verifyBundle(root(), identity);
   assertPublishable(manifest);
   const digest = await sha256File(manifestFile);
-  validateAcceptance(proof, manifest, digest, artifact);
+  validateAcceptance(
+    proof,
+    manifest,
+    digest,
+    artifact,
+    await readCandidateUpdateManifest(manifest)
+  );
   if (
     proof.runId !== String(identity.sourceRunId) ||
     manifest.toolingCommit !== source.run.head_sha ||
@@ -511,6 +539,16 @@ function installerFixture(identity, scenario) {
     return {
       baseline: identity.upgradeFixtures.v228,
       successorMethod: "delta",
+    };
+  }
+  if (scenario === CURRENT_MSI_HISTORY) {
+    return {
+      baseline: identity.upgradeFixtures.v229,
+      successorMethod: "delta",
+      historicalBaseline: JSON.stringify({
+        ...identity.baseline.full,
+        version: identity.baseline.version,
+      }),
     };
   }
   if (scenario?.includes("-history-")) {
@@ -597,7 +635,10 @@ async function runInstallerValidation(
 async function smokeTest(identity) {
   const manifest = await verifyBundle(root(), identity);
   const scenario = process.env.RELEASE_INSTALLER_SCENARIO;
-  if (scenario && !UPGRADE_SCENARIOS.includes(scenario)) {
+  if (
+    scenario &&
+    ![...UPGRADE_SCENARIOS, CURRENT_MSI_HISTORY].includes(scenario)
+  ) {
     throw new Error("Invalid installer scenario");
   }
   if (scenario === "manual") {
@@ -703,11 +744,27 @@ async function smokeTest(identity) {
   });
 }
 
+async function readCandidateUpdateManifest(manifest) {
+  if (manifest.releaseGateVersion !== RELEASE_GATE_VERSION) {
+    return undefined;
+  }
+  const relativePath = "download/update-manifest.json";
+  const file = path.join(root(), relativePath);
+  const record = manifest.files.find(
+    (entry) => entry.relativePath === relativePath
+  );
+  if (!record || (await sha256File(file)) !== record.sha256) {
+    throw new Error("Update manifest does not match the sealed candidate");
+  }
+  return readJson(file);
+}
+
 async function acceptCandidate(identity) {
   const manifestFile = path.join(root(), "bundle.json");
   const manifest = await readJson(manifestFile);
   assertIdentity(manifest, identity);
   const bundleSha256 = await sha256File(manifestFile);
+  const updateManifest = await readCandidateUpdateManifest(manifest);
   const input = path.resolve("inputs");
   const summary = await readJson(path.join(input, "e2e-summary.json"));
   if (
@@ -729,7 +786,13 @@ async function acceptCandidate(identity) {
         "installer-report.json"
       )
     );
-    validateInstallerReport(report, scenario, manifest, bundleSha256);
+    validateInstallerReport(
+      report,
+      scenario,
+      manifest,
+      bundleSha256,
+      updateManifest
+    );
     installers.push(report);
   }
   const localeEvidence = manifest.localeRequired
@@ -790,17 +853,34 @@ async function acceptCandidate(identity) {
     e2eTests: summary.tests,
     installers,
   };
-  validateAcceptance(proof, manifest, bundleSha256);
+  validateAcceptance(proof, manifest, bundleSha256, undefined, updateManifest);
   await writeJson(
     path.join(evidenceRoot(), "candidate-acceptance.json"),
     proof
   );
+  const stepSummary = process.env.GITHUB_STEP_SUMMARY;
+  if (stepSummary) {
+    await fsp.appendFile(
+      stepSummary,
+      `${formatUpgradeSummary(proof)}\n[下载候选产物](https://github.com/${repo()}/actions/runs/${proof.runId}/artifacts/${proof.artifactId})\n`
+    );
+  }
 }
 
 async function verifyPublicationEvidence(identity) {
-  const manifest = await verifyBundle(root(), identity);
   assertPublishable(identity);
+  assertPublicationRequested({
+    publishRelease: process.env.PUBLISH_RELEASE === "true",
+    sourceRunId: identity.sourceRunId,
+  });
+  const manifest = await verifyBundle(root(), identity);
   assertPublishable(manifest);
+  if (
+    compareVersions(manifest.version, "2.2.11") >= 0 &&
+    manifest.releaseGateVersion !== RELEASE_GATE_VERSION
+  ) {
+    throw new Error("Publication requires the current candidate acceptance");
+  }
   const smokeFile = path.join(evidenceRoot(), "smoke-status.json");
   const smoke = await readJson(smokeFile);
   const bundleSha256 = await sha256File(path.join(root(), "bundle.json"));
@@ -809,7 +889,16 @@ async function verifyPublicationEvidence(identity) {
     const proof = await readJson(
       path.join(evidenceRoot(), "candidate-acceptance.json")
     );
-    validateAcceptance(proof, manifest, bundleSha256);
+    validateAcceptance(
+      proof,
+      manifest,
+      bundleSha256,
+      undefined,
+      await readCandidateUpdateManifest(manifest)
+    );
+    if (proof.runId !== identity.sourceRunId) {
+      throw new Error("Acceptance belongs to a different candidate run");
+    }
     if (proof.smokeSha256 !== (await sha256File(smokeFile))) {
       throw new Error("Candidate smoke evidence has changed");
     }

@@ -228,6 +228,7 @@ const STRING_FIELDS = new Set([
   "installerPath",
   "confirmationStartedAt",
   "confirmedAt",
+  "checkReleaseVersion",
   "etag",
   "fallbackReason",
   "installCompletedAt",
@@ -307,8 +308,10 @@ export function isValidUpdateState(value: unknown): value is UpdateStatus {
     return false;
   }
   if (
-    record.version !== undefined &&
-    !STABLE_VERSION.test(String(record.version))
+    [record.version, record.checkReleaseVersion].some(
+      (version) =>
+        version !== undefined && !STABLE_VERSION.test(String(version))
+    )
   ) {
     return false;
   }

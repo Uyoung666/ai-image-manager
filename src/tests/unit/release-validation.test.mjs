@@ -38,9 +38,22 @@ describe("validation-only release isolation", () => {
       assertBuildAllowed({
         validateOnly: false,
         sourceRunId: "123",
+        publishRelease: true,
         existingRelease: {},
       })
     ).not.toThrow();
+  });
+  it("defaults to a candidate and requires an explicit publication with a valid run ID", () => {
+    expect(() => assertBuildAllowed({})).not.toThrow();
+    for (const invalid of [
+      { sourceRunId: "123" },
+      { publishRelease: true },
+      { publishRelease: true, sourceRunId: "abc" },
+      { publishRelease: true, sourceRunId: "123", prepareCandidate: true },
+      { publishRelease: true, sourceRunId: "123", validateOnly: true },
+    ]) {
+      expect(() => assertBuildAllowed(invalid)).toThrow();
+    }
   });
   it("keeps older production identities compatible while refusing validation markers", () => {
     expect(() => assertPublishable({})).not.toThrow();

@@ -1,3 +1,5 @@
+const RUN_ID_PATTERN = /^[1-9]\d*$/;
+
 export function validationOnly(env = process.env) {
   const value = env.VALIDATE_ONLY ?? "false";
   if (!["true", "false"].includes(value)) {
@@ -9,6 +11,7 @@ export function validationOnly(env = process.env) {
 export function assertBuildAllowed({
   validateOnly,
   prepareCandidate,
+  publishRelease = false,
   sourceRunId,
   existingRelease,
 }) {
@@ -22,9 +25,20 @@ export function assertBuildAllowed({
       "Validation-only runs must build from the tag, not recover artifacts"
     );
   }
+  if (publishRelease || sourceRunId) {
+    assertPublicationRequested({ publishRelease, sourceRunId });
+  }
   if (!(validateOnly || sourceRunId) && existingRelease) {
     throw new Error(
       "This version already has release assets; resume its source run instead of rebuilding"
+    );
+  }
+}
+
+export function assertPublicationRequested({ publishRelease, sourceRunId }) {
+  if (publishRelease !== true || !RUN_ID_PATTERN.test(sourceRunId ?? "")) {
+    throw new Error(
+      "Publication requires publish_release and an accepted candidate source_run_id"
     );
   }
 }

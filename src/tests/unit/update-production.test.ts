@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpdateStatus } from "@/types/update";
+import { updateRetrySeconds } from "@/utils/update-presentation";
 import { TestRuntime } from "../helpers/test-runtime";
 
 const mocks = vi.hoisted(() => ({
@@ -320,6 +321,69 @@ describe("manual checks during a server cooldown", () => {
     manager.checkForUpdatesManually();
     await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
     expect(mocks.request).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [429, "UPDATE_RATE_LIMITED"],
+    [503, "UPDATE_SERVICE_UNAVAILABLE"],
+  ])("honors Retry-After for HTTP %i on the selected manifest", async (status, message) => {
+    const now = vi.spyOn(Date, "now");
+    const start = Date.now();
+    try {
+      now.mockReturnValue(start);
+      mocks.request
+        .mockImplementationOnce(() =>
+          metadataResponse(200, [{ tag_name: "v2.2.4" }])
+        )
+        .mockImplementationOnce(() =>
+          metadataResponse(status, {}, { "retry-after": "60" })
+        );
+      manager.checkForUpdatesManually();
+      await vi.waitFor(() =>
+        expect(mocks.state).toMatchObject({
+          phase: "error",
+          message,
+          checkReleaseVersion: "2.2.4",
+          retryAfter: new Date(start + 60_000).toISOString(),
+        })
+      );
+      await reloadManager();
+      now.mockReturnValue(start + 15_000);
+      expect(updateRetrySeconds(mocks.state, Date.now())).toBe(45);
+      expect(manager.checkForUpdatesManually()).toMatchObject({
+        skipped: true,
+      });
+      expect(manager.checkForUpdatesManually()).toMatchObject({
+        skipped: true,
+      });
+      expect(mocks.request).toHaveBeenCalledTimes(2);
+      now.mockReturnValue(start + 60_000);
+      await download();
+      expect(mocks.request).toHaveBeenCalledTimes(3);
+      expect(mocks.request.mock.calls[2][0].url).toBe(
+        mocks.request.mock.calls[1][0].url
+      );
+      expect(mocks.state.checkReleaseVersion).toBeUndefined();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("rejects a valid manifest for a different release after cooldown", async () => {
+    mocks.state = {
+      phase: "error",
+      operation: "check",
+      checkReleaseVersion: "2.2.5",
+      retryAfter: new Date(Date.now() - 1000).toISOString(),
+    };
+    mocks.request.mockImplementationOnce(() => metadataResponse(200, manifest));
+    manager.checkForUpdatesManually();
+    await vi.waitFor(() => expect(mocks.state.phase).toBe("error"));
+    expect(mocks.request).toHaveBeenCalledExactlyOnceWith({
+      method: "GET",
+      url: "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.5/update-manifest.json",
+    });
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
   it("preserves API cooldown across restart while allowing the asset route", async () => {

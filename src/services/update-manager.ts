@@ -982,6 +982,12 @@ function check(userInitiated = false): UpdateResult {
     return { ok: true, skipped: true };
   }
   if (
+    persisted?.checkReleaseVersion &&
+    Date.parse(persisted.retryAfter ?? "") > Date.now()
+  ) {
+    return { ok: true, skipped: true };
+  }
+  if (
     downloadTask ||
     installTask ||
     hasOwnedInstaller() ||
@@ -1084,7 +1090,11 @@ async function checkGitHubUpdate(
   let targetVersion: string | undefined;
   let targetURL: string | undefined;
   try {
-    const metadata = await fetchLatestGitHubRelease();
+    const selectedVersion = recoveryState.checkReleaseVersion;
+    const metadata = await (selectedVersion &&
+    targetComparison(selectedVersion) > 0
+      ? retrySelectedRelease(selectedVersion)
+      : fetchLatestGitHubRelease());
     if (!metadata) {
       activePhase = null;
       broadcast({
@@ -1152,41 +1162,59 @@ async function checkGitHubUpdate(
       downloadTask = null;
     });
     await downloadTask;
-  } catch (error) {
-    activePhase = null;
-    if (error instanceof UpdateRequestError) {
-      recordUpdateDiagnostic({
-        body: error.bodySummary,
-        headers: error.rateHeaders,
-        retryAfter: error.retryAfter,
-        stage: "github-update-check",
-        status: error.status,
-      });
-    } else {
-      recordUpdateDiagnostic({
-        error: error instanceof Error ? error.message : String(error),
-        stage: "github-update-check",
-      });
-    }
-    const message = recordUpdateError(error, "github-update");
-    const retryAfter =
-      getUpdateState().retryAfter ??
-      (error instanceof UpdateRequestError ? error.retryAfter : undefined);
-    broadcast({
-      transactionId: recoveryState.transactionId,
-      cacheRepairs: recoveryState.cacheRepairs,
-      fullFallbackAttempted: recoveryState.fullFallbackAttempted,
-      resumeInstallation: recoveryState.resumeInstallation,
-      version: recoveryState.version,
-      updateMethod: recoveryState.updateMethod,
-      ...(targetURL ? { updateURL: targetURL } : {}),
-      ...(targetVersion ? { version: targetVersion } : {}),
-      message,
-      operation: "check",
-      phase: "error",
-      ...(retryAfter ? { retryAfter } : {}),
+  } catch (failure) {
+    reportGitHubCheckFailure(failure, recoveryState, targetVersion, targetURL);
+  }
+}
+
+function reportGitHubCheckFailure(
+  failure: unknown,
+  recoveryState: UpdatePayload,
+  targetVersion?: string,
+  targetURL?: string
+) {
+  activePhase = null;
+  const selected = failure instanceof SelectedReleaseError ? failure : null;
+  const error = selected ? selected.cause : failure;
+  if (error instanceof UpdateRequestError) {
+    recordUpdateDiagnostic({
+      body: error.bodySummary,
+      headers: error.rateHeaders,
+      retryAfter: error.retryAfter,
+      releaseVersion: selected?.version,
+      stage: "github-update-check",
+      status: error.status,
+    });
+  } else {
+    recordUpdateDiagnostic({
+      error: error instanceof Error ? error.message : String(error),
+      stage: "github-update-check",
     });
   }
+  const message = recordUpdateError(error, "github-update");
+  const retryAfter =
+    getUpdateState().retryAfter ??
+    (error instanceof UpdateRequestError ? error.retryAfter : undefined);
+  broadcast({
+    transactionId: recoveryState.transactionId,
+    cacheRepairs: recoveryState.cacheRepairs,
+    fullFallbackAttempted: recoveryState.fullFallbackAttempted,
+    resumeInstallation: recoveryState.resumeInstallation,
+    version: recoveryState.version,
+    updateMethod: recoveryState.updateMethod,
+    ...(targetURL ? { updateURL: targetURL } : {}),
+    ...(targetVersion ? { version: targetVersion } : {}),
+    message,
+    checkReleaseVersion:
+      retryAfter &&
+      (message === "UPDATE_RATE_LIMITED" ||
+        message === "UPDATE_SERVICE_UNAVAILABLE")
+        ? selected?.version
+        : undefined,
+    operation: "check",
+    phase: "error",
+    ...(retryAfter ? { retryAfter } : {}),
+  });
 }
 
 function fullDownloadTask(task: DownloadTask, reason: string): DownloadTask {
@@ -1407,7 +1435,14 @@ function restoreDownloadTask(
   };
 }
 
-class SelectedReleaseError extends Error {}
+class SelectedReleaseError extends Error {
+  readonly version: string;
+
+  constructor(version: string, cause: unknown) {
+    super("Selected release manifest request failed", { cause });
+    this.version = version;
+  }
+}
 
 function metadataFallbackAllowed(error: unknown): boolean {
   if (error instanceof SelectedReleaseError) {
@@ -1418,6 +1453,15 @@ function metadataFallbackAllowed(error: unknown): boolean {
     "NETWORK_ERROR",
     "UPDATE_SERVICE_UNAVAILABLE",
   ].includes(classifyUpdateError(error));
+}
+
+function retrySelectedRelease(version: string) {
+  const tag = `v${version}`;
+  const cached = getReleaseListCache()?.releases.find(
+    (entry) => entry.tag_name === tag
+  );
+  broadcast({ ...getUpdateState(), lastCheckAttemptAt: nowISO() });
+  return fetchSelectedRelease(tag, cached?.body ?? undefined);
 }
 
 async function fetchLatestGitHubRelease() {
@@ -1507,11 +1551,7 @@ async function fetchLatestGitHubRelease() {
   throw primaryError;
 }
 
-async function fetchLatestGitHubReleaseFromAPI(): Promise<{
-  etag?: string;
-  manifest: GitHubUpdateManifest;
-  release: { body?: string; tag_name: string };
-} | null> {
+async function fetchLatestGitHubReleaseFromAPI() {
   const cache = getReleaseListCache();
   let response = await requestJSON(releaseApiURL(), { etag: cache?.etag });
   if (response.status === 304 && !cache) {
@@ -1539,31 +1579,27 @@ async function fetchLatestGitHubReleaseFromAPI(): Promise<{
   if (!release?.tag_name) {
     return null;
   }
+  return fetchSelectedRelease(release.tag_name, release.body ?? undefined);
+}
+
+async function fetchSelectedRelease(tag: string, body?: string) {
   try {
     const manifestResponse = await requestJSON(
-      releaseAssetURL(
-        GITHUB_UPDATE_REPOSITORY,
-        release.tag_name,
-        "update-manifest.json"
-      )
+      releaseAssetURL(GITHUB_UPDATE_REPOSITORY, tag, "update-manifest.json")
     );
     const manifest = parseUpdateManifest(
       manifestResponse.value,
       GITHUB_UPDATE_REPOSITORY
     );
-    if (manifest.tag !== release.tag_name) {
+    if (manifest.tag !== tag) {
       throw new Error("GitHub release and update manifest do not match");
     }
     return {
-      etag: response.etag,
       manifest,
-      release: { body: release.body ?? undefined, tag_name: release.tag_name },
+      release: { body, tag_name: tag },
     };
   } catch (error) {
-    throw new SelectedReleaseError(
-      error instanceof Error ? error.message : String(error),
-      { cause: error }
-    );
+    throw new SelectedReleaseError(tag.slice(1), error);
   }
 }
 

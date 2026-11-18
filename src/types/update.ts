@@ -36,6 +36,7 @@ export interface UpdateStatus {
   cacheRepairs?: { delta?: boolean; full?: boolean };
   canResume?: boolean;
   canUseFull?: boolean;
+  checkReleaseVersion?: string;
   confirmationStartedAt?: string;
   confirmedAt?: string;
   etag?: string;

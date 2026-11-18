@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  CURRENT_MSI_HISTORY,
+  requiredUpgradeScenarios,
   UPGRADE_SCENARIOS,
   validateAcceptance,
+  validateInstallerReport,
 } from "../../../scripts/release/acceptance.mjs";
 import { validateSourceRun } from "../../../scripts/release/github.mjs";
 
@@ -64,6 +67,71 @@ function acceptance() {
 }
 
 describe("candidate acceptance", () => {
+  it.each([
+    ["setup-full", "delta"],
+    ["msi-full", "full"],
+    [CURRENT_MSI_HISTORY, "delta"],
+  ])("requires the package selected for the actual installation type in %s", (scenario, method) => {
+    const candidate = {
+      ...bundle,
+      releaseGateVersion: 2,
+      version: "2.2.11",
+      baseline: { version: "2.2.10" },
+    };
+    expect(requiredUpgradeScenarios(candidate)).toContain(CURRENT_MSI_HISTORY);
+    const updateManifest = {
+      packages: {
+        full: { sha256: sha },
+        delta: { fromVersion: "2.2.10", sha256: "d".repeat(64) },
+      },
+    };
+    const report = {
+      scenario,
+      status: "passed",
+      buildId: candidate.buildId,
+      bundleSha256: sha,
+      product: {
+        first: {
+          standardUser: true,
+          sourceVersion: "2.2.10",
+          sourceExecutableSha256: sha,
+          targetVersion: "2.2.11",
+          updateMethod: method,
+          downloadedPackageSha256: updateManifest.packages[method].sha256,
+        },
+        second: {
+          standardUser: true,
+          sourceVersion: "2.2.11",
+          updateMethod: scenario === CURRENT_MSI_HISTORY ? "delta" : "full",
+          metadataSource: "asset-fallback",
+        },
+        ...(scenario === CURRENT_MSI_HISTORY
+          ? {
+              history: {
+                standardUser: true,
+                targetVersion: "2.2.10",
+                updateMethod: "full",
+                targetExecutableSha256: sha,
+              },
+            }
+          : {}),
+      },
+    };
+    const validate = () =>
+      validateInstallerReport(report, scenario, candidate, sha, updateManifest);
+    expect(validate).not.toThrow();
+    const alternative = method === "delta" ? "full" : "delta";
+    report.product.first.updateMethod = alternative;
+    report.product.first.downloadedPackageSha256 =
+      updateManifest.packages[alternative].sha256;
+    expect(validate).toThrow("Unexpected update route or package");
+    report.product.first.updateMethod = method;
+    expect(validate).toThrow("Unexpected update route or package");
+    report.product.first.downloadedPackageSha256 =
+      updateManifest.packages[method].sha256;
+    report.product.second.metadataSource = "api";
+    expect(validate).toThrow("Unexpected update route or package");
+  });
   it("rejects an MSI negative control that contaminated the candidate profile or executable", () => {
     const proof = acceptance();
     const control = proof.installers.find(
