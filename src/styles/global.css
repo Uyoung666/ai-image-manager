@@ -680,8 +680,6 @@
   --search-fade-direction: to right;
   --search-fade-start: 0px;
   --search-fade-end: 0px;
-  scrollbar-color: transparent transparent;
-  scrollbar-width: thin;
   -webkit-mask-image: linear-gradient(
     var(--search-fade-direction),
     transparent 0,
@@ -698,27 +696,29 @@
   );
 }
 
-.search-history-scroll {
-  --search-fade-direction: to bottom;
+.search-preset-strip {
+  scrollbar-width: none;
 }
 
-.search-preset-strip::-webkit-scrollbar-thumb,
+.search-history-scroll {
+  --search-fade-direction: to bottom;
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
 .search-history-scroll::-webkit-scrollbar-thumb {
   background: transparent;
 }
 
-.search-preset-strip:hover,
 .search-history-scroll:hover {
   scrollbar-color: color-mix(in srgb, var(--primary) 35%, transparent)
     transparent;
 }
 
-.search-preset-strip:hover::-webkit-scrollbar-thumb,
 .search-history-scroll:hover::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--primary) 30%, transparent);
 }
 
-.search-preset-strip:hover::-webkit-scrollbar-thumb:hover,
 .search-history-scroll:hover::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--primary) 55%, transparent);
 }
@@ -734,12 +734,10 @@
 }
 
 @media (forced-colors: active) {
-  .search-preset-strip:hover,
   .search-history-scroll:hover {
     scrollbar-color: auto;
   }
 
-  .search-preset-strip:hover::-webkit-scrollbar-thumb,
   .search-history-scroll:hover::-webkit-scrollbar-thumb {
     background: ButtonText;
   }

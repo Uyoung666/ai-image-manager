@@ -125,16 +125,7 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
           "City",
         ])
       );
-      localStorage.setItem(
-        "exif-filter-presets",
-        JSON.stringify(
-          Array.from({ length: 10 }, (_, index) => ({
-            name: `Saved search ${index} with a long preset name`,
-            filters: { cameraModel: "Canon" },
-            createdAt: index + 1,
-          }))
-        )
-      );
+      localStorage.removeItem("exif-filter-presets");
       const held: Array<() => void> = [];
       let holding = true;
       const gate = {
@@ -248,9 +239,66 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
       await input.focus();
       const panel = page.locator('[data-overlay-kind="search-suggestions"]');
       await expect(panel).toBeVisible();
+      await expect(panel.locator("[data-search-presets]")).toHaveCount(0);
+      await expect(panel.locator(":scope > :first-child")).toContainText(
+        "Quick dates"
+      );
+      const previousPresets = panel.getByRole("button", {
+        name: "Scroll search presets left",
+      });
+      const nextPresets = panel.getByRole("button", {
+        name: "Scroll search presets right",
+      });
+      await page.evaluate(() => {
+        localStorage.setItem(
+          "exif-filter-presets",
+          JSON.stringify([{ name: "R7", filters: {}, createdAt: 1 }])
+        );
+        window.dispatchEvent(new Event("search-presets-changed"));
+      });
       await expect(
-        panel.getByText("Search presets (10)", { exact: true })
+        panel.getByRole("button", { name: "R7", exact: true })
       ).toBeVisible();
+      await expect(previousPresets).toHaveCount(0);
+      await expect(nextPresets).toHaveCount(0);
+      await page.evaluate(() => {
+        localStorage.setItem(
+          "exif-filter-presets",
+          JSON.stringify(
+            Array.from({ length: 10 }, (_, index) => ({
+              name: `Saved search ${index} with a long preset name`,
+              filters: { cameraModel: "Canon" },
+              createdAt: index + 1,
+            }))
+          )
+        );
+        window.dispatchEvent(new Event("search-presets-changed"));
+      });
+      const presetLabel = panel.getByText("Search presets (10)", {
+        exact: true,
+      });
+      await expect(presetLabel).toBeVisible();
+      const datesLabel = panel.getByText("Quick dates", { exact: true });
+      const presetStrip = panel.locator("[data-search-preset-strip]");
+      await expect(presetStrip).toHaveCSS("scrollbar-width", "none");
+      await expect(previousPresets).toHaveCount(0);
+      await expect(nextPresets).toBeVisible();
+      const presetChip = presetStrip.locator(":scope > div").first();
+      const today = panel.locator("[data-search-action]").first();
+      const [presetLabelBox, datesLabelBox, presetChipBox, todayBox] =
+        await Promise.all([
+          presetLabel.boundingBox(),
+          datesLabel.boundingBox(),
+          presetChip.boundingBox(),
+          today.boundingBox(),
+        ]);
+      expect(presetLabelBox?.x).toBeCloseTo(datesLabelBox?.x ?? -1, 0);
+      expect(presetChipBox?.x).toBeCloseTo(todayBox?.x ?? -1, 0);
+      expect(presetChipBox?.height).toBeCloseTo(todayBox?.height ?? -1, 0);
+      expect(presetLabelBox?.y).toBeGreaterThanOrEqual(presetChipBox?.y ?? -1);
+      expect(presetLabelBox?.y).toBeLessThan(
+        (presetChipBox?.y ?? 0) + (presetChipBox?.height ?? 0)
+      );
       await expect
         .poll(() => page.evaluate(() => window.starterLayoutGate.held))
         .toBeGreaterThan(0);
@@ -330,7 +378,29 @@ test("search starter skeletons, cached rotation and responsive overlay geometry"
       await panel.evaluate((node) => {
         node.scrollTop = 0;
       });
-      const presetStrip = panel.locator("[data-search-preset-strip]");
+      await nextPresets.click();
+      await expect
+        .poll(() => presetStrip.evaluate((node) => node.scrollLeft))
+        .toBeGreaterThan(0);
+      await expect(previousPresets).toBeVisible();
+      await nextPresets.focus();
+      await presetStrip.evaluate((node) => {
+        node.scrollLeft = node.scrollWidth - node.clientWidth - 32;
+      });
+      await nextPresets.press("Enter");
+      await expect(nextPresets).toHaveCount(0);
+      await expect(presetStrip).toBeFocused();
+      const endOffset = await presetStrip.evaluate((node) => node.scrollLeft);
+      await previousPresets.click();
+      await expect
+        .poll(() => presetStrip.evaluate((node) => node.scrollLeft))
+        .toBeLessThan(endOffset);
+      await presetStrip.evaluate((node) => {
+        node.scrollLeft = 0;
+      });
+      await expect(previousPresets).toHaveCount(0);
+      await expect(nextPresets).toBeVisible();
+      await input.focus();
       await presetStrip.locator("[data-search-preset]").first().hover();
       const panelScroll = await panel.evaluate((node) => node.scrollTop);
       await page.mouse.wheel(0, 160);

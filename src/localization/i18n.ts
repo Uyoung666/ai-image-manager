@@ -560,6 +560,8 @@ i18n.use(initReactI18next).init({
           "部分修改无法撤销，后续编辑将保留；其余修改已撤销",
         searchSavePreset: "保存搜索条件",
         searchLoadPresets: "搜索预设 ({{count}})",
+        searchPresetsScrollLeft: "向左滚动搜索预设",
+        searchPresetsScrollRight: "向右滚动搜索预设",
         searchPresetsEmpty:
           "暂无预设。输入关键词或筛选条件后，可保存当前搜索。",
         searchPresetSaveFailed: "无法保存搜索预设，请检查本地存储空间",

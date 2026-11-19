@@ -151,14 +151,36 @@ export function SearchSuggestionsPanel({
       style={{ maxHeight: Math.min(440, floatingPanelMaxHeight) }}
       tabIndex={0}
     >
-      {presetsContent && (
-        <div
-          className="min-w-0 border-border border-b px-3 py-2"
-          data-search-presets
-        >
-          {presetsContent}
-        </div>
-      )}
+      <div className="grid min-w-0 grid-cols-[fit-content(35%)_minmax(0,1fr)] gap-x-2">
+        {presetsContent}
+        {!query.trim() && (
+          <div className="col-span-full grid min-w-0 grid-cols-subgrid items-center gap-x-2 border-border border-b px-3 py-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Clock
+                aria-hidden="true"
+                className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
+              />
+              <span className="wrap-anywhere min-w-0 text-[11px] text-muted-foreground">
+                {t("searchStarterUi.quickTime")}
+              </span>
+            </div>
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 py-0.5">
+              {timePresets.map((preset) => (
+                <button
+                  className="h-6 rounded-[4px] border border-border px-2 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+                  data-search-action
+                  key={preset.label}
+                  onClick={() => onTimePresetSelect(preset)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  type="button"
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
       {query.trim() ? (
         <div className="py-1.5">
           <div className="flex min-w-0 items-center justify-between gap-3 px-3 pb-1.5 font-medium text-[11px] text-muted-foreground">
@@ -182,27 +204,6 @@ export function SearchSuggestionsPanel({
         </div>
       ) : (
         <>
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-border border-b px-3 py-2">
-            <Clock
-              aria-hidden="true"
-              className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
-            />
-            <span className="mr-1 text-[11px] text-muted-foreground">
-              {t("searchStarterUi.quickTime")}
-            </span>
-            {timePresets.map((preset) => (
-              <button
-                className="rounded-[4px] border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
-                data-search-action
-                key={preset.label}
-                onClick={() => onTimePresetSelect(preset)}
-                onMouseDown={(event) => event.preventDefault()}
-                type="button"
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
           <div
             className={cn(
               "grid min-w-0 grid-cols-1",

@@ -2617,6 +2617,8 @@
   "batchTagsUndoConflict": "Some changes could not be undone. Later edits were preserved; other changes were undone.",
   "searchSavePreset": "Save search",
   "searchLoadPresets": "Search presets ({{count}})",
+  "searchPresetsScrollLeft": "Scroll search presets left",
+  "searchPresetsScrollRight": "Scroll search presets right",
   "searchPresetsEmpty": "No presets yet. Enter a query or filters to save this search.",
   "searchPresetSaveFailed": "Could not save the search preset. Check local storage.",
   "albumAlreadyContainsPhotos": "Selected photos are already in “{{album}}”. No duplicates were added.",

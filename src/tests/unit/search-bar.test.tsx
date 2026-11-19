@@ -170,7 +170,20 @@ describe("SearchBar", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps saved search controls inside the search dropdown without a persistent extra row", async () => {
+  it("starts the search dropdown with quick dates when there are no presets or search criteria", async () => {
+    const user = userEvent.setup();
+    render(
+      <ControlledSearchBar
+        searchPresetContext={{ query: "", sort: "name", order: "asc" }}
+      />
+    );
+    await user.click(screen.getByPlaceholderText("搜索文件名、标签或人物"));
+    const panel = screen.getByRole("listbox");
+    expect(panel.firstElementChild).toHaveTextContent("快捷时间");
+    expect(panel.querySelector("[data-search-presets]")).toBeNull();
+  });
+
+  it("shows only the save control until the first search preset is saved", async () => {
     const user = userEvent.setup();
     const apply = vi.fn();
     const context = { query: "Travel", sort: "name", order: "asc" } as const;
@@ -182,14 +195,20 @@ describe("SearchBar", () => {
         searchPresetContext={context}
       />
     );
-    expect(screen.queryByText("搜索预设 (0)")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "保存搜索条件" })
+    ).not.toBeInTheDocument();
     const input = screen.getByPlaceholderText("搜索文件名、标签或人物");
     await user.click(input);
-    const heading = await screen.findByText("搜索预设 (0)");
+    const saveButton = screen.getByRole("button", { name: "保存搜索条件" });
     expect(
-      heading.closest('[data-overlay-kind="search-suggestions"]')
+      saveButton.closest('[data-overlay-kind="search-suggestions"]')
     ).not.toBeNull();
-    await user.click(screen.getByRole("button", { name: "保存搜索条件" }));
+    expect(screen.queryByText("搜索预设 (0)")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("暂无预设。输入关键词或筛选条件后，可保存当前搜索。")
+    ).not.toBeInTheDocument();
+    await user.click(saveButton);
     const name = await screen.findByPlaceholderText(
       "filterPresetNamePlaceholder"
     );
@@ -198,6 +217,7 @@ describe("SearchBar", () => {
     expect(readFilterPresets()).toMatchObject([
       { name: "Travel preset", filters: { creator: "Jane" }, search: context },
     ]);
+    expect(screen.getByText("搜索预设 (1)")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Travel preset" }));
     expect(apply).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Travel preset", search: context })
@@ -223,7 +243,9 @@ describe("SearchBar", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
     expect(input).toHaveFocus();
     expect(input).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("搜索预设 (0)")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "保存搜索条件" })
+    ).toBeInTheDocument();
 
     act(() => outside.focus());
     await act(() => new Promise((resolve) => setTimeout(resolve, 200)));

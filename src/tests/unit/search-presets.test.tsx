@@ -193,6 +193,10 @@ it("fades only the sides with hidden presets and clears the fade when everything
   fireEvent.scroll(strip);
   expect(strip).toHaveAttribute("data-left-fade", "true");
   expect(strip).toHaveAttribute("data-right-fade", "false");
+  Object.defineProperty(strip.parentElement, "clientWidth", { value: 300 });
+  fireEvent.scroll(strip);
+  expect(strip).toHaveAttribute("data-left-fade", "false");
+  expect(strip).toHaveAttribute("data-right-fade", "false");
   Object.defineProperty(strip, "clientWidth", { value: 400 });
   strip.scrollLeft = 0;
   fireEvent.scroll(strip);

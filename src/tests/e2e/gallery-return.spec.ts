@@ -1026,11 +1026,7 @@ for (const size of SIZES) {
     const strip = page.locator("[data-search-preset-strip]");
     await expect(strip).toBeVisible();
     await page.mouse.move(0, 0);
-    await expect(strip).toHaveCSS("scrollbar-width", "thin");
-    await expect(strip).toHaveCSS(
-      "scrollbar-color",
-      "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)"
-    );
+    await expect(strip).toHaveCSS("scrollbar-width", "none");
     await expect(strip).toHaveAttribute("data-left-fade", "false");
     await expect(strip).toHaveAttribute("data-right-fade", "true");
     await expect(strip.locator("[data-search-preset]").first()).toHaveAttribute(
@@ -1080,10 +1076,7 @@ for (const size of SIZES) {
     await saveWindowScreenshot("search-presets-tooltip.png");
     await page.mouse.move(0, 0);
     await strip.hover();
-    await expect(strip).not.toHaveCSS(
-      "scrollbar-color",
-      "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)"
-    );
+    await expect(strip).toHaveCSS("scrollbar-width", "none");
     await saveWindowScreenshot("search-presets-hover.png");
     await page.mouse.wheel(600, 0);
     await expect
@@ -1099,10 +1092,7 @@ for (const size of SIZES) {
     await expect(strip).toHaveAttribute("data-right-fade", "false");
     await saveWindowScreenshot("search-presets-end.png");
     await page.mouse.move(0, 0);
-    await expect(strip).toHaveCSS(
-      "scrollbar-color",
-      "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)"
-    );
+    await expect(strip).toHaveCSS("scrollbar-width", "none");
     await strip
       .getByRole("button", { name: `Search-${size.width}`, exact: true })
       .focus();

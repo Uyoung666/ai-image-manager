@@ -2617,6 +2617,8 @@
   "batchTagsUndoConflict": "一部の変更を取り消せませんでした。後の編集を保持し、その他の変更を取り消しました。",
   "searchSavePreset": "検索条件を保存",
   "searchLoadPresets": "検索プリセット ({{count}})",
+  "searchPresetsScrollLeft": "検索プリセットを左にスクロール",
+  "searchPresetsScrollRight": "検索プリセットを右にスクロール",
   "searchPresetsEmpty": "プリセットはありません。キーワードや条件を入力して検索を保存できます。",
   "searchPresetSaveFailed": "検索プリセットを保存できませんでした。ローカルストレージを確認してください。",
   "albumAlreadyContainsPhotos": "選択した写真はすでに「{{album}}」にあります。重複して追加しませんでした。",

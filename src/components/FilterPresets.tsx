@@ -1,4 +1,4 @@
-import { Save, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -109,6 +109,60 @@ function restorePreset(
   return restored;
 }
 
+function scrollSuggestionsAtStripEdge(
+  strip: HTMLElement,
+  event: WheelEvent,
+  unit: number
+) {
+  if (strip.scrollWidth <= strip.clientWidth) {
+    return;
+  }
+  const panel = strip.closest<HTMLElement>("#search-suggestions-listbox");
+  if (!panel) {
+    return;
+  }
+  const previousTop = panel.scrollTop;
+  const verticalUnit = event.deltaMode === 2 ? panel.clientHeight : unit;
+  panel.scrollTop += event.deltaY * verticalUnit;
+  if (panel.scrollTop !== previousTop) {
+    event.preventDefault();
+  }
+}
+
+function PresetScrollButton({
+  direction,
+  label,
+  onClick,
+  visible,
+}: {
+  direction: "left" | "right";
+  label: string;
+  onClick: () => void;
+  visible: boolean;
+}) {
+  if (!visible) {
+    return null;
+  }
+  const Icon = direction === "left" ? ChevronLeft : ChevronRight;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-label={label}
+          className="grid h-6 w-6 max-w-[20%] shrink-0 place-items-center rounded-[4px] text-muted-foreground hover:bg-foreground/8 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          data-preset-scroll={direction}
+          onClick={onClick}
+          onMouseDown={(event) => event.preventDefault()}
+          type="button"
+        >
+          <Icon aria-hidden="true" className="h-4 w-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function FilterPresets({
   currentFilters,
   currentSearch,
@@ -142,11 +196,24 @@ export function FilterPresets({
 
   const updateStripFade = useCallback(() => {
     const strip = stripRef.current;
-    if (!strip) {
+    const area = strip?.parentElement;
+    if (!(strip && area)) {
       return;
     }
-    const left = strip.scrollLeft > 2;
-    const right = strip.scrollWidth - strip.scrollLeft - strip.clientWidth > 2;
+    // Include the space occupied by arrows so they disappear when all presets fit.
+    const overflows = strip.scrollWidth - area.clientWidth > 2;
+    const left = overflows && strip.scrollLeft > 2;
+    const right =
+      overflows && strip.scrollWidth - strip.scrollLeft - strip.clientWidth > 2;
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      area.contains(active) &&
+      ((active.dataset.presetScroll === "left" && !left) ||
+        (active.dataset.presetScroll === "right" && !right))
+    ) {
+      strip.focus({ preventScroll: true });
+    }
     setStripFade((previous) =>
       previous.left === left && previous.right === right
         ? previous
@@ -178,6 +245,8 @@ export function FilterPresets({
       // Native clamping preserves fractional scroll limits under display scaling.
       strip.scrollLeft += event.deltaY * unit;
       if (strip.scrollLeft === previousScroll) {
+        // Chromium can stop the wheel at the strip edge in a scaled window.
+        scrollSuggestionsAtStripEdge(strip, event, unit);
         return;
       }
       event.preventDefault();
@@ -195,6 +264,15 @@ export function FilterPresets({
       observer?.disconnect();
     };
   }, [presentation, presets, updateStripFade]);
+
+  function scrollPresets(direction: -1 | 1) {
+    const strip = stripRef.current;
+    if (strip) {
+      // Keep a little of the current view visible so users can continue scanning.
+      strip.scrollLeft += direction * Math.max(1, strip.clientWidth * 0.85);
+      updateStripFade();
+    }
+  }
 
   function handleSave() {
     if (!presetName.trim()) {
@@ -280,6 +358,11 @@ export function FilterPresets({
     !!(currentSearch?.query.trim() || currentSearch?.colorHex) ||
     Object.values(currentFilters).some((v) => v && v.length > 0);
   const inline = presentation === "inline";
+  const hasPresets = presets.length > 0;
+  if (inline && !(hasPresets || hasActiveFilters)) {
+    return null;
+  }
+
   const sortedPresets = [...presets].sort(
     (a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)
   );
@@ -288,7 +371,7 @@ export function FilterPresets({
       className={cn(
         "flex min-w-0 items-center justify-between rounded-[4px] hover:bg-foreground/5",
         inline
-          ? "max-w-[min(14rem,70vw)] shrink-0 border border-border bg-secondary/40 pr-1"
+          ? "h-6 max-w-[min(14rem,70vw)] shrink-0 border border-border bg-secondary/40 pr-1"
           : "px-2 py-1"
       )}
       key={preset.name}
@@ -296,7 +379,7 @@ export function FilterPresets({
       <SearchTextButton
         className={cn(
           "min-w-0 flex-1 truncate text-left text-[12px] text-foreground",
-          inline && "px-2.5 py-1.5"
+          inline && "self-stretch px-2.5"
         )}
         data-search-preset={preset.name}
         onClick={() => {
@@ -319,7 +402,7 @@ export function FilterPresets({
             aria-label={inline ? `${t("delete")} ${preset.name}` : t("delete")}
             className={cn(
               "ml-1 shrink-0 text-muted-foreground/70 hover:text-destructive",
-              inline && "rounded-[3px] p-1.5"
+              inline && "flex items-center self-stretch rounded-[3px] px-1.5"
             )}
             onClick={() => handleDelete(preset.name)}
             type="button"
@@ -337,17 +420,55 @@ export function FilterPresets({
   return (
     <div
       className={cn(
-        "flex min-w-0 gap-2",
-        inline ? "w-full max-w-full flex-col" : "flex-wrap items-center"
+        "min-w-0 items-center gap-2",
+        inline
+          ? "col-span-full grid grid-cols-subgrid border-border border-b px-3 py-1.5"
+          : "flex flex-wrap"
       )}
+      data-search-presets={inline || undefined}
       ref={inlineTooltipRef}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        {inline && (
-          <div className="mr-auto flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-[11px] text-muted-foreground">
-              {t("searchLoadPresets", { count: presets.length })}
-            </span>
+      {inline && hasPresets && (
+        <div className="min-w-0 pl-5">
+          <span className="wrap-anywhere text-[11px] text-muted-foreground">
+            {t("searchLoadPresets", { count: presets.length })}
+          </span>
+        </div>
+      )}
+      <div
+        className={cn(
+          "flex min-w-0 flex-wrap items-center gap-2",
+          inline && !hasPresets && "col-span-full"
+        )}
+      >
+        {inline && hasPresets && (
+          <div className="flex min-w-0 flex-1 items-center">
+            <TooltipPortalProvider containerRef={inlineTooltipRef}>
+              <PresetScrollButton
+                direction="left"
+                label={t("searchPresetsScrollLeft")}
+                onClick={() => scrollPresets(-1)}
+                visible={stripFade.left}
+              />
+              <section
+                aria-label={t("searchLoadPresets", { count: presets.length })}
+                className="search-preset-strip flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain py-0.5"
+                data-left-fade={stripFade.left}
+                data-right-fade={stripFade.right}
+                data-search-preset-strip
+                onScroll={updateStripFade}
+                ref={stripRef}
+                tabIndex={-1}
+              >
+                {presetItems}
+              </section>
+              <PresetScrollButton
+                direction="right"
+                label={t("searchPresetsScrollRight")}
+                onClick={() => scrollPresets(1)}
+                visible={stripFade.right}
+              />
+            </TooltipPortalProvider>
           </div>
         )}
         {/* Save preset button */}
@@ -363,7 +484,10 @@ export function FilterPresets({
           >
             <PopoverTrigger asChild>
               <button
-                className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
+                className={cn(
+                  "flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground",
+                  inline && hasPresets && "wrap-anywhere max-w-1/2"
+                )}
                 type="button"
               >
                 <Save className="h-3 w-3" />
@@ -426,27 +550,6 @@ export function FilterPresets({
           </Popover>
         )}
       </div>
-
-      {inline &&
-        (presets.length ? (
-          <section
-            aria-label={t("searchLoadPresets", { count: presets.length })}
-            className="search-preset-strip flex w-full min-w-0 items-center gap-1.5 overflow-x-auto overscroll-x-contain py-1"
-            data-left-fade={stripFade.left}
-            data-right-fade={stripFade.right}
-            data-search-preset-strip
-            onScroll={updateStripFade}
-            ref={stripRef}
-          >
-            <TooltipPortalProvider containerRef={inlineTooltipRef}>
-              {presetItems}
-            </TooltipPortalProvider>
-          </section>
-        ) : (
-          <p className="text-[12px] text-muted-foreground">
-            {t("searchPresetsEmpty")}
-          </p>
-        ))}
 
       {/* Load preset button */}
       {!inline && (presets.length > 0 || currentSearch) && (
