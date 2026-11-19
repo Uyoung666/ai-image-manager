@@ -1353,6 +1353,7 @@ function PersonDetailPage() {
           <button
             aria-label={t("close")}
             className="absolute inset-0 z-30 border-0 bg-black/20 lg:hidden"
+            data-press-feedback="static"
             onClick={() => {
               clearSequenceFocus();
               sequenceView.setSelectedSequence(null);

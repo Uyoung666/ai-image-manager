@@ -347,6 +347,7 @@ export function FilterDropdown({
                 option.value === value && "bg-foreground/5",
                 index === activeIndex && "bg-foreground/10"
               )}
+              data-press-feedback="row"
               id={`${inputId}-option-${index}`}
               key={option.value || "__empty__"}
               onClick={() => {

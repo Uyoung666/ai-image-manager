@@ -124,6 +124,7 @@ export function SearchHistorySuggestion({
             ? "text-foreground"
             : "text-muted-foreground group-hover:text-foreground"
         )}
+        data-press-feedback="row"
         data-suggestion-index={index}
         id={`search-suggestion-${index}`}
         onClick={onClick}
@@ -168,6 +169,7 @@ export function SearchHistorySuggestion({
           <button
             aria-label={t("searchHistoryUi.remove", { name: label })}
             className="flex w-8 shrink-0 items-center justify-center self-stretch text-muted-foreground hover:bg-foreground/8 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+            data-press-feedback="row"
             data-search-action
             onClick={() => onRemove(entry.id)}
             onMouseDown={(event) => event.preventDefault()}

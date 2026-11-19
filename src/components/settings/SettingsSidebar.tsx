@@ -212,6 +212,7 @@ export function SettingsSidebar() {
                           ? "bg-primary/15 text-primary"
                           : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                       }`}
+                      data-press-feedback="row"
                       onClick={() => {
                         navigate({
                           to: item.to,

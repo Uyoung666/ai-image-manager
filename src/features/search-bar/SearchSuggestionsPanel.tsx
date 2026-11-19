@@ -393,6 +393,7 @@ function SuggestionButton({
           ? "bg-foreground/8 text-foreground"
           : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
       )}
+      data-press-feedback="row"
       data-suggestion-index={index}
       id={`search-suggestion-${index}`}
       onClick={onClick}

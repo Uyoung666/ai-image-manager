@@ -218,6 +218,7 @@ function FolderShortcutRow({
                 : "text-foreground"
             }`}
             data-folder-shortcut-id={folder.id}
+            data-press-feedback="row"
             onClick={onSelect}
             type="button"
           >
@@ -1307,6 +1308,7 @@ export function Sidebar({
                     <IconMotionTrigger asChild>
                       <button
                         className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                        data-press-feedback="row"
                         onClick={showAllFolders}
                         type="button"
                       >
@@ -1413,6 +1415,7 @@ export function Sidebar({
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   }`}
+                  data-press-feedback="row"
                   onClick={() => {
                     onSelectAllPhotos();
                   }}
@@ -1430,6 +1433,7 @@ export function Sidebar({
                         ? "nav-item-active bg-primary/15 text-primary"
                         : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     }`}
+                    data-press-feedback="row"
                     onClick={() => {
                       if (favoriteActive) {
                         return;
@@ -1925,6 +1929,7 @@ export function Sidebar({
             <div className="mx-2 my-1 border-border border-t" />
             <button
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+              data-press-feedback="row"
               onClick={() => {
                 if (togglePinnedFolder(folderCtx.folderId)) {
                   closeCtx();
@@ -1944,6 +1949,7 @@ export function Sidebar({
             <IconMotionTrigger asChild>
               <button
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+                data-press-feedback="row"
                 onClick={() => {
                   setAppearanceFolderId(folderCtx.folderId);
                   closeCtx();
@@ -1957,6 +1963,7 @@ export function Sidebar({
             <IconMotionTrigger asChild>
               <button
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+                data-press-feedback="row"
                 onClick={() => {
                   onDeleteFolder(folderCtx.folderId, folderCtx.displayName);
                   closeCtx();
@@ -2017,6 +2024,7 @@ export function Sidebar({
             <div className="mx-2 my-1 border-border border-t" />
             <button
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+              data-press-feedback="row"
               onClick={() => {
                 setChildTagParent({
                   parentId: tagCtx.tagId,
@@ -2032,6 +2040,7 @@ export function Sidebar({
             <IconMotionTrigger asChild>
               <button
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+                data-press-feedback="row"
                 onClick={() => {
                   setDeleteTagTarget({
                     id: tagCtx.tagId,

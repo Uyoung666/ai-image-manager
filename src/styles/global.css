@@ -545,9 +545,30 @@
   }
 
   /* ── 全局按钮按下反馈（弹簧曲线）─────── */
-  button:active:not(:disabled) {
+  button:active:not(:disabled, [data-press-feedback]) {
     transform: scale(0.96);
     transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+}
+
+/* Keep the hit area fixed while an option, navigation row, or menu item is held. */
+button[data-press-feedback="row"] {
+  transition:
+    background-color 100ms ease-out,
+    color 100ms ease-out;
+}
+
+button[data-press-feedback="row"]:active:not(
+    :disabled,
+    [aria-disabled="true"]
+  ) {
+  background-color: color-mix(in srgb, var(--foreground) 14%, transparent);
+  transition-duration: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button[data-press-feedback="row"] {
+    transition: none;
   }
 }
 

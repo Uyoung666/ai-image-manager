@@ -280,6 +280,7 @@ export function PhotoContextMenu({
       <IconMotionTrigger asChild disabled={!menu.photoPath}>
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          data-press-feedback="row"
           disabled={!menu.photoPath}
           onClick={() => {
             if (menu.photoPath) {
@@ -297,6 +298,7 @@ export function PhotoContextMenu({
       <IconMotionTrigger asChild disabled={!menu.photoPath}>
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          data-press-feedback="row"
           disabled={!menu.photoPath}
           onClick={async () => {
             if (menu.photoPath) {
@@ -319,6 +321,7 @@ export function PhotoContextMenu({
       <IconMotionTrigger asChild disabled={!menu.photoPath}>
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          data-press-feedback="row"
           disabled={!menu.photoPath}
           onClick={async () => {
             if (menu.photoPath) {
@@ -351,6 +354,7 @@ export function PhotoContextMenu({
         >
           <button
             className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+            data-press-feedback="row"
             disabled={menu.photoId === null && !menu.isBatch}
             onClick={() => {
               if (menu.isBatch && onBatchToggleFavorite) {
@@ -382,6 +386,7 @@ export function PhotoContextMenu({
       >
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          data-press-feedback="row"
           disabled={menu.photoId === null && !menu.isBatch}
           onClick={() => {
             if (menu.isBatch && onBatchAddToAlbum) {
@@ -403,6 +408,7 @@ export function PhotoContextMenu({
       {onRemoveFromAlbum && (
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-destructive hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          data-press-feedback="row"
           disabled={menu.photoId === null && !menu.isBatch}
           onClick={() => {
             if (menu.isBatch && onBatchRemoveFromAlbum) {
@@ -428,6 +434,7 @@ export function PhotoContextMenu({
         >
           <button
             className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+            data-press-feedback="row"
             disabled={menu.photoId === null || menu.isBatch}
             onClick={() => {
               if (menu.photoId !== null) {
@@ -450,6 +457,7 @@ export function PhotoContextMenu({
         >
           <button
             className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+            data-press-feedback="row"
             disabled={menu.photoId === null || menu.isBatch}
             onClick={() => {
               if (menu.photoId !== null) {
@@ -471,6 +479,7 @@ export function PhotoContextMenu({
       >
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          data-press-feedback="row"
           disabled={menu.photoId === null && !menu.isBatch}
           onClick={() => {
             if (menu.isBatch && onBatchExport) {
@@ -501,6 +510,7 @@ export function PhotoContextMenu({
         >
           <button
             className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+            data-press-feedback="row"
             disabled={menu.photoId === null && !menu.isBatch}
             onClick={() => {
               if (menu.isBatch && onBatchUploadToCloud) {
@@ -527,6 +537,7 @@ export function PhotoContextMenu({
         >
           <button
             className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+            data-press-feedback="row"
             disabled={menu.photoId === null && !menu.isBatch}
             onClick={() => {
               if (menu.isBatch && onBatchShare) {
@@ -553,6 +564,7 @@ export function PhotoContextMenu({
       >
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-destructive hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          data-press-feedback="row"
           disabled={menu.photoId === null && !menu.isBatch}
           onClick={() => {
             if (menu.sequenceMemberIds && onDeleteSequenceGroup) {

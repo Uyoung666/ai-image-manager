@@ -918,6 +918,7 @@ export function CullCurate({
         <button
           aria-label={t("close")}
           className="absolute inset-0 z-50 flex items-center justify-center overflow-hidden border-0 bg-black/20 p-2 text-left"
+          data-press-feedback="static"
           onClick={(event) => {
             if (event.target !== event.currentTarget) {
               return;

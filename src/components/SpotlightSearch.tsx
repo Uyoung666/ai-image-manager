@@ -333,6 +333,7 @@ export function SpotlightSearch() {
         aria-label={t("close")}
         className="absolute inset-0 border-0 bg-black/50 p-0 backdrop-blur-sm"
         data-overlay-kind="command-search"
+        data-press-feedback="static"
         data-surface="overlay-backdrop"
         onClick={(event) => {
           if (event.target === event.currentTarget) {

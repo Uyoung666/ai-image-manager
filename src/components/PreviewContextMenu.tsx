@@ -118,6 +118,7 @@ export function PreviewContextMenu({
       >
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
+          data-press-feedback="row"
           disabled={!menu.photoPath || menu.sourceUnavailable}
           onClick={async () => {
             if (menu.photoPath) {
@@ -145,6 +146,7 @@ export function PreviewContextMenu({
       <IconMotionTrigger asChild disabled={!menu.photoPath}>
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
+          data-press-feedback="row"
           disabled={!menu.photoPath}
           onClick={async () => {
             if (menu.photoPath) {
@@ -169,6 +171,7 @@ export function PreviewContextMenu({
       >
         <button
           className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
+          data-press-feedback="row"
           disabled={!menu.photoPath || menu.sourceUnavailable}
           onClick={() => {
             if (menu.photoPath) {

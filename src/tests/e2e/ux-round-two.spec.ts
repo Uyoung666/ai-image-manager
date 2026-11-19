@@ -10,6 +10,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { expectStablePress } from "./helpers/press-feedback";
 import { launchWanderApp, seedWanderLibrary } from "./helpers/wander";
 
 const require = createRequire(import.meta.url);
@@ -799,6 +800,165 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await electronApp?.close();
   fs.rmSync(userDataDir, { force: true, recursive: true });
+});
+
+test("search suggestions, select options, menus and backdrops keep their press targets", async () => {
+  const currentPage = requirePage();
+  const search = currentPage.locator("input.home-search-input");
+  const panel = currentPage.locator('[data-overlay-kind="search-suggestions"]');
+  const person = panel.getByRole("option", { name: "E2E Alice", exact: true });
+  const personHeading = currentPage.getByRole("heading", {
+    name: "E2E Alice",
+    exact: true,
+  });
+  const root = currentPage.locator("html");
+  const initialClass = await root.getAttribute("class");
+  const initialMotion = await root.getAttribute("data-reduced-motion");
+  const initialHistory = await currentPage.evaluate(() =>
+    localStorage.getItem("search_history_v2")
+  );
+  try {
+    for (const { width, height } of WINDOW_SIZES) {
+      await resizeWindow(width, height);
+      await navigateTo("/");
+      await root.evaluate((element, size) => {
+        element.classList.toggle("dark", size !== 900);
+        element.classList.toggle("light", size === 900);
+        element.setAttribute("data-reduced-motion", String(size === 1280));
+      }, width);
+
+      await test.step(`${width}x${height} holds and cancels the suggestion at its edges`, async () => {
+        for (const position of ["left", "center", "right"] as const) {
+          await search.fill("E2E Ali");
+          await expectInsideViewport(panel);
+          if (position === "left") {
+            await expectStablePress(currentPage, person, position, "cancel");
+            await expect(person).toBeVisible();
+            await expect(search).toBeFocused();
+          }
+          await expectStablePress(currentPage, person, position);
+          await expect(personHeading).toBeVisible();
+          await navigateTo("/");
+        }
+        await search.fill("E2E Ali");
+        await expect(person).toBeVisible();
+        await search.press("Escape");
+        await expect(panel).not.toBeVisible();
+        await search.fill("E2E Alic");
+        await expect(person).toBeVisible();
+        await search.press("ArrowDown");
+        await expect(person).toBeFocused();
+        await expect(person).toHaveAttribute("aria-selected", "true");
+        await currentPage.keyboard.press("Enter");
+        await expect(personHeading).toBeVisible();
+        await navigateTo("/");
+      });
+
+      await test.step(`${width}x${height} holds other rows and backdrops in place`, async () => {
+        await currentPage.keyboard.press("Control+k");
+        const backdrop = currentPage.locator(
+          '[data-overlay-kind="command-search"][data-surface="overlay-backdrop"]'
+        );
+        await expectInsideViewport(backdrop);
+        await expectStablePress(currentPage, backdrop, "left");
+        await expect(backdrop).not.toBeVisible();
+
+        await waitForPhotoGrid();
+        const menu = await openContextMenuAtCard(await edgeVisibleCard());
+        await expectInsideViewport(menu);
+        await expectStablePress(
+          currentPage,
+          menu.getByRole("menuitem", { name: "Add to Album", exact: true }),
+          "left"
+        );
+        const dialog = currentPage.getByRole("dialog", {
+          name: "Add to Album",
+          exact: true,
+        });
+        await expectInsideViewport(dialog);
+        await currentPage.keyboard.press("Escape");
+        await expect(dialog).not.toBeVisible();
+
+        await navigateTo("/settings/appearance");
+        const dropdown = currentPage.getByRole("combobox", {
+          name: "Language",
+        });
+        await dropdown.click();
+        const listbox = currentPage
+          .locator('[data-overlay-kind="select"]')
+          .last();
+        await expectInsideViewport(listbox);
+        await expectStablePress(
+          currentPage,
+          listbox.getByRole("option", { name: "English (en)", exact: true }),
+          "right"
+        );
+        await expect(listbox).not.toBeVisible();
+      });
+    }
+
+    await currentPage.emulateMedia({ reducedMotion: "reduce" });
+    await navigateTo("/");
+    await currentPage.evaluate(() => {
+      document.documentElement.dataset.reducedMotion = "false";
+      localStorage.setItem(
+        "search_history_v2",
+        JSON.stringify({
+          version: 2,
+          entries: [
+            { kind: "text", query: "Press history one", lastUsedAt: 2 },
+            { kind: "text", query: "Press history two", lastUsedAt: 1 },
+          ],
+        })
+      );
+      window.dispatchEvent(new Event("search-history-changed"));
+    });
+    await search.fill("Press history");
+    const removed = panel.getByRole("option", { name: "Press history one" });
+    const remaining = panel.getByRole("option", { name: "Press history two" });
+    await expectStablePress(
+      currentPage,
+      removed.locator("..").getByRole("button"),
+      "right"
+    );
+    await expect(removed).not.toBeVisible();
+    await expect(search).toHaveValue("Press history");
+    await expectStablePress(currentPage, remaining, "right");
+    await expect(search).toHaveValue("Press history two");
+    await expect(panel).not.toBeVisible();
+    await currentPage
+      .getByRole("button", { name: "Clear search", exact: true })
+      .click();
+    await expect(search).toHaveValue("");
+    await currentPage.keyboard.press("Escape");
+  } finally {
+    await currentPage.emulateMedia({ reducedMotion: null });
+    await root.evaluate(
+      (element, { className, history, motion }) => {
+        for (const [key, value] of [
+          ["class", className],
+          ["data-reduced-motion", motion],
+        ] as const) {
+          if (value === null) {
+            element.removeAttribute(key);
+          } else {
+            element.setAttribute(key, value);
+          }
+        }
+        if (history === null) {
+          localStorage.removeItem("search_history_v2");
+        } else {
+          localStorage.setItem("search_history_v2", history);
+        }
+        window.dispatchEvent(new Event("search-history-changed"));
+      },
+      {
+        className: initialClass,
+        history: initialHistory,
+        motion: initialMotion,
+      }
+    );
+  }
 });
 
 test("EXIF preset popovers stay usable across the responsive window matrix", async () => {

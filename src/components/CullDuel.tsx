@@ -1188,6 +1188,7 @@ export function CullDuel({
         <button
           aria-label={t("close")}
           className="absolute inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/20 p-2"
+          data-press-feedback="static"
           onClick={(event) => {
             if (event.target !== event.currentTarget) {
               return;

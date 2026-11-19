@@ -581,6 +581,7 @@ export function FolderTree({
         <button
           aria-expanded={!pinnedCollapsed}
           className="flex w-full items-center gap-1 rounded-[6px] px-2 py-1 text-left text-[11px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+          data-press-feedback="row"
           data-surface="pinned-folder-header"
           onClick={() => onTogglePinned?.()}
           type="button"
@@ -648,6 +649,7 @@ export function FolderTree({
                 isDragOver,
               })} px-2.5 py-1.5 text-[13px]`}
               data-folder-id={node.folder.id}
+              data-press-feedback="row"
               onClick={() => onSelect(node.folder.id)}
               onContextMenu={(event) =>
                 onContextMenu(event, node.folder.id, node.folder.displayName)
@@ -855,6 +857,7 @@ export function renderTagTree(
             isActive,
             isDragOver,
           })} px-3 py-1 text-[12px] ${isDragOver ? "animate-pulse" : ""}`}
+          data-press-feedback="row"
           onClick={() => {
             onSelect(node.tag.id);
           }}
