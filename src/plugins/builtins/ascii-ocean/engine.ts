@@ -5,6 +5,36 @@ const STEP = 1 / 60;
 const FRAME_MS = 1000 / 30;
 const MIXED: SharkKind[] = ["classic", "hammerhead", "thresher", "tiger"];
 const KINDS: SharkKind[] = [...MIXED, "zebra", "greathammer", "mako", "nurse"];
+const BACKGROUND_AREA =
+  'main:is([data-surface="content"], [data-surface="gallery"])';
+const BACKGROUND_LAYOUT = "article, div, footer, header, main, ol, section, ul";
+const FOREGROUND_AREA = [
+  "a[href]",
+  "button",
+  "details",
+  "form",
+  "input",
+  "label",
+  "select",
+  "textarea",
+  "[contenteditable]",
+  "[data-overlay-kind]",
+  "[data-photo-id]",
+  "[data-sequence-id]",
+  '[draggable="true"]',
+  "[inert]",
+  "nav",
+  '[data-surface="card"]',
+  '[data-surface="panel"]',
+  '[data-surface="section-card"]',
+  '[data-surface="inspector"]',
+  '[data-surface="media-well"]',
+  '[data-surface^="immersive"]',
+  '[data-surface="overlay"]',
+  '[data-surface="toolbar"]',
+  '[tabindex]:not([tabindex="-1"])',
+  ".page-toolbar",
+].join(", ");
 
 export interface OceanOptions {
   dark: boolean;
@@ -29,15 +59,49 @@ export function sharkRoster(species: string, count: number): SharkSpec[] {
   );
 }
 
-/** Require the direct hit target to be an explicitly designated background. */
+/** Follow transparent layout boxes back to the workspace background. */
 export function isOceanBackground(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLElement &&
-    target.hasAttribute("data-ocean-background") &&
-    !target.closest(
-      '[inert], [role="dialog"], [data-surface="overlay"], [data-surface="media-well"]'
+  if (
+    !(target instanceof HTMLElement && target.matches(BACKGROUND_LAYOUT)) ||
+    target.closest(FOREGROUND_AREA)
+  ) {
+    return false;
+  }
+
+  const workspace = target.closest(BACKGROUND_AREA);
+  if (
+    !workspace ||
+    Array.from(target.childNodes).some(
+      (child) => child.nodeType === Node.TEXT_NODE && child.textContent?.trim()
     )
-  );
+  ) {
+    return false;
+  }
+
+  for (
+    let element: HTMLElement | null = target;
+    element;
+    element = element.parentElement
+  ) {
+    if (element.matches('[role]:not([role="none"], [role="presentation"])')) {
+      return false;
+    }
+    const { backgroundColor, backgroundImage, cursor } =
+      getComputedStyle(element);
+    if (
+      (backgroundColor &&
+        backgroundColor !== "rgba(0, 0, 0, 0)" &&
+        backgroundColor !== "transparent") ||
+      (backgroundImage && backgroundImage !== "none") ||
+      cursor === "pointer"
+    ) {
+      return false;
+    }
+    if (element === workspace) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export class OceanEngine {

@@ -2287,10 +2287,7 @@ export const PhotoGrid = memo(
               {toolbarActions}
             </div>
           )}
-          <div
-            className="flex flex-1 items-center justify-center"
-            data-ocean-background="true"
-          >
+          <div className="flex flex-1 items-center justify-center">
             {isError ? (
               <div className="flex flex-col items-center gap-3 px-6 text-center">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-danger/10">

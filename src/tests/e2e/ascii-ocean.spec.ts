@@ -108,39 +108,70 @@ async function verifyToolbarScroll(toolbar: Locator) {
   await expect(toolbar).not.toHaveClass(SCROLLED_TOOLBAR);
 }
 
-async function expectPointerHitsBackground(x: number, y: number) {
+async function expectBackgroundWake(x: number, y: number) {
   await page.mouse.move(0, 0);
-  expect(
-    await page.evaluate(
-      ({ x, y }) =>
-        document.elementFromPoint(x, y)?.getAttribute("data-ocean-background"),
-      { x, y }
-    )
-  ).toBe("true");
-  await page.evaluate(() => {
-    document.documentElement.removeAttribute("data-test-background-hit");
-    window.addEventListener(
-      "pointermove",
-      ({ target }) => {
-        document.documentElement.setAttribute(
-          "data-test-background-hit",
-          String(
-            target instanceof HTMLElement &&
-              target.hasAttribute("data-ocean-background")
-          )
-        );
-      },
-      { capture: true, once: true }
-    );
-  });
-  await page.mouse.move(x, y);
-  await expect(page.locator("html")).toHaveAttribute(
-    "data-test-background-hit",
-    "true"
+  const canvas = page.locator(".ascii-ocean-canvas");
+  await canvas.evaluate(
+    (element, point) => {
+      const surface = element as HTMLCanvasElement;
+      const context = surface.getContext("2d");
+      if (!context) {
+        throw new Error("Expected the ocean canvas context");
+      }
+      const rect = surface.getBoundingClientRect();
+      const scale = surface.width / rect.width;
+      const centerX = (point.x - rect.left) * scale;
+      const centerY = (point.y - rect.top) * scale;
+      let dots = 0;
+      const { drawImage, fillRect } = context;
+      context.drawImage = new Proxy(drawImage, {
+        apply(original, receiver, args) {
+          dots = 0;
+          Reflect.apply(original, receiver, args);
+        },
+      });
+      context.fillRect = (left, top, width, height) => {
+        fillRect.call(context, left, top, width, height);
+        const { a: ratio } = context.getTransform();
+        if (
+          Math.hypot(left * ratio - centerX, top * ratio - centerY) <
+          30 * scale
+        ) {
+          dots += 1;
+          if (dots >= 5) {
+            surface.dataset.testWake = "true";
+          }
+        }
+      };
+      surface.addEventListener(
+        "stop-wake-probe",
+        () => {
+          context.drawImage = drawImage;
+          context.fillRect = fillRect;
+          delete surface.dataset.testWake;
+        },
+        { once: true }
+      );
+    },
+    { x, y }
   );
+  try {
+    await page.mouse.click(x, y);
+    await expect(canvas).toHaveAttribute("data-test-wake", "true");
+  } finally {
+    await canvas.dispatchEvent("stop-wake-probe");
+  }
 }
 
-async function expectPointerHitsPhotoGap() {
+async function expectWakeInPageMargin() {
+  const { x, y } = await page.locator("main").evaluate((element) => {
+    const { right, bottom } = element.getBoundingClientRect();
+    return { x: right - 8, y: bottom - 24 };
+  });
+  await expectBackgroundWake(x, y);
+}
+
+async function expectWakeInPhotoGap() {
   const gap = await page.locator(PHOTO_GRID).evaluate((grid) => {
     const content = grid.querySelector("[data-back-to-top-content]");
     for (const photo of grid.querySelectorAll("[data-photo-id]")) {
@@ -160,7 +191,7 @@ async function expectPointerHitsPhotoGap() {
     }
     throw new Error("Expected a visible gutter next to a photo");
   });
-  await expectPointerHitsBackground(gap.x, gap.y);
+  await expectBackgroundWake(gap.x, gap.y);
 }
 
 async function contentSurfaces() {
@@ -368,7 +399,7 @@ for (const size of [
       const { left, top } = scroller.getBoundingClientRect();
       return { x: left + 6, y: top + 20 };
     });
-    await expectPointerHitsBackground(padding.x, padding.y);
+    await expectBackgroundWake(padding.x, padding.y);
     for (const light of [false, true]) {
       await page.evaluate((value) => {
         document.documentElement.classList.toggle("light", value);
@@ -433,6 +464,7 @@ for (const size of [
       await navigate("/settings/appearance");
       await contentSurfaces();
       await bounds();
+      await expectWakeInPageMargin();
       await navigate("/");
       const photo = page.locator("[data-photo-id]").first();
       await expect(photo).toBeVisible();
@@ -451,10 +483,14 @@ for (const size of [
       await page.keyboard.press("Escape");
       await navigate("/albums/1");
       await verifyToolbarScroll(page.locator(ALBUM_TOOLBAR));
-      await expectPointerHitsPhotoGap();
+      await expectWakeInPhotoGap();
       await navigate("/albums/2");
       await expectNavigationMaterial(page.locator(ALBUM_TOOLBAR));
       await bounds();
+      for (const route of ["/people", "/trash"]) {
+        await navigate(route);
+        await expectWakeInPageMargin();
+      }
       await navigate("/cull/999999999");
       await expect(
         page.locator('[data-surface="immersive"]').first()

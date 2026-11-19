@@ -104,6 +104,13 @@ function start(overrides: Partial<OceanOptions> = {}, onError = vi.fn()) {
   return engine;
 }
 
+function mountWorkspace() {
+  const workspace = document.createElement("main");
+  workspace.dataset.surface = "content";
+  document.body.append(workspace);
+  return workspace;
+}
+
 describe("ASCII Ocean", () => {
   it("resizes sharks without reseeding a zero-fish ocean", () => {
     const world = new World(sharkRoster("mixed", 3), 0);
@@ -155,18 +162,42 @@ describe("ASCII Ocean", () => {
     ]);
   });
 
-  it("requires a direct background hit and ignores controls, media and overlays", () => {
+  it("accepts unmarked transparent layout inside the workspace only", () => {
+    const workspace = mountWorkspace();
     const background = document.createElement("div");
-    background.dataset.oceanBackground = "true";
+    const gap = document.createElement("section");
     const button = document.createElement("button");
-    background.append(button);
+    workspace.append(background);
+    background.append(gap, button);
+    expect(isOceanBackground(workspace)).toBe(true);
     expect(isOceanBackground(background)).toBe(true);
+    expect(isOceanBackground(gap)).toBe(true);
     expect(isOceanBackground(button)).toBe(false);
-    background.setAttribute("inert", "");
-    expect(isOceanBackground(background)).toBe(false);
-    background.removeAttribute("inert");
-    background.dataset.surface = "media-well";
-    expect(isOceanBackground(background)).toBe(false);
+    expect(isOceanBackground(document.body)).toBe(false);
+    gap.textContent = "Visible text";
+    expect(isOceanBackground(gap)).toBe(false);
+  });
+
+  it.each([
+    ["inert", ""],
+    ["role", "dialog"],
+    ["role", "option"],
+    ["data-overlay-kind", "tooltip"],
+    ["data-surface", "panel"],
+    ["data-surface", "media-well"],
+    ["data-surface", "immersive"],
+    ["data-photo-id", "1"],
+    ["style", "background-color: white"],
+    ["style", "background-image: linear-gradient(white, black)"],
+    ["style", "cursor: pointer"],
+  ])("rejects transparent descendants of foreground %s=%s", (name, value) => {
+    const workspace = mountWorkspace();
+    const foreground = document.createElement("section");
+    const child = document.createElement("div");
+    foreground.setAttribute(name, value);
+    foreground.append(child);
+    workspace.append(foreground);
+    expect(isOceanBackground(child)).toBe(false);
   });
 
   it("limits render resolution and frame rate, pauses offscreen and releases resources", () => {
@@ -233,11 +264,9 @@ describe("ASCII Ocean", () => {
   it("filters clicks and dragging and removes pointer listeners on disposal", () => {
     const splash = vi.spyOn(World.prototype, "splash");
     const active = start();
-    const background = document.createElement("div");
-    background.dataset.oceanBackground = "true";
+    const background = mountWorkspace();
     const button = document.createElement("button");
     background.append(button);
-    document.body.append(background);
     const click = (target: HTMLElement) => {
       for (const type of ["pointerdown", "pointerup"]) {
         target.dispatchEvent(
@@ -282,11 +311,9 @@ describe("ASCII Ocean", () => {
 
   it("restores hover after a file drag leaves the window or the window blurs", () => {
     const active = start();
-    const background = document.createElement("div");
-    background.dataset.oceanBackground = "true";
-    const child = document.createElement("div");
+    const background = mountWorkspace();
+    const child = document.createElement("button");
     background.append(child);
-    document.body.append(background);
     const [world] = renderer.render.mock.lastCall as [World, number];
     const hover = (target = background) => {
       target.dispatchEvent(
