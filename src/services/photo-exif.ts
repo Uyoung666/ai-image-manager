@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { advancedExifData, exifData } from "@/db/schema";
+import { CONTENT_CREDENTIALS_PARSER_VERSION } from "@/types/photo-metadata";
 
 export function readPhotoExif(photoId: number) {
   const db = getDatabase();
@@ -27,6 +28,15 @@ export function readPhotoExif(photoId: number) {
     const vendorRaw = advancedRow.vendorRawJson
       ? JSON.parse(advancedRow.vendorRawJson)
       : {};
+    if (
+      normalized?.provenance &&
+      advancedRow.parserVersion < CONTENT_CREDENTIALS_PARSER_VERSION
+    ) {
+      normalized.provenance = {
+        status: normalized.provenance.status,
+        legacy: true,
+      };
+    }
     return {
       ...basic,
       advanced: normalized ? { ...normalized, vendorRaw } : null,

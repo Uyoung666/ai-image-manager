@@ -1,4 +1,4 @@
-import type { PhotoMetadata, ProvenanceStatus } from "@/types/photo-metadata";
+import type { PhotoMetadata, PhotoProvenance } from "@/types/photo-metadata";
 
 type RawTags = Record<string, unknown>;
 
@@ -6,7 +6,8 @@ const SENSITIVE_TAG = /serial|ownername|ownerid|deviceid/i;
 const TRUE_VALUE = /^(true|yes|on|enabled|active|1)$/;
 const FALSE_VALUE = /^(false|no|off|disabled|inactive|0|none)$/;
 const DISABLED_MODE = /^(off|none|no|0)$/i;
-const PROVENANCE_TAG = /c2pa|jumbf|content.?credential|claim.?generator/i;
+const C2PA_LABEL = /^c2pa$/i;
+const C2PA_BOX_TYPE = /^(?:\(c2pa\)|63327061)-0011-0010-8000-?00aa00389b71$/i;
 const PROVENANCE_CAPABLE_FILE =
   /^(jpeg|jpg|png|webp|heic|heif|avif|tiff|dng)$/i;
 const EXIF_DATE_TIME_PATTERN =
@@ -174,24 +175,35 @@ function detectComputationalMode(index: Map<string, unknown>): string | null {
   return explicit;
 }
 
-function detectProvenance(tags: RawTags, index: Map<string, unknown>) {
-  const keys = Object.keys(tags).join(" ");
-  const hasManifestKey = PROVENANCE_TAG.test(keys);
-  const issuer = pick(
-    index,
-    "ClaimGenerator",
-    "C2PAIssuer",
-    "Signer",
-    "CertificateSubject"
-  );
-  const fileType = pick(index, "FileType");
-  let status: ProvenanceStatus = "unknown";
-  if (hasManifestKey) {
-    status = "present_unverified";
-  } else if (fileType && PROVENANCE_CAPABLE_FILE.test(fileType)) {
-    status = "not_detected";
+function detectProvenance(
+  tags: RawTags,
+  index: Map<string, unknown>
+): PhotoProvenance {
+  if (
+    C2PA_BOX_TYPE.test(asDisplay(tags["JUMBF:JUMDType"]) ?? "") ||
+    C2PA_LABEL.test(asDisplay(tags["JUMBF:JUMDLabel"]) ?? "")
+  ) {
+    const info = tags["CBOR:Claim_generator_info"];
+    const generator: unknown = Array.isArray(info) ? info[0] : info;
+    return {
+      generator:
+        asDisplay(tags["CBOR:Claim_generator"]) ??
+        (generator &&
+        typeof generator === "object" &&
+        "name" in generator &&
+        typeof generator.name === "string"
+          ? generator.name
+          : null),
+      status: "present_unverified",
+    };
   }
-  return { issuer, status };
+  const fileType = pick(index, "FileType");
+  return {
+    status:
+      fileType && PROVENANCE_CAPABLE_FILE.test(fileType)
+        ? "not_detected"
+        : "unknown",
+  };
 }
 
 export function sanitizeVendorTags(tags: RawTags): RawTags {

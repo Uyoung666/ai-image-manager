@@ -22,10 +22,15 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
+  advancedExifActions,
+  onAdvancedExifComplete,
+} from "@/actions/advanced-exif";
+import {
   readPhotoDetailAdvancedMetadataExpanded,
   savePhotoDetailAdvancedMetadataExpanded,
 } from "@/actions/photo-detail-panel-preferences";
 import { photoTagActions } from "@/actions/photo-tags";
+import { ContentCredentialSection } from "@/components/ContentCredentialSection";
 import { FolderOpen } from "@/components/icons/folder-open";
 import { IconMotionTrigger } from "@/components/icons/icon-motion";
 import { LibraryPathText } from "@/components/LibraryPathText";
@@ -41,6 +46,7 @@ import {
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import type { LibraryPhotoStatus } from "@/types/library-reliability";
+import type { PhotoProvenance } from "@/types/photo-metadata";
 import { getDateLocale } from "@/utils/date-locale";
 import {
   toGalleryThumbnailUrl,
@@ -67,7 +73,7 @@ interface ExifData {
     autofocus: Record<string, unknown>;
     capture: Record<string, unknown>;
     processing: Record<string, unknown>;
-    provenance: Record<string, unknown> & { status?: string };
+    provenance: PhotoProvenance;
     standard: Record<string, unknown>;
     vendor: string | null;
     vendorRaw: Record<string, unknown>;
@@ -441,25 +447,30 @@ export function PhotoDetailPanel({
     setLoading(true);
     setExif(null);
     setPhotoTags([]);
-    ipc.client.photos
-      .getPhotoExif({ id: activePhotoId })
-      .then((result) => {
-        if (photoRequestRef.current === requestId) {
-          setExif(result as ExifData | null);
-        }
-      })
-      .catch(() => {
-        if (photoRequestRef.current === requestId) {
-          setExif(null);
-        }
-      })
-      .finally(() => {
-        if (photoRequestRef.current === requestId) {
-          setLoading(false);
-        }
-      });
+    const loadExif = () => {
+      advancedExifActions
+        .getPhotoExif(activePhotoId)
+        .then((result) => {
+          if (photoRequestRef.current === requestId) {
+            setExif(result as ExifData | null);
+          }
+        })
+        .catch(() => {
+          if (photoRequestRef.current === requestId) {
+            setExif(null);
+          }
+        })
+        .finally(() => {
+          if (photoRequestRef.current === requestId) {
+            setLoading(false);
+          }
+        });
+    };
+    loadExif();
+    const stopListening = onAdvancedExifComplete(loadExif);
     loadTags(requestId);
     return () => {
+      stopListening();
       photoRequestRef.current += 1;
       tagRequestRef.current += 1;
     };
@@ -1307,11 +1318,6 @@ export function PhotoDetailPanel({
                       data={exif.advanced.workflow}
                       title={t("metadataWorkflow")}
                     />
-                    <MetadataGroup
-                      data={exif.advanced.provenance}
-                      provenance
-                      title={t("metadataProvenance")}
-                    />
                   </div>
                 </details>
               )}
@@ -1326,6 +1332,12 @@ export function PhotoDetailPanel({
               </p>
             </section>
           )}
+
+          <ContentCredentialSection
+            key={`${displayPhoto.id}:${displayPhoto.path}`}
+            photo={displayPhoto}
+            provenance={exif?.advanced?.provenance}
+          />
 
           {/* File Location */}
           <section>
@@ -1423,14 +1435,12 @@ const METADATA_LABEL_KEYS: Record<string, string> = {
   focusArea: "metadataFocusArea",
   focusMode: "metadataFocusMode",
   inCameraLook: "metadataInCameraLook",
-  issuer: "metadataIssuer",
   lensCorrection: "metadataLensCorrection",
   meteringMode: "metadataMeteringMode",
   protection: "metadataProtection",
   rating: "metadataRating",
   software: "metadataSoftware",
   stabilizationMode: "metadataStabilization",
-  status: "metadataCredentialStatus",
   subjectTarget: "metadataSubjectTarget",
   tracking: "metadataTracking",
   whiteBalance: "metadataWhiteBalance",
@@ -1451,11 +1461,9 @@ function formatMetadataValue(value: unknown): string {
 
 function MetadataGroup({
   data,
-  provenance = false,
   title,
 }: {
   data: Record<string, unknown>;
-  provenance?: boolean;
   title: string;
 }) {
   const { t } = useTranslation();
@@ -1475,8 +1483,6 @@ function MetadataGroup({
           let displayValue: React.ReactNode = formatMetadataValue(value);
           if (key === "rating") {
             displayValue = <RatingStars value={value} />;
-          } else if (provenance && key === "status") {
-            displayValue = t(`metadataProvenance_${String(value)}`);
           }
           return (
             <InfoRow
@@ -1487,11 +1493,6 @@ function MetadataGroup({
           );
         })}
       </div>
-      {provenance && data.status === "present_unverified" && (
-        <p className="mt-2 text-[9px] text-warning">
-          {t("metadataProvenanceDisclaimer")}
-        </p>
-      )}
     </section>
   );
 }

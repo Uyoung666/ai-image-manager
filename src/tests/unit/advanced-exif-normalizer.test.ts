@@ -60,13 +60,33 @@ describe("advanced EXIF normalization", () => {
   it("reports C2PA structures without claiming validation", () => {
     const result = normalizeAdvancedExif({
       "IFD0:Make": "Leica",
-      "JUMBF:C2PAClaim": "self#jumbf=c2pa.claim",
-      "C2PA:ClaimGenerator": "Leica Camera",
+      "JUMBF:JUMDType": "(c2pa)-0011-0010-800000aa00389b71",
+      "CBOR:Claim_generator": "Leica Camera",
     });
     expect(result.provenance).toEqual({
-      issuer: "Leica Camera",
+      generator: "Leica Camera",
       status: "present_unverified",
     });
+  });
+
+  it("reads structured generator information from a v2 manifest", () => {
+    expect(
+      normalizeAdvancedExif({
+        "JUMBF:JUMDLabel": "c2pa",
+        "CBOR:Claim_generator_info": { name: "TestApp", version: "1.0.0" },
+      }).provenance
+    ).toEqual({ generator: "TestApp", status: "present_unverified" });
+  });
+
+  it("does not treat generic JUMBF or a generator tag as a credential clue", () => {
+    expect(
+      normalizeAdvancedExif({
+        "File:FileType": "JPEG",
+        "JUMBF:JUMDType": "(json)-0011-0010-800000aa00389b71",
+        "JUMBF:JUMDLabel": "metadata",
+        "CBOR:Claim_generator": "Example app",
+      }).provenance
+    ).toEqual({ status: "not_detected" });
   });
 
   it("distinguishes no credential from an unsupported provenance check", () => {

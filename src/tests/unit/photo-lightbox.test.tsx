@@ -28,6 +28,7 @@ vi.mock("@/ipc/manager", () => ({
   ipc: {
     client: {
       photos: {
+        contentCredentialAvailable: vi.fn().mockResolvedValue(false),
         getPhotoExif: vi.fn().mockResolvedValue({
           aperture: 2.8,
           cameraMake: "Sony",

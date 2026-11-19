@@ -10,6 +10,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { SavedContentCredentialVerification } from "@/types/photo-metadata";
 
 /** Transactional revision of fields used by search, including external writes. */
 export const searchDataRevision = sqliteTable("search_data_revision", {
@@ -375,6 +376,19 @@ export const advancedExifData = sqliteTable(
       table.provenanceStatus
     ),
   })
+);
+
+export const contentCredentialResults = sqliteTable(
+  "content_credential_results",
+  {
+    photoId: integer("photo_id")
+      .primaryKey()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    sourceStamp: text("source_stamp").notNull(),
+    result: text("result", { mode: "json" })
+      .$type<SavedContentCredentialVerification>()
+      .notNull(),
+  }
 );
 
 /** A visually related run of photos, detected from EXIF and capture time. */

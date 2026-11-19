@@ -1190,7 +1190,7 @@ function DashboardPage() {
                 ["driveMode", "metadataDriveMode"],
                 ["computationalMode", "metadataComputationalMode"],
                 ["inCameraLook", "metadataInCameraLook"],
-                ["provenanceStatus", "metadataCredentialStatus"],
+                ["provenanceStatus", "metadataProvenance"],
               ].map(([key, label]) => (
                 <ChartBlock
                   color={

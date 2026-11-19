@@ -23,6 +23,7 @@ vi.mock("@/ipc/manager", () => ({
   ipc: {
     client: {
       photos: {
+        contentCredentialAvailable: vi.fn().mockResolvedValue(false),
         getPhotoExif: mocks.getPhotoExif,
         getPhotoTagAnalysisStatus: mocks.getPhotoTagAnalysisStatus,
         getPhotoTags: mocks.getPhotoTags,

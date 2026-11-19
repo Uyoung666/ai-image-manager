@@ -142,6 +142,10 @@ ipcRenderer.on("import-queue-status", (_event, payload) => {
   postToRenderer({ channel: "import-queue-status", ...payload });
 });
 
+ipcRenderer.on("advanced-exif-progress", (_event, progress) => {
+  postToRenderer({ type: "advanced-exif-progress", ...progress });
+});
+
 ipcRenderer.on("theme:system-changed", (_event, resolved) => {
   postToRenderer({ channel: "theme:system-changed", resolved });
 });

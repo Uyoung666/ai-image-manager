@@ -94,7 +94,7 @@ export function SearchActiveFilters({
               )}
               {filters.advancedField && filters.advancedValue && (
                 <FilterChip
-                  label={`${t(`advancedFilter_${filters.advancedField}`)}: ${filters.advancedValue}`}
+                  label={`${t(`advancedFilter_${filters.advancedField}`)}: ${filters.advancedField === "provenanceStatus" ? t(`metadataProvenance_${filters.advancedValue}`) : filters.advancedValue}`}
                   onRemove={onRemoveAdvancedFilter}
                 />
               )}

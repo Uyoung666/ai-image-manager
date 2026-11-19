@@ -2,6 +2,11 @@ import { ChevronDown, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  advancedExifActions,
+  onAdvancedExifComplete,
+} from "@/actions/advanced-exif";
+import { ContentCredentialSection } from "@/components/ContentCredentialSection";
 import { Copy } from "@/components/icons/copy";
 import { FolderOpen } from "@/components/icons/folder-open";
 import { IconMotionTrigger } from "@/components/icons/icon-motion";
@@ -12,6 +17,7 @@ import {
 } from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
+import type { PhotoProvenance } from "@/types/photo-metadata";
 import { getDateLocale } from "@/utils/date-locale";
 
 export interface LightboxInfoPhoto {
@@ -30,7 +36,7 @@ interface ExifData {
     autofocus: Record<string, unknown>;
     capture: Record<string, unknown>;
     processing: Record<string, unknown>;
-    provenance: Record<string, unknown>;
+    provenance: PhotoProvenance;
     standard: Record<string, unknown>;
     vendor: string | null;
     vendorRaw: Record<string, unknown>;
@@ -138,7 +144,7 @@ export function LightboxInfoPanel({
     setExif(null);
     setTags([]);
     Promise.all([
-      ipc.client.photos.getPhotoExif({ id: photo.id }),
+      advancedExifActions.getPhotoExif(photo.id),
       ipc.client.photos.getPhotoTags({ id: photo.id }),
     ])
       .then(([nextExif, nextTags]) => {
@@ -160,8 +166,19 @@ export function LightboxInfoPanel({
           setLoading(false);
         }
       });
+    const stopListening = onAdvancedExifComplete(() => {
+      advancedExifActions.getPhotoExif(photo.id).then(
+        (nextExif) => {
+          if (active) {
+            setExif(nextExif as ExifData | null);
+          }
+        },
+        () => undefined
+      );
+    });
     return () => {
       active = false;
+      stopListening();
     };
   }, [photo.id]);
 
@@ -214,7 +231,6 @@ export function LightboxInfoPanel({
         [t("metadataAutofocus"), exif.advanced.autofocus],
         [t("metadataProcessing"), exif.advanced.processing],
         [t("metadataWorkflow"), exif.advanced.workflow],
-        [t("metadataProvenance"), exif.advanced.provenance],
       ].filter(
         ([, values]) =>
           Object.keys(values as Record<string, unknown>).length > 0
@@ -385,6 +401,12 @@ export function LightboxInfoPanel({
             )}
           </>
         )}
+
+        <ContentCredentialSection
+          key={`${photo.id}:${photo.path}`}
+          photo={photo}
+          provenance={exif?.advanced?.provenance}
+        />
 
         <InfoSection title={t("filePath")}>
           <Tooltip>

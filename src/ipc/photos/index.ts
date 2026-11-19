@@ -24,6 +24,12 @@ import {
   updateBatchTags,
 } from "./handlers/batch-tags";
 import {
+  contentCredentialAvailable,
+  contentCredentialCurrent,
+  savedContentCredential,
+  verifyContentCredential,
+} from "./handlers/content-credentials";
+import {
   createDuplicateCleanupPlanHandler,
   executeDuplicateCleanupPlanHandler,
   listDuplicateCleanupBatchesHandler,
@@ -232,6 +238,10 @@ export const photos = {
   getIndexStats,
   getPhotoDetail,
   getPhotoExif,
+  contentCredentialAvailable,
+  contentCredentialCurrent,
+  savedContentCredential,
+  verifyContentCredential,
   getPhotoTags,
   getPhotoTagAnalysisStatus,
   getStats,

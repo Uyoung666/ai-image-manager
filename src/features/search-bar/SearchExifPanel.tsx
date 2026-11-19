@@ -9,6 +9,7 @@ import { FilterBreadcrumb } from "@/components/FilterBreadcrumb";
 import { FilterPresets } from "@/components/FilterPresets";
 import { FilterDropdown } from "@/components/filter-dropdown";
 import { getFilterLabel } from "@/components/search-bar-utils";
+import { PROVENANCE_STATUSES } from "@/types/photo-metadata";
 import type { AdvancedExifFilterField, ExifFilters } from "@/types/search";
 import { cn } from "@/utils/tailwind";
 
@@ -379,16 +380,31 @@ export function SearchExifPanel({
               value={filters.advancedField ?? ""}
             />
             <FilterDropdown
-              ariaLabel={t("advancedExifFilterValue")}
+              ariaLabel={t(
+                filters.advancedField === "provenanceStatus"
+                  ? "metadataCredentialStatus"
+                  : "advancedExifFilterValue"
+              )}
               className={filterDropdownClass}
               disabled={!filters.advancedField}
-              editable
+              editable={filters.advancedField !== "provenanceStatus"}
               onChange={(value) => updateFilter("advancedValue", value)}
-              options={(filters.advancedField
-                ? (advancedCategories[filters.advancedField] ?? [])
-                : []
-              ).map((option) => ({ label: option, value: option }))}
-              placeholder={t("advancedExifFilterValue")}
+              options={
+                filters.advancedField === "provenanceStatus"
+                  ? PROVENANCE_STATUSES.map((value) => ({
+                      label: t(`metadataProvenance_${value}`),
+                      value,
+                    }))
+                  : (filters.advancedField
+                      ? (advancedCategories[filters.advancedField] ?? [])
+                      : []
+                    ).map((value) => ({ label: value, value }))
+              }
+              placeholder={t(
+                filters.advancedField === "provenanceStatus"
+                  ? "metadataCredentialStatus"
+                  : "advancedExifFilterValue"
+              )}
               value={filters.advancedValue ?? ""}
             />
           </div>

@@ -16,13 +16,14 @@ import {
   photoWorkVersionColumns,
   photoWorkVersionMatch,
 } from "@/services/ai/photo-version";
-import type {
-  AdvancedExifProgress,
-  PhotoMetadata,
+import {
+  type AdvancedExifProgress,
+  CONTENT_CREDENTIALS_PARSER_VERSION,
+  type PhotoMetadata,
 } from "@/types/photo-metadata";
 import { registerGalleryCleanup } from "@/utils/gallery-lifecycle";
 
-export const ADVANCED_EXIF_PARSER_VERSION = 3;
+export const ADVANCED_EXIF_PARSER_VERSION = CONTENT_CREDENTIALS_PARSER_VERSION;
 const YIELD_MS = 150;
 
 let running = false;
@@ -72,7 +73,7 @@ function serializedMetadata(metadata: PhotoMetadata) {
       (metadata.processing.computationalMode as string | null) ?? null,
     inCameraLook: (metadata.processing.inCameraLook as string | null) ?? null,
     provenanceStatus: metadata.provenance.status,
-    provenanceIssuer: metadata.provenance.issuer ?? null,
+    provenanceIssuer: null,
     normalizedJson: JSON.stringify({ ...metadata, vendorRaw: undefined }),
     vendorRawJson: JSON.stringify(sanitizeVendorTags(metadata.vendorRaw)),
   };

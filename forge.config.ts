@@ -13,6 +13,7 @@ import type { ForgeConfig } from "@electron-forge/shared-types";
 import { MODEL_MANIFEST } from "./src/services/model-downloader";
 
 const packageTempSuffix = process.env.AIM_PACKAGE_TEMP_SUFFIX;
+const contentCredentialPrototype = process.env.AIM_C2PA_PROTOTYPE === "1";
 // Squirrel always emits the full package.  A stable RELEASES feed is optional
 // and is only used while publishing to derive a delta package from that
 // baseline.  Keeping the value out of normal local builds also prevents a
@@ -211,6 +212,9 @@ function cleanBuildNodeModules(buildPath: string) {
 }
 
 const config: ForgeConfig = {
+  ...(contentCredentialPrototype
+    ? { outDir: "out/content-credentials-prototype" }
+    : {}),
   packagerConfig: {
     ...(packageTempSuffix
       ? { out: path.join("out", `package-${packageTempSuffix}`) }
@@ -227,6 +231,9 @@ const config: ForgeConfig = {
       "THIRD_PARTY_NOTICES.md",
       "THIRD_PARTY_MODEL_NOTICES.md",
       "licenses",
+      ...(contentCredentialPrototype
+        ? [".test-runtime/content-credential-tool"]
+        : []),
     ],
     name: "AI Image Manager",
     executableName: "ai-image-manager",
