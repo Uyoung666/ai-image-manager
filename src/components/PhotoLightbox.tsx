@@ -1169,7 +1169,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
           style={{ opacity: controlsVisible ? 1 : 0 }}
         />
         <header
-          className={`absolute inset-x-0 top-0 z-30 flex h-14 min-w-0 items-center justify-between gap-2 px-2 transition-opacity duration-200 motion-reduce:transition-none sm:gap-5 sm:px-4 ${chromeClass}`}
+          className={`absolute inset-x-0 top-0 z-30 flex h-14 min-w-0 cursor-default select-none items-center justify-between gap-2 px-2 transition-opacity duration-200 motion-reduce:transition-none sm:gap-5 sm:px-4 ${isFullscreen ? chromeClass : ""}`}
+          data-lightbox-window-drag={!isFullscreen || undefined}
         >
           <div className="flex min-w-0 items-center gap-3">
             <span

@@ -1912,8 +1912,14 @@ html[data-reduced-motion="true"] [data-favorite-feedback] {
 
 /* Immersive lightbox controls */
 .lightbox-interactive,
-.lightbox-interactive * {
+.lightbox-interactive
+  :where(:not([data-lightbox-window-drag], [data-lightbox-window-drag] *)),
+.lightbox-interactive [data-lightbox-window-drag] :is(button, [tabindex]) {
   -webkit-app-region: no-drag;
+}
+
+.lightbox-interactive [data-lightbox-window-drag] {
+  -webkit-app-region: drag;
 }
 
 .lightbox-control-button svg {
