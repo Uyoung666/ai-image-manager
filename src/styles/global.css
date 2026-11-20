@@ -1911,9 +1911,10 @@ html[data-reduced-motion="true"] [data-favorite-feedback] {
 }
 
 /* Immersive lightbox controls */
+/* Use the canvas bounds for native hit testing. Transformed image frames can
+   extend into the draggable header even when their painting is clipped. */
 .lightbox-interactive,
-.lightbox-interactive
-  :where(:not([data-lightbox-window-drag], [data-lightbox-window-drag] *)),
+.lightbox-interactive :where([data-lightbox-canvas], [data-surface="overlay"]),
 .lightbox-interactive [data-lightbox-window-drag] :is(button, [tabindex]) {
   -webkit-app-region: no-drag;
 }

@@ -7,10 +7,12 @@ import {
   expect,
   type Locator,
   type Page,
+  type Route,
 } from "@playwright/test";
 import sharp from "sharp";
 import { waitForHomeWindow } from "./helpers/home-window";
 import { createTestRuntime, launchTestApp, test } from "./helpers/test-runtime";
+import { probeWindowsWindowDrag } from "./helpers/windows-window-drag";
 
 const electronPath = createRequire(import.meta.url)("electron") as string;
 const SIZES = [
@@ -145,8 +147,8 @@ test.beforeAll(async () => {
     `INSERT INTO folders(id,path,display_name,photo_count,created_at) VALUES(1,'${sqlEscape(fixture)}','FavoriteFixture',8,1)`,
   ];
   for (let id = 1; id <= 8; id++) {
-    const width = id === 2 ? 360 : 440;
-    const height = id === 2 ? 440 : 360;
+    const width = [2800, 360][id - 1] ?? 440;
+    const height = [1800, 440][id - 1] ?? 360;
     const filename = `FavoriteFixture-${id}.png`;
     const photoPath = path.join(fixture, filename);
     await sharp({
@@ -314,20 +316,144 @@ const LIGHTBOX_SIZES: { width: number; height: number; zoomFactor?: number }[] =
     { width: 720, height: 480, zoomFactor: 1.5 },
   ];
 
-async function openLightbox(size: (typeof LIGHTBOX_SIZES)[number]) {
+async function openLightbox(
+  size: (typeof LIGHTBOX_SIZES)[number],
+  photoId = 2
+) {
   await app.evaluate(({ BrowserWindow }, requested) => {
     const window = BrowserWindow.getAllWindows()[0];
     window.setContentSize(requested.width, requested.height);
     window.webContents.setZoomFactor(requested.zoomFactor ?? 1);
   }, size);
   await page.evaluate(() => localStorage.removeItem("lightbox.panel-mode"));
-  await page.locator('main [data-photo-id="2"][role="option"]').dblclick();
+  await page
+    .locator(`main [data-photo-id="${photoId}"][role="option"]`)
+    .dblclick();
   const lightbox = page.getByRole("dialog", {
     name: LIGHTBOX,
   });
   await expectInsideViewport(lightbox);
   return lightbox;
 }
+
+
+test("keeps the Windows lightbox header draggable while zoomed and upgrading detail", async () => {
+  test.skip(
+    process.platform !== "win32",
+    "Requires Windows native hit testing"
+  );
+
+  // Native hit testing is safe in CI. Moving the system cursor requires an
+  // interactive desktop reserved for this test.
+  const move = process.env.AIM_E2E_NATIVE_WINDOW_DRAG === "1";
+  await app.evaluate(({ BrowserWindow }, useSystemCursor) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.unmaximize();
+    window.center();
+    if (useSystemCursor) {
+      window.setAlwaysOnTop(true);
+      window.focus();
+    }
+  }, move);
+  const lightbox = await openLightbox({ width: 900, height: 600 }, 1);
+  const header = lightbox.locator("header");
+  const fitted = lightbox.locator(
+    'img[data-browse-visible="true"][src*="/photo-thumbnail"]'
+  );
+  await expect(fitted).toBeVisible();
+  const dragPoint = await header.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.x + rect.width / 2),
+      y: Math.round(rect.y + rect.height / 2),
+    };
+  });
+  const assertNativeDrag = async (label: string) => {
+    await test.step(label, async () => {
+      const { before, hit, window } = await probeWindowsWindowDrag(
+        app,
+        page,
+        dragPoint,
+        move,
+        env
+      );
+      expect(hit, "WM_NCHITTEST should return HTCAPTION").toBe(2);
+      if (!move) {
+        return;
+      }
+      const after = await window.evaluate((win) => win.getBounds());
+      expect(after.x).toBeGreaterThan(before.x);
+      expect(after.y).toBeGreaterThan(before.y);
+      expect(after.width).toBe(before.width);
+      expect(after.height).toBe(before.height);
+      await window.evaluate((win, bounds) => win.setBounds(bounds), before);
+    });
+  };
+
+  const originalRequest = (url: URL) =>
+    url.pathname === "/image" &&
+    url.searchParams.get("path")?.endsWith("FavoriteFixture-1.png") === true;
+  let releaseOriginal!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseOriginal = resolve;
+  });
+  let originalRequested = false;
+  const delayOriginal = async (route: Route) => {
+    originalRequested = true;
+    await gate;
+    await route.fulfill({ response: await route.fetch() });
+  };
+  await page.route(originalRequest, delayOriginal);
+  try {
+    await assertNativeDrag("Fit view");
+    await fitted.dblclick();
+    await expect.poll(() => originalRequested).toBe(true);
+    await expect(lightbox.getByText(PREVIEW_DETAIL)).toBeVisible();
+    await expect
+      .poll(async () => (await fitted.boundingBox())?.y)
+      .toBeLessThan(dragPoint.y);
+    await assertNativeDrag("Zoomed while the original request is held");
+
+    releaseOriginal();
+    const original = lightbox.locator(
+      'img[data-lightbox-original-frame][data-browse-visible="true"]'
+    );
+    await expect(original).toBeVisible();
+    await expect(lightbox.getByText(PREVIEW_DETAIL)).toHaveCount(0);
+    await assertNativeDrag("Zoomed after the original is displayed");
+
+    const canvasPoint = await lightbox
+      .locator("[data-lightbox-canvas]")
+      .evaluate((canvas) => {
+        const rect = canvas.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      });
+    const { hit } = await probeWindowsWindowDrag(
+      app,
+      page,
+      canvasPoint,
+      false,
+      env
+    );
+    expect(hit, "Panning the canvas should hit HTCLIENT").toBe(1);
+
+    await header.getByRole("button", { name: FULLSCREEN }).click();
+    await expect(header).not.toHaveAttribute("data-lightbox-window-drag");
+    await page.keyboard.press("Escape");
+    await expect(header).toHaveAttribute("data-lightbox-window-drag", "true");
+    await assertNativeDrag("After exiting fullscreen");
+  } finally {
+    releaseOriginal();
+    await page.unrouteAll({ behavior: "wait" });
+    if (move) {
+      await app.evaluate(({ BrowserWindow }) => {
+        BrowserWindow.getAllWindows()[0].setAlwaysOnTop(false);
+      });
+    }
+  }
+  await header.getByRole("button", { name: CLOSE }).click();
+  await expect(lightbox).toBeHidden();
+});
 
 for (const size of LIGHTBOX_SIZES) {
   const scale = size.zoomFactor ? ` at ${size.zoomFactor * 100}%` : "";
