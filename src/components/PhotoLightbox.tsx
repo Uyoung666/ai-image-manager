@@ -1266,7 +1266,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               )}
               {!sequencePlayback &&
                 (sourceUnavailable ||
-                  (wantsDetail &&
+                  (original.request.enabled &&
+                    original.request.src &&
                     !original.loaded &&
                     !originalFailedWithPreview)) &&
                 (fit.loaded || preview.loaded) && (

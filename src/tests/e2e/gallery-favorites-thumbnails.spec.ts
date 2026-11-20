@@ -293,6 +293,8 @@ const LIGHTBOX = /^(Photo review lightbox|照片审阅灯箱)$/;
 const ZOOM = /^(Zoom|缩放) · /;
 const ZOOM_IN = /^(Zoom in|放大)$/;
 const ZOOM_OUT = /^(Zoom out|缩小)$/;
+const PREVIEW_DETAIL =
+  /^(Showing available preview detail|正在显示可用的预览清晰度)$/;
 const LOCK_ZOOM = /lock zoom|锁定倍率/i;
 const PREVIOUS_PHOTO = /^(Previous photo|上一张)/;
 const NEXT_PHOTO = /^(Next photo|下一张)/;
@@ -375,8 +377,10 @@ for (const size of LIGHTBOX_SIZES) {
     ).toBe(false);
     await popovers.locator(".custom-switch").click();
     await expect(lock).toBeChecked();
+    await expect(image).toBeVisible();
     await popovers.getByRole("button", { name: ZOOM_IN }).click();
     await expect(zoom).toHaveText(PERCENTAGE);
+    await expect(header.getByText(PREVIEW_DETAIL)).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(popovers).toBeHidden();
     await page.keyboard.press("0");

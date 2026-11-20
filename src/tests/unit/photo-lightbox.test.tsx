@@ -142,6 +142,57 @@ function deferImageDecode(image: HTMLImageElement) {
 }
 
 describe("PhotoLightbox", () => {
+  it.each([
+    "png",
+    "jpg",
+  ])("does not report preview detail when magnifying an already loaded %s original", async (format) => {
+    const photo = {
+      ...photos[0],
+      filename: `native.${format}`,
+      path: `C:/Photos/native.${format}`,
+      width: 320,
+      height: 240,
+    };
+    render(
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={[photo]} />
+    );
+    const original = getFrame("[data-lightbox-original-frame]");
+    await loadImage(original);
+    expect(original).toHaveAttribute(
+      "src",
+      expect.stringContaining(photo.path)
+    );
+
+    fireEvent.keyDown(window, { key: "+" });
+
+    expect(getFrame("[data-lightbox-image]")).toBe(original);
+    expect(screen.queryByText("lightboxLimitedDetail")).not.toBeInTheDocument();
+  });
+
+  it("shows preview detail until a requested full-size image is decoded", async () => {
+    const photo = { ...photos[0], path: "C:/Photos/first.heic" };
+    render(
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={[photo]} />
+    );
+    await loadImage(getFrame("[data-lightbox-original-frame]"));
+    expect(screen.queryByText("lightboxLimitedDetail")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "1" });
+
+    expect(screen.getByText("lightboxLimitedDetail")).toBeInTheDocument();
+    await loadImage(getFrame("[data-lightbox-original-frame]"));
+    expect(screen.queryByText("lightboxLimitedDetail")).not.toBeInTheDocument();
+  });
+
+  it("keeps the preview detail notice for an offline photo", async () => {
+    const photo = { ...photos[0], sourceStatus: "offline" as const };
+    render(
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={[photo]} />
+    );
+    await loadImage(getFrame("[data-lightbox-original-frame]"));
+    expect(screen.getByText("lightboxLimitedDetail")).toBeInTheDocument();
+  });
+
   it("uses physical pixels and keeps the selected detail across portrait and landscape when locked", async () => {
     const dpr = vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
     const width = vi
