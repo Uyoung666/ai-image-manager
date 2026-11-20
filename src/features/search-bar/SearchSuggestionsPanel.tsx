@@ -196,7 +196,7 @@ export function SearchSuggestionsPanel({
                 `${suggestion.type}-${suggestion.text}`
               }
               onClick={() => handleSuggestionClick(suggestion)}
-              onMouseEnter={() => setSuggestionIndex(index)}
+              onHighlight={setSuggestionIndex}
               onRemoveHistory={onRemoveHistory}
               suggestion={suggestion}
             />
@@ -317,7 +317,7 @@ export function SearchSuggestionsPanel({
                           `${suggestion.type}-${suggestion.text}`
                         }
                         onClick={() => handleSuggestionClick(suggestion)}
-                        onMouseEnter={() => setSuggestionIndex(itemIndex)}
+                        onHighlight={setSuggestionIndex}
                         onRemoveHistory={onRemoveHistory}
                         suggestion={suggestion}
                       />
@@ -352,14 +352,14 @@ function SuggestionButton({
   index,
   isActive,
   onClick,
-  onMouseEnter,
+  onHighlight,
   onRemoveHistory,
 }: {
   suggestion: SearchSuggestion;
   index: number;
   isActive: boolean;
   onClick: () => void;
-  onMouseEnter: () => void;
+  onHighlight: (index: number) => void;
   onRemoveHistory: (id: string) => void;
 }) {
   const { t } = useTranslation();
@@ -370,7 +370,7 @@ function SuggestionButton({
         index={index}
         isActive={isActive}
         onClick={onClick}
-        onMouseEnter={onMouseEnter}
+        onHighlight={onHighlight}
         onRemove={onRemoveHistory}
       />
     );
@@ -398,7 +398,7 @@ function SuggestionButton({
       id={`search-suggestion-${index}`}
       onClick={onClick}
       onMouseDown={(event) => event.preventDefault()}
-      onPointerMove={onMouseEnter}
+      onPointerMove={() => onHighlight(index)}
       role="option"
       tabIndex={-1}
       tooltipText={suggestion.type === "history" ? undefined : suggestion.text}

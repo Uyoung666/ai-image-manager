@@ -282,6 +282,14 @@ test("mixed history, persisted preferences, keyboard scrolling and responsive bo
             .trim()
         )
       ).toBe("to bottom");
+      const firstText = scroll
+        .getByRole("option", { name: HISTORY_QUERY })
+        .first();
+      await firstText.hover();
+      await expect(firstText).toHaveAttribute("aria-selected", "true");
+      await input.hover();
+      await expect(firstText).toHaveAttribute("aria-selected", "false");
+
       await scroll.evaluate((el) => {
         el.scrollTop = (el.scrollHeight - el.clientHeight) / 2;
       });

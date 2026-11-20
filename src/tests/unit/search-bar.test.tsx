@@ -951,6 +951,51 @@ describe("SearchBar", () => {
     expect(first).toHaveAttribute("aria-selected", "true");
   });
 
+  it.each([
+    "recent",
+    "matching",
+  ])("clears hover from %s search history when the pointer leaves the row", async (view) => {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["海边旅行"]));
+    const user = userEvent.setup();
+    render(<ControlledSearchBar />);
+    const input = screen.getByRole("combobox");
+    await user.click(input);
+    if (view === "matching") {
+      await user.type(input, "海边旅");
+    }
+
+    const history = screen.getByRole("option", { name: "海边旅行" });
+    const remove = screen.getByRole("button", {
+      name: "searchHistoryUi.remove",
+    });
+    await user.hover(history);
+    expect(history).toHaveAttribute("aria-selected", "true");
+    await user.hover(remove);
+    expect(history).toHaveAttribute("aria-selected", "true");
+    await user.hover(input);
+    expect(history).toHaveAttribute("aria-selected", "false");
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+  });
+
+  it("keeps a keyboard-focused history entry highlighted when the pointer leaves", async () => {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["海边旅行"]));
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(<ControlledSearchBar onSearch={onSearch} />);
+    const input = screen.getByRole("combobox");
+    await user.click(input);
+    await user.type(input, "海边旅");
+    await user.keyboard("{ArrowDown}");
+    const history = screen.getByRole("option", { name: "海边旅行" });
+    expect(history).toHaveFocus();
+
+    await user.hover(history);
+    await user.hover(input);
+    expect(history).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Enter}");
+    expect(onSearch).toHaveBeenCalledWith("海边旅行", undefined);
+  });
+
   it("keeps search history free of redundant tooltips", async () => {
     localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["我的搜索记录"]));
     const user = userEvent.setup();

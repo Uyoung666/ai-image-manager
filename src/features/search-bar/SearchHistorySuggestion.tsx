@@ -41,17 +41,18 @@ export function SearchHistorySuggestion({
   index,
   isActive,
   onClick,
-  onMouseEnter,
+  onHighlight,
   onRemove,
 }: {
   entry: SearchHistoryEntry;
   index: number;
   isActive: boolean;
   onClick: () => void;
-  onMouseEnter: () => void;
+  onHighlight: (index: number) => void;
   onRemove: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const optionId = `search-suggestion-${index}`;
   const label = searchHistoryLabel(entry);
   const row = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -109,6 +110,12 @@ export function SearchHistorySuggestion({
         isActive ? "bg-foreground/8" : "hover:bg-foreground/5"
       )}
       data-search-history-row
+      onPointerLeave={() => {
+        if (isActive && document.activeElement?.id !== optionId) {
+          onHighlight(-1);
+        }
+      }}
+      onPointerMove={() => onHighlight(index)}
       ref={row}
     >
       <SearchTextButton
@@ -126,10 +133,9 @@ export function SearchHistorySuggestion({
         )}
         data-press-feedback="row"
         data-suggestion-index={index}
-        id={`search-suggestion-${index}`}
+        id={optionId}
         onClick={onClick}
         onMouseDown={(event) => event.preventDefault()}
-        onPointerMove={onMouseEnter}
         role="option"
         tabIndex={-1}
         tooltipAlways={Boolean(imagePath)}
@@ -173,7 +179,6 @@ export function SearchHistorySuggestion({
             data-search-action
             onClick={() => onRemove(entry.id)}
             onMouseDown={(event) => event.preventDefault()}
-            onPointerMove={onMouseEnter}
             type="button"
           >
             <X aria-hidden="true" className="h-3.5 w-3.5" />
