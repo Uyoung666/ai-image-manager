@@ -1997,6 +1997,7 @@
   "fullscreen": "全画面",
   "exitFullscreen": "全画面を終了",
   "fullscreenFailed": "全画面表示にできませんでした",
+  "exitFullscreenFailed": "全画面表示を終了できませんでした",
   "zoomIn": "ズームイン",
   "zoomOut": "ズームアウト",
   "lightboxZoom": "ズーム",
