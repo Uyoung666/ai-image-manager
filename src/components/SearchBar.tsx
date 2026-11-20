@@ -737,10 +737,24 @@ export const SearchBar = memo(
       }, [activeTagIds, tags]);
 
       return (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: only handles background clicks; Escape already dismisses the panel.
         <search
           aria-label={t("searchPlaceholder")}
           className="home-unified-toolbar relative min-w-0 border-border border-b transition-colors"
           data-surface="toolbar-content"
+          onClick={(event) => {
+            const { currentTarget, target } = event;
+            if (
+              showFilters &&
+              (target === currentTarget ||
+                (target instanceof Element &&
+                  target.matches(
+                    ".home-toolbar-inner, .home-toolbar-primary-row, .home-toolbar-actions"
+                  )))
+            ) {
+              setShowFilters(false);
+            }
+          }}
           ref={(node) => {
             toolbarRef.current = node;
             if (typeof ref === "function") {

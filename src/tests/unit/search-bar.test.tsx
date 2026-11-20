@@ -1740,6 +1740,31 @@ describe("SearchBar", () => {
     ).toBeInTheDocument();
   });
 
+  it("closes the EXIF panel from the toolbar gap and keeps the draft", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(<ControlledSearchBar onSearch={onSearch} />);
+
+    const filterButton = screen.getByRole("button", {
+      name: "exifFilterTitle",
+    });
+    const toolbarRow = filterButton.closest(".home-toolbar-primary-row");
+    if (!toolbarRow) {
+      throw new Error("Search toolbar row is missing");
+    }
+
+    await user.click(filterButton);
+    await user.type(screen.getByLabelText("creatorLabel"), "Jane");
+    expect(filterButton).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(toolbarRow);
+    expect(filterButton).toHaveAttribute("aria-expanded", "false");
+    expect(onSearch).not.toHaveBeenCalled();
+
+    await user.click(filterButton);
+    expect(screen.getByLabelText("creatorLabel")).toHaveValue("Jane");
+  });
+
   it("still closes the EXIF panel on a pointerdown outside the toolbar", async () => {
     const user = userEvent.setup();
     render(

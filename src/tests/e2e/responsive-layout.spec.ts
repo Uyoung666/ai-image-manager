@@ -301,12 +301,15 @@ async function expectSearchPanelsInsideViewport(): Promise<void> {
   const currentPage = requirePage();
   await navigateTo("/");
   const input = currentPage.locator(".home-search-input");
+  const filterButton = currentPage.getByRole("button", {
+    name: "EXIF Filters",
+  });
   await input.fill("");
   await input.focus();
 
   for (const kind of ["search-suggestions", "search-filter"]) {
     if (kind === "search-filter") {
-      await currentPage.getByRole("button", { name: "EXIF Filters" }).click();
+      await filterButton.click();
     }
     const panel = currentPage.locator(`[data-overlay-kind="${kind}"]`);
     await expect(panel).toBeVisible();
@@ -330,10 +333,29 @@ async function expectSearchPanelsInsideViewport(): Promise<void> {
       bounds.viewportHeight + OVERFLOW_TOLERANCE_PX
     );
   }
+
+  const filterPanel = currentPage.locator(
+    '[data-overlay-kind="search-filter"]'
+  );
+  const toolbarGap = await filterButton.evaluate((button) => {
+    const bounds = button.getBoundingClientRect();
+    const x = bounds.left - 3;
+    const y = bounds.top + bounds.height / 2;
+    if (
+      document.elementFromPoint(x, y) !==
+      button.closest(".home-toolbar-primary-row")
+    ) {
+      throw new Error("Expected a toolbar gap beside the EXIF filter button");
+    }
+    return { x, y };
+  });
+  await currentPage.mouse.click(toolbarGap.x, toolbarGap.y);
+  await expect(filterPanel).not.toBeVisible();
+
+  await filterButton.click();
+  await expect(filterPanel).toBeVisible();
   await currentPage.keyboard.press("Escape");
-  await expect(
-    currentPage.locator('[data-overlay-kind="search-filter"]')
-  ).not.toBeVisible();
+  await expect(filterPanel).not.toBeVisible();
 }
 
 async function expectImageSearchReferenceInsideToolbar(
