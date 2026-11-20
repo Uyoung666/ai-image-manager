@@ -189,39 +189,29 @@ test("HEIC import, thumbnail and full preview at three window sizes", async () =
       await expect(
         lightbox.locator('[data-browse-frame="clear"][data-browse-visible]')
       ).toHaveAttribute("alt", "主图.heic");
-      await expect(
-        lightbox.getByRole("checkbox", { name: "锁定倍率和位置" })
-      ).not.toBeChecked();
       await page.keyboard.press("1");
-      await expect(
-        lightbox.getByRole("button", { name: "适合窗口 (0)" })
-      ).toHaveText("100%");
-      const lock = lightbox.getByRole("checkbox", { name: "锁定倍率和位置" });
-      const lockHint = lightbox
-        .locator('[data-slot="tooltip-content"]')
-        .filter({
-          hasText: "翻页时保持倍率和位置。",
-        });
-      const actualSize = lightbox.getByRole("button", { name: "实际像素 (1)" });
+      const zoom = lightbox.getByRole("button", { name: "缩放 · 100%" });
+      await expect(zoom).toHaveText("100%");
+      await zoom.click();
+      const zoomPanel = lightbox.getByRole("dialog", { name: "缩放" });
+      await expect(zoomPanel).toBeInViewport({ ratio: 1 });
+      const lock = zoomPanel.getByRole("checkbox", { name: "锁定倍率和位置" });
+      await expect(lock).not.toBeChecked();
+      const actualSize = zoomPanel.getByRole("button", {
+        name: "实际像素 (1)",
+      });
       await actualSize.focus();
-      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
       await expect(lock).toBeFocused();
-      await expect(lockHint).toBeVisible();
-      await lightbox.getByRole("button", { name: "放大", exact: true }).focus();
-      await expect(lockHint).toBeHidden();
-      await lightbox.locator("label.custom-switch").hover();
-      await expect(lockHint).toBeVisible();
-      await expect(lockHint).toBeInViewport({ ratio: 1 });
-      await lock.focus();
       await page.keyboard.press("Space");
       await expect(lock).toBeChecked();
+      await page.keyboard.press("Escape");
+      await expect(zoomPanel).toBeHidden();
       await page.keyboard.press("ArrowRight");
       await expect(
         lightbox.locator('[data-browse-frame="clear"][data-browse-visible]')
       ).toHaveAttribute("alt", "十位.heif");
-      await expect(
-        lightbox.getByRole("button", { name: "适合窗口 (0)" })
-      ).toHaveText("100%");
+      await expect(zoom).toHaveText("100%");
       await page.keyboard.press("Escape");
       await expect(lightbox).not.toBeVisible();
       expect(
