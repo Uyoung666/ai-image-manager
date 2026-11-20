@@ -195,13 +195,10 @@ test("HEIC import, thumbnail and full preview at three window sizes", async () =
       await zoom.click();
       const zoomPanel = lightbox.getByRole("dialog", { name: "缩放" });
       await expect(zoomPanel).toBeInViewport({ ratio: 1 });
+      await expect(zoomPanel).toBeFocused();
       const lock = zoomPanel.getByRole("checkbox", { name: "锁定倍率和位置" });
       await expect(lock).not.toBeChecked();
-      const actualSize = zoomPanel.getByRole("button", {
-        name: "实际像素 (1)",
-      });
-      await actualSize.focus();
-      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
       await expect(lock).toBeFocused();
       await page.keyboard.press("Space");
       await expect(lock).toBeChecked();
