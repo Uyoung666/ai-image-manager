@@ -15,7 +15,6 @@ import {
   type DragEvent,
   memo,
   type PointerEvent,
-  type WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -392,6 +391,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   }, [open, photo]);
 
   const resetView = useCallback(() => {
+    dragRef.current = null;
     lockedView.current = null;
     setActualPixels(false);
     wheelZoomRef.current = 1;
@@ -401,6 +401,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   }, []);
 
   const changePhotoView = useCallback(() => {
+    dragRef.current = null;
     setRepairKey("");
     if (
       !(
@@ -525,7 +526,13 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   );
 
   const handleWheelZoom = useCallback(
-    (event: ReactWheelEvent<HTMLImageElement>) => {
+    (event: WheelEvent) => {
+      if (
+        event.target !== event.currentTarget &&
+        !(event.target instanceof HTMLImageElement)
+      ) {
+        return;
+      }
       event.preventDefault();
       let modeMultiplier = 1;
       if (event.deltaMode === 1) {
@@ -567,6 +574,15 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     },
     [pixelScale]
   );
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!(open && canvas)) {
+      return;
+    }
+    canvas.addEventListener("wheel", handleWheelZoom, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheelZoom);
+  }, [handleWheelZoom, open]);
 
   const showActualPixels = useCallback(() => {
     setPlaying(false);
@@ -1129,12 +1145,21 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const visibleFrame =
     [original, fit, preview].find((frame) => frame.loaded) ?? initialFrame;
   const originalFrame = original.request.enabled ? original : fit;
-  const panClass = zoom > 1 ? "cursor-grab active:cursor-grabbing" : "";
-  const beginPan = (event: PointerEvent<HTMLImageElement>) => {
-    if (zoom <= 1) {
+  const isZoomed = zoom > 1;
+  const beginPan = (event: PointerEvent<HTMLDivElement>) => {
+    if (
+      wheelZoomRef.current <= 1 ||
+      event.button !== 0 ||
+      dragRef.current ||
+      !(
+        event.target === event.currentTarget ||
+        event.target instanceof HTMLImageElement
+      )
+    ) {
       return;
     }
-    canvasRef.current?.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -1143,9 +1168,14 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       translateY: translate.y,
     };
   };
+  const endPan = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+    }
+  };
   const startOriginalDrag = (event: DragEvent<HTMLImageElement>) => {
     event.preventDefault();
-    if (!sourceUnavailable && zoom <= 1) {
+    if (!sourceUnavailable && wheelZoomRef.current <= 1) {
       window.electronAPI?.startDrag?.(photo.path);
     }
   };
@@ -1528,14 +1558,15 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         </header>
 
         <div
-          className="relative col-start-1 row-start-2 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center overflow-hidden px-10 py-2 sm:px-16"
+          className={`relative col-start-1 row-start-2 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center overflow-hidden px-10 py-2 sm:px-16 ${isZoomed ? "cursor-grab touch-none active:cursor-grabbing" : ""}`}
           data-lightbox-canvas
-          onLostPointerCapture={() => {
-            dragRef.current = null;
+          onLostPointerCapture={(event) => {
+            if (event.target === event.currentTarget) {
+              endPan(event);
+            }
           }}
-          onPointerCancel={() => {
-            dragRef.current = null;
-          }}
+          onPointerCancel={endPan}
+          onPointerDown={beginPan}
           onPointerMove={(event) => {
             const drag = dragRef.current;
             if (!drag || drag.pointerId !== event.pointerId) {
@@ -1548,14 +1579,16 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             setTranslate(
               sequencePlayback
                 ? point
-                : limitLightboxPan(point, fitted, area, zoom, isQuarterTurn)
+                : limitLightboxPan(
+                    point,
+                    fitted,
+                    area,
+                    wheelZoomRef.current,
+                    isQuarterTurn
+                  )
             );
           }}
-          onPointerUp={(event) => {
-            if (dragRef.current?.pointerId === event.pointerId) {
-              dragRef.current = null;
-            }
-          }}
+          onPointerUp={endPan}
           ref={canvasRef}
         >
           {imageError && (
@@ -1633,7 +1666,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 aria-hidden={
                   imageError || frame.state !== visibleFrame || undefined
                 }
-                className={`max-h-full max-w-full select-none object-contain ${visible ? "opacity-100" : "pointer-events-none opacity-0"} ${panClass}`}
+                className={`max-h-full max-w-full select-none object-contain ${visible ? "opacity-100" : "pointer-events-none opacity-0"}`}
                 data-browse-frame={
                   frame.kind === "preview" ? "placeholder" : "clear"
                 }
@@ -1651,13 +1684,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 data-lightbox-playback-frame={
                   frame.kind === "preview" ? true : undefined
                 }
-                draggable={!(sourceUnavailable || previewPlayback) && zoom <= 1}
+                draggable={!(sourceUnavailable || previewPlayback || isZoomed)}
                 height={photo.height || undefined}
                 key={`${frame.kind}-${photo.id}-${frame.src}-${frame.retry}`}
                 onDoubleClick={toggleZoom}
                 onDragStart={startOriginalDrag}
-                onPointerDown={beginPan}
-                onWheel={handleWheelZoom}
                 ref={frame.state.ref}
                 style={imageStyle}
                 width={photo.width || undefined}
@@ -1665,7 +1696,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             );
           })}
           {needsLoading && spinnerRequest === activeImageRequest && (
-            <div className="absolute inset-0 flex items-center justify-center">
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <LoadingSpinner
                 aria-label={t("loading")}
                 data-reduced-motion-keep="spinner"
@@ -1686,7 +1717,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <TooltipTrigger asChild>
                 <button
                   aria-label={t("previousPhoto")}
-                  className={`group z-10 col-start-1 row-start-2 flex w-10 items-center justify-center justify-self-start transition-opacity duration-200 sm:w-16 ${chromeClass}`}
+                  className={`group z-10 col-start-1 row-start-2 flex w-10 items-center justify-center justify-self-start transition-opacity duration-200 sm:w-16 ${chromeClass} ${isZoomed ? "self-center" : ""}`}
                   data-lightbox-controls
                   onClick={() => navigate(-1)}
                   type="button"
@@ -1702,7 +1733,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <TooltipTrigger asChild>
                 <button
                   aria-label={t("nextPhoto")}
-                  className={`group z-10 col-start-1 row-start-2 flex w-10 items-center justify-center justify-self-end transition-opacity duration-200 sm:w-16 ${chromeClass}`}
+                  className={`group z-10 col-start-1 row-start-2 flex w-10 items-center justify-center justify-self-end transition-opacity duration-200 sm:w-16 ${chromeClass} ${isZoomed ? "self-center" : ""}`}
                   data-lightbox-controls
                   onClick={() => navigate(1)}
                   type="button"

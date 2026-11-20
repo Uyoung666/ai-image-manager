@@ -502,6 +502,28 @@ describe("PhotoLightbox", () => {
     expect(image).toHaveStyle({ transition: "none" });
   });
 
+  it("pans when a pointer goes down before the wheel zoom frame is rendered", async () => {
+    vi.useFakeTimers();
+    const photo = { ...photos[0], width: 360, height: 440 };
+    render(
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={[photo]} />
+    );
+    const image = getFrame("[data-lightbox-image]");
+    await loadImage(image);
+    const canvas = image.parentElement as HTMLDivElement;
+    const capture = vi.fn();
+    Object.defineProperty(canvas, "setPointerCapture", { value: capture });
+
+    fireEvent.wheel(image, { deltaMode: 0, deltaY: -120 });
+    expect(image.style.transform).toContain("scale(1)");
+    firePointer(image, "pointerdown", { clientX: 300, pointerId: 7 });
+    firePointer(canvas, "pointermove", { clientX: 330, pointerId: 7 });
+    act(() => vi.advanceTimersToNextFrame());
+
+    expect(capture).toHaveBeenCalledWith(7);
+    expect(image.style.transform).toContain("translate3d(30px, 0px, 0)");
+  });
+
   it("enters slideshow mode and pauses when the user navigates", () => {
     render(
       <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />
@@ -845,12 +867,15 @@ describe("PhotoLightbox", () => {
       value: setPointerCapture,
     });
     const originalFrame = getFrame("[data-lightbox-original-frame]");
+    firePointer(playbackFrame, "pointerdown", { button: 2, pointerId: 7 });
+    expect(setPointerCapture).not.toHaveBeenCalled();
     firePointer(playbackFrame, "pointerdown", {
       clientX: 100,
       clientY: 100,
       pointerId: 7,
     });
     expect(setPointerCapture).toHaveBeenCalledWith(7);
+    firePointer(playbackFrame, "lostpointercapture", { pointerId: 7 });
     firePointer(canvas, "pointermove", {
       clientX: 125,
       clientY: 140,

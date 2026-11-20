@@ -336,6 +336,11 @@ async function openLightbox(
   return lightbox;
 }
 
+function horizontalPan(image: Locator) {
+  return image.evaluate((element) =>
+    Math.round(new DOMMatrix(getComputedStyle(element).transform).m41)
+  );
+}
 
 test("keeps the Windows lightbox header draggable while zoomed and upgrading detail", async () => {
   test.skip(
@@ -454,6 +459,90 @@ test("keeps the Windows lightbox header draggable while zoomed and upgrading det
   await header.getByRole("button", { name: CLOSE }).click();
   await expect(lightbox).toBeHidden();
 });
+
+for (const method of ["keyboard", "wheel", "zoom menu"] as const) {
+  test(`drags a magnified photo that still fits within the canvas after using the ${method}`, async () => {
+    const lightbox = await openLightbox({ width: 900, height: 600 });
+    const image = lightbox.locator('img[data-browse-visible="true"]');
+    const zoom = lightbox.getByRole("button", { name: ZOOM });
+    await expect(image).toBeVisible();
+    const point = { x: 450, y: 260 };
+    if (method === "zoom menu") {
+      await zoom.click();
+      await lightbox.getByRole("button", { name: ZOOM_IN }).click();
+    } else if (method === "keyboard") {
+      await page.keyboard.press("+");
+    }
+    await page.mouse.move(point.x, point.y);
+    if (method === "wheel") {
+      await page.mouse.wheel(0, -120);
+    }
+    await page.mouse.down();
+    await page.mouse.move(point.x + 35, point.y);
+    await page.mouse.up();
+    await expect(zoom).toHaveText(PERCENTAGE);
+    await expect.poll(() => horizontalPan(image)).toBe(35);
+    await lightbox.getByRole("button", { name: CLOSE }).click();
+    await expect(lightbox).toBeHidden();
+  });
+}
+
+for (const method of ["double click", "wheel"] as const) {
+  test(`keeps dragging from the photo edge while the full-size image loads after a ${method}`, async () => {
+    const lightbox = await openLightbox({ width: 900, height: 600 }, 1);
+    const fitted = lightbox.locator(
+      'img[data-browse-visible="true"][src*="/photo-thumbnail"]'
+    );
+    await expect(fitted).toBeVisible();
+    let releaseOriginal!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseOriginal = resolve;
+    });
+    const originalRequest = (url: URL) =>
+      url.pathname === "/image" &&
+      url.searchParams.get("path")?.endsWith("FavoriteFixture-1.png") === true;
+    let requested = false;
+    await page.route(originalRequest, async (route) => {
+      requested = true;
+      await gate;
+      await route.fulfill({ response: await route.fetch() });
+    });
+    try {
+      if (method === "wheel") {
+        await page.mouse.move(450, 260);
+        for (let step = 0; step < 4; step++) {
+          await page.mouse.wheel(0, -120);
+        }
+      } else {
+        await fitted.dblclick();
+      }
+      await expect.poll(() => requested).toBe(true);
+      await expect(lightbox.getByText(PREVIEW_DETAIL)).toBeVisible();
+
+      // The image now covers this part of the canvas, above the visible arrow.
+      await page.mouse.move(24, 160);
+      await page.mouse.down();
+      await page.mouse.move(54, 160);
+      await expect.poll(() => horizontalPan(fitted)).toBe(30);
+
+      releaseOriginal();
+      const original = lightbox.locator(
+        'img[data-lightbox-original-frame][data-browse-visible="true"]'
+      );
+      await expect(original).toBeVisible();
+      await expect.poll(() => horizontalPan(original)).toBe(30);
+      await page.mouse.move(84, 160);
+      await expect.poll(() => horizontalPan(original)).toBe(60);
+      await expect(lightbox.getByText(PREVIEW_DETAIL)).toHaveCount(0);
+    } finally {
+      await page.mouse.up();
+      releaseOriginal();
+      await page.unrouteAll({ behavior: "wait" });
+    }
+    await lightbox.getByRole("button", { name: CLOSE }).click();
+    await expect(lightbox).toBeHidden();
+  });
+}
 
 for (const size of LIGHTBOX_SIZES) {
   const scale = size.zoomFactor ? ` at ${size.zoomFactor * 100}%` : "";
