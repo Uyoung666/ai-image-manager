@@ -1999,6 +1999,7 @@
   "fullscreenFailed": "全画面表示にできませんでした",
   "zoomIn": "ズームイン",
   "zoomOut": "ズームアウト",
+  "lightboxZoom": "ズーム",
   "fitToScreen": "ウィンドウに合わせる（0）",
   "lightboxFitLabel": "ウィンドウに合わせる",
   "lightboxLockView": "倍率と表示位置を固定",

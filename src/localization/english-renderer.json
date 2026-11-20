@@ -2022,6 +2022,7 @@
   "fullscreenFailed": "Could not enter fullscreen",
   "zoomIn": "Zoom in",
   "zoomOut": "Zoom out",
+  "lightboxZoom": "Zoom",
   "fitToScreen": "Fit to window (0)",
   "lightboxFitLabel": "Fit to window",
   "lightboxLockView": "Lock zoom and position",

@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Info,
@@ -8,6 +9,7 @@ import {
   Plus,
   Rows3,
   X,
+  ZoomIn as ZoomIcon,
 } from "lucide-react";
 import {
   type DragEvent,
@@ -57,8 +59,8 @@ import {
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   Popover,
-  PopoverAnchor,
   PopoverContent,
+  PopoverTrigger,
 } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -113,6 +115,10 @@ interface PhotoLightboxProps {
 const SLIDESHOW_DELAYS = [3000, 5000, 10_000] as const;
 const MAX_ZOOM = 8;
 const ZOOM_STEP = 1.2;
+const CONTROL_REVEAL_EDGE = 24;
+const CONTROL_HIDE_DELAY = 3000;
+const LIGHTBOX_POPOVER_CLASS_NAME =
+  "z-[1100] max-h-[min(20rem,var(--radix-popover-content-available-height))] w-56 max-w-[calc(100dvw-1rem)] gap-0 overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-[#1a1a1e]/95 p-1.5 text-white shadow-2xl backdrop-blur-xl";
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -174,6 +180,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   });
   const reduceMotion = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  const zoomPanelRef = useRef<HTMLDivElement>(null);
+  const playbackRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const { area, dpr } = useBrowseArea(canvasRef, open);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -182,6 +191,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const wheelZoomRef = useRef(1);
   const wheelActiveRef = useRef(false);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const keyboardFocusRef = useRef(false);
   const focusFrameRef = useRef<number | null>(null);
   const currentPhotoIdRef = useRef<number | null>(null);
   const thumbnailScrollRef = useRef<HTMLDivElement>(null);
@@ -205,7 +215,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const [wheelActive, setWheelActive] = useState(false);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
-  const [canvasSize, setCanvasSize] = useState({ height: 0, width: 0 });
   const [sourceKey, setSourceKey] = useState(0);
   const [previewRetry, setPreviewRetry] = useState(0);
   const [repairKey, setRepairKey] = useState("");
@@ -223,7 +232,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   );
 
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreAnchorRef = useRef<HTMLDivElement>(null);
+  const [zoomOpen, setZoomOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [slideshowMode, setSlideshowMode] = useState(autoPlay);
   const [playing, setPlaying] = useState(autoPlay);
@@ -674,6 +683,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     setInfoVisible(false);
     setThumbnailsVisible(false);
     setMoreOpen(false);
+    setZoomOpen(false);
   }, []);
 
   const stopSlideshow = useCallback(() => {
@@ -682,30 +692,43 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     setProgress(0);
   }, []);
 
-  const canAutoHide = !(
-    infoVisible ||
-    thumbnailsVisible ||
-    moreOpen ||
-    modalOpen ||
-    previewMenu.open ||
-    (slideshowMode && !playing)
-  );
+  const rotateImage = useCallback((degrees: number) => {
+    setRotation((value) => value + degrees);
+    setPlaying(false);
+    setMoreOpen(false);
+  }, []);
 
-  const revealControls = useCallback(() => {
-    setControlsVisible(true);
+  const scheduleControlsHide = useCallback(() => {
     if (hideTimerRef.current) {
       clearTimeout(hideTimerRef.current);
     }
-    if (canAutoHide) {
-      hideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
-    }
-  }, [canAutoHide]);
+    hideTimerRef.current = setTimeout(() => {
+      hideTimerRef.current = null;
+      const focused = document.activeElement;
+      if (
+        (keyboardFocusRef.current &&
+          focused?.matches(":focus-visible") &&
+          focused.closest("[data-lightbox-controls]")) ||
+        headerRef.current?.matches(":hover") ||
+        playbackRef.current?.matches(":hover")
+      ) {
+        return;
+      }
+      setControlsVisible(false);
+    }, CONTROL_HIDE_DELAY);
+  }, []);
+
+  const revealControls = useCallback(() => {
+    setControlsVisible(true);
+    scheduleControlsHide();
+  }, [scheduleControlsHide]);
 
   useEffect(() => {
     if (!open) {
       setLockView(false);
       return;
     }
+    keyboardFocusRef.current = false;
     setPhotoIndex(initialIndex);
     setRepairKey("");
     resetView();
@@ -718,6 +741,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     setInfoVisible(initialPanelMode === "info");
     setThumbnailsVisible(initialPanelMode === "thumbnails");
     setMoreOpen(false);
+    setZoomOpen(false);
     setSlideshowMode(autoPlay);
     setPlaying(autoPlay);
     setProgress(0);
@@ -826,27 +850,20 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   }, [open]);
 
   useEffect(() => {
-    const handler = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    const handler = () => {
+      const fullscreen =
+        !!rootRef.current && document.fullscreenElement === rootRef.current;
+      setIsFullscreen(fullscreen);
+      if (fullscreen) {
+        rootRef.current?.focus({ preventScroll: true });
+        setControlsVisible(false);
+      } else {
+        revealControls();
+      }
+    };
     document.addEventListener("fullscreenchange", handler);
     return () => document.removeEventListener("fullscreenchange", handler);
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
-    }
-    const update = () => {
-      setCanvasSize({ height: canvas.clientHeight, width: canvas.clientWidth });
-    };
-    update();
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(update);
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, []);
+  }, [revealControls]);
 
   useEffect(() => {
     if (!open) {
@@ -908,13 +925,16 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       if (
         isEditableTarget(event.target) ||
         (event.key === " " &&
-          event.target instanceof HTMLInputElement &&
-          event.target.type === "checkbox")
+          ((event.target instanceof HTMLInputElement &&
+            event.target.type === "checkbox") ||
+            (keyboardFocusRef.current &&
+              event.target instanceof HTMLButtonElement)))
       ) {
         return;
       }
       if (event.key === "Tab") {
-        const root = rootRef.current;
+        keyboardFocusRef.current = true;
+        const root = zoomPanelRef.current ?? rootRef.current;
         if (root) {
           const focusable = getFocusableElements(root);
           if (focusable.length === 0) {
@@ -936,7 +956,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             focusable[nextIndex]?.focus();
           }
         }
-        revealControls();
         return;
       }
       if (event.key === "Escape") {
@@ -944,7 +963,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         event.stopImmediatePropagation();
         if (previewMenu.open) {
           setPreviewMenu((value) => ({ ...value, open: false }));
-        } else if (moreOpen) {
+        } else if (zoomOpen || moreOpen) {
+          setZoomOpen(false);
           setMoreOpen(false);
         } else if (infoVisible) {
           closeInfoPanel();
@@ -984,8 +1004,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       } else if (event.key.toLowerCase() === "r") {
         event.preventDefault();
         event.stopImmediatePropagation();
-        setRotation((value) => value + (event.shiftKey ? -90 : 90));
-        setPlaying(false);
+        rotateImage(event.shiftKey ? -90 : 90);
       } else if (event.key === "0") {
         event.preventDefault();
         updateZoom(1);
@@ -999,7 +1018,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         event.preventDefault();
         updateZoom(zoom / ZOOM_STEP);
       }
-      revealControls();
+      if (!isFullscreen) {
+        revealControls();
+      }
     };
     window.addEventListener("keydown", keydown, true);
     return () => window.removeEventListener("keydown", keydown, true);
@@ -1007,6 +1028,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     closeInfoPanel,
     closeThumbnails,
     infoVisible,
+    isFullscreen,
     moreOpen,
     modalOpen,
     navigate,
@@ -1014,6 +1036,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     previewMenu.open,
     requestClose,
     revealControls,
+    rotateImage,
     showActualPixels,
     slideshowMode,
     startSlideshow,
@@ -1023,11 +1046,15 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     toggleThumbnails,
     updateZoom,
     zoom,
+    zoomOpen,
   ]);
 
-  const chromeClass = controlsVisible
+  const chromeVisible = controlsVisible || moreOpen || zoomOpen || modalOpen;
+  const chromeClass = chromeVisible
     ? "pointer-events-auto opacity-100"
     : "pointer-events-none opacity-0";
+  const viewerChromeClass = isFullscreen ? chromeClass : "";
+  const playbackChromeClass = playing ? chromeClass : "";
   const fitMode = sequencePlayback ? zoom <= 1.05 : zoom === 1 && !actualPixels;
   const zoomLabel =
     !sequencePlayback && fitMode
@@ -1051,14 +1078,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     gridArea: "1 / 1",
     width: !sequencePlayback && fitted.width ? fitted.width : undefined,
     height: !sequencePlayback && fitted.height ? fitted.height : undefined,
-    maxHeight:
-      isQuarterTurn && canvasSize.width
-        ? `${Math.max(1, canvasSize.width - 128)}px`
-        : undefined,
-    maxWidth:
-      isQuarterTurn && canvasSize.height
-        ? `${Math.max(1, canvasSize.height - 112)}px`
-        : undefined,
+    maxHeight: isQuarterTurn && imageArea.height ? imageArea.height : undefined,
+    maxWidth: isQuarterTurn && imageArea.width ? imageArea.width : undefined,
     transform: `translate3d(${translate.x}px, ${translate.y}px, 0) scale(${zoom}) rotate(${rotation}deg)`,
     backfaceVisibility: "hidden" as const,
     transition:
@@ -1136,12 +1157,13 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     }
   };
 
-  return createPortal(
+  const content = createPortal(
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the modal dialog surface owns global reveal and image context-menu interactions.
     <div
       aria-label={t("lightboxReview")}
       aria-modal="true"
-      className={`lightbox-interactive fixed inset-0 z-[1000] flex overflow-hidden bg-[#09090b] text-white outline-none ${controlsVisible ? "cursor-default" : "cursor-none"}`}
+      className={`lightbox-interactive fixed inset-0 z-[1000] flex overflow-hidden bg-[#09090b] text-white outline-none ${isFullscreen && !chromeVisible ? "cursor-none" : "cursor-default"}`}
+      onBlur={scheduleControlsHide}
       onContextMenu={(event) => {
         const target = event.target as HTMLElement;
         if (!target.closest("[data-lightbox-image]")) {
@@ -1156,21 +1178,44 @@ export const PhotoLightbox = memo(function PhotoLightbox({
           y: event.clientY,
         });
       }}
-      onFocusCapture={revealControls}
-      onMouseMove={revealControls}
+      onFocusCapture={(event) => {
+        if (event.target.closest("[data-lightbox-controls]")) {
+          revealControls();
+        }
+      }}
+      onMouseMove={(event) => {
+        if (
+          !isFullscreen ||
+          event.clientY < CONTROL_REVEAL_EDGE ||
+          (slideshowMode &&
+            event.clientY >= window.innerHeight - CONTROL_REVEAL_EDGE)
+        ) {
+          revealControls();
+        }
+      }}
+      onMouseOut={(event) => {
+        const region = (event.target as Element).closest(
+          "[data-lightbox-controls]"
+        );
+        const nextTarget =
+          event.relatedTarget instanceof Node ? event.relatedTarget : null;
+        if (region && !region.contains(nextTarget)) {
+          scheduleControlsHide();
+        }
+      }}
+      onPointerDownCapture={() => {
+        keyboardFocusRef.current = false;
+      }}
       ref={rootRef}
       role="dialog"
       tabIndex={-1}
     >
-      <div className="relative min-w-0 flex-1 overflow-hidden">
-        <div
-          className="absolute inset-x-0 top-0 z-20 h-20 bg-gradient-to-b from-black/75 to-transparent transition-opacity duration-200 motion-reduce:transition-none"
-          data-lightbox-chrome
-          style={{ opacity: controlsVisible ? 1 : 0 }}
-        />
+      <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto_auto] overflow-hidden">
         <header
-          className={`absolute inset-x-0 top-0 z-30 flex h-14 min-w-0 cursor-default select-none items-center justify-between gap-2 px-2 transition-opacity duration-200 motion-reduce:transition-none sm:gap-5 sm:px-4 ${isFullscreen ? chromeClass : ""}`}
+          className={`col-start-1 row-start-1 flex h-14 min-w-0 cursor-default select-none items-center justify-between gap-3 border-white/10 border-b bg-black/45 px-2 transition-opacity duration-200 motion-reduce:transition-none max-[540px]:h-auto max-[540px]:min-h-14 max-[540px]:flex-col max-[540px]:items-stretch max-[540px]:gap-1 max-[540px]:py-1 sm:gap-5 sm:px-4 ${viewerChromeClass}`}
+          data-lightbox-controls
           data-lightbox-window-drag={!isFullscreen || undefined}
+          ref={headerRef}
         >
           <div className="flex min-w-0 items-center gap-3">
             <span
@@ -1231,7 +1276,125 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 )}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1 max-[540px]:justify-end max-[540px]:gap-0">
+            <Popover onOpenChange={setZoomOpen} open={zoomOpen}>
+              <Tooltip disabled={zoomOpen}>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button
+                      aria-label={`${t("lightboxZoom")} · ${zoomLabel}`}
+                      className="lightbox-control-button gap-1.5 px-2 text-xs tabular-nums data-[state=open]:bg-white/15"
+                      type="button"
+                    >
+                      <ZoomIcon className="size-4" />
+                      <span className="max-w-28 truncate max-[440px]:sr-only">
+                        {zoomLabel}
+                      </span>
+                      <ChevronDown className="hidden size-3 sm:block" />
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {t("lightboxZoom")} · {zoomLabel}
+                </TooltipContent>
+              </Tooltip>
+              {zoomOpen && (
+                <PopoverContent
+                  align="end"
+                  aria-label={t("lightboxZoom")}
+                  className={LIGHTBOX_POPOVER_CLASS_NAME}
+                  collisionPadding={8}
+                  data-lightbox-controls
+                  onOpenAutoFocus={(event) => {
+                    event.preventDefault();
+                    zoomPanelRef.current?.focus({ preventScroll: true });
+                  }}
+                  portalContainer={rootRef.current}
+                  ref={zoomPanelRef}
+                  sideOffset={6}
+                >
+                  <div className="flex min-w-0 items-center justify-between gap-1 px-1">
+                    <ControlButton
+                      label={t("zoomOut")}
+                      onClick={() => updateZoom(zoom / ZOOM_STEP)}
+                    >
+                      <Minus className="size-4" />
+                    </ControlButton>
+                    <span className="min-w-0 text-center text-white/70 tabular-nums">
+                      {zoomLabel}
+                    </span>
+                    <ControlButton
+                      label={t("zoomIn")}
+                      onClick={() => updateZoom(zoom * ZOOM_STEP)}
+                    >
+                      <Plus className="size-4" />
+                    </ControlButton>
+                  </div>
+                  <div className="my-1 border-white/10 border-t" />
+                  <MenuButton
+                    icon={<Maximize className="size-4 shrink-0" />}
+                    label={t("fitToScreen")}
+                    onClick={() => {
+                      updateZoom(1);
+                      setZoomOpen(false);
+                    }}
+                  />
+                  <MenuButton
+                    icon={
+                      <span
+                        aria-hidden="true"
+                        className="w-4 shrink-0 text-[10px]"
+                      >
+                        1:1
+                      </span>
+                    }
+                    label={t("actualSize")}
+                    onClick={() => {
+                      showActualPixels();
+                      setZoomOpen(false);
+                    }}
+                  />
+                  {!sequencePlayback && (
+                    <>
+                      <div className="my-1 border-white/10 border-t" />
+                      <div className="flex min-w-0 items-center justify-between gap-2 px-2.5 py-1.5 text-white/70">
+                        <span className="wrap-anywhere min-w-0">
+                          {t("lightboxLockView")}
+                        </span>
+                        <span className="inline-flex shrink-0">
+                          <Switch
+                            ariaLabel={t("lightboxLockView")}
+                            checked={lockView}
+                            onCheckedChange={setLockView}
+                          />
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </PopoverContent>
+              )}
+            </Popover>
+            <ControlButton
+              label={t("rotateLeft")}
+              onClick={() => rotateImage(-90)}
+            >
+              <RotateCcw className="size-4" />
+            </ControlButton>
+            <ControlButton
+              label={t("rotateRight")}
+              onClick={() => rotateImage(90)}
+            >
+              <RotateCw className="size-4" />
+            </ControlButton>
+            {photos.length > 1 && (
+              <ControlButton
+                active={thumbnailsVisible}
+                label={t("toggleThumbnails")}
+                onClick={toggleThumbnails}
+              >
+                <Rows3 className="size-4" />
+              </ControlButton>
+            )}
             {onToggleFavorite && (
               <ControlButton
                 active={favorite}
@@ -1252,39 +1415,44 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <Info className="h-4 w-4" />
             </ControlButton>
             <Popover onOpenChange={setMoreOpen} open={moreOpen}>
-              <PopoverAnchor asChild>
-                <div ref={moreAnchorRef}>
-                  <ControlButton
-                    active={moreOpen}
-                    label={t("more")}
-                    onClick={() => setMoreOpen((value) => !value)}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </ControlButton>
-                </div>
-              </PopoverAnchor>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <button
+                      aria-label={t("more")}
+                      className="lightbox-control-button data-[state=open]:bg-white/15"
+                      type="button"
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t("more")}</TooltipContent>
+              </Tooltip>
               {moreOpen && (
                 <PopoverContent
                   align="end"
-                  className="z-[1100] max-h-[min(20rem,var(--radix-popover-content-available-height))] w-56 max-w-[calc(100vw-1rem)] gap-0 overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-[#1a1a1e]/95 p-1.5 text-white shadow-2xl backdrop-blur-xl"
+                  aria-label={t("more")}
+                  className={LIGHTBOX_POPOVER_CLASS_NAME}
                   collisionPadding={8}
-                  onCloseAutoFocus={(event) => event.preventDefault()}
-                  onInteractOutside={(event) => {
-                    if (
-                      event.target instanceof Node &&
-                      moreAnchorRef.current?.contains(event.target)
-                    ) {
-                      event.preventDefault();
-                    }
-                  }}
+                  data-lightbox-controls
+                  portalContainer={rootRef.current}
                   sideOffset={6}
                 >
                   {onAddToAlbum && (
                     <MenuButton
                       icon={<Rows3 className="h-4 w-4" />}
                       label={t("addToAlbum")}
-                      onClick={() => {
+                      onClick={async () => {
                         setMoreOpen(false);
+                        if (isFullscreen) {
+                          try {
+                            await document.exitFullscreen();
+                          } catch {
+                            toast.error(t("fullscreenFailed"));
+                            return;
+                          }
+                        }
                         onAddToAlbum(photo.id);
                       }}
                     />
@@ -1359,7 +1527,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         </header>
 
         <div
-          className="absolute inset-x-0 top-0 grid grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center overflow-hidden px-10 pt-14 pb-16 transition-[bottom] duration-200 motion-reduce:transition-none sm:px-16"
+          className="relative col-start-1 row-start-2 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center overflow-hidden px-10 py-2 sm:px-16"
+          data-lightbox-canvas
           onLostPointerCapture={() => {
             dragRef.current = null;
           }}
@@ -1387,7 +1556,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             }
           }}
           ref={canvasRef}
-          style={{ bottom: thumbnailsVisible ? 96 : 0 }}
         >
           {imageError && (
             <div className="flex max-w-full flex-col items-center gap-3 text-center [grid-area:1/1]">
@@ -1517,7 +1685,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <TooltipTrigger asChild>
                 <button
                   aria-label={t("previousPhoto")}
-                  className={`group absolute top-14 bottom-16 left-0 z-10 flex w-10 items-center justify-center transition-opacity duration-200 sm:w-16 ${chromeClass}`}
+                  className={`group z-10 col-start-1 row-start-2 flex w-10 items-center justify-center justify-self-start transition-opacity duration-200 sm:w-16 ${chromeClass}`}
+                  data-lightbox-controls
                   onClick={() => navigate(-1)}
                   type="button"
                 >
@@ -1526,13 +1695,14 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                   </span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("previousPhoto")}</TooltipContent>
+              <TooltipContent side="right">{t("previousPhoto")}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   aria-label={t("nextPhoto")}
-                  className={`group absolute top-14 right-0 bottom-16 z-10 flex w-10 items-center justify-center transition-opacity duration-200 sm:w-16 ${chromeClass}`}
+                  className={`group z-10 col-start-1 row-start-2 flex w-10 items-center justify-center justify-self-end transition-opacity duration-200 sm:w-16 ${chromeClass}`}
+                  data-lightbox-controls
                   onClick={() => navigate(1)}
                   type="button"
                 >
@@ -1541,17 +1711,19 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                   </span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t("nextPhoto")}</TooltipContent>
+              <TooltipContent side="left">{t("nextPhoto")}</TooltipContent>
             </Tooltip>
           </>
         )}
 
-        <div
-          className={`absolute inset-x-0 z-30 flex justify-center overflow-hidden px-2 transition-[bottom,opacity] duration-200 motion-reduce:transition-none ${chromeClass}`}
-          style={{ bottom: thumbnailsVisible ? 108 : 12 }}
-        >
-          {slideshowMode ? (
-            <div className="relative flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain rounded-xl border border-white/10 bg-black/65 p-1.5 shadow-2xl backdrop-blur-xl">
+        {slideshowMode && (
+          <div
+            className={`col-start-1 row-start-3 min-w-0 cursor-default overflow-x-auto overscroll-x-contain whitespace-nowrap border-white/10 border-t bg-black/45 px-2 py-1.5 transition-opacity duration-200 motion-reduce:transition-none sm:px-3 ${playbackChromeClass}`}
+            data-lightbox-controls
+            data-lightbox-playback-toolbar
+            ref={playbackRef}
+          >
+            <div className="relative flex w-max items-center gap-1">
               <div
                 className="absolute bottom-0 left-0 h-0.5 bg-primary transition-[width] duration-100"
                 data-reduced-motion-keep="progress-bar"
@@ -1592,99 +1764,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 {t("exitSlideshow")}
               </button>
             </div>
-          ) : (
-            <div className="flex max-w-full items-center gap-0.5 overflow-x-auto overscroll-x-contain rounded-xl border border-white/10 bg-black/65 p-1.5 shadow-2xl backdrop-blur-xl">
-              <ControlButton
-                label={t("zoomOut")}
-                onClick={() => updateZoom(zoom / ZOOM_STEP)}
-              >
-                <Minus className="h-4 w-4" />
-              </ControlButton>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    aria-label={t("fitToScreen")}
-                    className="min-w-14 rounded-md px-2 py-2 text-[11px] text-white/70 tabular-nums hover:bg-white/10 hover:text-white"
-                    onClick={() => updateZoom(1)}
-                    type="button"
-                  >
-                    {zoomLabel}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("fitToScreen")}</TooltipContent>
-              </Tooltip>
-              <ControlButton
-                label={t("zoomIn")}
-                onClick={() => updateZoom(zoom * ZOOM_STEP)}
-              >
-                <Plus className="h-4 w-4" />
-              </ControlButton>
-              {!sequencePlayback && (
-                <TooltipPortalProvider containerRef={rootRef}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="inline-flex shrink-0 items-center px-1">
-                        <Switch
-                          ariaLabel={t("lightboxLockView")}
-                          checked={lockView}
-                          onCheckedChange={setLockView}
-                        />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("lightboxLockViewHint")}</TooltipContent>
-                  </Tooltip>
-                </TooltipPortalProvider>
-              )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    aria-label={t("actualSize")}
-                    className="lightbox-control-button px-2 font-semibold text-[10px]"
-                    onClick={showActualPixels}
-                    type="button"
-                  >
-                    1:1
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{t("actualSize")}</TooltipContent>
-              </Tooltip>
-              <div className="mx-1 h-5 border-white/10 border-l" />
-              <ControlButton
-                label={t("rotateLeft")}
-                onClick={() => {
-                  setRotation((value) => value - 90);
-                  setPlaying(false);
-                }}
-              >
-                <RotateCcw className="h-4 w-4" />
-              </ControlButton>
-              <ControlButton
-                label={t("rotateRight")}
-                onClick={() => {
-                  setRotation((value) => value + 90);
-                  setPlaying(false);
-                }}
-              >
-                <RotateCw className="h-4 w-4" />
-              </ControlButton>
-              {photos.length > 1 && (
-                <>
-                  <div className="mx-1 h-5 border-white/10 border-l" />
-                  <ControlButton
-                    active={thumbnailsVisible}
-                    label={t("toggleThumbnails")}
-                    onClick={toggleThumbnails}
-                  >
-                    <Rows3 className="h-4 w-4" />
-                  </ControlButton>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {thumbnailsVisible && (
-          <div className="absolute inset-x-0 bottom-0 z-20 h-24 border-white/10 border-t bg-black/80 px-3 py-2 backdrop-blur-xl">
+          <div className="col-start-1 row-start-4 h-24 min-w-0 cursor-default border-white/10 border-t bg-black/45 px-3 py-2">
             <div
               className="flex h-full gap-2 overflow-x-auto overscroll-contain"
               data-lightbox-thumbnail-strip
@@ -1761,6 +1845,12 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     </div>,
     document.body
   );
+
+  return (
+    <TooltipPortalProvider containerRef={rootRef}>
+      {content}
+    </TooltipPortalProvider>
+  );
 });
 
 function ControlButton({
@@ -1809,12 +1899,12 @@ function MenuButton({
   return (
     <IconMotionTrigger asChild>
       <button
-        className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+        className="flex w-full min-w-0 items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12px] text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-primary [&_svg]:shrink-0"
         onClick={onClick}
         type="button"
       >
         {icon}
-        {label}
+        <span className="wrap-anywhere min-w-0">{label}</span>
       </button>
     </IconMotionTrigger>
   );

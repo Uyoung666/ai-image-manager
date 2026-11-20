@@ -70,6 +70,7 @@ vi.mock("@/utils/local-media-url", () => ({
 }));
 
 const THUMBNAIL_NAME = /^\d+: image-/;
+const LIGHTBOX_ZOOM = /^lightboxZoom/;
 const photos = [
   {
     fileDate: new Date("2024-01-01").getTime(),
@@ -152,29 +153,27 @@ describe("PhotoLightbox", () => {
     const props = { initialIndex: 0, onClose: vi.fn(), open: true, photos };
     try {
       const { rerender } = render(<PhotoLightbox {...props} />);
-      const lock = screen.getByRole("checkbox", { name: "lightboxLockView" });
-      expect(lock).not.toBeChecked();
-      expect(
-        screen.getByRole("button", { name: "fitToScreen" })
-      ).toHaveTextContent("lightboxFitLabel");
+      const zoom = screen.getByRole("button", { name: LIGHTBOX_ZOOM });
+      expect(zoom).toHaveTextContent("lightboxFitLabel");
       fireEvent.keyDown(window, { key: "1" });
-      expect(
-        screen.getByRole("button", { name: "fitToScreen" })
-      ).toHaveTextContent("100%");
+      expect(zoom).toHaveTextContent("100%");
       const firstOriginal = getFrame("[data-lightbox-original-frame]");
       await loadImage(firstOriginal);
       expect(firstOriginal.style.transform).toContain("scale(2.5)");
+      fireEvent.click(zoom);
+      const lock = screen.getByRole("checkbox", { name: "lightboxLockView" });
+      expect(lock).not.toBeChecked();
       fireEvent.click(lock);
+      fireEvent.keyDown(window, { key: "Escape" });
       fireEvent.keyDown(window, { key: "ArrowRight" });
-      expect(
-        screen.getByRole("button", { name: "fitToScreen" })
-      ).toHaveTextContent("100%");
+      expect(zoom).toHaveTextContent("100%");
       const secondOriginal = getFrame("[data-lightbox-original-frame]");
       expect(secondOriginal.style.transform).toContain(
         "scale(3.3333333333333335)"
       );
       rerender(<PhotoLightbox {...props} open={false} />);
       rerender(<PhotoLightbox {...props} />);
+      fireEvent.click(screen.getByRole("button", { name: LIGHTBOX_ZOOM }));
       expect(
         screen.getByRole("checkbox", { name: "lightboxLockView" })
       ).not.toBeChecked();

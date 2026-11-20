@@ -2512,6 +2512,7 @@ i18n.use(initReactI18next).init({
         fullscreenFailed: "无法进入全屏",
         zoomIn: "放大",
         zoomOut: "缩小",
+        lightboxZoom: "缩放",
         fitToScreen: "适合窗口 (0)",
         lightboxFitLabel: "适合窗口",
         lightboxLockView: "锁定倍率和位置",
