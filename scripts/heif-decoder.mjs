@@ -163,23 +163,15 @@ export async function decodeHeif(input, options = {}) {
           .toBuffer();
         result.modelRgb = rgb;
       }
-      if (options.output === "import") {
-        result.buffer = await source()
-          .resize(options.thumbnailSize, options.thumbnailSize, {
-            fit: "inside",
-            withoutEnlargement: true,
-          })
-          .webp({ quality: 85, effort: 1 })
-          .toBuffer();
-      }
     } else if (options.output === "pixels") {
       result.buffer = normalized.data;
-    } else {
+    } else if (options.output !== "preview") {
       result.buffer = await source()
         .withMetadata({ orientation: 1 })
         .png()
         .toBuffer();
     }
+    await derivePreview(source, options, result);
     mark("deriveMs");
     timings.totalMs = performance.now() - started;
     return result;
@@ -191,6 +183,24 @@ export async function decodeHeif(input, options = {}) {
       lib.heif_context_free(decoder.decoder);
       decoder.decoder = null;
     }
+  }
+}
+
+async function derivePreview(source, options, result) {
+  if (!(options.output === "import" || options.output === "preview")) {
+    return;
+  }
+  const { data, info } = await source()
+    .resize(options.thumbnailSize, options.thumbnailSize, {
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .webp({ quality: 85, effort: 1 })
+    .toBuffer({ resolveWithObject: true });
+  result.buffer = data;
+  if (options.output === "preview") {
+    result.width = info.width;
+    result.height = info.height;
   }
 }
 

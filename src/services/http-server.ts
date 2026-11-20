@@ -6,6 +6,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
+import { needsNativePlayback } from "@/services/browser-image-animation";
 import {
   applyExifOrientation,
   resolveImageOrientation,
@@ -25,14 +26,15 @@ import {
 import { getDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
 import {
+  BROWSE_PREVIEW_EDGES,
+  type BrowsePreviewEdge,
   GALLERY_CONFIG,
   GALLERY_THUMBNAIL_EDGES,
-  type GalleryThumbnailEdge,
 } from "@/utils/gallery-config";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { createLogger } from "@/utils/logger";
 import { resolveSafePath as resolveSecurePath } from "@/utils/path-security";
-import { resolveHeifInput } from "./heif-input";
+import { decodeHeifDisplay } from "./heif-input";
 
 const log = createLogger("http-server");
 const PROJECT_MEDIA_ID_PATTERN =
@@ -158,16 +160,12 @@ class ConversionSemaphore {
 const conversionSemaphore = new ConversionSemaphore(4);
 
 async function createOrientedPipeline(
-  input: string | Buffer,
+  input: string,
   originalPath: string
 ): Promise<ReturnType<typeof sharp>> {
-  const decodedInput = await resolveHeifInput(input);
-  const metadata = await sharp(decodedInput, { failOn: "none" }).metadata();
+  const metadata = await sharp(input, { failOn: "none" }).metadata();
   const orientation = await resolveImageOrientation(originalPath, metadata);
-  return applyExifOrientation(
-    sharp(decodedInput, { failOn: "none" }),
-    orientation
-  );
+  return applyExifOrientation(sharp(input, { failOn: "none" }), orientation);
 }
 
 async function normalizeJpegPreview(
@@ -227,6 +225,9 @@ function safeEndError(
   status: number,
   body: string
 ): void {
+  if (res.destroyed) {
+    return;
+  }
   if (res.headersSent) {
     res.destroy();
   } else {
@@ -659,11 +660,7 @@ async function handlePreview(
 // RAW → extractRawPreview (不走 sharp)，browser-compatible → 直接流式，
 // HEIC/TIFF 等 → sharp({failOn:"none"}).png().pipe(res) 并发上限 4。
 
-function handleImage(
-  safePath: string,
-  res: http.ServerResponse,
-  req: http.IncomingMessage
-): void {
+function handleImage(safePath: string, res: http.ServerResponse): void {
   setCorsHeaders(res);
 
   fs.promises
@@ -776,9 +773,8 @@ function handleImage(
         res.on("finish", releaseSlot);
         res.on("close", releaseSlot);
         res.on("error", releaseSlot);
-        req.on("close", () => {
-          setTimeout(releaseSlot, 100);
-        });
+        const controller = new AbortController();
+        res.once("close", () => controller.abort());
 
         // 不在此处 res.writeHead(200)。由 pipe() 在首个数据块到达时
         // 自动发送响应头。若 sharp 流在产出数据前报错，headersSent 仍为
@@ -787,37 +783,27 @@ function handleImage(
         res.setHeader("cache-control", "private, no-cache");
 
         try {
-          const sharpStream = (
-            await createOrientedPipeline(safePath, safePath)
-          ).png();
-
-          sharpStream.on("error", (err: Error) => {
-            releaseSlot();
-            if (res.headersSent) {
-              // 已经向浏览器发送了部分 PNG 数据，无法再发送错误页。
-              // 只能销毁连接。
-              res.destroy();
-            } else {
-              // 尚未发送任何数据 — 正常返回 500 错误页，
-              // 杜绝 ERR_EMPTY_RESPONSE。
-              res.writeHead(500);
-              res.end("Image conversion failed");
-            }
-            log.error(
-              `[HttpServer] /image sharp conversion error for ${safePath}: ${err.message}`
-            );
+          const heif = await decodeHeifDisplay(safePath, {
+            signal: controller.signal,
+            priority: () => 0,
           });
-
-          sharpStream.pipe(res);
+          if (heif) {
+            if (!res.destroyed) {
+              res.setHeader("content-length", heif.buffer.length);
+              res.end(heif.buffer);
+            }
+            return;
+          }
+          controller.signal.throwIfAborted();
+          await pipeConvertedImage(safePath, res, controller.signal);
         } catch (err) {
           releaseSlot();
-          if (!res.headersSent) {
-            res.writeHead(500);
-            res.end("Image conversion failed");
+          if (!controller.signal.aborted) {
+            safeEndError(res, 500, "Image conversion failed");
+            log.error(
+              `[HttpServer] /image sharp init error for ${safePath}: ${(err as Error)?.message ?? String(err)}`
+            );
           }
-          log.error(
-            `[HttpServer] /image sharp init error for ${safePath}: ${(err as Error)?.message ?? String(err)}`
-          );
         }
       });
     })
@@ -839,6 +825,30 @@ function handleImage(
 }
 
 // ── 请求分发 ──────────────────────────────────────────────────────────
+
+async function pipeConvertedImage(
+  safePath: string,
+  res: http.ServerResponse,
+  signal: AbortSignal
+) {
+  const pipeline = (await createOrientedPipeline(safePath, safePath)).png();
+  if (signal.aborted) {
+    pipeline.destroy();
+    return;
+  }
+  res.once("close", () => pipeline.destroy());
+  pipeline.on("error", (err: Error) => {
+    if (res.headersSent) {
+      res.destroy();
+    } else {
+      safeEndError(res, 500, "Image conversion failed");
+    }
+    log.error(
+      `[HttpServer] /image conversion failed for ${safePath}: ${err.message}`
+    );
+  });
+  pipeline.pipe(res);
+}
 
 async function serveGalleryThumbnailResult(
   req: http.IncomingMessage,
@@ -910,43 +920,35 @@ function offlineCachedPreview(photo: {
     : null;
 }
 
-async function serveOfflinePhotoThumbnail(
-  res: http.ServerResponse,
+async function readOfflinePhotoThumbnail(
   thumbnailPath: string | null,
   signal: AbortSignal
-): Promise<void> {
+) {
   const cacheRoot = path.join(getDataPath(), "thumbnails");
   const safe = thumbnailPath && resolveSecurePath(thumbnailPath, [cacheRoot]);
   if (!safe || path.extname(safe).toLowerCase() !== ".webp") {
-    safeEndError(res, 404, "Thumbnail unavailable");
-    return;
+    return null;
   }
   try {
     const stat = await fs.promises.stat(safe);
     if (!stat.isFile()) {
-      safeEndError(res, 404, "Thumbnail unavailable");
-      return;
+      return null;
     }
     const { metadata, buffer } = await readValidatedThumbnail(safe, stat);
     if (metadata.format !== "webp") {
-      safeEndError(res, 404, "Thumbnail unavailable");
-      return;
+      return null;
     }
-    if (!(signal.aborted || res.destroyed)) {
-      res.setHeader("cache-control", "private, no-cache");
-      if (buffer) {
-        res.setHeader("content-type", "image/webp");
-        res.setHeader("content-length", buffer.length);
-        res.writeHead(200);
-        res.end(buffer);
-      } else {
-        serveStaticFile(safe, res, "image/webp", false, stat);
-      }
-    }
+    signal.throwIfAborted();
+    return {
+      thumbnailPath: safe,
+      stat,
+      buffer,
+      width: metadata.width ?? 0,
+      height: metadata.height ?? 0,
+      sourceIdentity: undefined,
+    };
   } catch {
-    if (!(signal.aborted || res.destroyed)) {
-      safeEndError(res, 404, "Thumbnail unavailable");
-    }
+    return null;
   }
 }
 
@@ -986,65 +988,107 @@ function readPhotoThumbnail(photoId: number) {
   return reader.get({ photoId });
 }
 
+export async function loadPhotoThumbnail(
+  params: URLSearchParams,
+  signal: AbortSignal,
+  priority = 0
+) {
+  const id = Number(params.get("id"));
+  const edge = Number(params.get("edge")) as BrowsePreviewEdge;
+  const edges: readonly number[] =
+    params.get("browse") === "1"
+      ? BROWSE_PREVIEW_EDGES
+      : GALLERY_THUMBNAIL_EDGES;
+  if (!Number.isSafeInteger(id) || id <= 0 || !edges.includes(edge)) {
+    return { status: 400 } as const;
+  }
+  const photo = readPhotoThumbnail(id);
+  if (!photo) {
+    return { status: 404 } as const;
+  }
+  if (
+    photo.sourceStatus !== "available" &&
+    photo.sourceStatus !== "unverified"
+  ) {
+    const thumbnail = await readOfflinePhotoThumbnail(
+      offlineCachedPreview(photo),
+      signal
+    );
+    return thumbnail
+      ? ({ status: 200, kind: "preview", thumbnail, offline: true } as const)
+      : ({ status: 404 } as const);
+  }
+  const safePath = resolveSafePath(photo.path, true);
+  if (!safePath) {
+    return { status: 403 } as const;
+  }
+  if (params.get("browse") === "1" && (await needsNativePlayback(safePath))) {
+    signal.throwIfAborted();
+    return { status: 200, kind: "original", originalPath: safePath } as const;
+  }
+  const selectExisting = params.get("select") === "1";
+  if (selectExisting) {
+    recordGalleryMediaStat("thumbnailSelectionRequest");
+  }
+  recordGalleryMediaStat("thumbnailRequest");
+  const thumbnail = await generateGalleryThumbnail(
+    safePath,
+    edge,
+    signal,
+    priority,
+    photo,
+    selectExisting,
+    params.get("repair") === "1",
+    photo
+  );
+  return { status: 200, kind: "preview", thumbnail, offline: false } as const;
+}
+
 async function handlePhotoThumbnail(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   params: URLSearchParams
 ): Promise<void> {
-  const id = Number(params.get("id"));
-  const edge = Number(params.get("edge"));
-  if (
-    !Number.isSafeInteger(id) ||
-    id <= 0 ||
-    !GALLERY_THUMBNAIL_EDGES.includes(edge as GalleryThumbnailEdge)
-  ) {
-    safeEndError(res, 400, "Invalid photo or thumbnail size");
-    return;
-  }
   const controller = new AbortController();
   const cancel = () => controller.abort();
   res.once("close", cancel);
   try {
-    const photo = readPhotoThumbnail(id);
-    if (!photo) {
-      safeEndError(res, 404, "Not Found");
-      return;
-    }
-    if (
-      photo.sourceStatus !== "available" &&
-      photo.sourceStatus !== "unverified"
-    ) {
-      await serveOfflinePhotoThumbnail(
-        res,
-        offlineCachedPreview(photo),
-        controller.signal
-      );
-      return;
-    }
-    const safePath = resolveSafePath(photo.path, true);
-    if (!safePath) {
-      safeEndError(res, 403, "Forbidden");
-      return;
-    }
-    const selectExisting = params.get("select") === "1";
-    if (selectExisting) {
-      recordGalleryMediaStat("thumbnailSelectionRequest");
-    }
-    recordGalleryMediaStat("thumbnailRequest");
-    const thumbnail = await generateGalleryThumbnail(
-      safePath,
-      edge as GalleryThumbnailEdge,
+    // Browser image requests are interactive. A fetch warms the same resource
+    // with background priority, without changing its URL or cache identity.
+    const result = await loadPhotoThumbnail(
+      params,
       controller.signal,
-      0,
-      photo,
-      selectExisting,
-      params.get("repair") === "1",
-      photo
+      params.get("browse") === "1" && req.headers["sec-fetch-dest"] === "empty"
+        ? 2
+        : 0
     );
     if (controller.signal.aborted) {
       return;
     }
-    await serveGalleryThumbnailResult(req, res, params, thumbnail);
+    if (result.status !== 200) {
+      safeEndError(res, result.status, "Thumbnail unavailable");
+      return;
+    }
+    if (result.kind === "original") {
+      serveBrowseOriginal(
+        result.originalPath,
+        res,
+        req.headers["sec-fetch-dest"] === "empty"
+      );
+      return;
+    }
+    if (result.offline) {
+      res.setHeader("cache-control", "private, no-cache");
+      serveStaticFile(
+        result.thumbnail.thumbnailPath,
+        res,
+        "image/webp",
+        false,
+        result.thumbnail.stat
+      );
+      return;
+    }
+    await serveGalleryThumbnailResult(req, res, params, result.thumbnail);
   } catch (error) {
     if (!(controller.signal.aborted || res.destroyed)) {
       recordGalleryMediaStat("thumbnailFailed");
@@ -1060,6 +1104,24 @@ async function handlePhotoThumbnail(
   } finally {
     res.removeListener("close", cancel);
   }
+}
+
+function serveBrowseOriginal(
+  filePath: string,
+  res: http.ServerResponse,
+  background: boolean
+) {
+  if (background) {
+    res.writeHead(204, { "cache-control": "no-store" }).end();
+    return;
+  }
+  res.setHeader("cache-control", "private, no-cache");
+  serveStaticFile(
+    filePath,
+    res,
+    getMimeType(path.extname(filePath).toLowerCase()),
+    false
+  );
 }
 
 function handleRequest(
@@ -1110,7 +1172,7 @@ function handleRequest(
     return;
   }
   if (pathname === "/shooting-project-original") {
-    handleShootingProjectOriginal(req, res, searchParams).catch(() =>
+    handleShootingProjectOriginal(res, searchParams).catch(() =>
       safeEndError(res, 500, "Project original unavailable")
     );
     return;
@@ -1147,7 +1209,7 @@ function handleRequest(
       handlePreview(safePath, res);
       break;
     case "/image":
-      handleImage(safePath, res, req);
+      handleImage(safePath, res);
       break;
     case "/duel-preview":
       handleDuelPreview(safePath, res);
@@ -1191,7 +1253,6 @@ async function handleShootingProjectPreview(
 }
 
 async function handleShootingProjectOriginal(
-  req: http.IncomingMessage,
   res: http.ServerResponse,
   searchParams: URLSearchParams
 ): Promise<void> {
@@ -1215,7 +1276,7 @@ async function handleShootingProjectOriginal(
     safeEndError(res, 404, "Project original not found");
     return;
   }
-  handleImage(original, res, req);
+  handleImage(original, res);
 }
 
 // ── 端口重试启动逻辑 ──────────────────────────────────────────────────

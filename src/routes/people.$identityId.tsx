@@ -1489,6 +1489,7 @@ function PersonDetailPage() {
             setQuickPreviewIndex(-1);
           }}
           photo={selectionPhotos[quickPreviewIndex]}
+          photos={selectionPhotos}
           total={selectionPhotos.length}
         />
       )}

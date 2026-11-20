@@ -54,6 +54,14 @@ vi.mock("@/ipc/manager", () => ({
 
 vi.mock("@/utils/local-media-url", () => ({
   toGalleryThumbnailUrl: () => "",
+  toBrowsePreviewUrl: (
+    id: number,
+    edge: number,
+    version?: string,
+    _repair?: boolean,
+    revision?: string
+  ) =>
+    `local-media://browse-preview/?id=${id}&edge=${edge}&rv=${version ?? ""}&v=${revision ?? ""}`,
   preloadImage: vi.fn(),
   toLocalMediaUrl: (filePath: string | null | undefined, revision?: string) =>
     filePath
@@ -133,6 +141,50 @@ function deferImageDecode(image: HTMLImageElement) {
 }
 
 describe("PhotoLightbox", () => {
+  it("uses physical pixels and keeps the selected detail across portrait and landscape when locked", async () => {
+    const dpr = vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+    const width = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockReturnValue(900);
+    const height = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockReturnValue(600);
+    const props = { initialIndex: 0, onClose: vi.fn(), open: true, photos };
+    try {
+      const { rerender } = render(<PhotoLightbox {...props} />);
+      const lock = screen.getByRole("checkbox", { name: "lightboxLockView" });
+      expect(lock).not.toBeChecked();
+      expect(
+        screen.getByRole("button", { name: "fitToScreen" })
+      ).toHaveTextContent("lightboxFitLabel");
+      fireEvent.keyDown(window, { key: "1" });
+      expect(
+        screen.getByRole("button", { name: "fitToScreen" })
+      ).toHaveTextContent("100%");
+      const firstOriginal = getFrame("[data-lightbox-original-frame]");
+      await loadImage(firstOriginal);
+      expect(firstOriginal.style.transform).toContain("scale(2.5)");
+      fireEvent.click(lock);
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      expect(
+        screen.getByRole("button", { name: "fitToScreen" })
+      ).toHaveTextContent("100%");
+      const secondOriginal = getFrame("[data-lightbox-original-frame]");
+      expect(secondOriginal.style.transform).toContain(
+        "scale(3.3333333333333335)"
+      );
+      rerender(<PhotoLightbox {...props} open={false} />);
+      rerender(<PhotoLightbox {...props} />);
+      expect(
+        screen.getByRole("checkbox", { name: "lightboxLockView" })
+      ).not.toBeChecked();
+    } finally {
+      height.mockRestore();
+      width.mockRestore();
+      dpr.mockRestore();
+    }
+  });
+
   it("rejects old decode results when the same photo's original URL gains a new content version", async () => {
     const props = { initialIndex: 0, onClose: vi.fn(), open: true };
     const { rerender } = render(
@@ -396,7 +448,7 @@ describe("PhotoLightbox", () => {
     const image = screen.getByRole("img", { name: "first.jpg" });
     fireEvent.wheel(image, { deltaMode: 0, deltaY: -100 });
 
-    await waitFor(() => expect(screen.getByText("120%")).toBeInTheDocument());
+    await waitFor(() => expect(image.style.transform).toContain("scale(1.197"));
     expect(image).toHaveStyle({ transition: "none" });
   });
 

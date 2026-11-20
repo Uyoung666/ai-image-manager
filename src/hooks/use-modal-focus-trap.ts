@@ -97,8 +97,9 @@ export function useModalFocusTrap({
 
     const handleOverlayKeyDown = (event: KeyboardEvent) => {
       if (
-        respectNestedOverlays &&
-        document.querySelector(NESTED_OVERLAY_SELECTOR)
+        event.defaultPrevented ||
+        (respectNestedOverlays &&
+          document.querySelector(NESTED_OVERLAY_SELECTOR))
       ) {
         return;
       }

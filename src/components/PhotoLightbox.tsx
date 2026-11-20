@@ -10,10 +10,13 @@ import {
   X,
 } from "lucide-react";
 import {
+  type DragEvent,
   memo,
+  type PointerEvent,
   type WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -57,21 +60,31 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
+  TooltipPortalProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  useBrowseArea,
+  useBrowsePlaceholder,
+  useBrowsePrefetch,
+  useBrowseTiming,
+} from "@/hooks/use-browse-image";
 import { useLightboxImage } from "@/hooks/use-lightbox-image";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { useHorizontalGalleryWindow } from "@/hooks/useHorizontalGalleryWindow";
 import { ipc } from "@/ipc/manager";
 import type { LibraryPhotoStatus } from "@/types/library-reliability";
+import { browseMedia, browsePhotoKey, fitImage } from "@/utils/browse-image";
 import {
   ensureGalleryPhotos,
   getGalleryDataVersion,
   subscribeGalleryData,
 } from "@/utils/gallery-data-source";
+import { limitLightboxPan, rotatedPoint } from "@/utils/lightbox-zoom";
 import {
   preloadImage,
   toGalleryThumbnailUrl,
@@ -107,7 +120,7 @@ function clamp(value: number, min: number, max: number) {
 
 function isEditableTarget(target: EventTarget | null) {
   return (
-    target instanceof HTMLInputElement ||
+    (target instanceof HTMLInputElement && target.type !== "checkbox") ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
     (target instanceof HTMLElement && target.isContentEditable)
@@ -162,6 +175,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const reduceMotion = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const { area, dpr } = useBrowseArea(canvasRef, open);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wheelFrameRef = useRef<number | null>(null);
   const wheelStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -181,12 +195,20 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
   const [photoIndex, setPhotoIndex] = useState(initialIndex);
   const [zoom, setZoom] = useState(1);
+  const [actualPixels, setActualPixels] = useState(false);
+  const [lockView, setLockView] = useState(false);
+  const lockedView = useRef<{
+    center: { x: number; y: number };
+    photoKey: string;
+    scale: number;
+  } | null>(null);
   const [wheelActive, setWheelActive] = useState(false);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
   const [canvasSize, setCanvasSize] = useState({ height: 0, width: 0 });
   const [sourceKey, setSourceKey] = useState(0);
   const [previewRetry, setPreviewRetry] = useState(0);
+  const [repairKey, setRepairKey] = useState("");
   const [controlsVisible, setControlsVisible] = useState(true);
   const [infoVisible, setInfoVisible] = useState(false);
   const [thumbnailsVisible, setThumbnailsVisible] = useState(false);
@@ -231,41 +253,104 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     }
   }, [open, photos, safeIndex]);
   const previewPlayback = sequencePlayback && slideshowMode && playing;
-  const previewUrl = photo?.thumbnailPath
+  const legacyPreviewUrl = photo?.thumbnailPath
     ? toLocalMediaUrl(photo.thumbnailPath)
     : null;
-  let originalUrl = photo?.path
-    ? toLocalMediaUrl(photo.path, photo.thumbnailPath ?? photo.thumbnailVersion)
-    : null;
-  if (sourceUnavailable && photo) {
-    originalUrl =
-      toGalleryThumbnailUrl(photo.id, 1024, "offline", undefined, true) ||
-      previewUrl;
-  }
+  const photoKey = photo ? browsePhotoKey(photo) : "";
+  const isQuarterTurn = Math.abs(rotation % 180) === 90;
+  const imageArea = isQuarterTurn
+    ? { width: area.height, height: area.width }
+    : area;
+  const fitted = photo ? fitImage(photo, imageArea) : imageArea;
+  const pixelScale =
+    photo && photo.width > 0 && fitted.width > 0
+      ? (fitted.width * dpr) / photo.width
+      : 0;
+  useLayoutEffect(() => {
+    if (!sequencePlayback && actualPixels && pixelScale > 0) {
+      const scale = 1 / pixelScale;
+      wheelZoomRef.current = scale;
+      setZoom(scale);
+    }
+  }, [actualPixels, pixelScale, sequencePlayback]);
+  const media =
+    photo && browseMedia(photo, imageArea, dpr, repairKey === photoKey);
+  const fit = useLightboxImage({
+    enabled: open && !sequencePlayback && area.width > 0 && area.height > 0,
+    photoId: photo?.id,
+    retry: sourceKey,
+    src: media?.fit ?? null,
+  });
+  const placeholder = useBrowsePlaceholder(
+    sequencePlayback || sourceUnavailable ? undefined : photo,
+    media?.fit ?? null,
+    fit.loaded,
+    media?.fit
+  );
+  const decodedFitEdge = fit.loaded
+    ? Math.max(
+        fit.ref.current?.naturalWidth ?? 0,
+        fit.ref.current?.naturalHeight ?? 0
+      )
+    : 0;
+  const wantsDetail = Boolean(
+    media &&
+      (((zoom > 1 || actualPixels) &&
+        Math.max(fitted.width, fitted.height) * dpr * zoom >
+          (decodedFitEdge || media.edge) + 1) ||
+        (fit.error && !placeholder))
+  );
+  const needsOriginal = wantsDetail && media?.original !== media?.fit;
+  const originalUrl =
+    sequencePlayback && sourceUnavailable && photo
+      ? toGalleryThumbnailUrl(photo.id, 1024, "offline", undefined, true) ||
+        legacyPreviewUrl
+      : media?.original || null;
   const original = useLightboxImage({
-    enabled: open && !(previewPlayback && previewUrl),
+    enabled:
+      open &&
+      (sequencePlayback
+        ? !(previewPlayback && legacyPreviewUrl)
+        : needsOriginal),
     photoId: photo?.id,
     retry: sourceKey,
     src: originalUrl,
   });
-  const showPreview =
-    sequencePlayback && Boolean(previewUrl) && !original.loaded;
+  const previewUrl = sequencePlayback ? legacyPreviewUrl : placeholder;
+  const showPreview = Boolean(previewUrl) && !original.loaded && !fit.loaded;
   const preview = useLightboxImage({
     enabled: open && showPreview,
     photoId: photo?.id,
     retry: previewRetry,
     src: previewUrl,
   });
-  const imageError =
-    (original.error && !preview.loaded) ||
-    (previewPlayback && preview.error) ||
-    (sourceUnavailable && !original.request.src && !previewUrl);
+  const imageError = sequencePlayback
+    ? (original.error && !preview.loaded) ||
+      (previewPlayback && preview.error) ||
+      (sourceUnavailable && !original.request.src && !previewUrl)
+    : fit.error &&
+      (!(original.request.enabled && original.request.src) || original.error) &&
+      (!preview.request.src || preview.error);
   const needsLoading =
     open &&
     Boolean(photo) &&
-    !(original.loaded || preview.loaded || imageError);
-  const activeImageRequest =
-    previewPlayback && previewUrl ? preview.request : original.request;
+    !(original.loaded || fit.loaded || preview.loaded || imageError);
+  const sequenceFrame = previewPlayback && previewUrl ? preview : original;
+  const activeImageRequest = (sequencePlayback ? sequenceFrame : fit).request;
+  useBrowsePrefetch(
+    photos,
+    safeIndex,
+    imageArea,
+    dpr,
+    open && !sequencePlayback,
+    true,
+    fit.loaded || original.loaded
+  );
+  useBrowseTiming(
+    photoKey,
+    open && !needsLoading && !imageError && Boolean(photo),
+    fit.loaded || original.loaded
+  );
   const [spinnerRequest, setSpinnerRequest] = useState<
     typeof activeImageRequest | null
   >(null);
@@ -298,11 +383,82 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   }, [open, photo]);
 
   const resetView = useCallback(() => {
+    lockedView.current = null;
+    setActualPixels(false);
     wheelZoomRef.current = 1;
     setZoom(1);
     setTranslate({ x: 0, y: 0 });
     setRotation(0);
   }, []);
+
+  const changePhotoView = useCallback(() => {
+    setRepairKey("");
+    if (
+      !(
+        lockView &&
+        pixelScale > 0 &&
+        (actualPixels || wheelZoomRef.current !== 1)
+      )
+    ) {
+      resetView();
+      return;
+    }
+    const local = rotatedPoint(translate, -rotation);
+    const scale = wheelZoomRef.current;
+    lockedView.current = {
+      center: {
+        x: local.x / (fitted.width * scale),
+        y: local.y / (fitted.height * scale),
+      },
+      scale: scale * pixelScale,
+      photoKey,
+    };
+    setRotation(0);
+  }, [
+    actualPixels,
+    fitted.height,
+    fitted.width,
+    lockView,
+    photoKey,
+    pixelScale,
+    resetView,
+    rotation,
+    translate,
+  ]);
+
+  useLayoutEffect(() => {
+    if (
+      !(
+        open &&
+        lockView &&
+        lockedView.current &&
+        lockedView.current.photoKey !== photoKey &&
+        pixelScale > 0
+      )
+    ) {
+      return;
+    }
+    const { center, scale } = lockedView.current;
+    lockedView.current = null;
+    const next = clamp(
+      scale / pixelScale,
+      Number.EPSILON,
+      Math.max(MAX_ZOOM, 1 / pixelScale)
+    );
+    wheelZoomRef.current = next;
+    setZoom(next);
+    setTranslate(
+      limitLightboxPan(
+        {
+          x: center.x * fitted.width * next,
+          y: center.y * fitted.height * next,
+        },
+        fitted,
+        area,
+        next
+      )
+    );
+  }, [area, fitted, lockView, open, photoKey, pixelScale]);
 
   const requestClose = useCallback(() => {
     const current = photos[safeIndex];
@@ -330,26 +486,34 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         }
         return next;
       });
-      resetView();
+      changePhotoView();
       setMoreOpen(false);
       if (manual) {
         setPlaying(false);
       }
     },
-    [photos.length, reduceMotion, resetView]
+    [changePhotoView, photos.length, reduceMotion]
   );
 
-  const updateZoom = useCallback((next: number, manual = true) => {
-    const value = clamp(next, 1, MAX_ZOOM);
-    wheelZoomRef.current = value;
-    setZoom(value);
-    if (value <= 1.001) {
-      setTranslate({ x: 0, y: 0 });
-    }
-    if (manual) {
-      setPlaying(false);
-    }
-  }, []);
+  const updateZoom = useCallback(
+    (next: number, manual = true) => {
+      const value = clamp(
+        next,
+        1,
+        Math.max(MAX_ZOOM, pixelScale ? 1 / pixelScale : MAX_ZOOM)
+      );
+      setActualPixels(false);
+      wheelZoomRef.current = value;
+      setZoom(value);
+      if (value <= 1.001) {
+        setTranslate({ x: 0, y: 0 });
+      }
+      if (manual) {
+        setPlaying(false);
+      }
+    },
+    [pixelScale]
+  );
 
   const handleWheelZoom = useCallback(
     (event: ReactWheelEvent<HTMLImageElement>) => {
@@ -364,8 +528,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       const next = clamp(
         wheelZoomRef.current * Math.exp(-delta * 0.0018),
         1,
-        MAX_ZOOM
+        Math.max(MAX_ZOOM, pixelScale ? 1 / pixelScale : MAX_ZOOM)
       );
+      setActualPixels(false);
       wheelZoomRef.current = next;
 
       if (!wheelActiveRef.current) {
@@ -391,11 +556,21 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       }, 120);
       setPlaying(false);
     },
-    []
+    [pixelScale]
   );
 
   const showActualPixels = useCallback(() => {
     setPlaying(false);
+    if (!sequencePlayback && pixelScale) {
+      const scale = 1 / pixelScale;
+      setActualPixels(true);
+      wheelZoomRef.current = scale;
+      setZoom(scale);
+      setTranslate((point) =>
+        limitLightboxPan(point, fitted, area, scale, isQuarterTurn)
+      );
+      return;
+    }
     const image = original.loaded
       ? original.ref.current
       : (preview.ref.current ?? original.ref.current);
@@ -408,7 +583,18 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     if (width) {
       updateZoom(clamp(width / image.clientWidth, 1, MAX_ZOOM));
     }
-  }, [original.loaded, original.ref, photo?.width, preview.ref, updateZoom]);
+  }, [
+    area,
+    fitted,
+    isQuarterTurn,
+    original.loaded,
+    original.ref,
+    photo?.width,
+    pixelScale,
+    preview.ref,
+    sequencePlayback,
+    updateZoom,
+  ]);
 
   const toggleInfo = useCallback(() => {
     const nextVisible = !infoVisible;
@@ -517,9 +703,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
   useEffect(() => {
     if (!open) {
+      setLockView(false);
       return;
     }
     setPhotoIndex(initialIndex);
+    setRepairKey("");
     resetView();
     setControlsVisible(true);
     const initialPanelMode = getInitialPanelMode({
@@ -563,7 +751,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   }, [open, photoIndex, photos]);
 
   useEffect(() => {
-    if (!(open && photo)) {
+    if (!(open && photo && sequencePlayback)) {
       return;
     }
     const ahead = previewPlayback ? 12 : 2;
@@ -588,7 +776,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         release();
       }
     };
-  }, [open, photo, photos, previewPlayback, safeIndex]);
+  }, [open, photo, photos, previewPlayback, safeIndex, sequencePlayback]);
 
   useEffect(() => {
     if (!(open && thumbnailsVisible && photo)) {
@@ -717,7 +905,12 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       if (modalOpen) {
         return;
       }
-      if (isEditableTarget(event.target)) {
+      if (
+        isEditableTarget(event.target) ||
+        (event.key === " " &&
+          event.target instanceof HTMLInputElement &&
+          event.target.type === "checkbox")
+      ) {
         return;
       }
       if (event.key === "Tab") {
@@ -835,8 +1028,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const chromeClass = controlsVisible
     ? "pointer-events-auto opacity-100"
     : "pointer-events-none opacity-0";
-  const zoomLabel = `${Math.round(zoom * 100)}%`;
-  const isQuarterTurn = Math.abs(rotation % 180) === 90;
+  const fitMode = sequencePlayback ? zoom <= 1.05 : zoom === 1 && !actualPixels;
+  const zoomLabel =
+    !sequencePlayback && fitMode
+      ? t("lightboxFitLabel")
+      : `${Math.round(zoom * (sequencePlayback ? 1 : pixelScale || 1) * 100)}%`;
   const firstThumbnail = thumbnailItems[0]?.index ?? 0;
   const lastThumbnail = thumbnailItems.at(-1)?.index ?? 0;
   useEffect(() => {
@@ -853,6 +1049,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
   const imageStyle = {
     gridArea: "1 / 1",
+    width: !sequencePlayback && fitted.width ? fitted.width : undefined,
+    height: !sequencePlayback && fitted.height ? fitted.height : undefined,
     maxHeight:
       isQuarterTurn && canvasSize.width
         ? `${Math.max(1, canvasSize.width - 128)}px`
@@ -890,14 +1088,53 @@ export const PhotoLightbox = memo(function PhotoLightbox({
           },
         ]
       : []),
+    ...(fit.request.enabled && fit.request.src
+      ? [{ kind: "fit", src: fit.request.src, state: fit, retry: sourceKey }]
+      : []),
   ];
   const retryImage = () => {
     if (preview.error) {
       setPreviewRetry((value) => value + 1);
     }
+    if (fit.error) {
+      setRepairKey(photoKey);
+    }
     setSourceKey((value) => value + 1);
   };
-  const originalFailedWithPreview = original.error && preview.loaded;
+  const originalFailedWithPreview =
+    (original.error && (preview.loaded || fit.loaded)) ||
+    (fit.error && preview.loaded && !original.loaded);
+  const initialFrame = sequencePlayback ? sequenceFrame : fit;
+  const visibleFrame =
+    [original, fit, preview].find((frame) => frame.loaded) ?? initialFrame;
+  const originalFrame = original.request.enabled ? original : fit;
+  const panClass = zoom > 1 ? "cursor-grab active:cursor-grabbing" : "";
+  const beginPan = (event: PointerEvent<HTMLImageElement>) => {
+    if (zoom <= 1) {
+      return;
+    }
+    canvasRef.current?.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      translateX: translate.x,
+      translateY: translate.y,
+    };
+  };
+  const startOriginalDrag = (event: DragEvent<HTMLImageElement>) => {
+    event.preventDefault();
+    if (!sourceUnavailable && zoom <= 1) {
+      window.electronAPI?.startDrag?.(photo.path);
+    }
+  };
+  const toggleZoom = () => {
+    if (fitMode) {
+      showActualPixels();
+    } else {
+      updateZoom(1);
+    }
+  };
 
   return createPortal(
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the modal dialog surface owns global reveal and image context-menu interactions.
@@ -981,6 +1218,16 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                   </button>
                 </div>
               )}
+              {!sequencePlayback &&
+                (sourceUnavailable ||
+                  (wantsDetail &&
+                    !original.loaded &&
+                    !originalFailedWithPreview)) &&
+                (fit.loaded || preview.loaded) && (
+                  <span className="text-[11px] text-white/75" role="status">
+                    {t("lightboxLimitedDetail")}
+                  </span>
+                )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -1123,10 +1370,15 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             if (!drag || drag.pointerId !== event.pointerId) {
               return;
             }
-            setTranslate({
+            const point = {
               x: drag.translateX + event.clientX - drag.startX,
               y: drag.translateY + event.clientY - drag.startY,
-            });
+            };
+            setTranslate(
+              sequencePlayback
+                ? point
+                : limitLightboxPan(point, fitted, area, zoom, isQuarterTurn)
+            );
           }}
           onPointerUp={(event) => {
             if (dragRef.current?.pointerId === event.pointerId) {
@@ -1202,60 +1454,46 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               {t("libraryReliability.detail.cached")}
             </p>
           )}
-          {frames.map((frame) => (
-            <img
-              alt={photo.filename}
-              aria-hidden={
-                imageError ||
-                (frame.kind === "original" && showPreview) ||
-                undefined
-              }
-              className={`max-h-full max-w-full select-none object-contain ${imageError || frame.state.error || (frame.kind === "original" && !original.loaded) ? "pointer-events-none opacity-0" : "opacity-100"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
-              data-lightbox-image={
-                frame.kind === "preview" || !showPreview ? true : undefined
-              }
-              data-lightbox-original-frame={
-                frame.kind === "original" ? true : undefined
-              }
-              data-lightbox-playback-frame={
-                frame.kind === "preview" ? true : undefined
-              }
-              draggable={!(sourceUnavailable || previewPlayback) && zoom <= 1}
-              height={photo.height || undefined}
-              key={`${frame.kind}-${photo.id}-${frame.src}-${frame.retry}`}
-              onDoubleClick={() => {
-                if (zoom > 1.05) {
-                  updateZoom(1);
-                } else {
-                  showActualPixels();
+          {frames.map((frame) => {
+            const selected = frame.state === visibleFrame;
+            const visible = selected && frame.state.loaded && !imageError;
+            return (
+              <img
+                alt={photo.filename}
+                aria-hidden={
+                  imageError || frame.state !== visibleFrame || undefined
                 }
-              }}
-              onDragStart={(event) => {
-                event.preventDefault();
-                if (sourceUnavailable || zoom > 1) {
-                  return;
+                className={`max-h-full max-w-full select-none object-contain ${visible ? "opacity-100" : "pointer-events-none opacity-0"} ${panClass}`}
+                data-browse-frame={
+                  frame.kind === "preview" ? "placeholder" : "clear"
                 }
-                window.electronAPI?.startDrag?.(photo.path);
-              }}
-              onPointerDown={(event) => {
-                if (zoom <= 1) {
-                  return;
+                data-browse-visible={visible || undefined}
+                data-lightbox-image={
+                  selected ||
+                  (sequencePlayback &&
+                    showPreview &&
+                    frame.kind === "preview") ||
+                  undefined
                 }
-                canvasRef.current?.setPointerCapture(event.pointerId);
-                dragRef.current = {
-                  pointerId: event.pointerId,
-                  startX: event.clientX,
-                  startY: event.clientY,
-                  translateX: translate.x,
-                  translateY: translate.y,
-                };
-              }}
-              onWheel={handleWheelZoom}
-              ref={frame.state.ref}
-              style={imageStyle}
-              width={photo.width || undefined}
-            />
-          ))}
+                data-lightbox-original-frame={
+                  frame.state === originalFrame || undefined
+                }
+                data-lightbox-playback-frame={
+                  frame.kind === "preview" ? true : undefined
+                }
+                draggable={!(sourceUnavailable || previewPlayback) && zoom <= 1}
+                height={photo.height || undefined}
+                key={`${frame.kind}-${photo.id}-${frame.src}-${frame.retry}`}
+                onDoubleClick={toggleZoom}
+                onDragStart={startOriginalDrag}
+                onPointerDown={beginPan}
+                onWheel={handleWheelZoom}
+                ref={frame.state.ref}
+                style={imageStyle}
+                width={photo.width || undefined}
+              />
+            );
+          })}
           {needsLoading && spinnerRequest === activeImageRequest && (
             <div className="absolute inset-0 flex items-center justify-center">
               <LoadingSpinner
@@ -1380,6 +1618,22 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               >
                 <Plus className="h-4 w-4" />
               </ControlButton>
+              {!sequencePlayback && (
+                <TooltipPortalProvider containerRef={rootRef}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex shrink-0 items-center px-1">
+                        <Switch
+                          ariaLabel={t("lightboxLockView")}
+                          checked={lockView}
+                          onCheckedChange={setLockView}
+                        />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("lightboxLockViewHint")}</TooltipContent>
+                  </Tooltip>
+                </TooltipPortalProvider>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -1458,7 +1712,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                       key={item.id}
                       onClick={() => {
                         setPhotoIndex(index);
-                        resetView();
+                        if (index !== safeIndex) {
+                          changePhotoView();
+                        }
                         setPlaying(false);
                       }}
                       style={{

@@ -1,8 +1,12 @@
 import path from "node:path";
 import { app } from "electron";
 import { getDataPath } from "@/utils/data-path";
+import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { isHeifInput } from "../../scripts/heif-decoder.mjs";
-import { createHeifResolver } from "../../scripts/heif-input.mjs";
+import {
+  createHeifResolver,
+  type HeifDecodeRequest,
+} from "../../scripts/heif-input.mjs";
 import {
   describeHeifModelCache,
   writeHeifModelCache,
@@ -17,14 +21,22 @@ export function getHeifImportMetrics() {
 }
 function getResolver() {
   resolver ??= createHeifResolver({
-    workerPath: path.join(
-      app.isPackaged
-        ? path.join(process.resourcesPath, "app.asar.unpacked")
-        : app.getAppPath(),
-      "scripts",
-      "heif-worker.mjs"
-    ),
+    workerPath: () =>
+      path.join(
+        app.isPackaged
+          ? path.join(process.resourcesPath, "app.asar.unpacked")
+          : app.getAppPath(),
+        "scripts",
+        "heif-worker.mjs"
+      ),
     track: trackChildProcess,
+    onDecode: ({ output }) => {
+      if (output === "preview" || output === "png") {
+        recordGalleryMediaStat(
+          output === "preview" ? "heifPreviewDecode" : "heifOriginalDecode"
+        );
+      }
+    },
   });
   return resolver;
 }
@@ -61,6 +73,18 @@ export async function resolveHeifInput(
     return input;
   }
   return getResolver().resolveInput(input);
+}
+
+export function decodeHeifDisplay(
+  input: string,
+  request?: HeifDecodeRequest,
+  edge?: number
+) {
+  return getResolver().resolveResult(
+    input,
+    edge ? { output: "preview", thumbnailSize: edge } : { output: "png" },
+    request
+  );
 }
 
 export function stopHeifDecoder(): void {

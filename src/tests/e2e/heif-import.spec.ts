@@ -141,23 +141,87 @@ test("HEIC import, thumbnail and full preview at three window sizes", async () =
         width: 1280,
         height: 854,
       });
-      await cards.first().dblclick();
+      const heicCard = cards.filter({
+        has: page.getByRole("img", { name: "主图.heic" }),
+      });
+      const protocolFit = await heicCard.evaluate(async (card) => {
+        const img = card.querySelector("img");
+        const token = new URL(img?.src ?? "").searchParams.get("token") ?? "";
+        const params = new URLSearchParams({
+          id: card.getAttribute("data-photo-id") ?? "",
+          edge: "512",
+          browse: "1",
+          token,
+        });
+        const response = await fetch(`local-media://browse-preview/?${params}`);
+        if (!response.ok) {
+          return { status: response.status };
+        }
+        const bitmap = await createImageBitmap(await response.blob());
+        const result = {
+          status: response.status,
+          width: bitmap.width,
+          height: bitmap.height,
+        };
+        bitmap.close();
+        return result;
+      });
+      expect(protocolFit).toEqual({ status: 200, width: 512, height: 342 });
+      await heicCard.focus();
+      await page.keyboard.press("Control+a");
+      await expect(heicCard).toHaveAttribute("aria-selected", "true");
+      await page.keyboard.press("Space");
+      const quick = page.getByRole("dialog", { name: "快速预览" });
+      await expect(quick).toBeFocused();
+      if (!(await quick.getByText("主图.heic", { exact: true }).count())) {
+        await page.keyboard.press(
+          (await quick.getByText("2 / 2", { exact: true }).count())
+            ? "ArrowLeft"
+            : "ArrowRight"
+        );
+      }
+      await expect(
+        quick.locator('[data-browse-frame="clear"][data-browse-visible]')
+      ).toBeVisible();
+      await page.keyboard.press("Enter");
       const lightbox = page.getByRole("dialog", { name: "照片审阅灯箱" });
       await expect(lightbox).toBeVisible();
-      await expect
-        .poll(() =>
-          lightbox
-            .locator("img")
-            .evaluateAll((images) =>
-              images.some(
-                (image) =>
-                  image instanceof HTMLImageElement &&
-                  image.complete &&
-                  image.naturalWidth > 0
-              )
-            )
-        )
-        .toBe(true);
+      await expect(
+        lightbox.locator('[data-browse-frame="clear"][data-browse-visible]')
+      ).toHaveAttribute("alt", "主图.heic");
+      await expect(
+        lightbox.getByRole("checkbox", { name: "锁定倍率和位置" })
+      ).not.toBeChecked();
+      await page.keyboard.press("1");
+      await expect(
+        lightbox.getByRole("button", { name: "适合窗口 (0)" })
+      ).toHaveText("100%");
+      const lock = lightbox.getByRole("checkbox", { name: "锁定倍率和位置" });
+      const lockHint = lightbox
+        .locator('[data-slot="tooltip-content"]')
+        .filter({
+          hasText: "翻页时保持倍率和位置。",
+        });
+      const actualSize = lightbox.getByRole("button", { name: "实际像素 (1)" });
+      await actualSize.focus();
+      await page.keyboard.press("Shift+Tab");
+      await expect(lock).toBeFocused();
+      await expect(lockHint).toBeVisible();
+      await lightbox.getByRole("button", { name: "放大", exact: true }).focus();
+      await expect(lockHint).toBeHidden();
+      await lightbox.locator("label.custom-switch").hover();
+      await expect(lockHint).toBeVisible();
+      await expect(lockHint).toBeInViewport({ ratio: 1 });
+      await lock.focus();
+      await page.keyboard.press("Space");
+      await expect(lock).toBeChecked();
+      await page.keyboard.press("ArrowRight");
+      await expect(
+        lightbox.locator('[data-browse-frame="clear"][data-browse-visible]')
+      ).toHaveAttribute("alt", "十位.heif");
+      await expect(
+        lightbox.getByRole("button", { name: "适合窗口 (0)" })
+      ).toHaveText("100%");
       await page.keyboard.press("Escape");
       await expect(lightbox).not.toBeVisible();
       expect(

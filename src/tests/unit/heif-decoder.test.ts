@@ -84,6 +84,38 @@ describe("offline HEIC decoding", () => {
     });
   });
 
+  it("produces the requested WebP tier from upright HEIC pixels", async () => {
+    const input = withHeifProperty("irot", Buffer.from([1]));
+    const preview = await decodeHeif(input, {
+      output: "preview",
+      thumbnailSize: 512,
+    });
+    expect(preview).toMatchObject({
+      width: 342,
+      height: 512,
+      orientationApplied: true,
+    });
+    expect(await sharp(preview.buffer).metadata()).toMatchObject({
+      format: "webp",
+      width: 342,
+      height: 512,
+    });
+    const pixels = await decodeHeif(input);
+    const reference = await sharp(pixels.buffer)
+      .resize(512, 512, { fit: "inside" })
+      .removeAlpha()
+      .raw()
+      .toBuffer();
+    const actual = await sharp(preview.buffer).removeAlpha().raw().toBuffer();
+    expect(actual).toHaveLength(reference.length);
+    const meanDifference =
+      actual.reduce(
+        (total, channel, index) => total + Math.abs(channel - reference[index]),
+        0
+      ) / actual.length;
+    expect(meanDifference).toBeLessThan(5);
+  });
+
   it.each([1, 2, 3])("applies container rotation %i once", async (angle) => {
     const original = await decodeHeif(heifFixturePath);
     const rotated = await decodeHeif(

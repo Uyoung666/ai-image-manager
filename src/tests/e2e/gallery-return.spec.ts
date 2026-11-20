@@ -361,7 +361,9 @@ for (const size of SIZES) {
       exact: true,
     });
     await expect(preview).toBeFocused();
-    await expect(preview.getByRole("img")).toHaveCSS("opacity", "1");
+    await expect(
+      preview.locator('[data-browse-frame="clear"][data-browse-visible]')
+    ).toHaveCSS("opacity", "1");
     await expect(first).toHaveAttribute("aria-selected", "true");
     await expect(second).toHaveAttribute("aria-selected", "true");
     await assertBounds();

@@ -1,4 +1,8 @@
-import { GALLERY_CONFIG, type GalleryThumbnailEdge } from "./gallery-config";
+import {
+  type BrowsePreviewEdge,
+  GALLERY_CONFIG,
+  type GalleryThumbnailEdge,
+} from "./gallery-config";
 import { getHttpPortSync } from "./http-port";
 import { preloadImagesWithConcurrency } from "./image-preloader";
 import { scheduleImage } from "./image-scheduler";
@@ -25,6 +29,34 @@ export function toGalleryThumbnailUrl(
     return "";
   }
   return `http://127.0.0.1:${port}/photo-thumbnail?id=${id}&edge=${edge}&gv=${GALLERY_CONFIG.thumbnailUrlVersion}&v=${encodeURIComponent(version)}&rv=${encodeURIComponent(sourceVersion ?? "")}${selectAvailable ? "&select=1" : ""}${repair ? "&repair=1" : ""}&token=${encodeURIComponent(getHttpAuthToken())}`;
+}
+
+export function toBrowsePreviewUrl(
+  id: number,
+  edge: BrowsePreviewEdge,
+  sourceVersion?: string,
+  repair = false,
+  revision?: string
+): string {
+  const port = getHttpPortSync();
+  const params = new URLSearchParams({
+    id: String(id),
+    edge: String(edge),
+    browse: "1",
+    gv: String(GALLERY_CONFIG.thumbnailUrlVersion),
+    rv: sourceVersion ?? "",
+  });
+  if (repair) {
+    params.set("repair", "1");
+  }
+  if (revision) {
+    params.set("v", revision);
+  }
+  params.set("token", getHttpAuthToken());
+  if (port === null) {
+    return `local-media://browse-preview/?${params}`;
+  }
+  return `http://127.0.0.1:${port}/photo-thumbnail?${params}`;
 }
 
 function getHttpAuthToken(): string {

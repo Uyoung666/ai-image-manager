@@ -24,7 +24,7 @@ function dpiChanged(): void {
 }
 export function subscribeGalleryDpr(listener: () => void): () => void {
   dpiListeners.add(listener);
-  if (!media) {
+  if (!media && typeof matchMedia === "function") {
     media = matchMedia(`(resolution: ${getGalleryDpr()}dppx)`);
     media.addEventListener("change", dpiChanged);
   }

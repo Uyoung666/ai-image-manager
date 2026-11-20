@@ -18,6 +18,8 @@ import {
 } from "vitest";
 import { folders, photos } from "@/db/schema";
 import { runColorMigration } from "@/services/color-migration";
+// biome-ignore lint/performance/noNamespaceImport: the test spies on one real module export.
+import * as heif from "@/services/heif-input";
 import {
   getHttpServerAuthToken,
   startHttpServerEarly,
@@ -33,6 +35,7 @@ import {
   initThumbnailer,
   stopThumbnailer,
 } from "@/services/thumbnailer";
+import { heifFixturePath } from "@/tests/helpers/heif-fixture";
 import { TestRuntime } from "@/tests/helpers/test-runtime";
 import { makePreviewNewerThanSource } from "@/tests/helpers/thumbnail-fixture";
 import { invalidateFoldersCache } from "@/utils/folder-paths";
@@ -51,7 +54,8 @@ function request(
   etag?: string,
   edge = 512,
   selectAvailable = false,
-  repair = false
+  repair = false,
+  browse = false
 ): Promise<{
   status: number;
   headers: http.IncomingHttpHeaders;
@@ -70,6 +74,9 @@ function request(
   }
   if (repair) {
     query.set("repair", "1");
+  }
+  if (browse) {
+    query.set("browse", "1");
   }
   return new Promise((resolve, reject) => {
     const req = http.get(
@@ -174,6 +181,66 @@ afterAll(async () => {
   });
 });
 describe("ID thumbnail HTTP lifecycle", () => {
+  it("allows the 4096 tier only for browsing and retains HEIC previews across cache restart", async () => {
+    const db = drizzle(sqlite);
+    const source = path.join(path.dirname(original), "browse.heic");
+    fs.copyFileSync(heifFixturePath, source);
+    db.insert(photos)
+      .values({
+        id: 42,
+        folderId: 1,
+        path: source,
+        filename: "browse.heic",
+        width: 1280,
+        height: 854,
+      })
+      .run();
+    const decode = vi.spyOn(heif, "decodeHeifDisplay");
+    try {
+      expect((await request(42, undefined, undefined, 4096)).status).toBe(400);
+      const [first, second] = await Promise.all([
+        request(42, undefined, undefined, 4096, false, false, true),
+        request(42, undefined, undefined, 4096, false, false, true),
+      ]);
+      expect(first.status).toBe(200);
+      expect(second.body).toEqual(first.body);
+      expect(await sharp(first.body).metadata()).toMatchObject({
+        format: "webp",
+        width: 1280,
+        height: 854,
+      });
+      expect(decode).toHaveBeenCalledTimes(1);
+      await stopThumbnailer();
+      initThumbnailer();
+      expect(
+        (await request(42, undefined, undefined, 4096, false, false, true)).body
+      ).toEqual(first.body);
+      expect(decode).toHaveBeenCalledTimes(1);
+      const replacement = await sharp({
+        create: { width: 1280, height: 854, channels: 3, background: "red" },
+      })
+        .jpeg()
+        .toBuffer();
+      fs.writeFileSync(source, replacement);
+      const changed = await request(
+        42,
+        undefined,
+        undefined,
+        4096,
+        false,
+        false,
+        true
+      );
+      expect(changed.status).toBe(200);
+      expect(changed.headers.etag).not.toBe(first.headers.etag);
+      expect(changed.body).not.toEqual(first.body);
+    } finally {
+      db.delete(photos).where(eq(photos.id, 42)).run();
+      await deletePhotoThumbnails(source);
+      heif.stopHeifDecoder();
+    }
+  });
+
   it("reads current deletion state and the active database on every request", async () => {
     const db = drizzle(sqlite);
     const alternateSqlite = new Database(":memory:");

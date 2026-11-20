@@ -31,6 +31,8 @@ export const GALLERY_CONFIG = {
 
 export const GALLERY_THUMBNAIL_EDGES = [256, 512, 1024, 2048] as const;
 export type GalleryThumbnailEdge = (typeof GALLERY_THUMBNAIL_EDGES)[number];
+export const BROWSE_PREVIEW_EDGES = [...GALLERY_THUMBNAIL_EDGES, 4096] as const;
+export type BrowsePreviewEdge = (typeof BROWSE_PREVIEW_EDGES)[number];
 
 export function chooseGalleryThumbnailEdge(
   width: number,

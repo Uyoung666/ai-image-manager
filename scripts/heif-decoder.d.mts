@@ -2,7 +2,7 @@ import type { ImageEmbeddingSpec } from "../src/services/ai/model-adapter";
 export const MAX_HEIF_PIXELS: number;
 export interface HeifDecodeOptions {
   image?: ImageEmbeddingSpec;
-  output?: "png" | "pixels" | "import" | "embedding";
+  output?: "png" | "pixels" | "import" | "embedding" | "preview";
   thumbnailSize?: number;
 }
 export interface HeifDecodeResult {

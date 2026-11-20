@@ -9,6 +9,7 @@ import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
 import {
+  type BrowsePreviewEdge,
   GALLERY_CONFIG,
   GALLERY_THUMBNAIL_EDGES,
   type GalleryThumbnailEdge,
@@ -19,12 +20,13 @@ import { createLogger } from "@/utils/logger";
 import { resolveSafePath } from "@/utils/path-security";
 import { PrioritySemaphore } from "@/utils/priority-semaphore";
 import { isHeifInput } from "../../scripts/heif-decoder.mjs";
+import type { HeifDecodeRequest } from "../../scripts/heif-input.mjs";
 import {
   HEIF_MODEL_CACHE_PATTERN,
   heifSourcePrefix,
   invalidateHeifModelCache,
 } from "../../scripts/heif-model-cache.mjs";
-import { resolveHeifInput } from "./heif-input";
+import { decodeHeifDisplay, resolveHeifInput } from "./heif-input";
 import {
   applyExifOrientation,
   type ExifOrientation,
@@ -41,7 +43,7 @@ const WEBP_SUFFIX = /\.webp$/;
 const REPAIRED_PREVIEW_SUFFIX = /-r-[a-f0-9]{16}\.webp$/i;
 const log = createLogger("thumbnailer");
 const MANAGED_THUMBNAIL_EXTENSION =
-  /^(?:[a-f0-9]{32}\.(?:webp|jpg)|g-[a-f0-9]{32}-[a-f0-9]{32}-(?:(?:r-[a-f0-9]{16}-)?(?:256|512|1024|2048)|v5-(?:sm|md|lg)-[1-3](?:-r-[a-f0-9]{16})?)\.webp)$/i;
+  /^(?:[a-f0-9]{32}\.(?:webp|jpg)|g-[a-f0-9]{32}-[a-f0-9]{32}-(?:(?:r-[a-f0-9]{16}-)?(?:256|512|1024|2048|4096)|v5-(?:sm|md|lg)-[1-3](?:-r-[a-f0-9]{16})?)\.webp)$/i;
 const HEIF_FILE_EXTENSION = /\.hei[cf]$/i;
 const HEIF_SOURCE_PREFIX = /^h-[a-f0-9]{32}-/;
 const GALLERY_SOURCE_PREFIX = /^g-[a-f0-9]{32}-/;
@@ -107,7 +109,7 @@ const CACHE_CONFIG: ThumbnailCacheConfig = {
 
 let thumbnailDir: string;
 let memoryCache: LRUCache<string, ThumbnailResult & { buffer: Buffer }>;
-interface ThumbnailResult {
+export interface ThumbnailResult {
   buffer?: Buffer;
   height: number;
   sourceIdentity?: string;
@@ -150,6 +152,7 @@ const galleryJobs = new Map<
     controller: AbortController;
     consumers: number;
     promise: Promise<ThumbnailResult>;
+    priority: { value: number };
   }
 >();
 const inFlightDuelPreviews = new Map<
@@ -940,14 +943,20 @@ async function readGalleryVariant(
 async function encodeGalleryVariant(
   imagePath: string,
   resource: string | Buffer,
-  edge: GalleryThumbnailEdge,
+  edge: BrowsePreviewEdge,
+  request: HeifDecodeRequest,
   knownOrientation?: ExifOrientation
 ) {
+  if (resource === imagePath) {
+    const heif = await decodeHeifDisplay(imagePath, request, edge);
+    if (heif) {
+      return { data: heif.buffer, info: heif };
+    }
+  }
   let preview =
     resource === imagePath && isRawFile(imagePath)
       ? ((await extractRawPreview(imagePath)) ?? imagePath)
       : resource;
-  preview = await resolveHeifInput(preview);
   // The managed preview was already validated and has corrected orientation.
   // Read it once; repeated sharp(path).metadata()/encode opens contend with IO.
   let orientation = knownOrientation;
@@ -966,25 +975,27 @@ async function encodeGalleryVariant(
 
 async function encodeFromGalleryPreview(
   imagePath: string,
-  edge: GalleryThumbnailEdge,
+  edge: BrowsePreviewEdge,
   preview: ThumbnailResult | undefined,
   scope: number,
-  identity: string
+  identity: string,
+  request: HeifDecodeRequest
 ) {
   if (!preview) {
-    return encodeGalleryVariant(imagePath, imagePath, edge);
+    return encodeGalleryVariant(imagePath, imagePath, edge, request);
   }
   try {
     return await encodeGalleryVariant(
       imagePath,
       preview.buffer ?? preview.thumbnailPath,
       edge,
+      request,
       1
     );
   } catch {
     // Metadata can remain readable in an otherwise undecodable preview.
     assertThumbnailSource(await fs.promises.stat(imagePath), scope, identity);
-    return encodeGalleryVariant(imagePath, imagePath, edge);
+    return encodeGalleryVariant(imagePath, imagePath, edge, request);
   }
 }
 
@@ -1235,7 +1246,7 @@ export async function getGalleryThumbnailHint(
 /** The source's filesystem identity is part of every new physical-pixel variant. */
 export async function generateGalleryThumbnail(
   imagePath: string,
-  edge: GalleryThumbnailEdge,
+  edge: BrowsePreviewEdge,
   signal?: AbortSignal,
   priority = 0,
   sourceSize?: { width: number | null; height: number | null },
@@ -1299,11 +1310,26 @@ export async function generateGalleryThumbnail(
     return { ...preview, sourceIdentity: identity };
   }
   let job = galleryJobs.get(target);
+  if (job?.controller.signal.aborted) {
+    await job.promise.catch(() => undefined);
+    signal?.throwIfAborted();
+    return generateGalleryThumbnail(
+      imagePath,
+      edge,
+      signal,
+      priority,
+      sourceSize,
+      selectExisting,
+      repair,
+      legacyEvidence
+    );
+  }
   if (stopping) {
     throw new DOMException("Cancelled", "AbortError");
   }
   if (!job) {
     const controller = new AbortController();
+    const jobPriority = { value: priority };
     const promise = (async (): Promise<ThumbnailResult> => {
       const queued = performance.now();
       await genSemaphore.acquire(controller.signal, priority);
@@ -1327,7 +1353,8 @@ export async function generateGalleryThumbnail(
           edge,
           preview,
           scope,
-          identity
+          identity,
+          { signal: controller.signal, priority: () => jobPriority.value }
         );
         recordGalleryMediaStat(
           "thumbnailEncodeMs",
@@ -1381,10 +1408,11 @@ export async function generateGalleryThumbnail(
         galleryJobs.delete(target);
       }
     });
-    job = { controller, consumers: 0, promise };
+    job = { controller, consumers: 0, promise, priority: jobPriority };
     galleryJobs.set(target, job);
   }
   const active = job;
+  active.priority.value = Math.min(active.priority.value, priority);
   genSemaphore.promote(active.controller.signal, priority);
   active.consumers++;
   return new Promise((resolve, reject) => {

@@ -64,6 +64,32 @@ describe("useModalFocusTrap", () => {
     expect(onEscape).toHaveBeenCalledOnce();
     rects.mockRestore();
   });
+
+  it("keeps focus in the upper overlay when it already handled Tab", () => {
+    const rects = vi
+      .spyOn(HTMLElement.prototype, "getClientRects")
+      .mockReturnValue({ length: 1 } as DOMRectList);
+    render(
+      <>
+        <FocusTrapHarness onEscape={vi.fn()} />
+        <button type="button">upper overlay</button>
+      </>
+    );
+    const upper = screen.getByRole("button", { name: "upper overlay" });
+    const tab = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    });
+    try {
+      upper.focus();
+      tab.preventDefault();
+      fireEvent(upper, tab);
+      expect(upper).toHaveFocus();
+    } finally {
+      rects.mockRestore();
+    }
+  });
 });
 
 it("lets nested portal overlays handle Escape and Tab before the inspector", () => {

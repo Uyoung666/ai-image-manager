@@ -7,6 +7,7 @@ import {
   type MouseEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -26,20 +27,28 @@ import {
   TooltipPortalProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  useBrowseArea,
+  useBrowsePlaceholder,
+  useBrowsePrefetch,
+  useBrowseTiming,
+} from "@/hooks/use-browse-image";
+import { useLightboxImage } from "@/hooks/use-lightbox-image";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import type { LibraryPhotoStatus } from "@/types/library-reliability";
+import {
+  browseMedia,
+  browsePhotoKey,
+  type ImageArea,
+} from "@/utils/browse-image";
 import { getDateLocale } from "@/utils/date-locale";
 import {
   ensureGalleryPhotos,
   getGalleryDataVersion,
   subscribeGalleryData,
 } from "@/utils/gallery-data-source";
-import {
-  toGalleryThumbnailUrl,
-  toLocalMediaUrl,
-} from "@/utils/local-media-url";
 
 interface QuickPreviewPhoto extends LibraryPhotoStatus {
   fileDate?: number | null;
@@ -58,17 +67,31 @@ interface QuickPreviewProps {
   onNavigate: (direction: -1 | 1) => void;
   onOpenLightbox?: () => void;
   photo: QuickPreviewPhoto;
+  photos?: readonly QuickPreviewPhoto[];
   total?: number;
 }
 
 export function QuickPreview({
   photo,
+  photos,
   onClose,
   onNavigate,
   onOpenLightbox,
   index,
   total,
 }: QuickPreviewProps) {
+  const { area, dpr } = useBrowseArea();
+  const [readyPhoto, setReadyPhoto] = useState("");
+  const photoKey = browsePhotoKey(photo);
+  useBrowsePrefetch(
+    photos ?? [],
+    index ?? 0,
+    area,
+    dpr,
+    Boolean(photos),
+    false,
+    readyPhoto === photoKey
+  );
   useSyncExternalStore(subscribeGalleryData, getGalleryDataVersion);
   useEffect(() => {
     ensureGalleryPhotos([photo]).catch(() => undefined);
@@ -230,7 +253,9 @@ export function QuickPreview({
           onClick={(e) => e.stopPropagation()}
         >
           <QuickPreviewImage
-            key={`${photo.id}:${photo.path}:${photo.sourceStatus ?? ""}:${photo.thumbnailPath ?? photo.thumbnailVersion ?? ""}`}
+            area={area}
+            dpr={dpr}
+            key={photoKey}
             onContextMenu={(e) => {
               e.preventDefault();
               setPreviewMenu({
@@ -243,6 +268,7 @@ export function QuickPreview({
                 y: e.clientY,
               });
             }}
+            onReady={setReadyPhoto}
             onResolve={() => {
               finishClose();
               navigate({
@@ -360,21 +386,63 @@ function PreviewControl({
 // A new image identity owns fresh load/error state; late events cannot affect its successor.
 function QuickPreviewImage({
   photo,
+  area,
+  dpr,
   onContextMenu,
+  onReady,
   onResolve,
 }: {
   photo: QuickPreviewPhoto;
+  area: ImageArea;
+  dpr: number;
   onResolve: () => void;
+  onReady: (key: string) => void;
   onContextMenu: (event: MouseEvent<HTMLImageElement>) => void;
 }) {
   const { t } = useTranslation();
-  const reduceMotion = useReducedMotion();
-  const [loaded, setLoaded] = useState(false);
-  const [imgError, setImgError] = useState(false);
   const [srcKey, setSrcKey] = useState(0);
-  const unavailable = isLibrarySourceUnavailable(photo.sourceStatus);
+  const media = browseMedia(photo, area, dpr, srcKey > 0);
+  const ready = area.width > 0 && area.height > 0;
+  const fit = useLightboxImage({
+    enabled: ready,
+    photoId: photo.id,
+    retry: srcKey,
+    src: media.fit,
+  });
+  const fallback = useLightboxImage({
+    enabled: fit.error,
+    photoId: photo.id,
+    retry: srcKey,
+    src: media.original && media.original !== media.fit ? media.original : null,
+  });
+  const placeholder = useBrowsePlaceholder(
+    media.unavailable ? undefined : photo,
+    media.fit,
+    fit.loaded,
+    media.fit
+  );
+  const preview = useLightboxImage({
+    enabled: Boolean(placeholder) && !fit.loaded && !fallback.loaded,
+    photoId: photo.id,
+    retry: 0,
+    src: placeholder,
+  });
+  const loaded = fit.loaded || preview.loaded || fallback.loaded;
+  const clear = fit.loaded || fallback.loaded;
+  const key = browsePhotoKey(photo);
+  useLayoutEffect(() => {
+    if (clear) {
+      onReady(key);
+    }
+  }, [clear, key, onReady]);
+  const imgError =
+    fit.error &&
+    (!fallback.request.src || fallback.error) &&
+    (!preview.request.src || preview.error);
+  useBrowseTiming(key, loaded, clear);
+  const retry = () => setSrcKey((key) => key + 1);
   return (
-    <div className="relative flex min-h-0 max-w-full items-center justify-center">
+    <div className="relative grid min-h-0 max-w-full place-items-center">
       {imgError ? (
         <div className="flex max-w-full flex-col items-center gap-3 rounded-[8px] bg-muted/20 p-6 sm:p-12">
           <span className="text-[14px] text-white/60">
@@ -387,56 +455,57 @@ function QuickPreviewImage({
           <button
             className="rounded-[6px] bg-white/10 px-3 py-1.5 text-[12px] text-white/80 hover:bg-white/20"
             onClick={() => {
-              if (unavailable) {
+              if (media.unavailable) {
                 onResolve();
                 return;
               }
-              setImgError(false);
-              setLoaded(false);
-              setSrcKey((key) => key + 1);
+              retry();
             }}
             type="button"
           >
-            {t(unavailable ? "libraryReliability.goToSettings" : "retry")}
+            {t(media.unavailable ? "libraryReliability.goToSettings" : "retry")}
           </button>
         </div>
       ) : (
-        <img
-          alt={photo.filename}
-          className={`max-h-[72dvh] min-h-0 max-w-[90dvw] rounded-[8px] object-contain [@media(max-height:560px)]:max-h-[calc(100dvh-9rem)] ${reduceMotion ? "" : "transition-opacity duration-200"} ${loaded ? "opacity-100" : "opacity-0"}`}
-          draggable={!unavailable}
-          height={photo.height ?? 1}
-          key={srcKey}
-          onContextMenu={onContextMenu}
-          onDragStart={(e) => {
-            e.preventDefault();
-            if (!unavailable) {
-              window.electronAPI?.startDrag?.(photo.path);
-            }
-          }}
-          onError={() => setImgError(true)}
-          onLoad={() => setLoaded(true)}
-          src={
-            isLibrarySourceUnavailable(photo.sourceStatus)
-              ? toGalleryThumbnailUrl(
-                  photo.id,
-                  1024,
-                  "offline",
-                  undefined,
-                  true
-                ) || toLocalMediaUrl(photo.thumbnailPath)
-              : toLocalMediaUrl(
-                  photo.path,
-                  photo.thumbnailPath ?? photo.thumbnailVersion
-                )
+        [preview, fit, fallback].map((frame) => {
+          if (!(frame.request.enabled && frame.request.src)) {
+            return null;
           }
-          width={photo.width ?? 1}
-        />
+          return (
+            <img
+              alt={frame.loaded ? photo.filename : ""}
+              className={`col-start-1 row-start-1 max-h-[72dvh] min-h-0 max-w-[90dvw] rounded-[8px] object-contain [@media(max-height:560px)]:max-h-[calc(100dvh-9rem)] ${frame.loaded ? "opacity-100" : "pointer-events-none opacity-0"}`}
+              data-browse-frame={frame === preview ? "placeholder" : "clear"}
+              data-browse-visible={frame.loaded || undefined}
+              draggable={!media.unavailable}
+              height={photo.height ?? 1}
+              key={`${frame.request.src}:${frame.request.retry}`}
+              onContextMenu={onContextMenu}
+              onDragStart={(event) => {
+                event.preventDefault();
+                if (!media.unavailable) {
+                  window.electronAPI?.startDrag?.(photo.path);
+                }
+              }}
+              ref={frame.ref}
+              width={photo.width ?? 1}
+            />
+          );
+        })
       )}
-      {loaded && unavailable && (
+      {loaded && media.unavailable && (
         <p className="absolute bottom-2 rounded bg-popover/90 px-2 py-1 text-popover-foreground text-xs">
           {t("libraryReliability.detail.cached")}
         </p>
+      )}
+      {preview.loaded && fit.error && !fallback.loaded && (
+        <button
+          className="absolute bottom-2 rounded bg-popover/90 px-2 py-1 text-popover-foreground text-xs"
+          onClick={retry}
+          type="button"
+        >
+          {t("retry")}
+        </button>
       )}
       {!(loaded || imgError) && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

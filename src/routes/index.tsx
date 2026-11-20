@@ -2976,6 +2976,7 @@ function HomePage() {
             setQuickPreviewIndex(-1);
           }}
           photo={previewPhotos[quickPreviewIndex]}
+          photos={previewPhotos}
           total={previewPhotos.length}
         />
       )}

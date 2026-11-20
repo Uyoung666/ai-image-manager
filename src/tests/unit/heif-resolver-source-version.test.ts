@@ -90,6 +90,54 @@ describe("HEIF resolver source versions", () => {
     expect(results[0]?.buffer.toString()).toBe("red pixels");
   });
 
+  it("skips cancelled prefetch and promotes a shared queued decode ahead of other work", async () => {
+    const active = resolver.resolveResult(Buffer.from("active"));
+    await vi.waitFor(() => expect(workers[0]?.send).toHaveBeenCalledOnce());
+    const request = new AbortController();
+    const cancelled = resolver.resolveResult(
+      Buffer.from("obsolete"),
+      {},
+      { signal: request.signal, priority: () => 2 }
+    );
+    const discarded = expect(cancelled).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    const nextBackground = Buffer.from("background");
+    const background = resolver.resolveResult(
+      nextBackground,
+      {},
+      { priority: () => 2 }
+    );
+    const target = Buffer.from("foreground");
+    const prefetched = resolver.resolveResult(
+      target,
+      {},
+      { priority: () => 2 }
+    );
+    await flushQueue();
+    const foreground = resolver.resolveResult(
+      target,
+      {},
+      { priority: () => 0 }
+    );
+    await flushQueue();
+    request.abort();
+    workers[0].respond("active done");
+    await active;
+    await discarded;
+    await vi.waitFor(() => expect(workers[0].send).toHaveBeenCalledTimes(2));
+    expect(workers[0].send.mock.calls[1][0]).toMatchObject({ input: target });
+    workers[0].respond("foreground done");
+    const [one, two] = await Promise.all([prefetched, foreground]);
+    expect(one).toBe(two);
+    await vi.waitFor(() => expect(workers[0].send).toHaveBeenCalledTimes(3));
+    expect(workers[0].send.mock.calls[2][0]).toMatchObject({
+      input: nextBackground,
+    });
+    workers[0].respond("background done");
+    await background;
+  });
+
   it.each([
     {},
     { output: "import" as const, thumbnailSize: 512 },

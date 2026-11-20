@@ -1,4 +1,5 @@
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
+
 import {
   memo,
   useCallback,
@@ -22,6 +23,7 @@ import {
 import { useGalleryThumbnail } from "@/hooks/useGalleryThumbnail";
 import type { LibraryPhotoStatus } from "@/types/library-reliability";
 import type { SearchMatch } from "@/types/photo";
+import { browsePhotoKey } from "@/utils/browse-image";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import type { ImagePriority } from "@/utils/image-scheduler";
 import {
@@ -653,6 +655,15 @@ export const PhotoCard = memo(function PhotoCard({
       aria-selected={isSelected}
       className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${cardStateClass} ${recentlyViewedClass}
       `}
+      data-browse-source={browsePhotoKey({
+        id,
+        path,
+        thumbnailVersion,
+        thumbnailPath,
+        sourceStatus,
+        width,
+        height,
+      })}
       data-photo-id={id}
       data-photo-path={path}
       data-recently-viewed={recentlyViewed ? "true" : undefined}

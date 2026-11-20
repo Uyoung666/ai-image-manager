@@ -56,10 +56,11 @@ import {
 } from "@/services/diagnostics/sanitizer";
 import { cancelFaceDetection } from "@/services/face-detector";
 import { shutdownFacePool } from "@/services/face-worker-pool";
-import { resolveHeifInput } from "@/services/heif-input";
+import { decodeHeifDisplay } from "@/services/heif-input";
 import {
   getHttpServerAuthToken,
   getHttpServerPort,
+  loadPhotoThumbnail,
   startHttpServerEarly,
 } from "@/services/http-server";
 import { isLibraryDirectoryChanging } from "@/services/library-directory";
@@ -1732,15 +1733,17 @@ async function ensureLocalMediaFile(resolved: string): Promise<string | null> {
   }
 }
 
-async function renderLocalMedia(resolved: string): Promise<Response> {
+async function renderLocalMedia(
+  resolved: string,
+  signal: AbortSignal
+): Promise<Response> {
   const availablePath = await ensureLocalMediaFile(resolved);
   if (!availablePath) {
     return notFoundResponse();
   }
   const ext = path.extname(availablePath).toLowerCase();
-  const buffer = await fs.promises.readFile(availablePath);
   if (BROWSER_COMPATIBLE_EXTENSIONS.has(ext)) {
-    return new Response(buffer, {
+    return new Response(await fs.promises.readFile(availablePath), {
       headers: {
         "content-type": getMimeType(ext),
         "cache-control": "private, no-cache",
@@ -1759,10 +1762,12 @@ async function renderLocalMedia(resolved: string): Promise<Response> {
     }
   }
   try {
-    const converted = await sharp(await resolveHeifInput(availablePath))
-      .rotate()
-      .png()
-      .toBuffer();
+    const heif = await decodeHeifDisplay(availablePath, {
+      signal,
+      priority: () => 0,
+    });
+    const converted =
+      heif?.buffer ?? (await sharp(availablePath).rotate().png().toBuffer());
     return new Response(new Uint8Array(converted), {
       headers: {
         "content-type": "image/png",
@@ -1770,8 +1775,9 @@ async function renderLocalMedia(resolved: string): Promise<Response> {
       },
     });
   } catch (err) {
+    signal.throwIfAborted();
     log.warn({ filePath: resolved, err }, "local-media: Conversion failed");
-    return new Response(buffer, {
+    return new Response(await fs.promises.readFile(availablePath), {
       headers: {
         "content-type": getMimeType(ext),
         "cache-control": "private, no-cache",
@@ -1780,13 +1786,42 @@ async function renderLocalMedia(resolved: string): Promise<Response> {
   }
 }
 
-async function handleLocalMediaRequest(request: {
-  url: string;
-}): Promise<Response> {
+async function handleLocalMediaRequest(request: Request): Promise<Response> {
   if (isLibraryDirectoryChanging()) {
     return new Response(null, { status: 503 });
   }
   try {
+    if (request.url.startsWith("local-media://browse-preview/?")) {
+      const params = new URL(request.url).searchParams;
+      if (params.get("token") !== getHttpServerAuthToken()) {
+        return new Response(null, { status: 401 });
+      }
+      const background = request.headers.get("sec-fetch-dest") === "empty";
+      const result = await loadPhotoThumbnail(
+        params,
+        request.signal,
+        background ? 2 : 0
+      );
+      if (result.status !== 200) {
+        return new Response(null, { status: result.status });
+      }
+      if (result.kind === "original") {
+        if (background) {
+          return new Response(null, { status: 204 });
+        }
+        return await renderLocalMedia(result.originalPath, request.signal);
+      }
+      const { thumbnail } = result;
+      const buffer =
+        thumbnail.buffer ??
+        (await fs.promises.readFile(thumbnail.thumbnailPath));
+      return new Response(new Uint8Array(buffer), {
+        headers: {
+          "content-type": "image/webp",
+          "cache-control": "private, no-cache",
+        },
+      });
+    }
     const encodedPath = request.url
       .slice("local-media://".length)
       .split("?")[0];
@@ -1800,7 +1835,7 @@ async function handleLocalMediaRequest(request: {
     }
     await mediaSemaphore.acquire();
     try {
-      return await renderLocalMedia(safePath);
+      return await renderLocalMedia(safePath, request.signal);
     } finally {
       mediaSemaphore.release();
     }

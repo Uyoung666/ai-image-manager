@@ -22,9 +22,11 @@ export function createHeifResolver({
   useProcess = true,
   track = (child) => child,
   timeoutMs = 60_000,
+  onDecode = () => undefined,
 } = {}) {
   let child;
-  let tail = Promise.resolve();
+  let running = false;
+  const queue = [];
   let idleTimer;
   const pending = new Map();
   const bufferKeys = new WeakMap();
@@ -54,34 +56,28 @@ export function createHeifResolver({
   function decode(input, options) {
     clearTimeout(idleTimer);
     if (!child || (useProcess ? !child.connected : child.threadId === -1)) {
+      const script =
+        (typeof workerPath === "function" ? workerPath() : workerPath) ??
+        fileURLToPath(new URL("./heif-worker.mjs", import.meta.url));
       if (useProcess) {
         child = track(
-          fork(
-            workerPath ??
-              fileURLToPath(new URL("./heif-worker.mjs", import.meta.url)),
-            [],
-            {
-              execArgv: process.execArgv.filter(
-                (arg) => !arg.startsWith("--input-type")
-              ),
-              serialization: "advanced",
-              stdio: ["ignore", "ignore", "pipe", "ipc"],
-              env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-            }
-          )
-        );
-      } else {
-        child = new Worker(
-          workerPath ??
-            fileURLToPath(new URL("./heif-worker.mjs", import.meta.url)),
-          {
+          fork(script, [], {
             execArgv: process.execArgv.filter(
               (arg) => !arg.startsWith("--input-type")
             ),
-            stdout: true,
-            stderr: true,
-          }
+            serialization: "advanced",
+            stdio: ["ignore", "ignore", "pipe", "ipc"],
+            env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+          })
         );
+      } else {
+        child = new Worker(script, {
+          execArgv: process.execArgv.filter(
+            (arg) => !arg.startsWith("--input-type")
+          ),
+          stdout: true,
+          stderr: true,
+        });
         child.stdout?.resume();
       }
       // Drain diagnostics without persisting original file paths.
@@ -148,8 +144,43 @@ export function createHeifResolver({
       });
     });
   }
-  async function resolveResult(input, options = {}) {
+  const cancelled = () =>
+    new DOMException("HEIC decoding cancelled", "AbortError");
+
+  function pump() {
+    if (running || !queue.length) {
+      return;
+    }
+    const priority = (job) =>
+      Math.min(...[...job.consumers].map((item) => item.priority()));
+    queue.sort((a, b) => priority(a) - priority(b));
+    const job = queue.shift();
+    running = true;
+    job
+      .run()
+      .then(
+        (result) => finishJob(job, null, result),
+        (error) => finishJob(job, error)
+      )
+      .finally(() => {
+        running = false;
+        pump();
+      });
+  }
+
+  function finishJob(job, error, result) {
+    if (pending.get(job.key) === job) {
+      pending.delete(job.key);
+    }
+    for (const consumer of job.consumers) {
+      consumer.finish(error, result);
+    }
+    job.consumers.clear();
+  }
+
+  async function resolveResult(input, options = {}, request = {}) {
     const scheduledGeneration = generation;
+    request.signal?.throwIfAborted();
     const supported = await isHeifInput(input);
     assertGeneration(scheduledGeneration);
     if (!supported) {
@@ -157,6 +188,7 @@ export function createHeifResolver({
     }
     const identity = await sourceIdentity(input);
     assertGeneration(scheduledGeneration);
+    request.signal?.throwIfAborted();
     const policy = JSON.stringify(options);
     let key;
     if (typeof input === "string") {
@@ -173,38 +205,62 @@ export function createHeifResolver({
       }
       key = policies.get(policy);
     }
-    if (pending.has(key)) {
-      const result = await pending.get(key);
-      await assertSource(input, identity, scheduledGeneration);
-      return result;
+    let job = pending.get(key);
+    if (!job) {
+      const queuedAt = performance.now();
+      job = {
+        key,
+        consumers: new Set(),
+        async run() {
+          await assertSource(input, identity, scheduledGeneration);
+          if (!this.consumers.size) {
+            throw cancelled();
+          }
+          const queueMs = performance.now() - queuedAt;
+          onDecode(options);
+          const result = await decode(input, options);
+          await assertSource(input, identity, scheduledGeneration);
+          if (result.timings) {
+            result.timings.queueMs = queueMs;
+          }
+          if (result.buffer) {
+            result.buffer = Buffer.from(result.buffer);
+          }
+          return result;
+        },
+      };
+      pending.set(key, job);
+      queue.push(job);
     }
-    const queuedAt = performance.now();
-    let queueMs = 0;
-    const job = tail
-      .then(async () => {
-        await assertSource(input, identity, scheduledGeneration);
-        queueMs = performance.now() - queuedAt;
-        return decode(input, options);
-      })
-      .then(async (result) => {
-        await assertSource(input, identity, scheduledGeneration);
-        if (result.timings) {
-          result.timings.queueMs = queueMs;
+    const active = job;
+    const result = await new Promise((resolve, reject) => {
+      const abort = () => {
+        active.consumers.delete(consumer);
+        consumer.finish(cancelled());
+        const index = queue.indexOf(active);
+        if (active.consumers.size === 0 && index >= 0) {
+          queue.splice(index, 1);
+          finishJob(active, cancelled());
         }
-        if (result.buffer) {
-          result.buffer = Buffer.from(result.buffer);
-        }
-        return result;
-      });
-    pending.set(key, job);
-    tail = job.catch(() => undefined);
-    try {
-      return await job;
-    } finally {
-      if (pending.get(key) === job) {
-        pending.delete(key);
-      }
-    }
+      };
+      const consumer = {
+        priority: request.priority ?? (() => 1),
+        finish(error, value) {
+          request.signal?.removeEventListener("abort", abort);
+          if (error) {
+            reject(error);
+          } else {
+            resolve(value);
+          }
+        },
+      };
+      active.consumers.add(consumer);
+      request.signal?.addEventListener("abort", abort, { once: true });
+      pump();
+    });
+    await assertSource(input, identity, scheduledGeneration);
+    request.signal?.throwIfAborted();
+    return result;
   }
   async function resolveInput(input) {
     const result = await resolveResult(input);
@@ -212,6 +268,9 @@ export function createHeifResolver({
   }
   function stop() {
     generation++;
+    for (const job of queue.splice(0)) {
+      finishJob(job, cancelled());
+    }
     pending.clear();
     recycle();
   }

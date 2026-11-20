@@ -28,8 +28,22 @@ const photo = {
   width: 4000,
 };
 
+function previewFrame(tier = "clear") {
+  const frame = document.querySelector<HTMLImageElement>(
+    `[data-browse-frame="${tier}"]`
+  );
+  if (!frame) {
+    throw new Error(`Missing preview frame ${tier}`);
+  }
+  return frame;
+}
+
+async function loadPreview(image: HTMLImageElement) {
+  await act(async () => fireEvent.load(image));
+}
+
 describe("QuickPreview", () => {
-  it("replaces the same photo's original request and load state after its cached version changes", () => {
+  it("replaces the same photo's request and load state after its cached version changes", async () => {
     const props = { onClose: vi.fn(), onNavigate: vi.fn() };
     const first = {
       ...photo,
@@ -37,9 +51,9 @@ describe("QuickPreview", () => {
       thumbnailVersion: "pending-descriptor",
     };
     const { rerender } = render(<QuickPreview {...props} photo={first} />);
-    const previous = screen.getByRole("img");
+    const previous = previewFrame();
     const oldSource = previous.getAttribute("src");
-    fireEvent.load(previous);
+    await loadPreview(previous);
     expect(previous).toHaveClass("opacity-100");
     rerender(
       <QuickPreview
@@ -47,7 +61,7 @@ describe("QuickPreview", () => {
         photo={{ ...first, thumbnailPath: "C:/Thumbs/new.webp" }}
       />
     );
-    const current = screen.getByRole("img");
+    const current = previewFrame();
     expect(current).not.toBe(previous);
     expect(current.getAttribute("src")).not.toBe(oldSource);
     expect(decodeURIComponent(current.getAttribute("src") ?? "")).toContain(
@@ -56,7 +70,7 @@ describe("QuickPreview", () => {
     expect(current).toHaveClass("opacity-0");
     fireEvent.error(previous);
     expect(screen.queryByRole("button", { name: "retry" })).toBeNull();
-    fireEvent.load(current);
+    await loadPreview(current);
     expect(current).toHaveClass("opacity-100");
   });
 
@@ -93,7 +107,7 @@ describe("QuickPreview", () => {
       <QuickPreview onClose={vi.fn()} onNavigate={onNavigate} photo={photo} />
     );
 
-    const image = screen.getByRole("img", { name: photo.filename });
+    const image = previewFrame();
     expect(image).toHaveClass("max-h-[72dvh]", "max-w-[90dvw]");
     expect(image).not.toHaveAttribute("style");
     expect(
@@ -126,11 +140,17 @@ describe("QuickPreview", () => {
     expect(onOpenLightbox).toHaveBeenCalledOnce();
   });
 
-  it("does not carry load errors or late image events into the next photo", () => {
+  it("does not carry load errors or late image events into the next photo", async () => {
     const props = { onClose: vi.fn(), onNavigate: vi.fn() };
     const { rerender } = render(<QuickPreview {...props} photo={photo} />);
-    const oldImage = screen.getByRole("img");
+    const oldImage = previewFrame();
     fireEvent.error(oldImage);
+    const fallback = document.querySelectorAll(
+      '[data-browse-frame="clear"]'
+    )[1];
+    if (fallback) {
+      fireEvent.error(fallback);
+    }
     expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument();
     rerender(
       <QuickPreview
@@ -143,13 +163,36 @@ describe("QuickPreview", () => {
         }}
       />
     );
-    const nextImage = screen.getByRole("img", { name: "good.jpg" });
+    const nextImage = previewFrame();
     expect(screen.queryByRole("button", { name: "retry" })).toBeNull();
-    fireEvent.load(nextImage);
+    await loadPreview(nextImage);
     fireEvent.error(oldImage);
     expect(screen.getByRole("img", { name: "good.jpg" })).toHaveClass(
       "opacity-100"
     );
+  });
+
+  it("keeps a loaded placeholder if the clear preview fails and can retry the upgrade", async () => {
+    render(
+      <QuickPreview
+        onClose={vi.fn()}
+        onNavigate={vi.fn()}
+        photo={{
+          ...photo,
+          path: "C:/Photos/image.heic",
+          thumbnailPath: "C:/Thumbs/image.webp",
+        }}
+      />
+    );
+    const small = previewFrame("placeholder");
+    const clear = previewFrame();
+    await loadPreview(small);
+    expect(small).toHaveClass("opacity-100");
+    fireEvent.error(clear);
+    expect(small).toHaveClass("opacity-100");
+    fireEvent.click(screen.getByRole("button", { name: "retry" }));
+    await loadPreview(previewFrame());
+    expect(previewFrame()).toHaveClass("opacity-100");
   });
 
   it("provides mouse navigation with accurate boundaries and a counter", () => {
@@ -198,7 +241,7 @@ it("does not drag unavailable originals and replaces futile retries with source 
       photo={{ ...photo, sourceStatus: "offline" }}
     />
   );
-  const image = screen.getByRole("img");
+  const image = previewFrame();
   expect(image).toHaveAttribute("draggable", "false");
   fireEvent.dragStart(image);
   expect(startDrag).not.toHaveBeenCalled();
