@@ -23,9 +23,10 @@ export function limitLightboxPan(
   fitted: ImageArea,
   area: ImageArea,
   zoom: number,
-  quarterTurn = false
+  quarterTurn = false,
+  preserveOffset = false
 ): Point {
-  if (zoom <= 1) {
+  if (zoom <= 1 && !preserveOffset) {
     return { x: 0, y: 0 };
   }
   const width = quarterTurn ? fitted.height : fitted.width;

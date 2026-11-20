@@ -2020,6 +2020,7 @@
   "fullscreen": "Fullscreen",
   "exitFullscreen": "Exit fullscreen",
   "fullscreenFailed": "Could not enter fullscreen",
+  "exitFullscreenFailed": "Could not exit fullscreen",
   "zoomIn": "Zoom in",
   "zoomOut": "Zoom out",
   "lightboxZoom": "Zoom",

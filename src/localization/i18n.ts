@@ -2510,6 +2510,7 @@ i18n.use(initReactI18next).init({
         fullscreen: "全屏",
         exitFullscreen: "退出全屏",
         fullscreenFailed: "无法进入全屏",
+        exitFullscreenFailed: "无法退出全屏",
         zoomIn: "放大",
         zoomOut: "缩小",
         lightboxZoom: "缩放",

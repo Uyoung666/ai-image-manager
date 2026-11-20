@@ -1,5 +1,5 @@
 import { ChevronDown, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type Ref, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -65,9 +65,11 @@ interface TagInfo {
 }
 
 interface LightboxInfoPanelProps {
+  fullscreen?: boolean;
   onClose: () => void;
   onOpenExplorer: (path: string) => void;
   photo: LightboxInfoPhoto;
+  ref?: Ref<HTMLElement>;
 }
 
 const WIDTH_KEY = "lightbox_info_panel_width";
@@ -126,9 +128,11 @@ function hasCaptureInfo(exif: ExifData | null) {
 }
 
 export function LightboxInfoPanel({
+  fullscreen = false,
   photo,
   onClose,
   onOpenExplorer,
+  ref,
 }: LightboxInfoPanelProps) {
   const { t, i18n } = useTranslation();
   const [exif, setExif] = useState<ExifData | null>(null);
@@ -240,12 +244,15 @@ export function LightboxInfoPanel({
   return (
     <aside
       aria-label={t("photoDetail")}
-      className="relative z-40 flex h-full shrink-0 flex-col border-white/10 border-l bg-[#111114] text-white max-[800px]:absolute max-[800px]:inset-y-0 max-[800px]:right-0 max-[800px]:max-w-[calc(100vw-3rem)] max-[800px]:shadow-2xl"
+      className="group/info relative z-40 flex h-full min-h-0 shrink-0 flex-col border-white/10 border-l bg-[#111114] text-white outline-none data-[fullscreen=true]:absolute data-[fullscreen=true]:inset-y-2 data-[fullscreen=true]:right-2 data-[fullscreen=true]:h-auto data-[fullscreen=true]:max-h-[calc(100dvh-1rem)] data-[fullscreen=true]:max-w-[calc(100dvw-1rem)] data-[fullscreen=true]:rounded-lg data-[fullscreen=true]:border data-[fullscreen=true]:shadow-2xl max-[800px]:absolute max-[800px]:inset-y-0 max-[800px]:right-0 max-[800px]:max-w-[calc(100vw-3rem)] max-[800px]:shadow-2xl min-[801px]:data-[fullscreen=true]:top-16 min-[801px]:data-[fullscreen=true]:bottom-auto min-[801px]:data-[fullscreen=true]:max-h-[calc(100dvh-8rem)]"
+      data-fullscreen={fullscreen}
+      ref={ref}
       style={{ width }}
+      tabIndex={-1}
     >
       <div
         aria-hidden="true"
-        className={`absolute top-0 -left-1 h-full w-2 cursor-col-resize max-[800px]:hidden ${resizing ? "bg-primary/50" : "hover:bg-white/10"}`}
+        className={`absolute top-0 -left-1 h-full w-2 cursor-col-resize group-data-[fullscreen=true]/info:hidden max-[800px]:hidden ${resizing ? "bg-primary/50" : "hover:bg-white/10"}`}
         onMouseDown={(event) => {
           event.preventDefault();
           resizeStart.current = { x: event.clientX, width };

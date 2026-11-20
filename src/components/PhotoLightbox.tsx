@@ -114,7 +114,6 @@ interface PhotoLightboxProps {
 const SLIDESHOW_DELAYS = [3000, 5000, 10_000] as const;
 const MAX_ZOOM = 8;
 const ZOOM_STEP = 1.2;
-const CONTROL_REVEAL_EDGE = 24;
 const CONTROL_HIDE_DELAY = 3000;
 const LIGHTBOX_POPOVER_CLASS_NAME =
   "z-[1100] max-h-[min(20rem,var(--radix-popover-content-available-height))] w-56 max-w-[calc(100dvw-1rem)] gap-0 overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-[#1a1a1e]/95 p-1.5 text-white shadow-2xl backdrop-blur-xl";
@@ -179,9 +178,10 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   });
   const reduceMotion = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
-  const headerRef = useRef<HTMLElement>(null);
   const zoomPanelRef = useRef<HTMLDivElement>(null);
-  const playbackRef = useRef<HTMLDivElement>(null);
+  const infoPanelRef = useRef<HTMLElement>(null);
+  const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
+  const fullscreenPendingRef = useRef(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   const { area, dpr } = useBrowseArea(canvasRef, open);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -204,7 +204,14 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
   const [photoIndex, setPhotoIndex] = useState(initialIndex);
   const [zoom, setZoom] = useState(1);
-  const [actualPixels, setActualPixels] = useState(false);
+  const [zoomMode, setZoomMode] = useState<"fit" | "custom" | "actual">("fit");
+  const actualPixels = zoomMode === "actual";
+  const previousGeometry = useRef<{
+    dpr: number;
+    photoKey: string;
+    rotation: number;
+    width: number;
+  } | null>(null);
   const [lockView, setLockView] = useState(false);
   const lockedView = useRef<{
     center: { x: number; y: number };
@@ -218,8 +225,14 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const [previewRetry, setPreviewRetry] = useState(0);
   const [repairKey, setRepairKey] = useState("");
   const [controlsVisible, setControlsVisible] = useState(true);
-  const [infoVisible, setInfoVisible] = useState(false);
-  const [thumbnailsVisible, setThumbnailsVisible] = useState(false);
+  const [panelMode, setPanelMode] = useState<LightboxPanelMode>("off");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenPanelMode, setFullscreenPanelMode] =
+    useState<LightboxPanelMode>("off");
+  const visiblePanelMode = isFullscreen ? fullscreenPanelMode : panelMode;
+  const infoVisible = visiblePanelMode === "info";
+  const thumbnailsVisible =
+    visiblePanelMode === "thumbnails" && photos.length > 1;
   const {
     items: thumbnailItems,
     totalSize: thumbnailTotalWidth,
@@ -232,7 +245,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
   const [moreOpen, setMoreOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [slideshowMode, setSlideshowMode] = useState(autoPlay);
   const [playing, setPlaying] = useState(autoPlay);
   const [delay, setDelay] = useState<number>(sequencePlayback ? 167 : 5000);
@@ -275,12 +287,51 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       ? (fitted.width * dpr) / photo.width
       : 0;
   useLayoutEffect(() => {
-    if (!sequencePlayback && actualPixels && pixelScale > 0) {
-      const scale = 1 / pixelScale;
-      wheelZoomRef.current = scale;
-      setZoom(scale);
+    const previous = previousGeometry.current;
+    previousGeometry.current =
+      open && fitted.width > 0
+        ? { dpr, photoKey, rotation, width: fitted.width }
+        : null;
+    if (!open || zoomMode === "fit" || fitted.width <= 0) {
+      return;
     }
-  }, [actualPixels, pixelScale, sequencePlayback]);
+    const sameView =
+      previous?.photoKey === photoKey && previous.rotation === rotation;
+    if (sameView && (previous.width !== fitted.width || previous.dpr !== dpr)) {
+      const ratio = previous.dpr / dpr;
+      const next =
+        actualPixels && pixelScale > 0
+          ? 1 / pixelScale
+          : wheelZoomRef.current * (previous.width / fitted.width) * ratio;
+      wheelZoomRef.current = next;
+      setZoom(next);
+      setTranslate((point) =>
+        limitLightboxPan(
+          { x: point.x * ratio, y: point.y * ratio },
+          fitted,
+          area,
+          next,
+          isQuarterTurn,
+          true
+        )
+      );
+    } else if (!sequencePlayback && actualPixels && pixelScale > 0) {
+      wheelZoomRef.current = 1 / pixelScale;
+      setZoom(1 / pixelScale);
+    }
+  }, [
+    actualPixels,
+    area,
+    dpr,
+    fitted,
+    isQuarterTurn,
+    open,
+    photoKey,
+    pixelScale,
+    rotation,
+    sequencePlayback,
+    zoomMode,
+  ]);
   const media =
     photo && browseMedia(photo, imageArea, dpr, repairKey === photoKey);
   const fit = useLightboxImage({
@@ -303,7 +354,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     : 0;
   const wantsDetail = Boolean(
     media &&
-      (((zoom > 1 || actualPixels) &&
+      ((zoomMode !== "fit" &&
         Math.max(fitted.width, fitted.height) * dpr * zoom >
           (decodedFitEdge || media.edge) + 1) ||
         (fit.error && !placeholder))
@@ -393,7 +444,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const resetView = useCallback(() => {
     dragRef.current = null;
     lockedView.current = null;
-    setActualPixels(false);
+    setZoomMode("fit");
     wheelZoomRef.current = 1;
     setZoom(1);
     setTranslate({ x: 0, y: 0 });
@@ -403,13 +454,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const changePhotoView = useCallback(() => {
     dragRef.current = null;
     setRepairKey("");
-    if (
-      !(
-        lockView &&
-        pixelScale > 0 &&
-        (actualPixels || wheelZoomRef.current !== 1)
-      )
-    ) {
+    if (!(lockView && pixelScale > 0 && zoomMode !== "fit")) {
       resetView();
       return;
     }
@@ -425,7 +470,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     };
     setRotation(0);
   }, [
-    actualPixels,
     fitted.height,
     fitted.width,
     lockView,
@@ -434,6 +478,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     resetView,
     rotation,
     translate,
+    zoomMode,
   ]);
 
   useLayoutEffect(() => {
@@ -512,7 +557,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         1,
         Math.max(MAX_ZOOM, pixelScale ? 1 / pixelScale : MAX_ZOOM)
       );
-      setActualPixels(false);
+      setZoomMode(value === 1 ? "fit" : "custom");
       wheelZoomRef.current = value;
       setZoom(value);
       if (value <= 1.001) {
@@ -546,7 +591,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         1,
         Math.max(MAX_ZOOM, pixelScale ? 1 / pixelScale : MAX_ZOOM)
       );
-      setActualPixels(false);
+      setZoomMode(next === 1 ? "fit" : "custom");
       wheelZoomRef.current = next;
 
       if (!wheelActiveRef.current) {
@@ -588,7 +633,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     setPlaying(false);
     if (!sequencePlayback && pixelScale) {
       const scale = 1 / pixelScale;
-      setActualPixels(true);
+      setZoomMode("actual");
       wheelZoomRef.current = scale;
       setZoom(scale);
       setTranslate((point) =>
@@ -621,47 +666,43 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     updateZoom,
   ]);
 
-  const toggleInfo = useCallback(() => {
-    const nextVisible = !infoVisible;
-    setInfoVisible(nextVisible);
-    if (nextVisible) {
-      setThumbnailsVisible(false);
+  const changePanelMode = useCallback(
+    (mode: LightboxPanelMode) => {
+      if (isFullscreen) {
+        setFullscreenPanelMode(mode);
+        return;
+      }
+      setPanelMode(mode);
+      if (!(sequencePlayback || autoPlay)) {
+        saveLightboxPanelMode(mode);
+      }
+    },
+    [autoPlay, isFullscreen, sequencePlayback]
+  );
+
+  const closeInfoPanel = useCallback(() => {
+    if (infoPanelRef.current?.contains(document.activeElement)) {
+      rootRef.current?.focus({ preventScroll: true });
     }
-    if (!(sequencePlayback || autoPlay)) {
-      saveLightboxPanelMode(nextVisible ? "info" : "off");
+    changePanelMode("off");
+  }, [changePanelMode]);
+
+  const toggleInfo = useCallback(() => {
+    if (infoVisible) {
+      closeInfoPanel();
+    } else {
+      changePanelMode("info");
     }
     setPlaying(false);
     setMoreOpen(false);
-  }, [autoPlay, infoVisible, sequencePlayback]);
-
-  const closeInfoPanel = useCallback(() => {
-    setInfoVisible(false);
-    if (!(sequencePlayback || autoPlay)) {
-      saveLightboxPanelMode("off");
-    }
-  }, [autoPlay, sequencePlayback]);
+  }, [changePanelMode, closeInfoPanel, infoVisible]);
 
   const toggleThumbnails = useCallback(() => {
-    if (photos.length <= 1) {
-      return;
+    if (photos.length > 1) {
+      changePanelMode(thumbnailsVisible ? "off" : "thumbnails");
+      setMoreOpen(false);
     }
-    const nextVisible = !thumbnailsVisible;
-    setThumbnailsVisible(nextVisible);
-    if (nextVisible) {
-      setInfoVisible(false);
-    }
-    if (!(sequencePlayback || autoPlay)) {
-      saveLightboxPanelMode(nextVisible ? "thumbnails" : "off");
-    }
-    setMoreOpen(false);
-  }, [autoPlay, photos.length, sequencePlayback, thumbnailsVisible]);
-
-  const closeThumbnails = useCallback(() => {
-    setThumbnailsVisible(false);
-    if (!(sequencePlayback || autoPlay)) {
-      saveLightboxPanelMode("off");
-    }
-  }, [autoPlay, sequencePlayback]);
+  }, [changePanelMode, photos.length, thumbnailsVisible]);
 
   const toggleFavorite = useCallback(async () => {
     if (!(photo && onToggleFavorite) || favoriteSaving) {
@@ -682,25 +723,36 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   }, [favorite, favoriteSaving, onToggleFavorite, photo, t]);
 
   const toggleFullscreen = useCallback(async () => {
+    const root = rootRef.current;
+    if (!root || fullscreenPendingRef.current) {
+      return;
+    }
+    const exiting = document.fullscreenElement === root;
+    fullscreenPendingRef.current = true;
     try {
-      if (document.fullscreenElement) {
+      if (exiting) {
         await document.exitFullscreen();
       } else {
-        await rootRef.current?.requestFullscreen();
+        await root.requestFullscreen();
       }
     } catch {
-      toast.error(t("fullscreenFailed"));
+      toast.error(t(exiting ? "exitFullscreenFailed" : "fullscreenFailed"));
+    } finally {
+      fullscreenPendingRef.current = false;
     }
   }, [t]);
 
   const startSlideshow = useCallback(() => {
     setSlideshowMode(true);
     setPlaying(true);
-    setInfoVisible(false);
-    setThumbnailsVisible(false);
+    if (isFullscreen) {
+      setFullscreenPanelMode("off");
+    } else {
+      setPanelMode("off");
+    }
     setMoreOpen(false);
     setZoomOpen(false);
-  }, []);
+  }, [isFullscreen]);
 
   const stopSlideshow = useCallback(() => {
     setPlaying(false);
@@ -722,11 +774,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       hideTimerRef.current = null;
       const focused = document.activeElement;
       if (
+        dragRef.current ||
         (keyboardFocusRef.current &&
           focused?.matches(":focus-visible") &&
           focused.closest("[data-lightbox-controls]")) ||
-        headerRef.current?.matches(":hover") ||
-        playbackRef.current?.matches(":hover")
+        rootRef.current?.querySelector("[data-lightbox-controls]:hover")
       ) {
         return;
       }
@@ -754,8 +806,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       sequencePlayback,
       showThumbnailsInitially,
     });
-    setInfoVisible(initialPanelMode === "info");
-    setThumbnailsVisible(initialPanelMode === "thumbnails");
+    setPanelMode(initialPanelMode);
+    setFullscreenPanelMode("off");
     setMoreOpen(false);
     setZoomOpen(false);
     setSlideshowMode(autoPlay);
@@ -772,10 +824,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   ]);
 
   useEffect(() => {
-    if (!open || photos.length <= 1) {
-      setThumbnailsVisible(false);
+    if (photos.length <= 1) {
+      setPanelMode((mode) => (mode === "thumbnails" ? "off" : mode));
+      setFullscreenPanelMode((mode) => (mode === "thumbnails" ? "off" : mode));
     }
-  }, [open, photos.length]);
+  }, [photos.length]);
 
   useEffect(() => {
     const id = currentPhotoIdRef.current;
@@ -866,20 +919,51 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   }, [open]);
 
   useEffect(() => {
+    if (!open) {
+      setIsFullscreen(false);
+      return;
+    }
+    const root = rootRef.current;
+    let wasFullscreen = false;
+    let returnFocusFrame = 0;
     const handler = () => {
-      const fullscreen =
-        !!rootRef.current && document.fullscreenElement === rootRef.current;
-      setIsFullscreen(fullscreen);
-      if (fullscreen) {
-        rootRef.current?.focus({ preventScroll: true });
-        setControlsVisible(false);
-      } else {
-        revealControls();
+      const fullscreen = !!root && document.fullscreenElement === root;
+      if (fullscreen === wasFullscreen) {
+        return;
       }
+      wasFullscreen = fullscreen;
+      setIsFullscreen(fullscreen);
+      setFullscreenPanelMode("off");
+      setMoreOpen(false);
+      setZoomOpen(false);
+      setPreviewMenu((value) => ({ ...value, open: false }));
+      if (fullscreen) {
+        cancelAnimationFrame(returnFocusFrame);
+        root.focus({ preventScroll: true });
+      } else {
+        fullscreenButtonRef.current?.focus({ preventScroll: true });
+        returnFocusFrame = requestAnimationFrame(() => {
+          const active = document.activeElement;
+          if (active === document.body || active === root) {
+            fullscreenButtonRef.current?.focus({ preventScroll: true });
+          }
+        });
+      }
+      revealControls();
     };
     document.addEventListener("fullscreenchange", handler);
-    return () => document.removeEventListener("fullscreenchange", handler);
-  }, [revealControls]);
+    handler();
+    return () => {
+      cancelAnimationFrame(returnFocusFrame);
+      document.removeEventListener("fullscreenchange", handler);
+    };
+  }, [open, revealControls]);
+
+  useLayoutEffect(() => {
+    if (isFullscreen && infoVisible) {
+      infoPanelRef.current?.focus({ preventScroll: true });
+    }
+  }, [isFullscreen, infoVisible]);
 
   useEffect(() => {
     if (!open) {
@@ -935,7 +1019,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     }
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the flat shortcut dispatcher keeps precedence and propagation rules auditable.
     const keydown = (event: KeyboardEvent) => {
-      if (modalOpen) {
+      if (modalOpen || event.defaultPrevented) {
         return;
       }
       if (
@@ -950,7 +1034,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       }
       if (event.key === "Tab") {
         keyboardFocusRef.current = true;
-        const root = zoomPanelRef.current ?? rootRef.current;
+        const narrowInfo =
+          isFullscreen && window.matchMedia("(width < 801px)").matches
+            ? infoPanelRef.current
+            : null;
+        const root = zoomPanelRef.current ?? narrowInfo ?? rootRef.current;
         if (root) {
           const focusable = getFocusableElements(root);
           if (focusable.length === 0) {
@@ -977,6 +1065,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (event.repeat || fullscreenPendingRef.current) {
+          return;
+        }
         if (previewMenu.open) {
           setPreviewMenu((value) => ({ ...value, open: false }));
         } else if (zoomOpen || moreOpen) {
@@ -985,9 +1076,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         } else if (infoVisible) {
           closeInfoPanel();
         } else if (thumbnailsVisible) {
-          closeThumbnails();
-        } else if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => undefined);
+          changePanelMode("off");
+        } else if (document.fullscreenElement === rootRef.current) {
+          toggleFullscreen();
         } else {
           requestClose();
         }
@@ -1042,7 +1133,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     return () => window.removeEventListener("keydown", keydown, true);
   }, [
     closeInfoPanel,
-    closeThumbnails,
+    changePanelMode,
     infoVisible,
     isFullscreen,
     moreOpen,
@@ -1058,6 +1149,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     startSlideshow,
     thumbnailsVisible,
     toggleFavorite,
+    toggleFullscreen,
     toggleInfo,
     toggleThumbnails,
     updateZoom,
@@ -1065,13 +1157,14 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     zoomOpen,
   ]);
 
-  const chromeVisible = controlsVisible || moreOpen || zoomOpen || modalOpen;
+  const chromeVisible =
+    controlsVisible || moreOpen || zoomOpen || previewMenu.open || modalOpen;
   const chromeClass = chromeVisible
     ? "pointer-events-auto opacity-100"
     : "pointer-events-none opacity-0";
   const viewerChromeClass = isFullscreen ? chromeClass : "";
   const playbackChromeClass = playing ? chromeClass : "";
-  const fitMode = sequencePlayback ? zoom <= 1.05 : zoom === 1 && !actualPixels;
+  const fitMode = sequencePlayback ? zoom <= 1.05 : zoomMode === "fit";
   const zoomLabel =
     !sequencePlayback && fitMode
       ? t("lightboxFitLabel")
@@ -1092,8 +1185,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
   const imageStyle = {
     gridArea: "1 / 1",
-    width: !sequencePlayback && fitted.width ? fitted.width : undefined,
-    height: !sequencePlayback && fitted.height ? fitted.height : undefined,
+    width: fitted.width || undefined,
+    height: fitted.height || undefined,
     maxHeight: isQuarterTurn && imageArea.height ? imageArea.height : undefined,
     maxWidth: isQuarterTurn && imageArea.width ? imageArea.width : undefined,
     transform: `translate3d(${translate.x}px, ${translate.y}px, 0) scale(${zoom}) rotate(${rotation}deg)`,
@@ -1171,6 +1264,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const endPan = (event: PointerEvent<HTMLDivElement>) => {
     if (dragRef.current?.pointerId === event.pointerId) {
       dragRef.current = null;
+      scheduleControlsHide();
     }
   };
   const startOriginalDrag = (event: DragEvent<HTMLImageElement>) => {
@@ -1192,7 +1286,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     <div
       aria-label={t("lightboxReview")}
       aria-modal="true"
-      className={`lightbox-interactive fixed inset-0 z-[1000] flex overflow-hidden bg-[#09090b] text-white outline-none ${isFullscreen && !chromeVisible ? "cursor-none" : "cursor-default"}`}
+      className="lightbox-interactive fixed inset-0 z-[1000] flex cursor-default overflow-hidden bg-[#09090b] text-white outline-none"
       onBlur={scheduleControlsHide}
       onContextMenu={(event) => {
         const target = event.target as HTMLElement;
@@ -1213,13 +1307,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
           revealControls();
         }
       }}
-      onMouseMove={(event) => {
-        if (
-          !isFullscreen ||
-          event.clientY < CONTROL_REVEAL_EDGE ||
-          (slideshowMode &&
-            event.clientY >= window.innerHeight - CONTROL_REVEAL_EDGE)
-        ) {
+      onMouseMove={() => {
+        if (!dragRef.current) {
           revealControls();
         }
       }}
@@ -1240,12 +1329,13 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       role="dialog"
       tabIndex={-1}
     >
-      <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto_auto] overflow-hidden">
+      <div
+        className={`relative grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden ${isFullscreen ? "grid-rows-[minmax(0,1fr)]" : "grid-rows-[auto_minmax(0,1fr)_auto_auto]"}`}
+      >
         <header
-          className={`col-start-1 row-start-1 flex h-14 min-w-0 cursor-default select-none items-center justify-between gap-3 border-white/10 border-b bg-black/45 px-2 transition-opacity duration-200 motion-reduce:transition-none max-[540px]:h-auto max-[540px]:min-h-14 max-[540px]:flex-col max-[540px]:items-stretch max-[540px]:gap-1 max-[540px]:py-1 sm:gap-5 sm:px-4 ${viewerChromeClass}`}
+          className={`flex h-14 min-w-0 cursor-default select-none items-center justify-between gap-3 border-white/10 border-b px-2 transition-opacity duration-200 motion-reduce:transition-none max-[540px]:h-auto max-[540px]:min-h-14 max-[540px]:flex-col max-[540px]:items-stretch max-[540px]:gap-1 max-[540px]:py-1 sm:gap-5 sm:px-4 ${isFullscreen ? "absolute inset-x-0 top-0 z-30 bg-black/70" : "col-start-1 row-start-1 bg-black/45"} ${viewerChromeClass}`}
           data-lightbox-controls
           data-lightbox-window-drag={!isFullscreen || undefined}
-          ref={headerRef}
         >
           <div className="flex min-w-0 items-center gap-3">
             <span
@@ -1480,7 +1570,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                           try {
                             await document.exitFullscreen();
                           } catch {
-                            toast.error(t("fullscreenFailed"));
+                            toast.error(t("exitFullscreenFailed"));
                             return;
                           }
                         }
@@ -1544,21 +1634,32 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               active={isFullscreen}
               label={isFullscreen ? t("exitFullscreen") : t("fullscreen")}
               onClick={toggleFullscreen}
+              ref={fullscreenButtonRef}
             >
               {isFullscreen ? (
-                <Minimize className="h-4 w-4" />
+                <>
+                  <Minimize className="size-4" />
+                  <span
+                    aria-hidden="true"
+                    className="mr-2 ml-1 hidden whitespace-nowrap text-xs min-[760px]:inline"
+                  >
+                    {t("exitFullscreen")}
+                  </span>
+                </>
               ) : (
                 <Maximize className="h-4 w-4" />
               )}
             </ControlButton>
-            <ControlButton label={t("close")} onClick={requestClose}>
-              <X className="h-5 w-5" />
-            </ControlButton>
+            {!isFullscreen && (
+              <ControlButton label={t("close")} onClick={requestClose}>
+                <X className="h-5 w-5" />
+              </ControlButton>
+            )}
           </div>
         </header>
 
         <div
-          className={`relative col-start-1 row-start-2 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center overflow-hidden px-10 py-2 sm:px-16 ${isZoomed ? "cursor-grab touch-none active:cursor-grabbing" : ""}`}
+          className={`relative col-start-1 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center overflow-hidden ${isFullscreen ? "row-start-1" : "row-start-2 px-10 py-2 sm:px-16"} ${isZoomed ? "cursor-grab touch-none active:cursor-grabbing" : ""}`}
           data-lightbox-canvas
           onLostPointerCapture={(event) => {
             if (event.target === event.currentTarget) {
@@ -1717,7 +1818,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <TooltipTrigger asChild>
                 <button
                   aria-label={t("previousPhoto")}
-                  className={`group z-10 col-start-1 row-start-2 flex w-10 items-center justify-center justify-self-start transition-opacity duration-200 sm:w-16 ${chromeClass} ${isZoomed ? "self-center" : ""}`}
+                  className={`group z-10 flex w-10 items-center justify-center transition-opacity duration-200 motion-reduce:transition-none sm:w-16 ${chromeClass} ${isFullscreen ? "absolute top-1/2 left-0 -translate-y-1/2" : `col-start-1 row-start-2 justify-self-start ${isZoomed ? "self-center" : ""}`}`}
                   data-lightbox-controls
                   onClick={() => navigate(-1)}
                   type="button"
@@ -1733,7 +1834,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <TooltipTrigger asChild>
                 <button
                   aria-label={t("nextPhoto")}
-                  className={`group z-10 col-start-1 row-start-2 flex w-10 items-center justify-center justify-self-end transition-opacity duration-200 sm:w-16 ${chromeClass} ${isZoomed ? "self-center" : ""}`}
+                  className={`group z-10 flex w-10 items-center justify-center transition-opacity duration-200 motion-reduce:transition-none sm:w-16 ${chromeClass} ${isFullscreen ? "absolute top-1/2 right-0 -translate-y-1/2" : `col-start-1 row-start-2 justify-self-end ${isZoomed ? "self-center" : ""}`}`}
                   data-lightbox-controls
                   onClick={() => navigate(1)}
                   type="button"
@@ -1748,126 +1849,151 @@ export const PhotoLightbox = memo(function PhotoLightbox({
           </>
         )}
 
-        {slideshowMode && (
-          <div
-            className={`col-start-1 row-start-3 min-w-0 cursor-default overflow-x-auto overscroll-x-contain whitespace-nowrap border-white/10 border-t bg-black/45 px-2 py-1.5 transition-opacity duration-200 motion-reduce:transition-none sm:px-3 ${playbackChromeClass}`}
-            data-lightbox-controls
-            data-lightbox-playback-toolbar
-            ref={playbackRef}
-          >
-            <div className="relative flex w-max items-center gap-1">
-              <div
-                className="absolute bottom-0 left-0 h-0.5 bg-primary transition-[width] duration-100"
-                data-reduced-motion-keep="progress-bar"
-                style={{ width: `${progress * 100}%` }}
-              />
-              <ControlButton
-                label={playing ? t("pauseSlideshow") : t("playSlideshow")}
-                onClick={() => setPlaying((value) => !value)}
-              >
-                {playing ? (
-                  <Pause className="h-4 w-4" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
-              </ControlButton>
-              {playbackDelays.map((value) => (
+        <div
+          className={
+            isFullscreen
+              ? "pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col"
+              : "contents"
+          }
+        >
+          {slideshowMode && (
+            <div
+              className={`col-start-1 row-start-3 min-w-0 cursor-default overflow-x-auto overscroll-x-contain whitespace-nowrap border-white/10 border-t px-2 py-1.5 transition-opacity duration-200 motion-reduce:transition-none sm:px-3 ${isFullscreen ? "bg-black/70" : "bg-black/45"} ${playbackChromeClass || "pointer-events-auto"}`}
+              data-lightbox-controls
+              data-lightbox-playback-toolbar
+            >
+              <div className="relative flex w-max items-center gap-1">
+                <div
+                  className="absolute bottom-0 left-0 h-0.5 bg-primary transition-[width] duration-100"
+                  data-reduced-motion-keep="progress-bar"
+                  style={{ width: `${progress * 100}%` }}
+                />
+                <ControlButton
+                  label={playing ? t("pauseSlideshow") : t("playSlideshow")}
+                  onClick={() => setPlaying((value) => !value)}
+                >
+                  {playing ? (
+                    <Pause className="h-4 w-4" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                </ControlButton>
+                {playbackDelays.map((value) => (
+                  <button
+                    className={`rounded-md px-2 py-1.5 text-[11px] transition-colors ${delay === value ? "bg-white/15 text-white" : "text-white/50 hover:bg-white/10 hover:text-white"}`}
+                    key={value}
+                    onClick={() => {
+                      setDelay(value);
+                      setProgress(0);
+                    }}
+                    type="button"
+                  >
+                    {sequencePlayback
+                      ? `${Math.round(1000 / value)} fps`
+                      : `${value / 1000}s`}
+                  </button>
+                ))}
+                <div className="mx-1 h-5 border-white/10 border-l" />
                 <button
-                  className={`rounded-md px-2 py-1.5 text-[11px] transition-colors ${delay === value ? "bg-white/15 text-white" : "text-white/50 hover:bg-white/10 hover:text-white"}`}
-                  key={value}
-                  onClick={() => {
-                    setDelay(value);
-                    setProgress(0);
-                  }}
+                  className="lightbox-control-button gap-1.5 px-2.5 text-[11px]"
+                  onClick={stopSlideshow}
                   type="button"
                 >
-                  {sequencePlayback
-                    ? `${Math.round(1000 / value)} fps`
-                    : `${value / 1000}s`}
+                  <X className="h-3.5 w-3.5" />
+                  {t("exitSlideshow")}
                 </button>
-              ))}
-              <div className="mx-1 h-5 border-white/10 border-l" />
-              <button
-                className="lightbox-control-button gap-1.5 px-2.5 text-[11px]"
-                onClick={stopSlideshow}
-                type="button"
-              >
-                <X className="h-3.5 w-3.5" />
-                {t("exitSlideshow")}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {thumbnailsVisible && (
-          <div className="col-start-1 row-start-4 h-24 min-w-0 cursor-default border-white/10 border-t bg-black/45 px-3 py-2">
-            <div
-              className="flex h-full gap-2 overflow-x-auto overscroll-contain"
-              data-lightbox-thumbnail-strip
-              onWheel={(event) => {
-                if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-                  event.currentTarget.scrollLeft += event.deltaY;
-                }
-              }}
-              ref={thumbnailScrollRef}
-            >
-              <div
-                style={{
-                  position: "relative",
-                  height: "100%",
-                  width: thumbnailTotalWidth,
-                  flexShrink: 0,
-                }}
-              >
-                {thumbnailItems.map((virtualItem) => {
-                  const index = virtualItem.index;
-                  const item = photos[index];
-                  return (
-                    <button
-                      aria-label={`${index + 1}: ${item.filename}`}
-                      className={`relative h-full w-24 shrink-0 overflow-hidden rounded-md border-2 transition-all ${index === safeIndex ? "border-primary opacity-100" : "border-transparent opacity-45 hover:opacity-80"}`}
-                      key={item.id}
-                      onClick={() => {
-                        setPhotoIndex(index);
-                        if (index !== safeIndex) {
-                          changePhotoView();
-                        }
-                        setPlaying(false);
-                      }}
-                      style={{
-                        position: "absolute",
-                        left: 0,
-                        top: 0,
-                        transform: `translateX(${virtualItem.start}px)`,
-                      }}
-                      type="button"
-                    >
-                      <GalleryLightboxThumbnail photo={item} />
-                      {index === safeIndex && (
-                        <span className="absolute right-1 bottom-1 rounded bg-primary px-1 text-[9px] text-primary-foreground">
-                          {index + 1}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
               </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {thumbnailsVisible && (
+            <div
+              className={`pointer-events-auto col-start-1 row-start-4 h-24 min-w-0 cursor-default border-white/10 border-t px-3 py-2 ${isFullscreen ? "max-h-[25dvh] bg-black/75" : "bg-black/45"}`}
+              data-lightbox-controls
+            >
+              <div
+                className="flex h-full gap-2 overflow-x-auto overscroll-contain"
+                data-lightbox-thumbnail-strip
+                onWheel={(event) => {
+                  if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+                    event.currentTarget.scrollLeft += event.deltaY;
+                  }
+                }}
+                ref={thumbnailScrollRef}
+              >
+                <div
+                  style={{
+                    position: "relative",
+                    height: "100%",
+                    width: thumbnailTotalWidth,
+                    flexShrink: 0,
+                  }}
+                >
+                  {thumbnailItems.map((virtualItem) => {
+                    const index = virtualItem.index;
+                    const item = photos[index];
+                    return (
+                      <button
+                        aria-current={index === safeIndex || undefined}
+                        aria-label={`${index + 1}: ${item.filename}`}
+                        className={`relative h-full w-24 shrink-0 overflow-hidden rounded-md border-2 transition-all ${index === safeIndex ? "border-primary opacity-100" : "border-transparent opacity-45 hover:opacity-80"}`}
+                        key={item.id}
+                        onClick={() => {
+                          setPhotoIndex(index);
+                          if (index !== safeIndex) {
+                            changePhotoView();
+                          }
+                          setPlaying(false);
+                        }}
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: 0,
+                          transform: `translateX(${virtualItem.start}px)`,
+                        }}
+                        type="button"
+                      >
+                        <GalleryLightboxThumbnail photo={item} />
+                        {index === safeIndex && (
+                          <span className="absolute right-1 bottom-1 rounded bg-primary px-1 text-[9px] text-primary-foreground">
+                            {index + 1}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {infoVisible && (
-        <LightboxInfoPanel
-          onClose={closeInfoPanel}
-          onOpenExplorer={(path) => {
-            ipc.client.shell.openInExplorer({ path }).catch(() => undefined);
-          }}
-          photo={photo}
-        />
+        <>
+          {isFullscreen && (
+            <button
+              aria-label={t("close")}
+              className="absolute inset-0 z-30 bg-black/45 min-[801px]:hidden"
+              onClick={closeInfoPanel}
+              tabIndex={-1}
+              type="button"
+            />
+          )}
+          <LightboxInfoPanel
+            fullscreen={isFullscreen}
+            onClose={closeInfoPanel}
+            onOpenExplorer={(path) => {
+              ipc.client.shell.openInExplorer({ path }).catch(() => undefined);
+            }}
+            photo={photo}
+            ref={infoPanelRef}
+          />
+        </>
       )}
 
       <PreviewContextMenu
+        container={rootRef.current}
         menu={previewMenu}
         onClose={() => setPreviewMenu((value) => ({ ...value, open: false }))}
         onOpenExplorer={(path) => {
@@ -1891,12 +2017,14 @@ function ControlButton({
   label,
   onClick,
   children,
+  ref,
 }: {
   active?: boolean;
   children: React.ReactNode;
   disabled?: boolean;
   label: string;
   onClick: () => void;
+  ref?: React.Ref<HTMLButtonElement>;
 }) {
   return (
     <Tooltip>
@@ -1908,6 +2036,7 @@ function ControlButton({
             className={`lightbox-control-button ${active ? "bg-white/15 text-white" : ""}`}
             disabled={disabled}
             onClick={onClick}
+            ref={ref}
             type="button"
           >
             {children}

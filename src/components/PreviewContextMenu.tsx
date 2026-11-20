@@ -16,6 +16,7 @@ interface PreviewMenuState {
 }
 
 interface PreviewContextMenuProps {
+  container?: HTMLElement | null;
   menu: PreviewMenuState;
   onClose: () => void;
   onOpenExplorer: (path: string) => void;
@@ -25,6 +26,7 @@ export type { PreviewMenuState };
 
 /** Lightbox / QuickPreview 右键菜单 — 复制图片、复制路径、在资源管理器中打开 */
 export function PreviewContextMenu({
+  container,
   menu,
   onClose,
   onOpenExplorer,
@@ -186,6 +188,6 @@ export function PreviewContextMenu({
         </button>
       </IconMotionTrigger>
     </div>,
-    document.body
+    container ?? document.body
   );
 }

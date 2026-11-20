@@ -142,6 +142,35 @@ function deferImageDecode(image: HTMLImageElement) {
 }
 
 describe("PhotoLightbox", () => {
+  it("keeps the windowed layout and focus when the fullscreen request is rejected", async () => {
+    render(
+      <PhotoLightbox
+        initialIndex={0}
+        onClose={vi.fn()}
+        open
+        photos={photos}
+        showThumbnailsInitially
+      />
+    );
+    const lightbox = screen.getByRole("dialog", { name: "lightboxReview" });
+    const fullscreen = screen.getByRole("button", { name: "fullscreen" });
+    const requestFullscreen = vi.fn().mockRejectedValue(new Error("Denied"));
+    Object.defineProperty(lightbox, "requestFullscreen", {
+      value: requestFullscreen,
+    });
+    await waitFor(() => expect(lightbox).toHaveFocus());
+    fullscreen.focus();
+    fireEvent.click(fullscreen);
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("fullscreenFailed")
+    );
+    expect(requestFullscreen).toHaveBeenCalledOnce();
+    expect(fullscreen).toHaveFocus();
+    expect(
+      lightbox.querySelector("[data-lightbox-thumbnail-strip]")
+    ).toBeVisible();
+  });
+
   it.each([
     "png",
     "jpg",

@@ -306,6 +306,9 @@ const ROTATE_LEFT = /^(Rotate Left|向左旋转)$/;
 const ROTATE_RIGHT = /^(Rotate Right|向右旋转)$/;
 const CLOSE = /^(Close|关闭)$/;
 const FULLSCREEN = /^(Fullscreen|全屏)$/;
+const EXIT_FULLSCREEN = /^(Exit fullscreen|退出全屏)$/;
+const FIRST_FIXTURE = /FavoriteFixture-1/;
+const SECOND_FIXTURE = /FavoriteFixture-2/;
 const PLAY = /^(Play slideshow|播放幻灯片)$/;
 const PAUSE = /^(Pause slideshow|暂停幻灯片)$/;
 const EXIT_SLIDESHOW = /^(Exit slideshow|退出幻灯片)$/;
@@ -690,25 +693,131 @@ for (const size of LIGHTBOX_SIZES) {
   });
 }
 
-test("fullscreen lightbox reveals controls at the edge or on focus and keeps paused playback usable", async () => {
+for (const size of LIGHTBOX_SIZES) {
+  test(`fullscreen fills the viewport and restores the thumbnail strip at ${size.width}x${size.height} (${size.zoomFactor ?? 1}x)`, async () => {
+    const lightbox = await openLightbox(size, 1);
+    const header = lightbox.locator("header").first();
+    const canvas = lightbox.locator("[data-lightbox-canvas]");
+    const image = canvas.locator("img[data-browse-visible]");
+    const strip = lightbox.locator("[data-lightbox-thumbnail-strip]");
+    const enter = header.getByRole("button", { name: FULLSCREEN });
+    const exit = header.getByRole("button", { name: EXIT_FULLSCREEN });
+    await header.getByRole("button", { name: THUMBNAIL_TOGGLE }).click();
+    await expect(strip).toBeVisible();
+    await expect(image).toHaveAttribute("alt", "FavoriteFixture-1.png");
+    const windowedWidth = (await image.boundingBox())?.width ?? 0;
+
+    await enter.click();
+    await expect(exit).toBeVisible();
+    await expect(header.getByRole("button", { name: CLOSE })).toHaveCount(0);
+    await expect(strip).toHaveCount(0);
+    await expect
+      .poll(() => canvas.boundingBox())
+      .toEqual(await lightbox.boundingBox());
+    await expect
+      .poll(async () => (await image.boundingBox())?.width)
+      .toBeGreaterThan(windowedWidth);
+    await expectInsideViewport(image);
+    const center = await canvas.evaluate((element) => ({
+      x: Math.round(element.clientWidth / 2),
+      y: Math.round(element.clientHeight / 2),
+    }));
+    await page.mouse.move(center.x, center.y);
+    await expect(header).toHaveCSS("opacity", "0");
+    const bounds = await image.boundingBox();
+    await page.mouse.move(center.x + 12, center.y);
+    await expect(header).toHaveCSS("opacity", "1");
+    expect(await image.boundingBox()).toEqual(bounds);
+
+    await page.keyboard.press("t");
+    await expect(strip).toBeVisible();
+    expect(await image.boundingBox()).toEqual(bounds);
+    await page.keyboard.press("i");
+    const info = lightbox.locator("aside");
+    await expectInsideViewport(info);
+    await expect(strip).toHaveCount(0);
+    expect(await image.boundingBox()).toEqual(bounds);
+    await page.keyboard.press("Escape");
+    await expect(info).toHaveCount(0);
+    await expect(exit).toBeAttached();
+    await page.keyboard.press("ArrowLeft");
+    await expect(image).toHaveAttribute("alt", "FavoriteFixture-2.png");
+    await expectInsideViewport(image);
+    await expect
+      .poll(() => image.evaluate((element) => element.clientWidth))
+      .toBe(360);
+    await page.keyboard.press("Escape");
+    await expect(enter).toBeFocused();
+    await expect(strip.locator('[aria-current="true"]')).toHaveAccessibleName(
+      SECOND_FIXTURE
+    );
+    await expectInsideViewport(strip);
+    expect(
+      await page.evaluate(() => localStorage.getItem("lightbox.panel-mode"))
+    ).toBe("thumbnails");
+
+    await page.keyboard.press("Enter");
+    await expect(exit).toBeVisible();
+    await lightbox.getByRole("button", { name: NEXT_PHOTO }).click();
+    await expect(image).toHaveAttribute("alt", "FavoriteFixture-1.png");
+    await exit.click();
+    await expect(enter).toBeFocused();
+    await expect(strip.locator('[aria-current="true"]')).toHaveAccessibleName(
+      FIRST_FIXTURE
+    );
+    await header.getByRole("button", { name: CLOSE }).click();
+    await expect(lightbox).toBeHidden();
+  });
+}
+
+test("fullscreen lightbox keeps zoom and rotation on external exit", async () => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const lightbox = await openLightbox({ width: 900, height: 600 }, 1);
+  const header = lightbox.locator("header").first();
+  const image = lightbox.locator("img[data-browse-visible]");
+  const canvas = lightbox.locator("[data-lightbox-canvas]");
+  const rotatedWidth = () =>
+    image.evaluate((element) => {
+      const frame = element as HTMLImageElement;
+      return frame.width * new DOMMatrix(getComputedStyle(frame).transform).b;
+    });
+  await expect(image).toHaveAttribute("alt", "FavoriteFixture-1.png");
+  await page.keyboard.press("r");
+  await page.keyboard.press("1");
+  await expect.poll(rotatedWidth).toBeCloseTo(2800, -1);
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error("Lightbox canvas is missing");
+  }
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 45, y + 35);
+  await page.mouse.up();
+  await expect.poll(() => horizontalPan(image)).toBe(45);
+  await header.getByRole("button", { name: FULLSCREEN }).click();
+  await expect(
+    header.getByRole("button", { name: EXIT_FULLSCREEN })
+  ).toBeVisible();
+  await expect.poll(rotatedWidth).toBeCloseTo(2800, -1);
+  await expect.poll(() => horizontalPan(image)).toBe(45);
+  await page.evaluate(() => document.exitFullscreen());
+  await expect(header.getByRole("button", { name: FULLSCREEN })).toBeFocused();
+  await expect.poll(rotatedWidth).toBeCloseTo(2800, -1);
+  await expect.poll(() => horizontalPan(image)).toBe(45);
+  await header.getByRole("button", { name: CLOSE }).click();
+  await expect(lightbox).toBeHidden();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+});
+
+test("fullscreen lightbox reveals controls with the keyboard and keeps paused playback usable", async () => {
   const lightbox = await openLightbox({ width: 900, height: 600 });
   const header = lightbox.locator("header");
   const canvas = lightbox.locator("[data-lightbox-canvas]");
-  const strip = lightbox.locator("[data-lightbox-thumbnail-strip]");
-  await header.getByRole("button", { name: THUMBNAIL_TOGGLE }).click();
   await header.getByRole("button", { name: FULLSCREEN }).click();
   await expect(header).not.toHaveAttribute("data-lightbox-window-drag");
-  await expect(header).toHaveCSS("opacity", "0");
   const imageArea = await canvas.boundingBox();
-  await page.mouse.move(300, 160);
-  await expect(header).toHaveCSS("opacity", "0");
-  await expect(strip).toBeVisible();
-
-  await page.mouse.move(300, 10);
-  await expect(header).toHaveCSS("opacity", "1");
-  await page.waitForTimeout(3200);
-  await expect(header).toHaveCSS("opacity", "1");
-  expect(await canvas.boundingBox()).toEqual(imageArea);
   await page.mouse.move(300, 160);
   await expect(header).toHaveCSS("opacity", "0");
   await page.keyboard.press("Tab");
@@ -729,13 +838,23 @@ test("fullscreen lightbox reveals controls at the edge or on focus and keeps pau
   const playback = lightbox.locator("[data-lightbox-playback-toolbar]");
   await expectInsideViewport(playback);
   await expect(playback.getByRole("button", { name: PAUSE })).toBeVisible();
+  expect(await canvas.boundingBox()).toEqual(imageArea);
   await playback.getByRole("button", { name: "5s" }).click();
   await page.keyboard.press("Space");
   await expect(playback.getByRole("button", { name: PLAY })).toBeVisible();
-  await page.mouse.move(300, 160);
+  await page.mouse.move(320, 180);
   await expect(header).toHaveCSS("opacity", "0");
   await expect(playback).toHaveCSS("opacity", "1");
   await expect(playback.getByRole("button", { name: "5s" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  const enter = header.getByRole("button", { name: FULLSCREEN });
+  await expect(enter).toBeFocused();
+  await expect(playback.getByRole("button", { name: PLAY })).toBeVisible();
+  await enter.click();
+  await expect(
+    header.getByRole("button", { name: EXIT_FULLSCREEN })
+  ).toBeAttached();
+  await expect(playback.getByRole("button", { name: PLAY })).toBeVisible();
   await playback.getByRole("button", { name: EXIT_SLIDESHOW }).click();
   await expect(playback).toHaveCount(0);
   await page.keyboard.press("Escape");
