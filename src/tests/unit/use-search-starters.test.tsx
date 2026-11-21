@@ -27,6 +27,20 @@ function ready(revision = "first"): SearchStarterResponse {
     })),
   };
 }
+
+function readyMonths(): SearchStarterResponse {
+  const response = ready("months");
+  return {
+    ...response,
+    candidates: response.candidates.map((item, index) => ({
+      ...item,
+      source: "library",
+      kind: "month",
+      previewPhotoIds: [2 * index + 1, 2 * index + 2],
+    })),
+  };
+}
+
 const initial = {
   open: true,
   enabled: true,
@@ -273,6 +287,71 @@ describe("search starter loading and cache", () => {
     expect(result.current.batch.some((item) => item.kind !== "month")).toBe(
       true
     );
+  });
+
+  it("keeps the first month cards when a delayed AI result revalidates the same metadata", async () => {
+    let finish: ((response: SearchStarterResponse) => void) | undefined;
+    vi.mocked(searchStarterActions.get).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const metadata = readyMonths();
+    const updatedMetadata = { ...metadata, validity: "updated-index" };
+    vi.mocked(searchStarterActions.fallbacks)
+      .mockResolvedValueOnce(metadata)
+      .mockResolvedValue(updatedMetadata);
+    const { result } = renderHook(() => useSearchStarters(initial));
+    await waitFor(() => expect(result.current.batch).toHaveLength(4));
+    const firstBatch = result.current.batch;
+
+    await act(() =>
+      finish?.({
+        ...updatedMetadata,
+        revision: "updated-themes",
+        status: "busy",
+        candidates: [],
+      })
+    );
+
+    expect(searchStarterActions.fallbacks).toHaveBeenCalledTimes(2);
+    expect(result.current.batch).toEqual(firstBatch);
+    expect(result.current.metadataRevision).toBe(metadata.revision);
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.batch).toHaveLength(4);
+    expect(
+      result.current.batch.every(
+        (item) => !firstBatch.some(({ key }) => key === item.key)
+      )
+    ).toBe(true);
+  });
+
+  it("keeps matching cards while dropping a month removed from the library", async () => {
+    const metadata = readyMonths();
+    vi.mocked(searchStarterActions.fallbacks).mockResolvedValue(metadata);
+    const { result } = renderHook(() =>
+      useSearchStarters({ ...initial, semanticEnabled: false })
+    );
+    await waitFor(() => expect(result.current.batch).toHaveLength(4));
+    const [removed, ...remaining] = result.current.batch;
+    vi.mocked(searchStarterActions.fallbacks).mockResolvedValue({
+      ...metadata,
+      revision: "library-updated",
+      validity: "library-updated",
+      candidates: metadata.candidates
+        .filter(({ key }) => key !== removed.key)
+        .map((item) => ({
+          ...item,
+          previewPhotoIds: item.previewPhotoIds?.toReversed(),
+        })),
+    });
+
+    act(() => window.dispatchEvent(new Event("tags-changed")));
+
+    await waitFor(() => expect(result.current.batch).toEqual(remaining));
   });
 
   it("retains executable cards through busy and failed preference revisions", async () => {

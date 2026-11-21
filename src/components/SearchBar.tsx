@@ -290,10 +290,13 @@ export const SearchBar = memo(
         () =>
           starters.batch.map((starter) => ({
             ...starter,
-            previewVersion: starters.validity,
+            previewVersion:
+              starter.kind === "month" || starter.kind === "tag"
+                ? starters.metadataRevision
+                : starters.validity,
             type: "example",
           })),
-        [starters.batch, starters.validity]
+        [starters.batch, starters.metadataRevision, starters.validity]
       );
       const displayedSuggestions = useMemo(
         () =>

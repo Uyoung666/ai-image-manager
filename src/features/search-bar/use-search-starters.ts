@@ -42,14 +42,44 @@ function pool(
   ];
 }
 
+function revalidateMetadataCards(
+  batch: SearchStarter[],
+  response: SearchStarterResponse
+) {
+  return batch.flatMap((item) => {
+    if (isSemantic(item)) {
+      return [item];
+    }
+    const candidate = response.candidates.find(({ key }) => key === item.key);
+    if (!candidate) {
+      return [];
+    }
+    const cover = item.previewPhotoIds?.[0];
+    const ids = candidate.previewPhotoIds;
+    return cover !== undefined && ids?.includes(cover)
+      ? [
+          {
+            ...candidate,
+            previewPhotoIds: [cover, ...ids.filter((id) => id !== cover)],
+          },
+        ]
+      : [candidate];
+  });
+}
+
 function installFallback(
   entry: CachedStarters,
   response: SearchStarterResponse
 ) {
   const validity = validityOf(response);
+  // An AI index change also bumps validity, even when month and tag cards still match.
   if (entry.validity && entry.validity !== validity) {
-    entry.batch = [];
+    entry.batch = entry.batch.filter((item) => !isSemantic(item));
     entry.semantic = undefined;
+  }
+  const metadataChanged = entry.fallback?.revision !== response.revision;
+  if (metadataChanged) {
+    entry.batch = revalidateMetadataCards(entry.batch, response);
     entry.fallback = undefined;
   }
   entry.validity = validity;
@@ -58,7 +88,7 @@ function installFallback(
     response.status === "empty" ||
     !entry.fallback
   ) {
-    entry.dirty ||= entry.fallback?.revision !== response.revision;
+    entry.dirty ||= metadataChanged;
     entry.fallback = response;
   }
 }
@@ -402,6 +432,7 @@ export function useSearchStarters({
           loading: enabled,
         }),
     validity: cache.get(key)?.validity,
+    metadataRevision: cache.get(key)?.fallback?.revision,
     refresh: () => (enabled ? loadRef.current(true) : Promise.resolve()),
   };
 }
