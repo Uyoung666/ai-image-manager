@@ -30,18 +30,18 @@ A local-first AI photo manager for Windows, with natural-language search, smart 
 
 AI Image Manager is designed for photographers, creators, designers, and anyone with a long-lived photo library on Windows. The workflow is built around your existing folders: index them in place, find photos with natural language, visual similarity, metadata, or folders, then organize, curate, analyze, export, or share them.
 
-## Current code version: v2.2.9
+## Latest stable release v2.2.12
 
-v2.2.9 improves how the app checks, recovers, and refreshes library sources. GitHub Releases lists the available stable release.
+v2.2.12 adds immersive fullscreen viewing and improves HEIC previews, search controls, and the ASCII Ocean theme. [Read the release notes](https://github.com/Uyoung666/ai-image-manager/releases/tag/v2.2.12)
 
-- Use **Settings → Library sources** to check offline, missing, or inaccessible originals and relink a folder or an individual photo. Existing cached previews remain available while sources are offline.
-- When an original changes, the app keeps manual organization and refreshes the photo's preview, EXIF, and AI analysis. Keep earlier culling decisions as history and start a new review for affected photos that are ready.
-- Automatic discovery and AI indexing work again for watched folders. Press Space to preview a selected photo. The dashboard, search feedback, and built-in themes also received updates.
-- The updater retries writing update metadata when Windows briefly locks the file.
+- Double-click a photo and choose **Fullscreen** in the lightbox toolbar for immersive viewing. The lightbox keeps your viewing position when zooming or switching to a sharper image.
+- The app can reuse an existing HEIC preview when you reopen a photo and show more detail once the full image loads.
+- Search presets are easier to browse. Click empty toolbar space to close the EXIF filters. Hover highlighting clears when the pointer leaves search history.
+- ASCII Ocean toolbars align correctly. Move the pointer over exposed ocean background to create ripples, or click to make a wider splash.
 
 ### Upgrading
 
-Quit the app and back up its data directory first. v2.2.9 migrates an existing library database on first launch. You can normally keep using the existing AI index.
+Quit the app and back up its data directory first. The app migrates an existing library database as needed when it opens. You can normally keep using the existing AI index.
 
 Setup and MSI installations with the updater enabled can check for stable releases under **Settings → Software Update**. v2.2.4 and v2.2.5 require one manual upgrade because of a download redirect issue. Upgrade ZIP builds and MSI installations with the updater disabled manually. Keep your installation method and app data directory when upgrading manually. See [upgrade and backup instructions](GUIDE.en.md#upgrading-from-an-older-version).
 
@@ -127,7 +127,7 @@ Actual performance depends on image format, resolution, library storage, system 
 
 - Virtualized masonry gallery, timeline grouping, and a tree of your real folders.
 - Single selection, multi-selection, range selection, marquee selection, favorites, and scroll restoration.
-- Press `Space` for quick preview. Double-click to open the lightbox with fullscreen, slideshow, zoom, pan, rotation, and thumbnail navigation.
+- Press `Space` for quick preview. Double-click to open the lightbox with immersive fullscreen, slideshow, zoom, pan, rotation, and thumbnail navigation.
 - A detail panel for file information, EXIF, tags, location, and the original path.
 - Folder appearance settings for colors and icons inside the app; they do not modify real folders on disk.
 - Soft deletion and a 30-day trash with restore, cleanup, and Windows system recycle-bin handling.
