@@ -626,11 +626,21 @@ for (const [sizeIndex, size] of SIZES.entries()) {
       }, columnWidth);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => Boolean(window.__e2eNavigate));
+      const gallery = page.locator("[data-masonry-scroll]");
       const first = page.locator('[data-photo-id="1"][role="option"]');
-      await expect(first).toBeVisible();
       await expect(page.locator(".home-gallery-toolbar-layer")).toContainText(
         "620"
       );
+      // Reload can restore the previous case's scroll position. Start this
+      // pagination scenario at the top once the catalogue has rendered.
+      await expect
+        .poll(async () => {
+          await gallery.evaluate((element) => {
+            element.scrollTop = 0;
+          });
+          return first.isVisible();
+        })
+        .toBe(true);
       await first.click({ modifiers: ["Control"] });
       await page
         .locator('[data-photo-id="2"][role="option"]')
@@ -662,7 +672,6 @@ for (const [sizeIndex, size] of SIZES.entries()) {
       ).toBe(requestsBeforeApply);
       await page.keyboard.press("Escape");
 
-      const gallery = page.locator("[data-masonry-scroll]");
       const last = page.locator(
         `[data-photo-id="${PHOTO_COUNT}"][role="option"]`
       );

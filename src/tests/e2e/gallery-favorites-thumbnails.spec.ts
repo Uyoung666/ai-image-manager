@@ -364,20 +364,48 @@ test("keeps the Windows lightbox header draggable while zoomed and upgrading det
     }
   }, move);
   const lightbox = await openLightbox({ width: 900, height: 600 }, 1);
-  const header = lightbox.locator("header");
+  const header = lightbox.locator("[data-lightbox-window-drag]");
   const fitted = lightbox.locator(
     'img[data-browse-visible="true"][src*="/photo-thumbnail"]'
   );
   await expect(fitted).toBeVisible();
-  const dragPoint = await header.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return {
-      x: Math.round(rect.x + rect.width / 2),
-      y: Math.round(rect.y + rect.height / 2),
-    };
-  });
   const assertNativeDrag = async (label: string) => {
     await test.step(label, async () => {
+      await expect(header).toHaveCSS("-webkit-app-region", "drag");
+      const dragPoint = await header.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const y = Math.round(bounds.top + bounds.height / 2);
+        // The toolbar and focusable filename reserve parts of this row
+        // for clicks. Find a point that belongs to the header itself.
+        for (
+          let x = Math.round(bounds.left + bounds.width / 2);
+          x > bounds.left;
+          x -= 4
+        ) {
+          if (document.elementFromPoint(x, y) === element) {
+            return { x, y };
+          }
+        }
+        throw new Error("No clear drag point in the lightbox header");
+      });
+      await expect
+        .poll(
+          async () => {
+            const { hit } = await probeWindowsWindowDrag(
+              app,
+              page,
+              dragPoint,
+              false,
+              env
+            );
+            return hit;
+          },
+          { message: "WM_NCHITTEST should return HTCAPTION" }
+        )
+        .toBe(2);
+      if (!move) {
+        return;
+      }
       const { before, hit, window } = await probeWindowsWindowDrag(
         app,
         page,
@@ -386,9 +414,6 @@ test("keeps the Windows lightbox header draggable while zoomed and upgrading det
         env
       );
       expect(hit, "WM_NCHITTEST should return HTCAPTION").toBe(2);
-      if (!move) {
-        return;
-      }
       const after = await window.evaluate((win) => win.getBounds());
       expect(after.x).toBeGreaterThan(before.x);
       expect(after.y).toBeGreaterThan(before.y);
@@ -418,8 +443,14 @@ test("keeps the Windows lightbox header draggable while zoomed and upgrading det
     await expect.poll(() => originalRequested).toBe(true);
     await expect(lightbox.getByText(PREVIEW_DETAIL)).toBeVisible();
     await expect
-      .poll(async () => (await fitted.boundingBox())?.y)
-      .toBeLessThan(dragPoint.y);
+      .poll(async () => {
+        const [image, bounds] = await Promise.all([
+          fitted.boundingBox(),
+          header.boundingBox(),
+        ]);
+        return image && bounds ? image.y - bounds.y - bounds.height / 2 : null;
+      })
+      .toBeLessThan(0);
     await assertNativeDrag("Zoomed while the original request is held");
 
     releaseOriginal();
@@ -446,7 +477,7 @@ test("keeps the Windows lightbox header draggable while zoomed and upgrading det
     expect(hit, "Panning the canvas should hit HTCLIENT").toBe(1);
 
     await header.getByRole("button", { name: FULLSCREEN }).click();
-    await expect(header).not.toHaveAttribute("data-lightbox-window-drag");
+    await expect(header).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(header).toHaveAttribute("data-lightbox-window-drag", "true");
     await assertNativeDrag("After exiting fullscreen");

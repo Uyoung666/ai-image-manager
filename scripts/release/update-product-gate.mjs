@@ -28,6 +28,8 @@ const ALBUM_NAME_PLACEHOLDER = /相册名称|Album name/i;
 const RETENTION_ALBUM = "Product upgrade retention album";
 const CREATE_BUTTON = /^(创建|Create)$/;
 const CHECK_BUTTON = /^(检查更新|Check for Updates|Check for updates)$/;
+const CHECK_OR_RETRY_BUTTON =
+  /^(检查更新|Check for Updates|Check for updates|重试|Retry)$/;
 const INSTALL_BUTTON = /^(安装并重启|Install and restart)$/;
 const CLOSE_BUTTON = /^(关闭|Close)$/;
 const AUTO_UPDATE_CHECKBOX = /^(自动更新|Automatic updates)$/;
@@ -37,6 +39,10 @@ const require = createRequire(import.meta.url);
 const repository = "Uyoung666/ai-image-manager";
 const sessions = new Map();
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+export function startProductUpdateCheck(page) {
+  return page.getByRole("button", { name: CHECK_OR_RETRY_BUTTON }).click();
+}
 
 export function installedTargetPath(executable, version) {
   const directory = path.dirname(executable);
@@ -694,11 +700,9 @@ async function runUpgrade(
     await expect(automaticUpdates).toBeEnabled();
     stage = "download";
     proxy.activate();
-    await page
-      .getByRole("button", {
-        name: CHECK_BUTTON,
-      })
-      .click();
+    // An older client may already have failed its automatic check before
+    // the fixture is activated. Retry starts a fresh check in that state.
+    await startProductUpdateCheck(page);
     await page
       .getByRole("button", { name: INSTALL_BUTTON })
       .waitFor({ timeout: 180_000 });

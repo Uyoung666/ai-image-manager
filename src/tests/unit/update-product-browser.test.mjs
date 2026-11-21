@@ -7,7 +7,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "@playwright/test";
 import electron from "electron";
 import { expect, it, vi } from "vitest";
-import { waitForProductPage } from "../../../scripts/release/update-product-gate.mjs";
+import {
+  startProductUpdateCheck,
+  waitForProductPage,
+} from "../../../scripts/release/update-product-gate.mjs";
 import { TestRuntime } from "../helpers/test-runtime";
 
 vi.unmock("electron");
@@ -90,6 +93,23 @@ app.whenReady().then(()=>{
       expect(await page.locator("p").innerText()).toBe("ready");
       // Reconnection may also find an existing page instead of a new event.
       expect(await waitForProductPage(browser, 1000)).toBe(page);
+      // The released 2.2.9 client can enter this state before the test
+      // activates its update feed. Exercise the same DOM action as the gate.
+      await page.evaluate(() => {
+        const button = document.createElement("button");
+        button.textContent = "Retry";
+        button.addEventListener("click", () => {
+          button.textContent = "Checking for updates";
+          button.disabled = true;
+        });
+        document.body.append(button);
+      });
+      await startProductUpdateCheck(page);
+      expect(
+        await page
+          .getByRole("button", { name: "Checking for updates" })
+          .isDisabled()
+      ).toBe(true);
       await page.evaluate(() => {
         window.electronAPI = { isE2E: true };
       });
