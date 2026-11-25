@@ -155,7 +155,11 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : undefined;
-      toast.error(message || t("shareException"));
+      toast.error(
+        message === "SHARE_PAGE_TOO_LARGE"
+          ? t("sharePageTooLarge")
+          : message || t("shareException")
+      );
     }
     setLoading(false);
   }

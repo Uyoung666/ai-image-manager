@@ -2410,6 +2410,7 @@
   "sharePublished": "Share page published",
   "shareFailed": "Failed to generate share page",
   "shareException": "Share page generation failed",
+  "sharePageTooLarge": "This share page is too large. Select fewer photos and publish them in separate groups.",
   "sharePublishedCloud": "Share page published to cloud",
   "shareLink": "Share link",
   "noCloudConfig": "No cloud storage configurations",

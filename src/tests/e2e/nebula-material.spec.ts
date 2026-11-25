@@ -587,16 +587,20 @@ test("maintains contrast over bright, dark, detailed image and video backdrops",
       });
     }, fixture.file);
     const wallpaper = page.locator(".nebula-glass-wallpaper");
-    const previousSource = (await wallpaper.count())
-      ? await wallpaper.getAttribute("src")
-      : null;
+    const previousSource = await wallpaper.evaluateAll(
+      ([element]) => element?.getAttribute("src") ?? null
+    );
     await page.getByRole("button", { name: CHOOSE_ASSET }).click();
     await expect
-      .poll(() => page.locator(".nebula-glass-wallpaper").getAttribute("src"))
-      .toContain("aim-plugin-user:");
-    await expect
-      .poll(() => page.locator(".nebula-glass-wallpaper").getAttribute("src"))
-      .not.toBe(previousSource);
+      .poll(() =>
+        wallpaper.evaluateAll(([element], previous) => {
+          const source = element?.getAttribute("src");
+          return Boolean(
+            source?.startsWith("aim-plugin-user:") && source !== previous
+          );
+        }, previousSource)
+      )
+      .toBe(true);
     await expect
       .poll(() =>
         page

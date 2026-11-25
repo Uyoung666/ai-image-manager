@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import sharp from "sharp";
-import { resolveHeifInput } from "@/services/heif-input";
-import { assertLibraryFileReady } from "@/services/library-file-guard";
+import {
+  assertLibraryFileReady,
+  assertUnchangedSource,
+} from "@/services/library-file-guard";
+import { openDeliveryImage } from "@/services/photo-delivery-jpeg";
 import { getThumbnailDir } from "@/services/thumbnailer";
 import { DEFAULT_DELIVERY_DISCLOSURE } from "@/types/photo-delivery";
 import { resolveSafePath } from "@/utils/path-security";
@@ -43,30 +46,40 @@ function escapeHtml(value: string): string {
   );
 }
 
+function serializeSharePhoto(p: SharePhoto): string {
+  return serializeDeliveryData({
+    fn: p.filename,
+    dt: p.dateTaken || undefined,
+    exif: {
+      c: p.camera || undefined,
+      l: p.lens || undefined,
+      f: p.focalLength || undefined,
+      a: p.aperture || undefined,
+      s: p.shutter || undefined,
+      i: p.iso || undefined,
+    },
+    tags: p.tags.length ? p.tags : undefined,
+    w: p.width,
+    h: p.height,
+    thumb: p.thumbnailBase64,
+  });
+}
+
 export function buildSharePageHtml(
   items: SharePhoto[],
   locale = "zh-CN"
 ): string {
-  const normalizedLocale = deliveryLocale(locale);
-
-  const itemsJson = serializeDeliveryData(
-    items.map((p) => ({
-      fn: p.filename,
-      dt: p.dateTaken || undefined,
-      exif: {
-        c: p.camera || undefined,
-        l: p.lens || undefined,
-        f: p.focalLength || undefined,
-        a: p.aperture || undefined,
-        s: p.shutter || undefined,
-        i: p.iso || undefined,
-      },
-      tags: p.tags.length ? p.tags : undefined,
-      w: p.width,
-      h: p.height,
-      thumb: p.thumbnailBase64,
-    }))
+  return renderSharePageHtml(
+    items.map(serializeSharePhoto),
+    deliveryLocale(locale)
   );
+}
+
+function renderSharePageHtml(
+  items: string[],
+  normalizedLocale: string
+): string {
+  const itemsJson = `[${items.join(",")}]`;
 
   const css = `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#08090a;--surface:#1c1e22;--surface-hover:#25272d;--fg:#f7f8f8;--fg2:#a1a1aa;--fg3:#6b6b75;--accent:#5e6ad2;--accent-hover:#7c7fe0;--border:rgba(255,255,255,0.06);--radius:8px}
@@ -223,10 +236,12 @@ render(filteredData);
 export async function generateSharePage(
   photoIds: number[],
   locale = "zh-CN",
-  disclosure = DEFAULT_DELIVERY_DISCLOSURE
+  disclosure = DEFAULT_DELIVERY_DISCLOSURE,
+  maxDataBytes = 64 * 1024 * 1024
 ): Promise<string> {
   const normalizedLocale = deliveryLocale(locale);
-  const sharePhotos: SharePhoto[] = [];
+  const sharePhotos: string[] = [];
+  let dataBytes = 2;
   for (const photo of deliveryPhotos(photoIds)) {
     const preview = await renderSharePreview(photo);
     const { exif, tags } = deliveryMetadata(
@@ -234,7 +249,7 @@ export async function generateSharePage(
       disclosure,
       normalizedLocale
     );
-    sharePhotos.push({
+    const item = serializeSharePhoto({
       filename: disclosure.filenames
         ? photo.filename
         : deliverySequence(sharePhotos.length),
@@ -250,13 +265,19 @@ export async function generateSharePage(
       height: preview.info.height,
       thumbnailBase64: `data:image/jpeg;base64,${preview.data.toString("base64")}`,
     });
+    // The upload API holds the entire HTML buffer in memory. Bound the payload
+    // before joining the records and allocating the final string and buffer.
+    dataBytes += Buffer.byteLength(item) + (sharePhotos.length ? 1 : 0);
+    if (dataBytes > maxDataBytes) {
+      throw new Error("SHARE_PAGE_TOO_LARGE");
+    }
+    sharePhotos.push(item);
   }
-  return buildSharePageHtml(sharePhotos, normalizedLocale);
+  return renderSharePageHtml(sharePhotos, normalizedLocale);
 }
 
-async function encodeSharePreview(input: string | Buffer) {
-  return sharp(typeof input === "string" ? await readFile(input) : input)
-    .autoOrient()
+function encodeSharePreview(pipeline: sharp.Sharp) {
+  return pipeline
     .resize(600, 450, { fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 80 })
     .toBuffer({ resolveWithObject: true });
@@ -272,14 +293,19 @@ async function renderSharePreview(photo: DeliveryPhoto) {
       : null;
   if (thumbPath?.toLowerCase().endsWith(".webp")) {
     try {
-      return await encodeSharePreview(thumbPath);
+      return await encodeSharePreview(
+        sharp(await readFile(thumbPath)).autoOrient()
+      );
     } catch {
       // A missing or unreadable cache can be regenerated from the current source.
     }
   }
   try {
-    assertLibraryFileReady(photo);
-    return await encodeSharePreview(await resolveHeifInput(photo.path));
+    const before = assertLibraryFileReady(photo);
+    const { pipeline } = await openDeliveryImage(photo.path);
+    const preview = await encodeSharePreview(pipeline);
+    assertUnchangedSource(photo, before);
+    return preview;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`${photo.filename}: ${reason}`, { cause: error });

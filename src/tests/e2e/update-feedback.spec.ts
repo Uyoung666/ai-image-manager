@@ -290,6 +290,11 @@ for (const locale of LOCALES) {
           `${locale}-${size.width}-${theme}-background-check.png`
         );
         await page.keyboard.press("Escape");
+        // Let the previous popover finish closing and restore focus before
+        // opening the next state with the keyboard.
+        const details = page.getByTestId("update-details");
+        await expect(details).toHaveCount(0);
+        await expect(weakTrigger).toBeFocused();
         await page.evaluate(() =>
           window.postMessage(
             {
@@ -318,10 +323,8 @@ for (const locale of LOCALES) {
         await expect(trigger).toBeVisible();
         await expect(page.locator(ACTIVE_TOAST)).toHaveCount(0);
         await expect(trigger).toContainText("42%");
-        await trigger.focus();
-        await page.keyboard.press("Enter");
-        const details = page.getByTestId("update-details");
-        await expect(details).toBeVisible();
+        await trigger.press("Enter");
+        await expect(details).toHaveAttribute("data-state", "open");
         await expect(details).toBeFocused();
         await expect(details).toHaveCSS("opacity", "1");
         await expect(details).not.toContainText(checkedTime);

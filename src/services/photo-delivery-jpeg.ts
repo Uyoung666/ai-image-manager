@@ -6,6 +6,7 @@ import {
   getOrientedDimensions,
   resolveImageOrientation,
 } from "./image-orientation";
+import { extractRawPreview, isRawFile } from "./raw-preview";
 
 interface Watermark {
   anchor: string;
@@ -96,6 +97,32 @@ async function buildWatermark(
   return { input: Buffer.from(svg), left: 0, top: 0 };
 }
 
+export async function openDeliveryImage(source: string) {
+  const raw = isRawFile(source);
+  const decoded = raw
+    ? await extractRawPreview(source)
+    : await resolveHeifInput(source);
+  if (!decoded) {
+    throw new Error("No embedded RAW preview available");
+  }
+  const input = typeof decoded === "string" ? await readFile(decoded) : decoded;
+  const pipeline = sharp(input);
+  const metadata = await pipeline.metadata();
+  // HEIF decoding already applies orientation. RAW previews may need the container's EXIF.
+  const orientation = await resolveImageOrientation(
+    raw ? source : input,
+    metadata
+  );
+  return {
+    pipeline: applyExifOrientation(pipeline, orientation),
+    dimensions: getOrientedDimensions(
+      metadata.width,
+      metadata.height,
+      orientation
+    ),
+  };
+}
+
 export async function renderDeliveryJpeg(
   source: string,
   target: string,
@@ -103,17 +130,7 @@ export async function renderDeliveryJpeg(
   quality: number,
   watermark?: Watermark
 ): Promise<{ width: number; height: number }> {
-  const decoded = await resolveHeifInput(source);
-  const input = typeof decoded === "string" ? await readFile(decoded) : decoded;
-  const pipeline = sharp(input);
-  const metadata = await pipeline.metadata();
-  const orientation = await resolveImageOrientation(input, metadata);
-  const dimensions = getOrientedDimensions(
-    metadata.width,
-    metadata.height,
-    orientation
-  );
-  applyExifOrientation(pipeline, orientation);
+  const { pipeline, dimensions } = await openDeliveryImage(source);
   const width = Math.min(dimensions.width, maxWidth ?? dimensions.width);
   const height = Math.max(
     1,

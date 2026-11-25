@@ -14,12 +14,14 @@ import previousUpdateRecovery from "./v2.2.8";
 import previousLibraryRelease from "./v2.2.9";
 import previousWindowsUpdate from "./v2.2.10";
 import previousLibraryManagement from "./v2.2.11";
-import current from "./v2.2.12";
+import previousImmersiveViewing from "./v2.2.12";
+import current from "./v2.2.13";
 
 export type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
 
 export const changelogEntries: ChangelogEntry[] = [
   current,
+  previousImmersiveViewing,
   previousLibraryManagement,
   previousWindowsUpdate,
   previousLibraryRelease,

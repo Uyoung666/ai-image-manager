@@ -16,6 +16,7 @@ import { TestRuntime } from "@/tests/helpers/test-runtime";
 
 const state = vi.hoisted(() => ({ db: undefined as unknown, cache: "" }));
 const JPEG_PREVIEW = /data:image\/jpeg;base64,([^"]+)/;
+const SHARE_DATA = /var data=(\[.*\]);/;
 vi.mock("@/db", () => ({ getDatabase: () => state.db }));
 vi.mock("@/services/thumbnailer", () => ({
   getThumbnailDir: () => state.cache,
@@ -45,11 +46,11 @@ function testImage(width: number, height: number) {
   });
 }
 
-async function addPhoto(filename: string, source: Buffer) {
+async function addPhoto(filename: string, source: Buffer, preview = source) {
   const file = path.join(runtime.root, filename);
   await fs.promises.writeFile(file, source);
   const [metadata, stat] = await Promise.all([
-    sharp(source).metadata(),
+    sharp(preview).metadata(),
     fs.promises.stat(file),
   ]);
   return db
@@ -219,6 +220,59 @@ it("limits the displayed width and keeps TIFF originals separate from full-size 
   expect(
     await sharp(entry(jpeg, "photos/Studio.jpg")).metadata()
   ).toMatchObject({ format: "jpeg", width: 800, height: 450 });
+});
+
+it("delivers an embedded RAW preview in JPEG exports and uncached shares", async () => {
+  const preview = await testImage(120, 80)
+    .withMetadata({ orientation: 6 })
+    .jpeg()
+    .toBuffer();
+  const header = Buffer.alloc(160);
+  header.write("FUJIFILMCCD-RAW ");
+  header.writeUInt32BE(header.length, 84);
+  header.writeUInt32BE(preview.length, 88);
+  const raw = Buffer.concat([header, preview]);
+  const id = await addPhoto("Studio.raf", raw, preview);
+  const archive = await exportArchive({ ids: [id], format: "compressed" });
+  const share = await generateSharePage([id]);
+  const shared = Buffer.from(JPEG_PREVIEW.exec(share)?.[1] ?? "", "base64");
+  for (const jpeg of [entry(archive, "photos/photo-0001.jpg"), shared]) {
+    expect(await sharp(jpeg).metadata()).toMatchObject({
+      format: "jpeg",
+      width: 80,
+      height: 120,
+    });
+  }
+  expect(
+    entry(await exportArchive({ ids: [id] }), "photos/Studio.raf")
+  ).toEqual(raw);
+}, 30_000);
+
+it("rejects stale selections that contain a trashed photo", async () => {
+  const id = await addPhoto(
+    "Trashed.jpg",
+    await testImage(80, 40).jpeg().toBuffer()
+  );
+  db.update(photos).set({ deletedAt: Date.now() }).run();
+  await expect(generateSharePage([id])).rejects.toThrow(`Photo #${id}`);
+  await expect(exportArchive({ ids: [id] })).rejects.toThrow(`Photo #${id}`);
+  expect(fs.existsSync(path.join(runtime.root, "delivery.zip"))).toBe(false);
+});
+
+it("checks the combined serialized share size before publishing", async () => {
+  const image = await testImage(80, 40).jpeg().toBuffer();
+  const first = await addPhoto("First.jpg", image);
+  const second = await addPhoto("Second.jpg", image);
+  const html = await generateSharePage([first]);
+  const record = SHARE_DATA.exec(html)?.[1];
+  expect(record).toBeTruthy();
+  const limit = Buffer.byteLength(record ?? "");
+  await expect(
+    generateSharePage([first], "en", undefined, limit)
+  ).resolves.toContain("photo-0001");
+  await expect(
+    generateSharePage([first, second], "en", undefined, limit)
+  ).rejects.toThrow("SHARE_PAGE_TOO_LARGE");
 });
 
 it("keeps an existing archive when any photo fails and removes staging files", async () => {

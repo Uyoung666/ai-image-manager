@@ -1,4 +1,4 @@
-import { os } from "@orpc/server";
+import { ORPCError, os } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
@@ -37,7 +37,17 @@ export const generateAndUploadShare = os
 
     const config = JSON.parse(decrypt(cfg.configJson));
     const provider = getProvider(cfg.provider as CloudProviderType);
-    const html = await generateSharePage(photoIds, locale, disclosure);
+    const html = await generateSharePage(photoIds, locale, disclosure).catch(
+      (error: unknown) => {
+        if (
+          error instanceof Error &&
+          error.message === "SHARE_PAGE_TOO_LARGE"
+        ) {
+          throw new ORPCError("PAYLOAD_TOO_LARGE", { message: error.message });
+        }
+        throw error;
+      }
+    );
     const buf = Buffer.from(html, "utf-8");
     const filename = `share-${Date.now()}`;
     const remotePath = `ai-image-manager/shares/${filename}`;

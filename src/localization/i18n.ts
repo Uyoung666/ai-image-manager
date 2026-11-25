@@ -2930,6 +2930,7 @@ i18n.use(initReactI18next).init({
         sharePublished: "分享页面已发布",
         shareFailed: "生成分享页失败",
         shareException: "生成分享页异常",
+        sharePageTooLarge: "分享页过大，请减少选中的照片，分批发布。",
         sharePublishedCloud: "分享页面已发布到云端",
         shareLink: "分享链接",
         noCloudConfig: "暂无云存储与上传配置",

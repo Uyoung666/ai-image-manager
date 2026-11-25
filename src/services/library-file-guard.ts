@@ -23,3 +23,16 @@ export function assertLibraryFileReady(photo: Source): fs.Stats {
   }
   return stat;
 }
+
+export function assertUnchangedSource(photo: Source, before: fs.Stats): void {
+  const current = assertLibraryFileReady(photo);
+  if (
+    current.size !== before.size ||
+    current.mtimeMs !== before.mtimeMs ||
+    current.ctimeMs !== before.ctimeMs ||
+    current.ino !== before.ino ||
+    current.dev !== before.dev
+  ) {
+    throw new Error("LIBRARY_SOURCE_CHANGED");
+  }
+}

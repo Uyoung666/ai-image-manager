@@ -9,7 +9,10 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { appSettings } from "@/db/schema";
-import { assertLibraryFileReady } from "@/services/library-file-guard";
+import {
+  assertLibraryFileReady,
+  assertUnchangedSource,
+} from "@/services/library-file-guard";
 import {
   type DeliveryPhoto,
   deliveryLocale,
@@ -273,18 +276,6 @@ async function writeArchive(
     archive.destroy();
     await written.catch(() => undefined);
     throw error;
-  }
-}
-
-function assertUnchangedSource(photo: DeliveryPhoto, stat: fs.Stats): void {
-  const current = assertLibraryFileReady(photo);
-  if (
-    current.size !== stat.size ||
-    current.mtimeMs !== stat.mtimeMs ||
-    current.ctimeMs !== stat.ctimeMs ||
-    current.ino !== stat.ino
-  ) {
-    throw new Error("LIBRARY_SOURCE_CHANGED");
   }
 }
 

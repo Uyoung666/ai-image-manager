@@ -1,4 +1,4 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, photos, photoTags, tags } from "@/db/schema";
 import type { DeliveryDisclosure } from "@/types/photo-delivery";
@@ -14,7 +14,7 @@ export function* deliveryPhotos(ids: number[]): Generator<DeliveryPhoto> {
     const rows = db
       .select()
       .from(photos)
-      .where(inArray(photos.id, batch))
+      .where(and(inArray(photos.id, batch), isNull(photos.deletedAt)))
       .all();
     const byId = new Map(rows.map((photo) => [photo.id, photo]));
     for (const id of batch) {

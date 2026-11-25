@@ -2,7 +2,7 @@
 
 > A local-first photo manager for Windows. Build an index over your existing folders, then search, organize, curate, analyze, export, and share your library.
 
-This guide covers installing [v2.2.12](https://github.com/Uyoung666/ai-image-manager/releases/tag/v2.2.12), browsing and searching photos, and organizing your library.
+This guide covers installation and library management in [v2.2.12](https://github.com/Uyoung666/ai-image-manager/releases/tag/v2.2.12). The XMP/ACR project handoff, JPEG export options, and share-page disclosure controls described below apply to development version 2.2.13.
 
 ---
 
@@ -716,11 +716,15 @@ Press `Ctrl + Shift + E` or use the bottom action bar:
 - **Original** packages the source files byte for byte, retaining embedded metadata such as GPS.
 - **JPEG copies** lets you set quality, keep the original dimensions or limit the width, and apply a saved watermark. The JPEG files omit embedded capture metadata and GPS from the sources.
 
+JPEG copies of RAW photos use the resolution of their embedded previews. Choose Original to deliver the full sensor data.
+
 JPEG copies use sequential filenames by default. The gallery omits capture details and tags by default. You can include original filenames, capture dates and camera settings, and tags you added or personally confirmed. If a photo fails to export, the dialog identifies the photo and preserves any ZIP already at the destination.
 
 ### HTML share page
 
 The share action creates a single-file HTML page with JPEG previews and publishes it to a configured WebDAV/S3 provider. The page uses numbered filenames and omits capture details and tags by default. The share dialog previews which details will be included.
+
+Each page can hold up to 64 MiB of encoded previews and selected details. Split larger selections across multiple pages.
 
 Access control and retention after cloud publication are controlled by the provider. Review location, people, and client metadata before publishing a page to an untrusted space.
 
