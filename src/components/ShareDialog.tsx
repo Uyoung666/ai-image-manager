@@ -10,11 +10,16 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { photoShareActions } from "@/actions/photo-share";
 import { openExternalLink } from "@/actions/shell";
 import { Cloud } from "@/components/icons/cloud";
 import { Copy } from "@/components/icons/copy";
 import { IconMotionTrigger } from "@/components/icons/icon-motion";
 import { Share2 } from "@/components/icons/share-2";
+import {
+  PhotoDeliveryOptions,
+  PhotoDeliverySummary,
+} from "@/components/PhotoDeliveryOptions";
 import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
@@ -30,7 +35,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ipc } from "@/ipc/manager";
+import { DEFAULT_DELIVERY_DISCLOSURE } from "@/types/photo-delivery";
 import { getDateLocale } from "@/utils/date-locale";
 
 interface CloudConfig {
@@ -60,6 +65,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
   const [configLoadState, setConfigLoadState] =
     useState<ConfigLoadState>("loading");
   const [loading, setLoading] = useState(false);
+  const [disclosure, setDisclosure] = useState(DEFAULT_DELIVERY_DISCLOSURE);
   const [result, setResult] = useState<{
     url: string;
     filename: string;
@@ -78,9 +84,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
     setConfigs([]);
     setSelectedId(null);
     try {
-      const list = (await ipc.client.cloud.listCloudConfigs(
-        {}
-      )) as CloudConfig[];
+      const list = await photoShareActions.listCloudConfigs();
       if (requestId !== configRequestRef.current) {
         return;
       }
@@ -108,6 +112,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
       setSelectedId(null);
       setResult(null);
       setLoading(false);
+      setDisclosure(DEFAULT_DELIVERY_DISCLOSURE);
       loadConfigs();
     } else {
       configRequestRef.current += 1;
@@ -126,18 +131,24 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
     }
     setLoading(true);
     try {
-      const res = (await ipc.client.photos.generateAndUploadShare({
+      const res = (await photoShareActions.publish({
         photoIds,
         cloudConfigId: selectedId,
         locale: getDateLocale(i18n.language),
+        disclosure,
       })) as {
         success: boolean;
         url?: string;
         filename?: string;
         error?: string;
+        provider?: string;
       };
       if (res.success && res.url) {
-        setResult({ url: res.url, filename: res.filename || "" });
+        setResult({
+          url: res.url,
+          filename: res.filename || "",
+          provider: res.provider,
+        });
         toast.success(t("sharePublished"));
       } else {
         toast.error(res.error || t("shareFailed"));
@@ -253,9 +264,16 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
           </div>
         </div>
 
-        <p className="text-[11px] text-muted-foreground/70">
-          {t("shareDescription", { count: photoIds.length })}
-        </p>
+        <PhotoDeliveryOptions
+          disabled={loading}
+          onChange={setDisclosure}
+          value={disclosure}
+        />
+        <PhotoDeliverySummary
+          count={photoIds.length}
+          kind="share"
+          value={disclosure}
+        />
 
         <DialogFooter>
           <button

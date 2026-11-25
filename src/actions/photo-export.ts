@@ -4,5 +4,6 @@ export const photoExportActions = {
     ipc.client.shell.saveFileDialog(input),
   export: (input: Parameters<typeof ipc.client.photos.exportPhotos>[0]) =>
     ipc.client.photos.exportPhotos(input),
+  getWatermarkSettings: () => ipc.client.photos.getWatermarkSettings({}),
   openFolder: (path: string) => ipc.client.shell.openInExplorer({ path }),
 };

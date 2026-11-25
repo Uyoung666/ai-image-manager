@@ -6,10 +6,15 @@ import {
   saveExportPreferences,
 } from "@/actions/export-preferences";
 import { photoExportActions } from "@/actions/photo-export";
+import {
+  PhotoDeliveryOptions,
+  PhotoDeliverySummary,
+} from "@/components/PhotoDeliveryOptions";
 import { AnimatedActionButton } from "@/components/ui/animated-action-button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -21,6 +26,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { DEFAULT_DELIVERY_DISCLOSURE } from "@/types/photo-delivery";
 import { getDateLocale } from "@/utils/date-locale";
 
 interface ExportDialogProps {
@@ -34,6 +40,11 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
   const [format, setFormat] = useState<"original" | "compressed">("original");
   const [quality, setQuality] = useState(85);
   const [maxWidth, setMaxWidth] = useState(1920);
+  const [keepSize, setKeepSize] = useState(false);
+  const [applyWatermark, setApplyWatermark] = useState(false);
+  const [watermarkLoading, setWatermarkLoading] = useState(false);
+  const [watermarkLoadFailed, setWatermarkLoadFailed] = useState(false);
+  const [disclosure, setDisclosure] = useState(DEFAULT_DELIVERY_DISCLOSURE);
   const [openAfterExport, setOpenAfterExport] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<{
@@ -50,10 +61,42 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
       setFormat(preferences.format);
       setQuality(preferences.quality);
       setMaxWidth(preferences.maxWidth);
+      setKeepSize(false);
+      setApplyWatermark(false);
+      setDisclosure(DEFAULT_DELIVERY_DISCLOSURE);
       setOpenAfterExport(preferences.openAfterExport);
       setResult(null);
       setExporting(false);
     }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let active = true;
+    setWatermarkLoading(true);
+    setWatermarkLoadFailed(false);
+    photoExportActions
+      .getWatermarkSettings()
+      .then((settings) => {
+        if (active) {
+          setApplyWatermark(settings?.enabled === true);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setWatermarkLoadFailed(true);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setWatermarkLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, [open]);
 
   async function openFolder(path: string) {
@@ -72,36 +115,32 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         defaultName,
         title: t("exportGalleryTitle"),
       });
-      const savePath = (dialogResult as { path?: string } | null)?.path;
+      const savePath = dialogResult?.path;
       if (!savePath) {
         setExporting(false);
         return;
       }
-      const res = await photoExportActions.export({
+      const jpeg = format === "compressed";
+      const requestedWidth = keepSize ? null : maxWidth;
+      const data = await photoExportActions.export({
         ids: photoIds,
         format,
-        maxWidth: format === "compressed" ? maxWidth : undefined,
-        quality: format === "compressed" ? quality : undefined,
+        maxWidth: jpeg ? requestedWidth : undefined,
+        quality: jpeg ? quality : undefined,
+        applyWatermark: jpeg && applyWatermark,
+        disclosure,
         outputPath: savePath,
         locale: getDateLocale(i18n.language),
       });
-      const data = res as {
-        success: boolean;
-        path?: string;
-        filename?: string;
-        photoCount?: number;
-        sizeMB?: number;
-        error?: string;
-      };
       if (data.success) {
         saveExportPreferences({ format, quality, maxWidth, openAfterExport });
         setResult({
-          path: data.path ?? "",
-          filename: data.filename ?? "",
-          photoCount: data.photoCount ?? 0,
-          sizeMB: data.sizeMB ?? 0,
+          path: data.path,
+          filename: data.filename,
+          photoCount: data.photoCount,
+          sizeMB: data.sizeMB,
         });
-        if (data.path && openAfterExport) {
+        if (openAfterExport) {
           await openFolder(data.path);
         }
       } else {
@@ -142,6 +181,9 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
           <DialogTitle>
             {t("exportPhotosTitle", { count: photoIds.length })}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("exportGalleryTitle")}
+          </DialogDescription>
         </DialogHeader>
 
         <div>
@@ -172,6 +214,15 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
 
         {format === "compressed" && (
           <>
+            <div className="flex min-w-0 items-center justify-between gap-3 text-[12px]">
+              <span>{t("deliveryKeepSize")}</span>
+              <Switch
+                ariaLabel={t("deliveryKeepSize")}
+                checked={keepSize}
+                disabled={exporting}
+                onCheckedChange={setKeepSize}
+              />
+            </div>
             <div>
               <label
                 className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
@@ -191,27 +242,56 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
                 value={quality}
               />
             </div>
-            <div>
-              <label
-                className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
-                htmlFor="export-max-width"
-              >
-                {t("exportMaxWidth", { width: maxWidth })}
-              </label>
-              <input
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
-                disabled={exporting}
-                id="export-max-width"
-                max={3840}
-                min={640}
-                onChange={(e) => setMaxWidth(Number(e.target.value))}
-                step={160}
-                type="range"
-                value={maxWidth}
+            {!keepSize && (
+              <div>
+                <label
+                  className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
+                  htmlFor="export-max-width"
+                >
+                  {t("exportMaxWidth", { width: maxWidth })}
+                </label>
+                <input
+                  className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                  disabled={exporting}
+                  id="export-max-width"
+                  max={3840}
+                  min={640}
+                  onChange={(e) => setMaxWidth(Number(e.target.value))}
+                  step={160}
+                  type="range"
+                  value={maxWidth}
+                />
+              </div>
+            )}
+            <div className="flex min-w-0 items-center justify-between gap-3 text-[12px]">
+              <span>{t("deliveryApplyWatermark")}</span>
+              <Switch
+                ariaLabel={t("deliveryApplyWatermark")}
+                checked={applyWatermark}
+                disabled={exporting || watermarkLoading}
+                onCheckedChange={setApplyWatermark}
               />
             </div>
+            {watermarkLoadFailed && (
+              <p className="text-[12px] text-muted-foreground" role="status">
+                {t("deliveryWatermarkLoadFailed")}
+              </p>
+            )}
           </>
         )}
+
+        <PhotoDeliveryOptions
+          disabled={exporting}
+          keepsOriginalNames={format === "original"}
+          onChange={setDisclosure}
+          value={disclosure}
+        />
+        <PhotoDeliverySummary
+          count={photoIds.length}
+          kind={format === "original" ? "original" : "jpeg"}
+          value={disclosure}
+          watermarked={applyWatermark}
+        />
 
         <div className="flex min-w-0 items-center justify-between gap-3 text-[12px]">
           <span className="min-w-0">{t("exportOpenAfterExport")}</span>
@@ -298,7 +378,9 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
           </button>
           <AnimatedActionButton
             className="py-1.5"
-            disabled={exporting}
+            disabled={
+              exporting || (format === "compressed" && watermarkLoading)
+            }
             icon={
               exporting ? <LoadingSpinner size="sm" variant="inherit" /> : null
             }

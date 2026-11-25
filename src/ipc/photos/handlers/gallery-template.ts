@@ -1,3 +1,8 @@
+import {
+  deliveryLocale,
+  serializeDeliveryData,
+} from "@/services/photo-delivery";
+
 export function buildHtmlGallery(
   photos: Array<{
     filename: string;
@@ -16,12 +21,12 @@ export function buildHtmlGallery(
   }>,
   locale = "zh-CN"
 ): string {
-  const itemsJson = JSON.stringify(
+  const itemsJson = serializeDeliveryData(
     photos.map((p) => ({
-      src: `photos/${p.filename}`,
+      src: `photos/${encodeURIComponent(p.filename)}`,
       w: p.width,
       h: p.height,
-      tags: p.tags,
+      tags: p.tags.length ? p.tags : undefined,
       exif: p.exif
         ? {
             c: p.exif.camera,
@@ -32,7 +37,7 @@ export function buildHtmlGallery(
             i: p.exif.iso,
             d: p.exif.dateTaken,
           }
-        : null,
+        : undefined,
     }))
   );
 
@@ -115,7 +120,7 @@ footer a{color:var(--accent);text-decoration:none}
       if(p.exif.i) parts.push(h("ISO "+p.exif.i));
       meta=parts.join(" &middot; ");
     }
-    if(p.tags.length) meta+='<div class="tags">'+p.tags.map(function(t){return '<span>'+h(t)+'</span>';}).join("")+'</div>';
+    if(p.tags) meta+='<div class="tags">'+p.tags.map(function(t){return '<span>'+h(t)+'</span>';}).join("")+'</div>';
     lbMeta.innerHTML=meta;
     lb.classList.add("open");
   }
@@ -141,7 +146,7 @@ footer a{color:var(--accent);text-decoration:none}
     if(!q){filteredData=data.slice();}
     else{
       filteredData=data.filter(function(p){
-        var text=(p.tags.join(" ")+" "+(p.exif?Object.values(p.exif).join(" "):"")).toLowerCase();
+        var text=[...(p.tags||[]),...Object.values(p.exif||{})].filter(Boolean).join(" ").toLowerCase();
         return text.indexOf(q)>-1;
       });
     }
@@ -153,7 +158,7 @@ footer a{color:var(--accent);text-decoration:none}
 })();`;
 
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${deliveryLocale(locale)}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">

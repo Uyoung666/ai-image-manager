@@ -6,6 +6,7 @@ import { ExportDialog } from "@/components/ExportDialog";
 const actions = vi.hoisted(() => ({
   choosePath: vi.fn(),
   export: vi.fn(),
+  getWatermarkSettings: vi.fn(),
   openFolder: vi.fn(),
 }));
 const toast = vi.hoisted(() => ({ error: vi.fn() }));
@@ -23,6 +24,7 @@ beforeEach(() => {
     sizeMB: 1,
   });
   actions.openFolder.mockResolvedValue(undefined);
+  actions.getWatermarkSettings.mockResolvedValue({ enabled: false });
 });
 it("remembers successful settings and defaults to leaving the folder closed", async () => {
   const view = render(
@@ -35,7 +37,9 @@ it("remembers successful settings and defaults to leaving the folder closed", as
   fireEvent.change(screen.getAllByRole("slider")[1], {
     target: { value: "1280" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "exportAction" }));
+  const exportButton = screen.getByRole("button", { name: "exportAction" });
+  await waitFor(() => expect(exportButton).toBeEnabled());
+  fireEvent.click(exportButton);
   await waitFor(() => expect(actions.export).toHaveBeenCalled());
   expect(actions.openFolder).not.toHaveBeenCalled();
   expect(readExportPreferences()).toEqual({
@@ -52,6 +56,11 @@ it("remembers successful settings and defaults to leaving the folder closed", as
     <ExportDialog onClose={vi.fn()} open={false} photoIds={[1, 2]} />
   );
   view.rerender(<ExportDialog onClose={vi.fn()} open photoIds={[1, 2]} />);
+  await waitFor(() =>
+    expect(
+      screen.getByRole("checkbox", { name: "deliveryApplyWatermark" })
+    ).toBeEnabled()
+  );
   expect(screen.getAllByRole("slider")[0]).toHaveValue("70");
   expect(screen.getAllByRole("slider")[1]).toHaveValue("1280");
 });
@@ -72,13 +81,40 @@ it("does not remember failed or cancelled export attempts", async () => {
   actions.export.mockResolvedValue({ success: false, error: "failed" });
   render(<ExportDialog onClose={vi.fn()} open photoIds={[1]} />);
   fireEvent.click(screen.getByRole("button", { name: "exportCompressed" }));
-  fireEvent.click(screen.getByRole("button", { name: "exportAction" }));
+  const exportButton = screen.getByRole("button", { name: "exportAction" });
+  await waitFor(() => expect(exportButton).toBeEnabled());
+  fireEvent.click(exportButton);
   await waitFor(() => expect(screen.getByText("failed")).toBeVisible());
   expect(readExportPreferences().format).toBe("original");
   actions.choosePath.mockResolvedValue(null);
   fireEvent.click(screen.getByRole("button", { name: "exportAction" }));
   await waitFor(() => expect(actions.choosePath).toHaveBeenCalledTimes(2));
   expect(actions.export).toHaveBeenCalledTimes(1);
+});
+
+it("submits full-size JPEG copies with the saved watermark and opted-in filenames", async () => {
+  actions.getWatermarkSettings.mockResolvedValue({ enabled: true });
+  render(<ExportDialog onClose={vi.fn()} open photoIds={[1]} />);
+  fireEvent.click(screen.getByRole("button", { name: "exportCompressed" }));
+  const watermark = screen.getByRole("checkbox", {
+    name: "deliveryApplyWatermark",
+  });
+  await waitFor(() => expect(watermark).toBeChecked());
+  fireEvent.click(screen.getByRole("checkbox", { name: "deliveryKeepSize" }));
+  expect(screen.getAllByRole("slider")).toHaveLength(1);
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "deliveryOriginalNames" })
+  );
+  fireEvent.click(screen.getByRole("button", { name: "exportAction" }));
+  await waitFor(() =>
+    expect(actions.export).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxWidth: null,
+        applyWatermark: true,
+        disclosure: { filenames: true, captureDetails: false, tags: false },
+      })
+    )
+  );
 });
 it("validates stored numeric settings and recovers from malformed storage", () => {
   localStorage.setItem(

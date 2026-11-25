@@ -1,8 +1,18 @@
-import { eq, inArray } from "drizzle-orm";
-import { getDatabase } from "@/db";
-import { exifData, photos, photoTags, tags } from "@/db/schema";
+import { readFile } from "node:fs/promises";
+import sharp from "sharp";
+import { resolveHeifInput } from "@/services/heif-input";
+import { assertLibraryFileReady } from "@/services/library-file-guard";
 import { getThumbnailDir } from "@/services/thumbnailer";
+import { DEFAULT_DELIVERY_DISCLOSURE } from "@/types/photo-delivery";
 import { resolveSafePath } from "@/utils/path-security";
+import {
+  type DeliveryPhoto,
+  deliveryLocale,
+  deliveryMetadata,
+  deliveryPhotos,
+  deliverySequence,
+  serializeDeliveryData,
+} from "./photo-delivery";
 
 export interface SharePhoto {
   aperture: string;
@@ -33,40 +43,25 @@ function escapeHtml(value: string): string {
   );
 }
 
-function serializeForInlineScript(value: unknown): string {
-  return JSON.stringify(value)
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
-}
-
 export function buildSharePageHtml(
   items: SharePhoto[],
   locale = "zh-CN"
 ): string {
-  let normalizedLocale = "zh-CN";
-  try {
-    normalizedLocale =
-      Intl.DateTimeFormat.supportedLocalesOf([locale])[0] ?? normalizedLocale;
-  } catch {
-    // Invalid locale input must not prevent a share page from rendering.
-  }
+  const normalizedLocale = deliveryLocale(locale);
 
-  const itemsJson = serializeForInlineScript(
+  const itemsJson = serializeDeliveryData(
     items.map((p) => ({
       fn: p.filename,
-      dt: p.dateTaken,
+      dt: p.dateTaken || undefined,
       exif: {
-        c: p.camera,
-        l: p.lens,
-        f: p.focalLength,
-        a: p.aperture,
-        s: p.shutter,
-        i: p.iso,
+        c: p.camera || undefined,
+        l: p.lens || undefined,
+        f: p.focalLength || undefined,
+        a: p.aperture || undefined,
+        s: p.shutter || undefined,
+        i: p.iso || undefined,
       },
-      tags: p.tags,
+      tags: p.tags.length ? p.tags : undefined,
       w: p.width,
       h: p.height,
       thumb: p.thumbnailBase64,
@@ -133,8 +128,8 @@ function render(items){
     if(p.exif.c) gear.push(p.exif.c);
     if(p.exif.l) gear.push(p.exif.l);
     var tagsHtml="";
-    if(p.tags.length) tagsHtml='<div class="tags-row">'+p.tags.map(function(t){return '<span>'+h(t)+'</span>';}).join("")+'</div>';
-    card.innerHTML='<img src="'+h(p.thumb)+'" alt="'+h(p.fn)+'" loading="lazy"><div class="meta"><div class="date">'+h(p.dt)+'</div><div class="gear">'+h(gear.join(" · "))+'</div>'+tagsHtml+'</div>';
+    if(p.tags) tagsHtml='<div class="tags-row">'+p.tags.map(function(t){return '<span>'+h(t)+'</span>';}).join("")+'</div>';
+    card.innerHTML='<img src="'+h(p.thumb)+'" alt="'+h(p.fn)+'" loading="lazy"><div class="meta"><div class="date">'+h(p.fn)+'</div><div class="gear">'+h([p.dt].concat(gear).filter(Boolean).join(" · "))+'</div>'+tagsHtml+'</div>';
     card.addEventListener("click",function(){openLightbox(i);});
     grid.appendChild(card);
   });
@@ -149,10 +144,12 @@ function openLightbox(idx){
   if(p.dt) parts.push(h(p.dt));
   if(p.exif.c) parts.push(h(p.exif.c));
   if(p.exif.l) parts.push(h(p.exif.l));
-  if(p.exif.f) parts.push(h(p.exif.f+"mm f/"+p.exif.a));
-  if(p.exif.s) parts.push(h(p.exif.s+"s ISO"+p.exif.i));
+  if(p.exif.f) parts.push(h(p.exif.f+"mm"));
+  if(p.exif.a) parts.push(h("f/"+p.exif.a));
+  if(p.exif.s) parts.push(h(p.exif.s+"s"));
+  if(p.exif.i) parts.push(h("ISO "+p.exif.i));
   var meta=parts.join(" · ");
-  if(p.tags.length) meta+='<div class="lb-tags">'+p.tags.map(function(t){return '<span>'+h(t)+'</span>';}).join("")+'</div>';
+  if(p.tags) meta+='<div class="lb-tags">'+p.tags.map(function(t){return '<span>'+h(t)+'</span>';}).join("")+'</div>';
   lbMeta.innerHTML=meta;
   lb.classList.add("open");
 }
@@ -178,7 +175,7 @@ search.addEventListener("input",function(){
   if(!q){filteredData=data.slice();}
   else{
     filteredData=data.filter(function(p){
-      var text=(p.tags.join(" ")+" "+p.dt+" "+(p.exif?Object.values(p.exif).join(" "):"")).toLowerCase();
+      var text=[p.fn,p.dt,...(p.tags||[]),...Object.values(p.exif)].filter(Boolean).join(" ").toLowerCase();
       return text.indexOf(q)>-1;
     });
   }
@@ -223,94 +220,68 @@ render(filteredData);
 </html>`;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Share generation keeps database selection, asset preparation, and cleanup-compatible output assembly together.
 export async function generateSharePage(
   photoIds: number[],
-  locale = "zh-CN"
+  locale = "zh-CN",
+  disclosure = DEFAULT_DELIVERY_DISCLOSURE
 ): Promise<string> {
-  const db = getDatabase();
-
-  const photoList = db
-    .select()
-    .from(photos)
-    .where(inArray(photos.id, photoIds))
-    .all();
-
+  const normalizedLocale = deliveryLocale(locale);
   const sharePhotos: SharePhoto[] = [];
-
-  for (const photo of photoList) {
-    // Thumbnail base64
-    let thumbnailBase64 = "";
-    try {
-      const cacheRoot = getThumbnailDir();
-      const thumbPath =
-        cacheRoot &&
-        photo.thumbnailPath &&
-        photo.metadataRevision === photo.contentRevision
-          ? resolveSafePath(photo.thumbnailPath, [cacheRoot])
-          : null;
-      if (thumbPath?.toLowerCase().endsWith(".webp")) {
-        const fs = await import("node:fs");
-        if (fs.existsSync(thumbPath)) {
-          const buf = fs.readFileSync(thumbPath);
-          thumbnailBase64 = `data:image/webp;base64,${buf.toString("base64")}`;
-        }
-      }
-    } catch {
-      // Skip thumbnail on failure
-    }
-
-    // Fallback: generate inline thumbnail with sharp
-    if (!thumbnailBase64) {
-      try {
-        const fs = await import("node:fs");
-        if (fs.existsSync(photo.path)) {
-          const sharp = (await import("sharp")).default;
-          const buf = await sharp(photo.path)
-            .rotate()
-            .resize(600, 450, { fit: "inside", withoutEnlargement: true })
-            .jpeg({ quality: 80 })
-            .toBuffer();
-          thumbnailBase64 = `data:image/jpeg;base64,${buf.toString("base64")}`;
-        }
-      } catch {
-        thumbnailBase64 = "";
-      }
-    }
-
-    // Tags
-    const photoTagRows = db
-      .select({ name: tags.name })
-      .from(photoTags)
-      .innerJoin(tags, eq(photoTags.tagId, tags.id))
-      .where(eq(photoTags.photoId, photo.id))
-      .all();
-    const tagNames = photoTagRows.map((t) => t.name);
-
-    // EXIF
-    const exif = db
-      .select()
-      .from(exifData)
-      .where(eq(exifData.photoId, photo.id))
-      .get();
-
+  for (const photo of deliveryPhotos(photoIds)) {
+    const preview = await renderSharePreview(photo);
+    const { exif, tags } = deliveryMetadata(
+      photo,
+      disclosure,
+      normalizedLocale
+    );
     sharePhotos.push({
-      filename: photo.filename,
-      dateTaken: exif?.dateTaken
-        ? new Date(exif.dateTaken).toLocaleDateString(locale)
-        : new Date(photo.fileDate || Date.now()).toLocaleDateString(locale),
-      camera: exif?.cameraModel ?? "",
-      lens: exif?.lensModel ?? "",
-      focalLength: exif?.focalLength?.toString() ?? "",
-      aperture: exif?.aperture?.toString() ?? "",
-      shutter: exif?.shutterSpeed ?? "",
+      filename: disclosure.filenames
+        ? photo.filename
+        : deliverySequence(sharePhotos.length),
+      dateTaken: exif?.dateTaken ?? "",
+      camera: exif?.camera ?? "",
+      lens: exif?.lens ?? "",
+      focalLength: exif?.focalLength ?? "",
+      aperture: exif?.aperture ?? "",
+      shutter: exif?.shutter ?? "",
       iso: exif?.iso?.toString() ?? "",
-      tags: tagNames,
-      width: photo.width ?? 0,
-      height: photo.height ?? 0,
-      thumbnailBase64,
+      tags,
+      width: preview.info.width,
+      height: preview.info.height,
+      thumbnailBase64: `data:image/jpeg;base64,${preview.data.toString("base64")}`,
     });
   }
+  return buildSharePageHtml(sharePhotos, normalizedLocale);
+}
 
-  return buildSharePageHtml(sharePhotos, locale);
+async function encodeSharePreview(input: string | Buffer) {
+  return sharp(typeof input === "string" ? await readFile(input) : input)
+    .autoOrient()
+    .resize(600, 450, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 80 })
+    .toBuffer({ resolveWithObject: true });
+}
+
+async function renderSharePreview(photo: DeliveryPhoto) {
+  const cacheRoot = getThumbnailDir();
+  const thumbPath =
+    cacheRoot &&
+    photo.thumbnailPath &&
+    photo.metadataRevision === photo.contentRevision
+      ? resolveSafePath(photo.thumbnailPath, [cacheRoot])
+      : null;
+  if (thumbPath?.toLowerCase().endsWith(".webp")) {
+    try {
+      return await encodeSharePreview(thumbPath);
+    } catch {
+      // A missing or unreadable cache can be regenerated from the current source.
+    }
+  }
+  try {
+    assertLibraryFileReady(photo);
+    return await encodeSharePreview(await resolveHeifInput(photo.path));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`${photo.filename}: ${reason}`, { cause: error });
+  }
 }

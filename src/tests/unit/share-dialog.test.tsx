@@ -138,4 +138,24 @@ describe("ShareDialog", () => {
     expect(primary).toHaveAttribute("aria-pressed", "false");
     expect(archive).toHaveAttribute("aria-pressed", "true");
   });
+
+  it("publishes with per-share disclosure choices", async () => {
+    mocks.listCloudConfigs.mockResolvedValue([
+      { id: 1, name: "Primary", provider: "webdav" },
+    ]);
+    renderDialog();
+    const tags = await screen.findByRole("checkbox", {
+      name: "deliveryReviewedTags",
+    });
+    expect(tags).not.toBeChecked();
+    fireEvent.click(tags);
+    fireEvent.click(screen.getByRole("button", { name: "generateAndPublish" }));
+    await waitFor(() =>
+      expect(mocks.generateAndUploadShare).toHaveBeenCalledWith(
+        expect.objectContaining({
+          disclosure: { filenames: false, captureDetails: false, tags: true },
+        })
+      )
+    );
+  });
 });

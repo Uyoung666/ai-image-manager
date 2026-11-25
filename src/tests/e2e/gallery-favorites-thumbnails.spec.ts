@@ -145,6 +145,7 @@ test.beforeAll(async () => {
   const sqlEscape = (value: string) => value.replaceAll("'", "''");
   const statements = [
     `INSERT INTO folders(id,path,display_name,photo_count,created_at) VALUES(1,'${sqlEscape(fixture)}','FavoriteFixture',8,1)`,
+    "INSERT INTO cloud_configs(provider,name,config_json,created_at) VALUES('webdav','Delivery test','{}',1)",
   ];
   for (let id = 1; id <= 8; id++) {
     const width = [2800, 360][id - 1] ?? 440;
@@ -288,6 +289,71 @@ async function expectInsideViewport(locator: Locator) {
       })
     )
     .toBe(true);
+}
+
+const DELIVERY_JPEG = /^(JPEG copies|JPEG 副本)$/;
+const DELIVERY_EXPORT = /^(Export|导出)$/;
+const DELIVERY_EXPORT_ITEM =
+  /^(Export Photo|导出照片)( \(\d+\))? Ctrl\+Shift\+E$/i;
+const DELIVERY_EXPORT_DIALOG = /^(Export \d+ photos|导出 \d+ 张照片)$/;
+const DELIVERY_SHARE = /^(Generate Share Page|生成分享页)( \(\d+\))?$/;
+const DELIVERY_SHARE_DIALOG = /^(Generate Share Page|生成分享页面)$/;
+const DELIVERY_PUBLISH =
+  /^(Generate & Publish|Generate and Publish|生成并发布)$/i;
+const DELIVERY_NAMES = /^(Original filenames|原文件名)$/;
+const DELIVERY_CAPTURE =
+  /^(Capture date and camera settings|拍摄日期与相机参数)$/;
+
+for (const size of SIZES) {
+  test(`photo delivery dialogs fit at ${size.width}x${size.height}`, async () => {
+    await app.evaluate(({ BrowserWindow }, { width, height }) => {
+      BrowserWindow.getAllWindows()[0].setSize(width, height);
+    }, size);
+    const main = page.locator("main").first();
+    const photo = main.locator('[data-photo-id="1"][role="option"]');
+    await photo.click({ button: "right" });
+    const exportItem = page.getByRole("menuitem", {
+      name: DELIVERY_EXPORT_ITEM,
+    });
+    await exportItem.scrollIntoViewIfNeeded();
+    await expectInsideViewport(exportItem);
+    await exportItem.click();
+    const dialog = page.getByRole("dialog", { name: DELIVERY_EXPORT_DIALOG });
+    await dialog.getByRole("button", { name: DELIVERY_JPEG }).click();
+    await expect(
+      dialog.getByRole("checkbox", { name: DELIVERY_NAMES })
+    ).not.toBeChecked();
+    await expectInsideViewport(dialog);
+    const exportButton = dialog.getByRole("button", { name: DELIVERY_EXPORT });
+    await exportButton.scrollIntoViewIfNeeded();
+    await exportButton.click({ trial: true });
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+
+    await photo.click({ button: "right" });
+    const shareItem = page.getByRole("menuitem", { name: DELIVERY_SHARE });
+    await shareItem.scrollIntoViewIfNeeded();
+    await expectInsideViewport(shareItem);
+    await shareItem.click();
+    const shareDialog = page.getByRole("dialog", {
+      name: DELIVERY_SHARE_DIALOG,
+    });
+    const capture = shareDialog.getByRole("checkbox", {
+      name: DELIVERY_CAPTURE,
+    });
+    await expect(capture).not.toBeChecked();
+    await expectInsideViewport(shareDialog);
+    const publish = shareDialog.getByRole("button", { name: DELIVERY_PUBLISH });
+    await publish.scrollIntoViewIfNeeded();
+    await publish.click({ trial: true });
+    await page.keyboard.press("Escape");
+    await expect(shareDialog).toBeHidden();
+    expect(
+      await main.evaluate(
+        (element) => element.scrollWidth - element.clientWidth
+      )
+    ).toBeLessThanOrEqual(2);
+  });
 }
 
 const THUMBNAIL_TOGGLE = /^(Show\/hide thumbnails|显示\/隐藏缩略图) \(T\)$/;

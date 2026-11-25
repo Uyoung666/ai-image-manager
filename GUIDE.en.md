@@ -683,7 +683,7 @@ After selecting multiple photos, the bottom action bar provides:
 | --- | --- | --- |
 | Favorite | `F` | Toggle favorite state |
 | Add to album | — | Add to an existing or new album |
-| Export | `Ctrl + Shift + E` | Export original or compressed ZIP |
+| Export | `Ctrl + Shift + E` | Package originals or JPEG copies in a ZIP |
 | Batch rename | `F2` | Generate names from a template |
 | Convert | `Ctrl + Shift + C` | Convert to JPG, PNG, WebP, or AVIF |
 | Delete | `Delete` | Move to the app trash |
@@ -711,14 +711,14 @@ Presets include `Date_Camera_Index`, `Date_Index`, `Original_Date`, and `Date_Or
 
 Press `Ctrl + Shift + E` or use the bottom action bar:
 
-- **Original**: package the source files without recompression.
-- **Compressed**: choose quality and maximum width for delivery or web sharing.
+- **Original** packages the source files byte for byte, retaining embedded metadata such as GPS.
+- **JPEG copies** lets you set quality, keep the original dimensions or limit the width, and apply a saved watermark. The JPEG files omit embedded capture metadata and GPS from the sources.
 
-Choose an output directory. Export does not change the originals in the library.
+JPEG copies use sequential filenames by default. The gallery omits capture details and tags by default. You can include original filenames, capture dates and camera settings, and tags you added or personally confirmed. If a photo fails to export, the dialog identifies the photo and preserves any ZIP already at the destination.
 
 ### HTML share page
 
-The share action creates a single-file HTML page with thumbnails, EXIF, and tags. Save it locally or publish it to a configured WebDAV/S3 provider.
+The share action creates a single-file HTML page with JPEG previews and publishes it to a configured WebDAV/S3 provider. The page uses numbered filenames and omits capture details and tags by default. The share dialog previews which details will be included.
 
 Access control and retention after cloud publication are controlled by the provider. Review location, people, and client metadata before publishing a page to an untrusted space.
 
@@ -729,9 +729,7 @@ Open **Settings → Watermark** to:
 - Choose a text or image watermark
 - Use nine anchors or drag the preview to position it
 - Adjust margin, opacity, font size, or image scale
-- Apply it to export and format conversion output
-
-Watermarks apply to output files and do not modify originals.
+- Enable the watermark to apply it by default to JPEG copies. You can change the selection for each export.
 
 ---
 
