@@ -5,6 +5,7 @@ const childProcessMock = vi.hoisted(() => {
 
   class FakeChildProcess {
     private readonly listeners = new Map<string, Listener[]>();
+    connected = true;
     readonly kill = vi.fn(() => {
       this.emit("exit", 0, null);
       return true;
@@ -14,6 +15,19 @@ const childProcessMock = vi.hoisted(() => {
       on: vi.fn(),
     };
 
+    failNextSend(error: Error) {
+      this.send.mockImplementationOnce((_message, callback) => {
+        queueMicrotask(() => {
+          if (callback) {
+            callback(error);
+          } else {
+            this.emit("error", error);
+          }
+        });
+        return false;
+      });
+    }
+
     on(event: string, listener: Listener) {
       const existing = this.listeners.get(event) ?? [];
       existing.push(listener);
@@ -22,6 +36,9 @@ const childProcessMock = vi.hoisted(() => {
     }
 
     emit(event: string, ...args: any[]) {
+      if (event === "exit") {
+        this.connected = false;
+      }
       if (
         event === "message" &&
         ["result", "provider-error"].includes(args[0]?.type) &&
@@ -51,6 +68,9 @@ const childProcessMock = vi.hoisted(() => {
 const gpuDetectorMock = vi.hoisted(() => ({
   probeEmbeddingGpuCapability: vi.fn(),
 }));
+const recordDiagnosticIncident = vi.hoisted(() =>
+  vi.fn(() => ({ id: "test-incident" }))
+);
 
 function getWorkerIdentity(child: (typeof childProcessMock.children)[number]): {
   adapterId: string;
@@ -81,6 +101,12 @@ vi.mock("node:child_process", () => ({
 }));
 
 vi.mock("@/services/gpu-detector", () => gpuDetectorMock);
+vi.mock("@/services/diagnostics/incidents", () => ({
+  recordDiagnosticIncident,
+}));
+vi.mock("@/services/diagnostics/logging", () => ({
+  appendDiagnosticLog: vi.fn(),
+}));
 vi.mock("@/utils/data-path", () => ({ getDataPath: () => process.cwd() }));
 vi.mock("../../../scripts/heif-decoder.mjs", () => ({
   isHeifInput: vi.fn().mockResolvedValue(false),
@@ -139,6 +165,7 @@ describe("embed worker pool lifecycle", () => {
     childProcessMock.children.length = 0;
     childProcessMock.fork.mockClear();
     gpuDetectorMock.probeEmbeddingGpuCapability.mockReset();
+    recordDiagnosticIncident.mockClear();
   });
 
   afterEach(() => {
@@ -198,6 +225,62 @@ describe("embed worker pool lifecycle", () => {
 
     expect(childProcessMock.fork).toHaveBeenCalledTimes(4);
     shutdownPool();
+  });
+
+  it.each([
+    ["shutdownPool", false],
+    ["shutdownPool", true],
+    ["abortAllWorkers", false],
+    ["abortAllWorkers", true],
+  ] as const)("%s tolerates a closed channel with connected initially %s", async (operation, initiallyConnected) => {
+    const pool = await import("@/services/embed-worker-pool");
+    const initialization = pool.initWorkerPool("model-path");
+    const [closingWorker, healthyWorker] = childProcessMock.children;
+    emitReady(closingWorker);
+    emitReady(healthyWorker);
+    await vi.advanceTimersByTimeAsync(50);
+    await initialization;
+    closingWorker.connected = initiallyConnected;
+    closingWorker.failNextSend(
+      Object.assign(new Error("Channel closed"), {
+        code: "ERR_IPC_CHANNEL_CLOSED",
+      })
+    );
+
+    pool[operation]();
+    await Promise.resolve();
+
+    expect(recordDiagnosticIncident).not.toHaveBeenCalled();
+    expect(
+      closingWorker.send.mock.calls.map(([message]) => message.type)
+    ).toEqual(initiallyConnected ? ["init", "abort"] : ["init"]);
+    expect(
+      healthyWorker.send.mock.calls.map(([message]) => message.type)
+    ).toEqual(["init", "abort"]);
+  });
+
+  it("reports an unexpected abort send failure and marks the worker dead", async () => {
+    const { abortAllWorkers, getPoolHealth, initWorkerPool } = await import(
+      "@/services/embed-worker-pool"
+    );
+    const initialization = initWorkerPool("model-path");
+    const [failedWorker, healthyWorker] = childProcessMock.children;
+    emitReady(failedWorker);
+    emitReady(healthyWorker);
+    await vi.advanceTimersByTimeAsync(50);
+    await initialization;
+    failedWorker.failNextSend(new Error("Unexpected send failure"));
+
+    abortAllWorkers();
+    await Promise.resolve();
+
+    expect(recordDiagnosticIncident).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        message: "Unexpected send failure",
+        source: "worker-crash",
+      })
+    );
+    expect(getPoolHealth()).toMatchObject({ alive: 1, dead: 1 });
   });
 
   it("respawns a crashed worker with the same adapter identity", async () => {

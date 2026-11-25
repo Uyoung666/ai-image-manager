@@ -898,14 +898,26 @@ function dispatchBatch(
   });
 }
 
+function sendWorkerAbort(child: ChildProcess): void {
+  if (!child.connected) {
+    return;
+  }
+  // A worker can disconnect after the check. Node reports send failures via
+  // the callback instead of emitting a child process error when one is supplied.
+  child.send({ type: "abort" }, (error) => {
+    if (
+      error &&
+      (error as NodeJS.ErrnoException).code !== "ERR_IPC_CHANNEL_CLOSED"
+    ) {
+      child.emit("error", error);
+    }
+  });
+}
+
 /** Send abort signal to all running workers (best-effort mid-batch interrupt). */
 export function abortAllWorkers(): void {
   for (const slot of slots) {
-    try {
-      slot.process.send({ type: "abort" });
-    } catch {
-      /* ignore */
-    }
+    sendWorkerAbort(slot.process);
   }
 }
 
@@ -929,8 +941,7 @@ export function shutdownPool(): void {
   }
   requestQueue = [];
 
-  // Send abort first so workers can stop mid-batch if idle enough
-  // to receive the message, then send shutdown + kill.
+  // Let connected workers stop mid-batch before terminating old processes.
   for (const slot of oldSlots) {
     if (slot.timeoutId) {
       clearTimeout(slot.timeoutId);
@@ -941,11 +952,7 @@ export function shutdownPool(): void {
     slot.pendingReject = null;
     slot.status = "dead";
     reject?.(shutdownError);
-    try {
-      slot.process.send({ type: "abort" });
-    } catch {
-      /* ignore */
-    }
+    sendWorkerAbort(slot.process);
   }
   // Small grace period for abort messages to be processed
   const killAll = () => {

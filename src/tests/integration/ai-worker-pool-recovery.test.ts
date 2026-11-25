@@ -18,6 +18,7 @@ const childProcessMock = vi.hoisted(() => {
 
   class FakeChildProcess {
     adapter: { adapterId: string; fingerprint: string } | null = null;
+    connected = true;
     killed = false;
     private readonly listeners = new Map<string, Listener[]>();
     readonly stderr = { on: vi.fn() };
@@ -65,6 +66,9 @@ const childProcessMock = vi.hoisted(() => {
     }
 
     emit(event: string, ...args: unknown[]): void {
+      if (event === "exit") {
+        this.connected = false;
+      }
       for (const listener of this.listeners.get(event) ?? []) {
         listener(...args);
       }
