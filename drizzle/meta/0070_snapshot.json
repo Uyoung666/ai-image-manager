@@ -182,101 +182,72 @@
       "indexes": {
         "advanced_exif_data_photo_id_unique": {
           "name": "advanced_exif_data_photo_id_unique",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": true
         },
         "idx_advanced_exif_status_version": {
           "name": "idx_advanced_exif_status_version",
-          "columns": [
-            "status",
-            "parser_version"
-          ],
+          "columns": ["status", "parser_version"],
           "isUnique": false
         },
         "idx_advanced_exif_vendor": {
           "name": "idx_advanced_exif_vendor",
-          "columns": [
-            "vendor"
-          ],
+          "columns": ["vendor"],
           "isUnique": false
         },
         "idx_advanced_exif_capture_mode": {
           "name": "idx_advanced_exif_capture_mode",
-          "columns": [
-            "capture_mode"
-          ],
+          "columns": ["capture_mode"],
           "isUnique": false
         },
         "idx_advanced_exif_exposure_program": {
           "name": "idx_advanced_exif_exposure_program",
-          "columns": [
-            "exposure_program"
-          ],
+          "columns": ["exposure_program"],
           "isUnique": false
         },
         "idx_advanced_exif_metering_mode": {
           "name": "idx_advanced_exif_metering_mode",
-          "columns": [
-            "metering_mode"
-          ],
+          "columns": ["metering_mode"],
           "isUnique": false
         },
         "idx_advanced_exif_white_balance": {
           "name": "idx_advanced_exif_white_balance",
-          "columns": [
-            "white_balance"
-          ],
+          "columns": ["white_balance"],
           "isUnique": false
         },
         "idx_advanced_exif_focus_mode": {
           "name": "idx_advanced_exif_focus_mode",
-          "columns": [
-            "focus_mode"
-          ],
+          "columns": ["focus_mode"],
           "isUnique": false
         },
         "idx_advanced_exif_subject_target": {
           "name": "idx_advanced_exif_subject_target",
-          "columns": [
-            "subject_target"
-          ],
+          "columns": ["subject_target"],
           "isUnique": false
         },
         "idx_advanced_exif_drive_mode": {
           "name": "idx_advanced_exif_drive_mode",
-          "columns": [
-            "drive_mode"
-          ],
+          "columns": ["drive_mode"],
           "isUnique": false
         },
         "idx_advanced_exif_stabilization": {
           "name": "idx_advanced_exif_stabilization",
-          "columns": [
-            "stabilization_mode"
-          ],
+          "columns": ["stabilization_mode"],
           "isUnique": false
         },
         "idx_advanced_exif_computational": {
           "name": "idx_advanced_exif_computational",
-          "columns": [
-            "computational_mode"
-          ],
+          "columns": ["computational_mode"],
           "isUnique": false
         },
         "idx_advanced_exif_in_camera_look": {
           "name": "idx_advanced_exif_in_camera_look",
-          "columns": [
-            "in_camera_look"
-          ],
+          "columns": ["in_camera_look"],
           "isUnique": false
         },
         "idx_advanced_exif_provenance": {
           "name": "idx_advanced_exif_provenance",
-          "columns": [
-            "provenance_status"
-          ],
+          "columns": ["provenance_status"],
           "isUnique": false
         }
       },
@@ -285,12 +256,8 @@
           "name": "advanced_exif_data_photo_id_photos_id_fk",
           "tableFrom": "advanced_exif_data",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -335,10 +302,7 @@
       "indexes": {
         "idx_album_photo": {
           "name": "idx_album_photo",
-          "columns": [
-            "album_id",
-            "photo_id"
-          ],
+          "columns": ["album_id", "photo_id"],
           "isUnique": true
         }
       },
@@ -347,12 +311,8 @@
           "name": "album_photos_album_id_albums_id_fk",
           "tableFrom": "album_photos",
           "tableTo": "albums",
-          "columnsFrom": [
-            "album_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["album_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -360,12 +320,8 @@
           "name": "album_photos_photo_id_photos_id_fk",
           "tableFrom": "album_photos",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -584,12 +540,8 @@
           "name": "cloud_sync_log_photo_id_photos_id_fk",
           "tableFrom": "cloud_sync_log",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -597,12 +549,8 @@
           "name": "cloud_sync_log_provider_id_cloud_configs_id_fk",
           "tableFrom": "cloud_sync_log",
           "tableTo": "cloud_configs",
-          "columnsFrom": [
-            "provider_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["provider_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -642,12 +590,8 @@
           "name": "content_credential_results_photo_id_photos_id_fk",
           "tableFrom": "content_credential_results",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -698,10 +642,7 @@
       "indexes": {
         "idx_cal_session_created": {
           "name": "idx_cal_session_created",
-          "columns": [
-            "session_id",
-            "created_at"
-          ],
+          "columns": ["session_id", "created_at"],
           "isUnique": false
         }
       },
@@ -710,12 +651,8 @@
           "name": "cull_action_logs_session_id_cull_sessions_id_fk",
           "tableFrom": "cull_action_logs",
           "tableTo": "cull_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -807,54 +744,37 @@
       "indexes": {
         "idx_csp_session_id": {
           "name": "idx_csp_session_id",
-          "columns": [
-            "session_id"
-          ],
+          "columns": ["session_id"],
           "isUnique": false
         },
         "idx_csp_photo_id": {
           "name": "idx_csp_photo_id",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": false
         },
         "idx_csp_project_photo_id": {
           "name": "idx_csp_project_photo_id",
-          "columns": [
-            "project_photo_id"
-          ],
+          "columns": ["project_photo_id"],
           "isUnique": false
         },
         "idx_csp_session_project_photo": {
           "name": "idx_csp_session_project_photo",
-          "columns": [
-            "session_id",
-            "project_photo_id"
-          ],
+          "columns": ["session_id", "project_photo_id"],
           "isUnique": true
         },
         "idx_csp_rating": {
           "name": "idx_csp_rating",
-          "columns": [
-            "rating"
-          ],
+          "columns": ["rating"],
           "isUnique": false
         },
         "idx_csp_session_photo": {
           "name": "idx_csp_session_photo",
-          "columns": [
-            "session_id",
-            "photo_id"
-          ],
+          "columns": ["session_id", "photo_id"],
           "isUnique": true
         },
         "idx_csp_session_status": {
           "name": "idx_csp_session_status",
-          "columns": [
-            "session_id",
-            "status"
-          ],
+          "columns": ["session_id", "status"],
           "isUnique": false
         }
       },
@@ -863,12 +783,8 @@
           "name": "cull_session_photos_session_id_cull_sessions_id_fk",
           "tableFrom": "cull_session_photos",
           "tableTo": "cull_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -876,12 +792,8 @@
           "name": "cull_session_photos_photo_id_photos_id_fk",
           "tableFrom": "cull_session_photos",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -889,12 +801,8 @@
           "name": "cull_session_photos_project_photo_id_shooting_project_photos_id_fk",
           "tableFrom": "cull_session_photos",
           "tableTo": "shooting_project_photos",
-          "columnsFrom": [
-            "project_photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1023,12 +931,8 @@
           "name": "cull_sessions_project_id_shooting_projects_id_fk",
           "tableFrom": "cull_sessions",
           "tableTo": "shooting_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1140,25 +1044,17 @@
       "indexes": {
         "idx_duplicate_cleanup_event_plan": {
           "name": "idx_duplicate_cleanup_event_plan",
-          "columns": [
-            "plan_id",
-            "created_at"
-          ],
+          "columns": ["plan_id", "created_at"],
           "isUnique": false
         },
         "idx_duplicate_cleanup_event_batch": {
           "name": "idx_duplicate_cleanup_event_batch",
-          "columns": [
-            "batch_id",
-            "created_at"
-          ],
+          "columns": ["batch_id", "created_at"],
           "isUnique": false
         },
         "idx_duplicate_cleanup_event_photo": {
           "name": "idx_duplicate_cleanup_event_photo",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": false
         }
       },
@@ -1272,17 +1168,12 @@
       "indexes": {
         "idx_duplicate_cleanup_plan_item_photo": {
           "name": "idx_duplicate_cleanup_plan_item_photo",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": false
         },
         "idx_duplicate_cleanup_plan_item_group": {
           "name": "idx_duplicate_cleanup_plan_item_group",
-          "columns": [
-            "plan_id",
-            "group_key"
-          ],
+          "columns": ["plan_id", "group_key"],
           "isUnique": false
         }
       },
@@ -1291,23 +1182,15 @@
           "name": "duplicate_cleanup_plan_items_plan_id_duplicate_cleanup_plans_id_fk",
           "tableFrom": "duplicate_cleanup_plan_items",
           "tableTo": "duplicate_cleanup_plans",
-          "columnsFrom": [
-            "plan_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["plan_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "duplicate_cleanup_plan_items_plan_id_group_key_photo_id_pk": {
-          "columns": [
-            "plan_id",
-            "group_key",
-            "photo_id"
-          ],
+          "columns": ["plan_id", "group_key", "photo_id"],
           "name": "duplicate_cleanup_plan_items_plan_id_group_key_photo_id_pk"
         }
       },
@@ -1387,16 +1270,12 @@
       "indexes": {
         "idx_duplicate_cleanup_plan_status": {
           "name": "idx_duplicate_cleanup_plan_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_duplicate_cleanup_plan_batch": {
           "name": "idx_duplicate_cleanup_plan_batch",
-          "columns": [
-            "batch_id"
-          ],
+          "columns": ["batch_id"],
           "isUnique": true
         }
       },
@@ -1532,23 +1411,17 @@
       "indexes": {
         "idx_duplicate_detection_run_status": {
           "name": "idx_duplicate_detection_run_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_duplicate_detection_run_config": {
           "name": "idx_duplicate_detection_run_config",
-          "columns": [
-            "config_fingerprint"
-          ],
+          "columns": ["config_fingerprint"],
           "isUnique": false
         },
         "idx_duplicate_detection_run_started": {
           "name": "idx_duplicate_detection_run_started",
-          "columns": [
-            "started_at"
-          ],
+          "columns": ["started_at"],
           "isUnique": false
         }
       },
@@ -1628,31 +1501,22 @@
       "indexes": {
         "idx_dup_pair": {
           "name": "idx_dup_pair",
-          "columns": [
-            "photo_a_id",
-            "photo_b_id"
-          ],
+          "columns": ["photo_a_id", "photo_b_id"],
           "isUnique": true
         },
         "idx_dup_status": {
           "name": "idx_dup_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         },
         "idx_dup_photo_a": {
           "name": "idx_dup_photo_a",
-          "columns": [
-            "photo_a_id"
-          ],
+          "columns": ["photo_a_id"],
           "isUnique": false
         },
         "idx_dup_photo_b": {
           "name": "idx_dup_photo_b",
-          "columns": [
-            "photo_b_id"
-          ],
+          "columns": ["photo_b_id"],
           "isUnique": false
         }
       },
@@ -1661,12 +1525,8 @@
           "name": "duplicate_pairs_photo_a_id_photos_id_fk",
           "tableFrom": "duplicate_pairs",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_a_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_a_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1674,12 +1534,8 @@
           "name": "duplicate_pairs_photo_b_id_photos_id_fk",
           "tableFrom": "duplicate_pairs",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_b_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_b_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1759,17 +1615,12 @@
       "indexes": {
         "idx_duplicate_fingerprint_hash": {
           "name": "idx_duplicate_fingerprint_hash",
-          "columns": [
-            "hash_version",
-            "full_sha256"
-          ],
+          "columns": ["hash_version", "full_sha256"],
           "isUnique": false
         },
         "idx_duplicate_fingerprint_path": {
           "name": "idx_duplicate_fingerprint_path",
-          "columns": [
-            "path"
-          ],
+          "columns": ["path"],
           "isUnique": false
         }
       },
@@ -1778,12 +1629,8 @@
           "name": "duplicate_photo_fingerprints_photo_id_photos_id_fk",
           "tableFrom": "duplicate_photo_fingerprints",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1869,17 +1716,12 @@
       "indexes": {
         "idx_duplicate_review_event_group": {
           "name": "idx_duplicate_review_event_group",
-          "columns": [
-            "group_key",
-            "created_at"
-          ],
+          "columns": ["group_key", "created_at"],
           "isUnique": false
         },
         "idx_duplicate_review_event_photo": {
           "name": "idx_duplicate_review_event_photo",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": false
         }
       },
@@ -1971,16 +1813,12 @@
       "indexes": {
         "idx_duplicate_review_group_version": {
           "name": "idx_duplicate_review_group_version",
-          "columns": [
-            "group_version"
-          ],
+          "columns": ["group_version"],
           "isUnique": false
         },
         "idx_duplicate_review_group_needs_review": {
           "name": "idx_duplicate_review_group_needs_review",
-          "columns": [
-            "needs_review"
-          ],
+          "columns": ["needs_review"],
           "isUnique": false
         }
       },
@@ -2041,16 +1879,12 @@
       "indexes": {
         "idx_duplicate_review_member_photo_id": {
           "name": "idx_duplicate_review_member_photo_id",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": false
         },
         "idx_duplicate_review_member_decision": {
           "name": "idx_duplicate_review_member_decision",
-          "columns": [
-            "decision"
-          ],
+          "columns": ["decision"],
           "isUnique": false
         }
       },
@@ -2059,12 +1893,8 @@
           "name": "duplicate_review_members_group_key_duplicate_review_groups_group_key_fk",
           "tableFrom": "duplicate_review_members",
           "tableTo": "duplicate_review_groups",
-          "columnsFrom": [
-            "group_key"
-          ],
-          "columnsTo": [
-            "group_key"
-          ],
+          "columnsFrom": ["group_key"],
+          "columnsTo": ["group_key"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2072,22 +1902,15 @@
           "name": "duplicate_review_members_photo_id_photos_id_fk",
           "tableFrom": "duplicate_review_members",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "duplicate_review_members_group_key_photo_id_pk": {
-          "columns": [
-            "group_key",
-            "photo_id"
-          ],
+          "columns": ["group_key", "photo_id"],
           "name": "duplicate_review_members_group_key_photo_id_pk"
         }
       },
@@ -2150,9 +1973,7 @@
       "indexes": {
         "idx_duplicate_run_group_key": {
           "name": "idx_duplicate_run_group_key",
-          "columns": [
-            "group_key"
-          ],
+          "columns": ["group_key"],
           "isUnique": false
         }
       },
@@ -2161,22 +1982,15 @@
           "name": "duplicate_run_groups_run_id_duplicate_detection_runs_id_fk",
           "tableFrom": "duplicate_run_groups",
           "tableTo": "duplicate_detection_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "duplicate_run_groups_run_id_group_key_pk": {
-          "columns": [
-            "run_id",
-            "group_key"
-          ],
+          "columns": ["run_id", "group_key"],
           "name": "duplicate_run_groups_run_id_group_key_pk"
         }
       },
@@ -2225,9 +2039,7 @@
       "indexes": {
         "idx_duplicate_run_member_photo": {
           "name": "idx_duplicate_run_member_photo",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": false
         }
       },
@@ -2236,23 +2048,15 @@
           "name": "duplicate_run_members_run_id_duplicate_detection_runs_id_fk",
           "tableFrom": "duplicate_run_members",
           "tableTo": "duplicate_detection_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "duplicate_run_members_run_id_group_key_photo_id_pk": {
-          "columns": [
-            "run_id",
-            "group_key",
-            "photo_id"
-          ],
+          "columns": ["run_id", "group_key", "photo_id"],
           "name": "duplicate_run_members_run_id_group_key_photo_id_pk"
         }
       },
@@ -2315,16 +2119,12 @@
       "indexes": {
         "idx_duplicate_run_pair_photo_a": {
           "name": "idx_duplicate_run_pair_photo_a",
-          "columns": [
-            "photo_a_id"
-          ],
+          "columns": ["photo_a_id"],
           "isUnique": false
         },
         "idx_duplicate_run_pair_photo_b": {
           "name": "idx_duplicate_run_pair_photo_b",
-          "columns": [
-            "photo_b_id"
-          ],
+          "columns": ["photo_b_id"],
           "isUnique": false
         }
       },
@@ -2333,23 +2133,15 @@
           "name": "duplicate_run_pairs_run_id_duplicate_detection_runs_id_fk",
           "tableFrom": "duplicate_run_pairs",
           "tableTo": "duplicate_detection_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "duplicate_run_pairs_run_id_photo_a_id_photo_b_id_pk": {
-          "columns": [
-            "run_id",
-            "photo_a_id",
-            "photo_b_id"
-          ],
+          "columns": ["run_id", "photo_a_id", "photo_b_id"],
           "name": "duplicate_run_pairs_run_id_photo_a_id_photo_b_id_pk"
         }
       },
@@ -2545,104 +2337,72 @@
       "indexes": {
         "exif_data_photo_id_unique": {
           "name": "exif_data_photo_id_unique",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": true
         },
         "idx_exif_date_taken": {
           "name": "idx_exif_date_taken",
-          "columns": [
-            "date_taken"
-          ],
+          "columns": ["date_taken"],
           "isUnique": false
         },
         "idx_exif_camera_model": {
           "name": "idx_exif_camera_model",
-          "columns": [
-            "camera_model"
-          ],
+          "columns": ["camera_model"],
           "isUnique": false
         },
         "idx_exif_lens_model": {
           "name": "idx_exif_lens_model",
-          "columns": [
-            "lens_model"
-          ],
+          "columns": ["lens_model"],
           "isUnique": false
         },
         "idx_exif_focal_length": {
           "name": "idx_exif_focal_length",
-          "columns": [
-            "focal_length"
-          ],
+          "columns": ["focal_length"],
           "isUnique": false
         },
         "idx_exif_aperture": {
           "name": "idx_exif_aperture",
-          "columns": [
-            "aperture"
-          ],
+          "columns": ["aperture"],
           "isUnique": false
         },
         "idx_exif_iso": {
           "name": "idx_exif_iso",
-          "columns": [
-            "iso"
-          ],
+          "columns": ["iso"],
           "isUnique": false
         },
         "idx_exif_shutter_speed": {
           "name": "idx_exif_shutter_speed",
-          "columns": [
-            "shutter_speed"
-          ],
+          "columns": ["shutter_speed"],
           "isUnique": false
         },
         "idx_exif_focal_length_num": {
           "name": "idx_exif_focal_length_num",
-          "columns": [
-            "focal_length_num"
-          ],
+          "columns": ["focal_length_num"],
           "isUnique": false
         },
         "idx_exif_shutter_speed_num": {
           "name": "idx_exif_shutter_speed_num",
-          "columns": [
-            "shutter_speed_num"
-          ],
+          "columns": ["shutter_speed_num"],
           "isUnique": false
         },
         "idx_exif_camera_date": {
           "name": "idx_exif_camera_date",
-          "columns": [
-            "camera_model",
-            "date_taken"
-          ],
+          "columns": ["camera_model", "date_taken"],
           "isUnique": false
         },
         "idx_exif_iso_aperture": {
           "name": "idx_exif_iso_aperture",
-          "columns": [
-            "iso",
-            "aperture"
-          ],
+          "columns": ["iso", "aperture"],
           "isUnique": false
         },
         "idx_exif_focal_aperture": {
           "name": "idx_exif_focal_aperture",
-          "columns": [
-            "focal_length_num",
-            "aperture"
-          ],
+          "columns": ["focal_length_num", "aperture"],
           "isUnique": false
         },
         "idx_exif_shutter_iso": {
           "name": "idx_exif_shutter_iso",
-          "columns": [
-            "shutter_speed_num",
-            "iso"
-          ],
+          "columns": ["shutter_speed_num", "iso"],
           "isUnique": false
         }
       },
@@ -2651,12 +2411,8 @@
           "name": "exif_data_photo_id_photos_id_fk",
           "tableFrom": "exif_data",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2738,16 +2494,12 @@
       "indexes": {
         "idx_face_identities_rep_photo": {
           "name": "idx_face_identities_rep_photo",
-          "columns": [
-            "representative_photo_id"
-          ],
+          "columns": ["representative_photo_id"],
           "isUnique": false
         },
         "idx_face_identities_name": {
           "name": "idx_face_identities_name",
-          "columns": [
-            "name"
-          ],
+          "columns": ["name"],
           "isUnique": false
         }
       },
@@ -2756,12 +2508,8 @@
           "name": "face_identities_representative_photo_id_photos_id_fk",
           "tableFrom": "face_identities",
           "tableTo": "photos",
-          "columnsFrom": [
-            "representative_photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["representative_photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -2805,24 +2553,17 @@
       "indexes": {
         "idx_face_identity_exclusion": {
           "name": "idx_face_identity_exclusion",
-          "columns": [
-            "identity_id",
-            "face_vector_id"
-          ],
+          "columns": ["identity_id", "face_vector_id"],
           "isUnique": true
         },
         "idx_face_identity_exclusion_identity": {
           "name": "idx_face_identity_exclusion_identity",
-          "columns": [
-            "identity_id"
-          ],
+          "columns": ["identity_id"],
           "isUnique": false
         },
         "idx_face_identity_exclusion_vector": {
           "name": "idx_face_identity_exclusion_vector",
-          "columns": [
-            "face_vector_id"
-          ],
+          "columns": ["face_vector_id"],
           "isUnique": false
         }
       },
@@ -2831,12 +2572,8 @@
           "name": "face_identity_exclusions_identity_id_face_identities_id_fk",
           "tableFrom": "face_identity_exclusions",
           "tableTo": "face_identities",
-          "columnsFrom": [
-            "identity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["identity_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2844,12 +2581,8 @@
           "name": "face_identity_exclusions_face_vector_id_face_vectors_id_fk",
           "tableFrom": "face_identity_exclusions",
           "tableTo": "face_vectors",
-          "columnsFrom": [
-            "face_vector_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["face_vector_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2886,24 +2619,17 @@
       "indexes": {
         "idx_face_id_member": {
           "name": "idx_face_id_member",
-          "columns": [
-            "identity_id",
-            "face_vector_id"
-          ],
+          "columns": ["identity_id", "face_vector_id"],
           "isUnique": true
         },
         "idx_face_id_member_unique_vector": {
           "name": "idx_face_id_member_unique_vector",
-          "columns": [
-            "face_vector_id"
-          ],
+          "columns": ["face_vector_id"],
           "isUnique": true
         },
         "idx_face_id_member_fv_id": {
           "name": "idx_face_id_member_fv_id",
-          "columns": [
-            "face_vector_id"
-          ],
+          "columns": ["face_vector_id"],
           "isUnique": false
         }
       },
@@ -2912,12 +2638,8 @@
           "name": "face_identity_members_identity_id_face_identities_id_fk",
           "tableFrom": "face_identity_members",
           "tableTo": "face_identities",
-          "columnsFrom": [
-            "identity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["identity_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2925,12 +2647,8 @@
           "name": "face_identity_members_face_vector_id_face_vectors_id_fk",
           "tableFrom": "face_identity_members",
           "tableTo": "face_vectors",
-          "columnsFrom": [
-            "face_vector_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["face_vector_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3010,25 +2728,17 @@
       "indexes": {
         "idx_face_review_decision_photo_face": {
           "name": "idx_face_review_decision_photo_face",
-          "columns": [
-            "photo_id",
-            "face_index",
-            "content_revision"
-          ],
+          "columns": ["photo_id", "face_index", "content_revision"],
           "isUnique": true
         },
         "idx_face_review_decision_photo_id": {
           "name": "idx_face_review_decision_photo_id",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": false
         },
         "idx_face_review_decision_source_identity": {
           "name": "idx_face_review_decision_source_identity",
-          "columns": [
-            "source_identity_id"
-          ],
+          "columns": ["source_identity_id"],
           "isUnique": false
         }
       },
@@ -3037,12 +2747,8 @@
           "name": "face_review_decisions_photo_id_photos_id_fk",
           "tableFrom": "face_review_decisions",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3050,12 +2756,8 @@
           "name": "face_review_decisions_source_identity_id_face_identities_id_fk",
           "tableFrom": "face_review_decisions",
           "tableTo": "face_identities",
-          "columnsFrom": [
-            "source_identity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_identity_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3165,9 +2867,7 @@
       "indexes": {
         "idx_face_vectors_photo_id": {
           "name": "idx_face_vectors_photo_id",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": false
         }
       },
@@ -3176,12 +2876,8 @@
           "name": "face_vectors_photo_id_photos_id_fk",
           "tableFrom": "face_vectors",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3313,16 +3009,12 @@
       "indexes": {
         "folders_path_unique": {
           "name": "folders_path_unique",
-          "columns": [
-            "path"
-          ],
+          "columns": ["path"],
           "isUnique": true
         },
         "idx_folders_parent_id": {
           "name": "idx_folders_parent_id",
-          "columns": [
-            "parent_id"
-          ],
+          "columns": ["parent_id"],
           "isUnique": false
         }
       },
@@ -3405,9 +3097,7 @@
       "indexes": {
         "idx_library_move_target": {
           "name": "idx_library_move_target",
-          "columns": [
-            "target_path_key"
-          ],
+          "columns": ["target_path_key"],
           "isUnique": false
         }
       },
@@ -3416,22 +3106,15 @@
           "name": "library_move_candidates_photo_id_photos_id_fk",
           "tableFrom": "library_move_candidates",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "library_move_candidates_photo_id_target_path_key_pk": {
-          "columns": [
-            "photo_id",
-            "target_path_key"
-          ],
+          "columns": ["photo_id", "target_path_key"],
           "name": "library_move_candidates_photo_id_target_path_key_pk"
         }
       },
@@ -3502,12 +3185,8 @@
           "name": "library_refresh_jobs_photo_id_photos_id_fk",
           "tableFrom": "library_refresh_jobs",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3540,12 +3219,8 @@
           "name": "photo_sequence_exclusions_photo_id_photos_id_fk",
           "tableFrom": "photo_sequence_exclusions",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3589,17 +3264,12 @@
       "indexes": {
         "idx_sequence_member_position": {
           "name": "idx_sequence_member_position",
-          "columns": [
-            "sequence_id",
-            "position"
-          ],
+          "columns": ["sequence_id", "position"],
           "isUnique": true
         },
         "idx_sequence_member_photo": {
           "name": "idx_sequence_member_photo",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": true
         }
       },
@@ -3608,12 +3278,8 @@
           "name": "photo_sequence_members_sequence_id_photo_sequences_id_fk",
           "tableFrom": "photo_sequence_members",
           "tableTo": "photo_sequences",
-          "columnsFrom": [
-            "sequence_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sequence_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3621,12 +3287,8 @@
           "name": "photo_sequence_members_photo_id_photos_id_fk",
           "tableFrom": "photo_sequence_members",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3692,17 +3354,12 @@
       "indexes": {
         "idx_sequence_suggestion_pair": {
           "name": "idx_sequence_suggestion_pair",
-          "columns": [
-            "first_sequence_id",
-            "second_sequence_id"
-          ],
+          "columns": ["first_sequence_id", "second_sequence_id"],
           "isUnique": true
         },
         "idx_sequence_suggestion_status": {
           "name": "idx_sequence_suggestion_status",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         }
       },
@@ -3711,12 +3368,8 @@
           "name": "photo_sequence_suggestions_first_sequence_id_photo_sequences_id_fk",
           "tableFrom": "photo_sequence_suggestions",
           "tableTo": "photo_sequences",
-          "columnsFrom": [
-            "first_sequence_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["first_sequence_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3724,12 +3377,8 @@
           "name": "photo_sequence_suggestions_second_sequence_id_photo_sequences_id_fk",
           "tableFrom": "photo_sequence_suggestions",
           "tableTo": "photo_sequences",
-          "columnsFrom": [
-            "second_sequence_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["second_sequence_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3824,17 +3473,12 @@
       "indexes": {
         "idx_sequence_folder_time": {
           "name": "idx_sequence_folder_time",
-          "columns": [
-            "folder_id",
-            "started_at"
-          ],
+          "columns": ["folder_id", "started_at"],
           "isUnique": false
         },
         "idx_sequence_representative": {
           "name": "idx_sequence_representative",
-          "columns": [
-            "representative_photo_id"
-          ],
+          "columns": ["representative_photo_id"],
           "isUnique": false
         }
       },
@@ -3843,12 +3487,8 @@
           "name": "photo_sequences_folder_id_folders_id_fk",
           "tableFrom": "photo_sequences",
           "tableTo": "folders",
-          "columnsFrom": [
-            "folder_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["folder_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -3856,12 +3496,8 @@
           "name": "photo_sequences_representative_photo_id_photos_id_fk",
           "tableFrom": "photo_sequences",
           "tableTo": "photos",
-          "columnsFrom": [
-            "representative_photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["representative_photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3929,24 +3565,17 @@
       "indexes": {
         "idx_photo_tag": {
           "name": "idx_photo_tag",
-          "columns": [
-            "photo_id",
-            "tag_id"
-          ],
+          "columns": ["photo_id", "tag_id"],
           "isUnique": true
         },
         "idx_pt_photo_id": {
           "name": "idx_pt_photo_id",
-          "columns": [
-            "photo_id"
-          ],
+          "columns": ["photo_id"],
           "isUnique": false
         },
         "idx_pt_tag_id": {
           "name": "idx_pt_tag_id",
-          "columns": [
-            "tag_id"
-          ],
+          "columns": ["tag_id"],
           "isUnique": false
         }
       },
@@ -3955,12 +3584,8 @@
           "name": "photo_tags_photo_id_photos_id_fk",
           "tableFrom": "photo_tags",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3968,12 +3593,8 @@
           "name": "photo_tags_tag_id_tags_id_fk",
           "tableFrom": "photo_tags",
           "tableTo": "tags",
-          "columnsFrom": [
-            "tag_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tag_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4026,18 +3647,12 @@
       "indexes": {
         "idx_photo_view_stats_viewed": {
           "name": "idx_photo_view_stats_viewed",
-          "columns": [
-            "view_count",
-            "last_viewed_at"
-          ],
+          "columns": ["view_count", "last_viewed_at"],
           "isUnique": false
         },
         "idx_photo_view_stats_wandered": {
           "name": "idx_photo_view_stats_wandered",
-          "columns": [
-            "wander_shown_count",
-            "last_wandered_at"
-          ],
+          "columns": ["wander_shown_count", "last_wandered_at"],
           "isUnique": false
         }
       },
@@ -4046,12 +3661,8 @@
           "name": "photo_view_stats_photo_id_photos_id_fk",
           "tableFrom": "photo_view_stats",
           "tableTo": "photos",
-          "columnsFrom": [
-            "photo_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["photo_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4455,185 +4066,117 @@
       "indexes": {
         "photos_path_unique": {
           "name": "photos_path_unique",
-          "columns": [
-            "path"
-          ],
+          "columns": ["path"],
           "isUnique": true
         },
         "idx_photos_folder_id": {
           "name": "idx_photos_folder_id",
-          "columns": [
-            "folder_id"
-          ],
+          "columns": ["folder_id"],
           "isUnique": false
         },
         "idx_photos_path_folded": {
           "name": "idx_photos_path_folded",
-          "columns": [
-            "lower(\"path\")"
-          ],
+          "columns": ["lower(\"path\")"],
           "isUnique": false
         },
         "idx_photos_source_status": {
           "name": "idx_photos_source_status",
-          "columns": [
-            "source_status"
-          ],
+          "columns": ["source_status"],
           "isUnique": false
         },
         "idx_photos_source_hash": {
           "name": "idx_photos_source_hash",
-          "columns": [
-            "source_size",
-            "source_hash"
-          ],
+          "columns": ["source_size", "source_hash"],
           "isUnique": false
         },
         "idx_photos_is_ai_processed": {
           "name": "idx_photos_is_ai_processed",
-          "columns": [
-            "is_ai_processed"
-          ],
+          "columns": ["is_ai_processed"],
           "isUnique": false
         },
         "idx_photos_is_face_processed": {
           "name": "idx_photos_is_face_processed",
-          "columns": [
-            "is_face_processed"
-          ],
+          "columns": ["is_face_processed"],
           "isUnique": false
         },
         "idx_photos_file_date": {
           "name": "idx_photos_file_date",
-          "columns": [
-            "file_date"
-          ],
+          "columns": ["file_date"],
           "isUnique": false
         },
         "idx_photos_phash": {
           "name": "idx_photos_phash",
-          "columns": [
-            "phash"
-          ],
+          "columns": ["phash"],
           "isUnique": false
         },
         "idx_photos_deleted_at": {
           "name": "idx_photos_deleted_at",
-          "columns": [
-            "deleted_at"
-          ],
+          "columns": ["deleted_at"],
           "isUnique": false
         },
         "idx_photos_deleted_file_date": {
           "name": "idx_photos_deleted_file_date",
-          "columns": [
-            "deleted_at",
-            "file_date"
-          ],
+          "columns": ["deleted_at", "file_date"],
           "isUnique": false
         },
         "idx_photos_deleted_folder_file_date": {
           "name": "idx_photos_deleted_folder_file_date",
-          "columns": [
-            "deleted_at",
-            "folder_id",
-            "file_date"
-          ],
+          "columns": ["deleted_at", "folder_id", "file_date"],
           "isUnique": false
         },
         "idx_photos_deleted_fav_file_date": {
           "name": "idx_photos_deleted_fav_file_date",
-          "columns": [
-            "deleted_at",
-            "is_favorite",
-            "file_date"
-          ],
+          "columns": ["deleted_at", "is_favorite", "file_date"],
           "isUnique": false
         },
         "idx_photos_file_size": {
           "name": "idx_photos_file_size",
-          "columns": [
-            "file_size"
-          ],
+          "columns": ["file_size"],
           "isUnique": false
         },
         "idx_photos_thumbnail_path": {
           "name": "idx_photos_thumbnail_path",
-          "columns": [
-            "thumbnail_path"
-          ],
+          "columns": ["thumbnail_path"],
           "isUnique": false
         },
         "idx_photos_filename": {
           "name": "idx_photos_filename",
-          "columns": [
-            "filename"
-          ],
+          "columns": ["filename"],
           "isUnique": false
         },
         "idx_photos_deleted_name": {
           "name": "idx_photos_deleted_name",
-          "columns": [
-            "deleted_at",
-            "filename",
-            "id"
-          ],
+          "columns": ["deleted_at", "filename", "id"],
           "isUnique": false
         },
         "idx_photos_deleted_size": {
           "name": "idx_photos_deleted_size",
-          "columns": [
-            "deleted_at",
-            "file_size",
-            "id"
-          ],
+          "columns": ["deleted_at", "file_size", "id"],
           "isUnique": false
         },
         "idx_photos_deleted_folder_name": {
           "name": "idx_photos_deleted_folder_name",
-          "columns": [
-            "deleted_at",
-            "folder_id",
-            "filename",
-            "id"
-          ],
+          "columns": ["deleted_at", "folder_id", "filename", "id"],
           "isUnique": false
         },
         "idx_photos_deleted_folder_size": {
           "name": "idx_photos_deleted_folder_size",
-          "columns": [
-            "deleted_at",
-            "folder_id",
-            "file_size",
-            "id"
-          ],
+          "columns": ["deleted_at", "folder_id", "file_size", "id"],
           "isUnique": false
         },
         "idx_photos_deleted_fav_name": {
           "name": "idx_photos_deleted_fav_name",
-          "columns": [
-            "deleted_at",
-            "is_favorite",
-            "filename",
-            "id"
-          ],
+          "columns": ["deleted_at", "is_favorite", "filename", "id"],
           "isUnique": false
         },
         "idx_photos_deleted_fav_size": {
           "name": "idx_photos_deleted_fav_size",
-          "columns": [
-            "deleted_at",
-            "is_favorite",
-            "file_size",
-            "id"
-          ],
+          "columns": ["deleted_at", "is_favorite", "file_size", "id"],
           "isUnique": false
         },
         "idx_photos_color_bucket": {
           "name": "idx_photos_color_bucket",
-          "columns": [
-            "color_bucket"
-          ],
+          "columns": ["color_bucket"],
           "isUnique": false
         }
       },
@@ -4642,12 +4185,8 @@
           "name": "photos_folder_id_folders_id_fk",
           "tableFrom": "photos",
           "tableTo": "folders",
-          "columnsFrom": [
-            "folder_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["folder_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -4713,10 +4252,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "plugin_assets_plugin_id_setting_id_pk": {
-          "columns": [
-            "plugin_id",
-            "setting_id"
-          ],
+          "columns": ["plugin_id", "setting_id"],
           "name": "plugin_assets_plugin_id_setting_id_pk"
         }
       },
@@ -4809,10 +4345,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "plugin_installations_plugin_id_version_pk": {
-          "columns": [
-            "plugin_id",
-            "version"
-          ],
+          "columns": ["plugin_id", "version"],
           "name": "plugin_installations_plugin_id_version_pk"
         }
       },
@@ -4933,10 +4466,7 @@
       "indexes": {
         "idx_shooting_project_actions_project": {
           "name": "idx_shooting_project_actions_project",
-          "columns": [
-            "project_id",
-            "id"
-          ],
+          "columns": ["project_id", "id"],
           "isUnique": false
         }
       },
@@ -4945,12 +4475,8 @@
           "name": "shooting_project_actions_project_id_shooting_projects_id_fk",
           "tableFrom": "shooting_project_actions",
           "tableTo": "shooting_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -5080,17 +4606,12 @@
       "indexes": {
         "idx_shooting_project_output_items_task": {
           "name": "idx_shooting_project_output_items_task",
-          "columns": [
-            "task_id"
-          ],
+          "columns": ["task_id"],
           "isUnique": false
         },
         "idx_shooting_project_output_items_target": {
           "name": "idx_shooting_project_output_items_target",
-          "columns": [
-            "task_id",
-            "target_path"
-          ],
+          "columns": ["task_id", "target_path"],
           "isUnique": true
         }
       },
@@ -5099,12 +4620,8 @@
           "name": "shooting_project_output_items_task_id_shooting_project_outputs_id_fk",
           "tableFrom": "shooting_project_output_items",
           "tableTo": "shooting_project_outputs",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["task_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -5170,9 +4687,7 @@
       "indexes": {
         "idx_shooting_project_outputs_project": {
           "name": "idx_shooting_project_outputs_project",
-          "columns": [
-            "project_id"
-          ],
+          "columns": ["project_id"],
           "isUnique": false
         }
       },
@@ -5181,12 +4696,8 @@
           "name": "shooting_project_outputs_project_id_shooting_projects_id_fk",
           "tableFrom": "shooting_project_outputs",
           "tableTo": "shooting_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -5367,18 +4878,12 @@
       "indexes": {
         "idx_shooting_project_photos_path": {
           "name": "idx_shooting_project_photos_path",
-          "columns": [
-            "project_id",
-            "relative_path"
-          ],
+          "columns": ["project_id", "relative_path"],
           "isUnique": true
         },
         "idx_shooting_project_photos_status": {
           "name": "idx_shooting_project_photos_status",
-          "columns": [
-            "project_id",
-            "status"
-          ],
+          "columns": ["project_id", "status"],
           "isUnique": false
         }
       },
@@ -5387,12 +4892,8 @@
           "name": "shooting_project_photos_project_id_shooting_projects_id_fk",
           "tableFrom": "shooting_project_photos",
           "tableTo": "shooting_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -5541,10 +5042,7 @@
       "indexes": {
         "idx_shooting_projects_recent": {
           "name": "idx_shooting_projects_recent",
-          "columns": [
-            "archived_at",
-            "last_opened_at"
-          ],
+          "columns": ["archived_at", "last_opened_at"],
           "isUnique": false
         }
       },
@@ -5595,16 +5093,12 @@
       "indexes": {
         "tags_name_unique": {
           "name": "tags_name_unique",
-          "columns": [
-            "name"
-          ],
+          "columns": ["name"],
           "isUnique": true
         },
         "idx_tags_parent_id": {
           "name": "idx_tags_parent_id",
-          "columns": [
-            "parent_id"
-          ],
+          "columns": ["parent_id"],
           "isUnique": false
         }
       },
@@ -5613,12 +5107,8 @@
           "name": "tags_parent_id_tags_id_fk",
           "tableFrom": "tags",
           "tableTo": "tags",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["parent_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
