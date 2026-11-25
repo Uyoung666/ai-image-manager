@@ -1,8 +1,8 @@
-# AI Image Manager v2.2.10 User Guide
+# AI Image Manager v2.2.12 User Guide
 
 > A local-first photo manager for Windows. Build an index over your existing folders, then search, organize, curate, analyze, export, and share your library.
 
-This guide follows the normal user workflow and describes v2.2.10. GitHub Releases identifies the available stable release. v2.0.0 was the new public starting point; this guide makes no upgrade or data-format promise for historical releases.
+This guide covers installing [v2.2.12](https://github.com/Uyoung666/ai-image-manager/releases/tag/v2.2.12), browsing and searching photos, and organizing your library.
 
 ---
 
@@ -74,8 +74,8 @@ RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews r
 Quit the app and back up its data directory before upgrading. Keep the existing data directory and original photo folders. For a manual upgrade, download the matching installer from [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest) and install over your existing copy. For ZIP builds, extract the new version into a new directory and keep using the existing data directory.
 
 - **v2.2.4 and v2.2.5** report “Redirect was cancelled” when the updater follows a GitHub download redirect. Upgrade manually once. Use the same steps if you run into the download error.
-- **Setup and MSI installations with the updater enabled** can check for v2.2.10 under **Settings → Software Update**. This release uses a full download so older clients can install the MSI update fix. Upgrade ZIP builds and MSI installations with the updater disabled manually.
-- v2.2.9 migrates an existing library database on first launch. If the existing photos table has yet to receive the library source schema, the app saves a `pre-library-reliability-*.db` database snapshot under `data/backups/` in the app data directory before migrating. Background checks then verify sources and fill in file fingerprints in batches.
+- **Setup and MSI installations with the updater enabled** can check for v2.2.12 under **Settings → Software Update**. Eligible v2.2.11 installations can use a delta package. Other supported installations use the full package. Upgrade ZIP builds and MSI installations with the updater disabled manually.
+- The app migrates an existing library database as needed when it opens. For libraries that still need the source schema introduced in v2.2.9, the app saves a `pre-library-reliability-*.db` database snapshot under `data/backups/` in the app data directory before migrating. Background checks then verify sources and fill in file fingerprints in batches.
 - Source status updates as checks progress. You can normally keep using the existing AI index. When photo content changes, the app refreshes that photo as needed. If the app reports an incompatible index, follow [Index upgrades and rebuilding](#index-upgrades-and-rebuilding).
 - To return to an earlier app version, quit the app and restore a pre-upgrade backup compatible with that version. The automatic snapshot contains only the database. Use a pre-upgrade backup of the app data directory for a complete restore.
 
@@ -200,13 +200,15 @@ Select a photo and press `Space`:
 
 Double-click a photo, or press `Enter` from quick preview:
 
-- `Space` plays or pauses the slideshow
-- Scroll to zoom, drag to pan, double-click to toggle fit and actual pixels
+- `Space` plays or pauses the slideshow. You can set the playback interval.
+- Scroll to zoom, drag the photo to pan, or double-click to switch between fit and actual pixels. In the **Zoom** menu, enable **Lock zoom and position** to keep your view while switching photos.
 - `R` rotates clockwise; `Shift + R` rotates counter-clockwise
 - `0` fits the window; `1` shows actual pixels
 - `T` toggles the thumbnail navigator
 - `I` toggles the information panel
-- Fullscreen and configurable slideshow intervals are available
+- Choose **Fullscreen** in the toolbar for immersive viewing. Move the pointer to show the controls again. Press `Esc` to close any open menu or panel, then exit fullscreen.
+
+The lightbox keeps your viewing position while zooming or loading a sharper image. If a cached HEIC preview is available, you can start browsing while the full image loads.
 
 Lightbox actions affect the viewing session and do not rewrite the original file. Rotation and slideshow state are not automatically written to photo metadata.
 
@@ -248,7 +250,7 @@ Click the filter button to combine:
 - Minimum and maximum focal length
 - Available format, tag, and favorite filters
 
-Active conditions appear as filter chips and can be removed individually or cleared at once.
+Active conditions appear as filter chips and can be removed individually or cleared at once. Click empty toolbar space to close the EXIF filter panel.
 
 Use `YYYY-MM-DD` for dates. Photos without the relevant EXIF are not assigned an invented capture date; interpret results together with metadata coverage.
 
@@ -786,6 +788,8 @@ Chinese and English are built in. For Japanese, download the matching official `
 
 Use **Settings → Plugins** to install and manage theme plugins and official signed language packs. Plugins are currently imported from local `.aim-plugin` files; there is no online plugin marketplace yet.
 
+With the built-in **ASCII Ocean** theme and background interaction enabled, move the pointer over exposed ocean background in the main content area to create ripples, or click to make a wider splash. Reduced motion shows a still frame.
+
 #### Install, preview, and enable
 
 1. Click **Install Plugin** and choose a plugin package.
@@ -813,8 +817,9 @@ If you want to create a plugin, read the [Plugin development guide](docs/plugin-
 
 ### Storage and indexing
 
-- View and change the data directory
-- Migrate the database, thumbnails, vector index, and models
+Use **Settings → Storage → Data Directory → Manage library** to create an empty library, open an existing one, or migrate the current library to an empty folder and switch to it. Migration copies library data such as the database, thumbnails, vector index, and models. Original photos stay where they are, and the old library directory is kept by default.
+
+- View the active data directory
 - View thumbnail cache size and location
 - Clear the thumbnail cache
 - View the database location and library source status
@@ -835,6 +840,8 @@ Use **Settings → Wander** to configure idle time, photo interval, automatic ac
 ### Software updates
 
 The header update control shows task status, download progress and recovery actions across pages. Interrupted downloads can resume, and update tasks can recover after restarting the app. Follow the prompts for insufficient disk space or damaged caches, then retry. Once downloaded, choose to install and restart.
+
+Software Update shows the time of the last check attempt and the last successful check. If GitHub rate-limits its API, the app tries to fetch the update manifest from GitHub's download endpoint. If the manifest for the selected version asks you to wait, you can retry that version when the countdown ends.
 
 Under **Settings → Software Update**, you can:
 
@@ -935,7 +942,7 @@ Press `?` to open the in-app shortcut help panel.
 | Shortcut | Action |
 | --- | --- |
 | `Space` | Play/pause slideshow |
-| `Esc` | Exit lightbox |
+| `Esc` | Close a menu or panel, exit fullscreen, or close the lightbox |
 | `I` | Toggle details |
 | `F` | Toggle favorite |
 | `T` | Toggle thumbnails |
