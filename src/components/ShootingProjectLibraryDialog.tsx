@@ -15,6 +15,14 @@ import { queryClient } from "@/providers/QueryProvider";
 import type { ShootingProjectOutputTask } from "@/types/shooting-project";
 import { shootingProjectErrorKey } from "./ShootingProjectStatus";
 
+const OUTPUT_TASK_ERRORS = new Set([
+  "shootingProject.outputConflict",
+  "shootingProject.outputIncomplete",
+  "shootingProject.outputInvalidTarget",
+  "shootingProject.outputRecheckUnavailable",
+  "shootingProject.outputVerifyFailed",
+]);
+
 export function ShootingProjectLibraryDialog({
   projectId,
   tasks,
@@ -45,6 +53,10 @@ export function ShootingProjectLibraryDialog({
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errorKey, setErrorKey] = useState<string | null>(null);
+  const needsOutputRetry =
+    sourceValue !== "original" &&
+    errorKey !== null &&
+    OUTPUT_TASK_ERRORS.has(errorKey);
   const [retry, setRetry] = useState(0);
   const request =
     sourceValue === "original"
@@ -168,14 +180,16 @@ export function ShootingProjectLibraryDialog({
             <p className="break-words text-destructive text-xs" role="alert">
               {t(errorKey)}
             </p>
-            <Button
-              disabled={busy}
-              onClick={() => setRetry((value) => value + 1)}
-              type="button"
-              variant="outline"
-            >
-              {t("retry")}
-            </Button>
+            {!needsOutputRetry && (
+              <Button
+                disabled={busy}
+                onClick={() => setRetry((value) => value + 1)}
+                type="button"
+                variant="outline"
+              >
+                {t("retry")}
+              </Button>
+            )}
           </div>
         )}
         <DialogFooter>
@@ -185,13 +199,16 @@ export function ShootingProjectLibraryDialog({
             type="button"
             variant="outline"
           >
-            {t("close")}
+            {t(
+              needsOutputRetry ? "shootingProject.outputReturnToTasks" : "close"
+            )}
           </Button>
           <Button
             data-testid="shooting-library-confirm"
             disabled={
               busy ||
               loading ||
+              needsOutputRetry ||
               !inspection ||
               inspection.count === 0 ||
               result !== null

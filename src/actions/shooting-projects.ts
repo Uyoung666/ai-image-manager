@@ -4,6 +4,7 @@ import type {
   ShootingProject,
   ShootingProjectBrowseState,
   ShootingProjectLibraryRequest,
+  ShootingProjectOutputDecision,
   ShootingProjectPhotoStatus,
   ShootingProjectSource,
 } from "@/types/shooting-project";
@@ -91,6 +92,8 @@ export const shootingProjectActions = {
     targetParent: string;
     photoIds?: string[];
     acknowledgeWatchedTarget?: boolean;
+    inspectionToken: string;
+    decisions: ShootingProjectOutputDecision[];
   }) {
     return ipc.client.shootingProjects.createOutput(input);
   },

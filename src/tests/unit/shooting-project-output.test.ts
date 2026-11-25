@@ -5,6 +5,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// biome-ignore lint/performance/noNamespaceImport: These tests spy on the real database export to detect access after shutdown.
+import * as database from "@/db";
 import { closeDatabase, getDatabase } from "@/db";
 import {
   folders,
@@ -17,7 +19,7 @@ import {
 import { getLightweightFingerprint } from "@/services/shooting-project-files";
 import {
   cancelShootingProjectOutput,
-  createShootingProjectOutput,
+  createShootingProjectOutput as createInspectedOutput,
   inspectShootingProjectOutput,
   listShootingProjectOutputs,
   resolveShootingProjectCompletedOutputFiles,
@@ -99,6 +101,20 @@ async function addPhoto(
   };
   getDatabase().insert(shootingProjectPhotos).values(row).run();
   return { ...row, sourcePath, bytes };
+}
+
+async function createShootingProjectOutput(
+  input: Omit<
+    Parameters<typeof createInspectedOutput>[0],
+    "inspectionToken" | "decisions"
+  >
+) {
+  const { token } = await inspectShootingProjectOutput(input);
+  return await createInspectedOutput({
+    ...input,
+    inspectionToken: token,
+    decisions: [],
+  });
 }
 
 async function settled(taskId: string): Promise<ShootingProjectOutputTask> {
@@ -320,6 +336,264 @@ describe("shooting project original output", () => {
     expect(fs.readFileSync(raw.sourcePath)).toEqual(raw.bytes);
   });
 
+  it("includes full-name XMP and standalone ACR, and scans each source directory once per pass", async () => {
+    const raw = await addPhoto("day-one/IMG.01.NEF");
+    const jpeg = await addPhoto("day-one/IMG.01.JPG");
+    await addPhoto("day-two/IMG.01.NEF");
+    const expected = [
+      "day-one/IMG.01.NEF.XMP",
+      "day-one/IMG.01.JPG.xmp",
+      "day-one/IMG.01.ACR",
+      "day-two/IMG.01.xmp",
+    ];
+    for (const relative of expected) {
+      fs.writeFileSync(path.join(sourceRoot, relative), relative);
+    }
+    fs.writeFileSync(
+      path.join(sourceRoot, "day-one", "IMG.01_01.NEF.xmp"),
+      "numbered edit"
+    );
+    const read = vi.spyOn(fsp, "readdir");
+    const inspected = await inspectShootingProjectOutput({
+      projectId,
+      targetParent,
+    });
+    expect(inspected).toMatchObject({
+      originalCount: 3,
+      xmpCount: 3,
+      acrCount: 1,
+      count: 7,
+      ambiguities: [],
+    });
+    expect(read).toHaveBeenCalledTimes(2);
+    const created = await createInspectedOutput({
+      projectId,
+      targetParent,
+      inspectionToken: inspected.token,
+      decisions: [],
+    });
+    expect(read).toHaveBeenCalledTimes(4);
+    const result = await settled(created.id);
+    expect(result.status).toBe("completed");
+    const sidecars = result.items.filter((item) => item.kind !== "original");
+    expect(sidecars.map((item) => item.relativePath).sort()).toEqual(
+      expected.map((relative) => path.normalize(relative)).sort()
+    );
+    for (const item of sidecars) {
+      expect(fs.readFileSync(item.targetPath)).toEqual(
+        fs.readFileSync(item.sourcePath)
+      );
+      expect(item.sha256).toBe(digest(fs.readFileSync(item.sourcePath)));
+    }
+    expect(
+      sidecars.find((item) => item.relativePath.endsWith("NEF.XMP"))?.photoId
+    ).toBe(raw.id);
+    expect(
+      sidecars.find((item) => item.relativePath.endsWith("JPG.xmp"))?.photoId
+    ).toBe(jpeg.id);
+    expect(
+      await resolveShootingProjectCompletedOutputFiles({
+        projectId,
+        taskId: result.id,
+      })
+    ).toHaveLength(3);
+  });
+
+  it.each([
+    "include",
+    "skip",
+  ] as const)("honors the decision to %s shared files beside an unscanned JPEG", async (action) => {
+    const raw = await addPhoto("IMG.NEF");
+    fs.writeFileSync(path.join(sourceRoot, "IMG.JPG"), "unscanned");
+    fs.writeFileSync(path.join(sourceRoot, "IMG.NEF.xmp"), "raw only");
+    fs.writeFileSync(path.join(sourceRoot, "IMG.xmp"), "shared XMP");
+    fs.writeFileSync(path.join(sourceRoot, "IMG.acr"), "shared ACR");
+    const input = { projectId, targetParent, photoIds: [raw.id] };
+    const inspection = await inspectShootingProjectOutput(input);
+    expect(inspection).toMatchObject({ count: 2, xmpCount: 1, acrCount: 0 });
+    expect(inspection.ambiguities).toHaveLength(1);
+    const [group] = inspection.ambiguities;
+    expect(group.photos).toEqual([
+      { relativePath: "IMG.JPG", selected: false },
+      { relativePath: "IMG.NEF", selected: true },
+    ]);
+    expect(group.files.map((item) => item.relativePath)).toEqual([
+      "IMG.acr",
+      "IMG.xmp",
+    ]);
+    await expect(
+      createInspectedOutput({
+        ...input,
+        inspectionToken: inspection.token,
+        decisions: [],
+      })
+    ).rejects.toMatchObject({ code: "OUTPUT_INSPECTION_CHANGED" });
+    expect(fs.readdirSync(targetParent)).toEqual([]);
+    const created = await createInspectedOutput({
+      ...input,
+      inspectionToken: inspection.token,
+      decisions: [{ id: group.id, action }],
+    });
+    const task = await settled(created.id);
+    expect(task.status).toBe("completed");
+    expect(fs.readdirSync(task.targetRoot).sort()).toEqual(
+      action === "include"
+        ? ["IMG.NEF", "IMG.NEF.xmp", "IMG.acr", "IMG.xmp"]
+        : ["IMG.NEF", "IMG.NEF.xmp"]
+    );
+    expect(task.skippedSidecars).toEqual(
+      action === "skip" ? ["IMG.acr", "IMG.xmp"] : undefined
+    );
+  });
+
+  it("reserves a full-name XMP for its original even when another selected filename shares that stem", async () => {
+    await addPhoto("IMG.NEF");
+    const jpeg = await addPhoto("IMG.NEF.JPG");
+    fs.writeFileSync(
+      path.join(sourceRoot, "IMG.NEF.xmp"),
+      "belongs to IMG.NEF"
+    );
+    const input = { projectId, targetParent, photoIds: [jpeg.id] };
+    expect(await inspectShootingProjectOutput(input)).toMatchObject({
+      count: 1,
+      xmpCount: 0,
+      acrCount: 0,
+      ambiguities: [],
+    });
+  });
+
+  it("keeps registered but missing originals in sidecar ownership checks", async () => {
+    const missing = await addPhoto("pair.NEF");
+    const jpeg = await addPhoto("pair.JPG");
+    const dotted = await addPhoto("pair.NEF.JPG");
+    fs.renameSync(missing.sourcePath, path.join(runtime.root, "offline.nef"));
+    fs.writeFileSync(
+      path.join(sourceRoot, "pair.NEF.xmp"),
+      "belongs to missing RAW"
+    );
+    fs.writeFileSync(path.join(sourceRoot, "pair.xmp"), "shared metadata");
+
+    const inspection = await inspectShootingProjectOutput({
+      projectId,
+      targetParent,
+      photoIds: [jpeg.id, dotted.id],
+    });
+    expect(inspection.xmpCount).toBe(0);
+    expect(inspection.ambiguities).toHaveLength(1);
+    expect(inspection.ambiguities[0]).toMatchObject({
+      files: [{ relativePath: "pair.xmp" }],
+      photos: expect.arrayContaining([
+        { relativePath: "pair.NEF", selected: false },
+        { relativePath: "pair.JPG", selected: true },
+      ]),
+    });
+  });
+
+  it("lets the user skip a locked optional sidecar without blocking the original", async () => {
+    const raw = await addPhoto("pair.NEF");
+    await addPhoto("pair.JPG");
+    const sidecar = path.join(sourceRoot, "pair.acr");
+    fs.writeFileSync(sidecar, "locked edit");
+    const open = fsp.open.bind(fsp);
+    vi.spyOn(fsp, "open").mockImplementation(async (file, ...args) => {
+      if (String(file) === sidecar) {
+        throw Object.assign(new Error("File is locked"), { code: "EACCES" });
+      }
+      return await open(file, ...args);
+    });
+    const input = { projectId, targetParent, photoIds: [raw.id] };
+    const inspection = await inspectShootingProjectOutput(input);
+    expect(inspection.ambiguities[0].files).toMatchObject([
+      { relativePath: "pair.acr", unavailable: true },
+    ]);
+    const [{ id }] = inspection.ambiguities;
+    await expect(
+      createInspectedOutput({
+        ...input,
+        inspectionToken: inspection.token,
+        decisions: [{ id, action: "include" }],
+      })
+    ).rejects.toMatchObject({ code: "OUTPUT_PERMISSION_DENIED" });
+    expect(fs.readdirSync(targetParent)).toEqual([]);
+    const created = await createInspectedOutput({
+      ...input,
+      inspectionToken: inspection.token,
+      decisions: [{ id, action: "skip" }],
+    });
+    const task = await settled(created.id);
+    expect(task).toMatchObject({
+      status: "completed",
+      skippedSidecars: ["pair.acr"],
+      items: [{ photoId: raw.id, status: "completed" }],
+    });
+  });
+
+  it("refreshes when files appear after inspection, and accepts each new preview only once", async () => {
+    await addPhoto("IMG.NEF");
+    fs.writeFileSync(path.join(sourceRoot, "IMG.xmp"), "shared metadata");
+    const input = { projectId, targetParent };
+    const before = await inspectShootingProjectOutput(input);
+    fs.writeFileSync(path.join(sourceRoot, "IMG.JPG"), "unselected");
+    fs.writeFileSync(path.join(sourceRoot, "IMG.acr"), "new edit");
+    await expect(
+      createInspectedOutput({
+        ...input,
+        inspectionToken: before.token,
+        decisions: [],
+      })
+    ).rejects.toMatchObject({ code: "OUTPUT_INSPECTION_CHANGED" });
+    expect(fs.readdirSync(targetParent)).toEqual([]);
+    const after = await inspectShootingProjectOutput(input);
+    expect(after.ambiguities[0].files).toHaveLength(2);
+    const request = {
+      ...input,
+      inspectionToken: after.token,
+      decisions: [{ id: after.ambiguities[0].id, action: "include" as const }],
+    };
+    const first = createInspectedOutput(request);
+    await expect(createInspectedOutput(request)).rejects.toMatchObject({
+      code: "OUTPUT_BUSY",
+    });
+    const created = await first;
+    await expect(createInspectedOutput(request)).rejects.toMatchObject({
+      code: "OUTPUT_INSPECTION_EXPIRED",
+    });
+    expect((await settled(created.id)).items).toHaveLength(3);
+    expect(fs.readdirSync(targetParent)).toHaveLength(1);
+  });
+
+  it("allows an accepted inspection to finish rechecking after its expiry time", async () => {
+    await addPhoto();
+    const input = { projectId, targetParent };
+    const started = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(started);
+    const accepted = await inspectShootingProjectOutput(input);
+    const statfs = vi.spyOn(fsp, "statfs").mockImplementation(() => {
+      clock.mockReturnValue(started + 11 * 60_000);
+      return Promise.resolve({
+        bavail: 100n,
+        bsize: 4096n,
+      } as fs.BigIntStatsFs);
+    });
+    const created = await createInspectedOutput({
+      ...input,
+      inspectionToken: accepted.token,
+      decisions: [],
+    });
+    statfs.mockRestore();
+    expect((await settled(created.id)).status).toBe("completed");
+    const expired = await inspectShootingProjectOutput(input);
+    clock.mockReturnValue(started + 22 * 60_000);
+    await expect(
+      createInspectedOutput({
+        ...input,
+        inspectionToken: expired.token,
+        decisions: [],
+      })
+    ).rejects.toMatchObject({ code: "OUTPUT_INSPECTION_EXPIRED" });
+    expect(await listShootingProjectOutputs(projectId)).toHaveLength(1);
+  });
+
   it("rejects output under the source, protected Temp destinations, empty selections and another project's IDs", async () => {
     await addPhoto();
     await expect(
@@ -395,6 +669,38 @@ describe("shooting project original output", () => {
     ).rejects.toMatchObject({ code: "OUTPUT_NO_SPACE" });
     expect(fs.readdirSync(targetParent)).toEqual([]);
     expect(await listShootingProjectOutputs(projectId)).toEqual([]);
+  });
+
+  it("copies online items when another selected source directory disappeared", async () => {
+    const online = await addPhoto("online/current.nef");
+    const offline = await addPhoto("offline/missing.nef");
+    const originalDirectory = path.dirname(offline.sourcePath);
+    const detachedDirectory = path.join(runtime.root, "detached-source");
+    fs.renameSync(originalDirectory, detachedDirectory);
+
+    const input = { projectId, targetParent };
+    const inspection = await inspectShootingProjectOutput(input);
+    expect(inspection).toMatchObject({ originalCount: 2, unavailable: 1 });
+    const created = await createInspectedOutput({
+      ...input,
+      inspectionToken: inspection.token,
+      decisions: [],
+    });
+    const task = await settled(created.id);
+    expect(task.status).toBe("failed");
+    expect(
+      task.items.find((item) => item.photoId === offline.id)
+    ).toMatchObject({
+      error: "OUTPUT_SOURCE_UNAVAILABLE",
+      status: "failed",
+    });
+    const copied = task.items.find((item) => item.photoId === online.id);
+    expect(copied?.status).toBe("completed");
+    expect(fs.readFileSync(copied?.targetPath ?? "")).toEqual(online.bytes);
+
+    fs.renameSync(detachedDirectory, originalDirectory);
+    await retryShootingProjectOutput({ projectId, taskId: created.id });
+    expect((await settled(created.id)).status).toBe("completed");
   });
 
   it("rejects a destination junction into the source before creating output files", async () => {
@@ -734,17 +1040,20 @@ describe("shooting project original output", () => {
     expect(fs.existsSync(recovered.tempPath)).toBe(false);
   });
 
-  it("keeps an XMP failure separate from the original success and retries only the failed file", async () => {
+  it.each([
+    "xmp",
+    "acr",
+  ] as const)("keeps a %s failure separate from the original success and retries the failed file", async (kind) => {
     await addPhoto();
-    const sidecar = path.join(sourceRoot, "day-one", "photo.xmp");
+    const sidecar = path.join(sourceRoot, "day-one", `photo.${kind}`);
     fs.writeFileSync(sidecar, "<sidecar>bytes</sidecar>");
     const open = fsp.open.bind(fsp);
-    // Let manifest sampling finish, then fail the next XMP source open.
+    // Let manifest sampling finish, then fail the next sidecar source open.
     const created = await createShootingProjectOutput({
       projectId,
       targetParent,
     });
-    const xmpOpen = vi
+    const sidecarOpen = vi
       .spyOn(fsp, "open")
       .mockImplementation(async (filename, ...args) => {
         if (String(filename) === sidecar && args[0] === "r") {
@@ -756,12 +1065,12 @@ describe("shooting project original output", () => {
     expect(first.status).toBe("failed");
     const original = first.items.find((item) => item.kind === "original");
     expect(original?.status).toBe("completed");
-    expect(first.items.find((item) => item.kind === "xmp")).toMatchObject({
+    expect(first.items.find((item) => item.kind === kind)).toMatchObject({
       status: "failed",
       error: "OUTPUT_PERMISSION_DENIED",
     });
     const originalStamp = original && fs.statSync(original.targetPath).mtimeMs;
-    xmpOpen.mockRestore();
+    sidecarOpen.mockRestore();
     await retryShootingProjectOutput({ projectId, taskId: created.id });
     const retried = await settled(created.id);
     expect(retried.status).toBe("completed");
@@ -826,6 +1135,290 @@ describe("shooting project original output", () => {
     spy.mockRestore();
     await retryShootingProjectOutput({ projectId, taskId });
     expect((await settled(taskId)).status).toBe("completed");
+  });
+
+  it("retains the receipt when a retry is cancelled while rechecking a completed sidecar", async () => {
+    await addPhoto("paired.jpg");
+    const sidecar = path.join(sourceRoot, "paired.acr");
+    fs.writeFileSync(sidecar, Buffer.alloc(2 * 1024 * 1024, 0x5a));
+    const created = await createShootingProjectOutput({
+      projectId,
+      targetParent,
+    });
+    const completed = await settled(created.id);
+    const committed = completed.items.find((item) => item.kind === "acr");
+    expect(committed?.status).toBe("completed");
+    const open = fsp.open.bind(fsp);
+    let cancel: Promise<unknown> | undefined;
+    const spy = vi
+      .spyOn(fsp, "open")
+      .mockImplementation(async (file, ...args) => {
+        const handle = await open(file, ...args);
+        if (String(file) === committed?.targetPath) {
+          cancel = cancelShootingProjectOutput({
+            projectId,
+            taskId: created.id,
+          });
+        }
+        return handle;
+      });
+    await retryShootingProjectOutput({ projectId, taskId: created.id });
+    const cancelled = await settled(created.id);
+    await cancel;
+    spy.mockRestore();
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.items.find((item) => item.kind === "acr")).toMatchObject({
+      status: "completed",
+      sha256: committed?.sha256,
+    });
+    await retryShootingProjectOutput({ projectId, taskId: created.id });
+    expect((await settled(created.id)).status).toBe("completed");
+  });
+
+  it.each([
+    "retry",
+    "library",
+  ] as const)("recovers from temporarily locked committed files after %s verification", async (entry) => {
+    await addPhoto("paired.jpg");
+    fs.writeFileSync(path.join(sourceRoot, "paired.acr"), "committed edit");
+    const task = await createShootingProjectOutput({ projectId, targetParent });
+    const completed = await settled(task.id);
+    const committed = completed.items.find((item) => item.kind === "acr");
+    expect(committed).toBeDefined();
+    const stamp = fs.statSync(committed?.targetPath ?? "").mtimeMs;
+    const open = fsp.open.bind(fsp);
+    const spy = vi
+      .spyOn(fsp, "open")
+      .mockImplementation(async (file, ...args) => {
+        if (String(file) === committed?.targetPath) {
+          throw Object.assign(new Error("Temporarily locked"), {
+            code: "EACCES",
+          });
+        }
+        return await open(file, ...args);
+      });
+    if (entry === "retry") {
+      await retryShootingProjectOutput({ projectId, taskId: task.id });
+    } else {
+      await expect(
+        resolveShootingProjectCompletedOutputFiles({
+          projectId,
+          taskId: task.id,
+        })
+      ).rejects.toMatchObject({ code: "OUTPUT_RECHECK_UNAVAILABLE" });
+    }
+    const blocked = await settled(task.id);
+    expect(blocked.status).toBe("failed");
+    expect(blocked.items.find((item) => item.kind === "acr")).toMatchObject({
+      status: "completed",
+      sha256: committed?.sha256,
+      error: "OUTPUT_RECHECK_UNAVAILABLE",
+    });
+    spy.mockRestore();
+    await retryShootingProjectOutput({ projectId, taskId: task.id });
+    const restored = await settled(task.id);
+    expect(restored.status).toBe("completed");
+    expect(
+      restored.items.find((item) => item.kind === "acr")?.error
+    ).toBeNull();
+    expect(fs.statSync(committed?.targetPath ?? "").mtimeMs).toBe(stamp);
+    expect(
+      await resolveShootingProjectCompletedOutputFiles({
+        projectId,
+        taskId: task.id,
+      })
+    ).toHaveLength(1);
+  });
+
+  it("retries against the confirmed full sidecar hash when the sampled bytes still match", async () => {
+    await addPhoto("paired.nef");
+    const source = path.join(sourceRoot, "paired.acr");
+    const original = Buffer.alloc(1024 * 1024, 0x5a);
+    const stamp = new Date("2026-11-25T00:00:00Z");
+    fs.writeFileSync(source, original);
+    fs.utimesSync(source, stamp, stamp);
+    const fingerprint = await getLightweightFingerprint(source);
+    const created = await createShootingProjectOutput({
+      projectId,
+      targetParent,
+    });
+    const open = fsp.open.bind(fsp);
+    const spy = vi
+      .spyOn(fsp, "open")
+      .mockImplementation(async (file, ...args) => {
+        if (String(file) === source) {
+          throw Object.assign(new Error("Temporarily locked"), {
+            code: "EACCES",
+          });
+        }
+        return await open(file, ...args);
+      });
+    const failed = await settled(created.id);
+    expect(failed.items.find((item) => item.kind === "acr")?.status).toBe(
+      "failed"
+    );
+    spy.mockRestore();
+
+    const changed = Buffer.from(original);
+    changed[256 * 1024] = 0x88;
+    fs.writeFileSync(source, changed);
+    fs.utimesSync(source, stamp, stamp);
+    expect(await getLightweightFingerprint(source)).toBe(fingerprint);
+    await retryShootingProjectOutput({ projectId, taskId: created.id });
+    const rejected = await settled(created.id);
+    expect(rejected.items.find((item) => item.kind === "acr")).toMatchObject({
+      status: "failed",
+      error: "OUTPUT_SOURCE_CHANGED",
+    });
+    expect(fs.existsSync(path.join(created.targetRoot, "paired.acr"))).toBe(
+      false
+    );
+  });
+
+  it.each([
+    "project",
+    "service",
+  ] as const)("rejects a late retry after stopping the %s while the source path is being checked", async (scope) => {
+    const photo = await addPhoto();
+    const task = recoveredTask(photo, "verifying", false);
+    startShootingProjectOutputServices();
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    vi.spyOn(fsp, "realpath").mockImplementationOnce(async () => {
+      entered.resolve();
+      await resume.promise;
+      return sourceRoot;
+    });
+    const result = expect(
+      retryShootingProjectOutput({
+        projectId,
+        taskId: task.taskId,
+      })
+    ).rejects.toMatchObject({ code: "OUTPUT_BUSY" });
+    await entered.promise;
+    await stopShootingProjectOutputTasks(
+      scope === "project" ? projectId : undefined
+    );
+    resume.resolve();
+    await result;
+    expect((await settled(task.taskId)).status).toBe("interrupted");
+    expect(fs.existsSync(task.targetPath)).toBe(false);
+  });
+
+  it("does not issue an inspection stopped during a source directory scan", async () => {
+    await addPhoto();
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const readdir = fsp.readdir.bind(fsp);
+    const spy = vi
+      .spyOn(fsp, "readdir")
+      .mockImplementationOnce(async (...args) => {
+        entered.resolve();
+        await resume.promise;
+        return await readdir(...args);
+      });
+    const input = { projectId, targetParent };
+    const result = expect(
+      inspectShootingProjectOutput(input)
+    ).rejects.toMatchObject({ code: "OUTPUT_BUSY" });
+    await entered.promise;
+    await stopShootingProjectOutputTasks(projectId);
+    resume.resolve();
+    await result;
+    spy.mockRestore();
+    expect(await inspectShootingProjectOutput(input)).toMatchObject({
+      originalCount: 1,
+    });
+  });
+
+  it("does not reopen the database when stopped while resolving the destination", async () => {
+    await addPhoto();
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    vi.spyOn(fsp, "realpath").mockImplementationOnce(async () => {
+      entered.resolve();
+      await resume.promise;
+      return targetParent;
+    });
+    const result = expect(
+      inspectShootingProjectOutput({ projectId, targetParent })
+    ).rejects.toMatchObject({ code: "OUTPUT_BUSY" });
+    await entered.promise;
+    await stopShootingProjectOutputTasks();
+    closeDatabase();
+    const dbAccess = vi.spyOn(database, "getDatabase");
+    resume.resolve();
+    await result;
+    expect(dbAccess).not.toHaveBeenCalled();
+  });
+
+  it("does not write an old verification error after the output service stops", async () => {
+    await addPhoto("paired.jpg");
+    fs.writeFileSync(path.join(sourceRoot, "paired.acr"), "committed edit");
+    const task = await createShootingProjectOutput({ projectId, targetParent });
+    const completed = await settled(task.id);
+    const sidecar = completed.items.find((item) => item.kind === "acr");
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const open = fsp.open.bind(fsp);
+    vi.spyOn(fsp, "open").mockImplementation(async (file, ...args) => {
+      if (String(file) === sidecar?.targetPath) {
+        entered.resolve();
+        await resume.promise;
+        throw Object.assign(new Error("Temporarily locked"), {
+          code: "EACCES",
+        });
+      }
+      return await open(file, ...args);
+    });
+    const result = expect(
+      resolveShootingProjectCompletedOutputFiles({
+        projectId,
+        taskId: task.id,
+      })
+    ).rejects.toMatchObject({ code: "OUTPUT_BUSY" });
+    await entered.promise;
+    await stopShootingProjectOutputTasks();
+    closeDatabase();
+    const dbAccess = vi.spyOn(database, "getDatabase");
+    resume.resolve();
+    await result;
+    expect(dbAccess).not.toHaveBeenCalled();
+    dbAccess.mockRestore();
+    expect((await settled(task.id)).status).toBe("completed");
+  });
+
+  it("waits for the confirmed destination folder to roll back when stopped during creation", async () => {
+    await addPhoto();
+    const input = { projectId, targetParent };
+    const inspection = await inspectShootingProjectOutput(input);
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const mkdir = fsp.mkdir.bind(fsp);
+    vi.spyOn(fsp, "mkdir").mockImplementationOnce(async (...args) => {
+      entered.resolve();
+      await resume.promise;
+      return await mkdir(...args);
+    });
+    const result = expect(
+      createInspectedOutput({
+        ...input,
+        inspectionToken: inspection.token,
+        decisions: [],
+      })
+    ).rejects.toMatchObject({ code: "OUTPUT_INSPECTION_EXPIRED" });
+    await entered.promise;
+    let stopped = false;
+    const stop = stopShootingProjectOutputTasks(projectId).then(() => {
+      stopped = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(stopped).toBe(false);
+    resume.resolve();
+    await result;
+    await stop;
+    expect(fs.readdirSync(targetParent)).toEqual([]);
+    expect(await listShootingProjectOutputs(projectId)).toEqual([]);
   });
 
   it("waits for active writes at shutdown and keeps the task interrupted until explicit resume", async () => {

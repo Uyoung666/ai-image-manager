@@ -3,10 +3,27 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getDataPath } from "@/utils/data-path";
+import { RAW_EXTENSIONS } from "./raw-preview";
 
 const ID_PATTERN =
   /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const SAMPLE_BYTES = 64 * 1024;
+
+export const SHOOTING_PROJECT_IMAGE_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".avif",
+  ".tiff",
+  ".tif",
+  ".heic",
+  ".heif",
+  ".gif",
+  ".bmp",
+  ".ico",
+  ...RAW_EXTENSIONS,
+]);
 
 export class ShootingProjectError extends Error {
   readonly code: string;
@@ -27,8 +44,7 @@ export function isWithinProjectRoot(root: string, candidate: string): boolean {
   );
 }
 
-/** Resolve only an actual file below the chosen root, never a linked subtree. */
-export async function resolveProjectRelativePath(
+async function resolveProjectPath(
   root: string,
   relativePath: string
 ): Promise<string> {
@@ -54,7 +70,28 @@ export async function resolveProjectRelativePath(
   if (!isWithinProjectRoot(rootReal, await fs.realpath(target))) {
     throw new ShootingProjectError("INVALID_SOURCE");
   }
+  return target;
+}
+
+/** Resolve only an actual file below the chosen root, never a linked subtree. */
+export async function resolveProjectRelativePath(
+  root: string,
+  relativePath: string
+): Promise<string> {
+  const target = await resolveProjectPath(root, relativePath);
   if (!(await fs.stat(target)).isFile()) {
+    throw new ShootingProjectError("INVALID_SOURCE");
+  }
+  return target;
+}
+
+export async function resolveProjectDirectory(
+  root: string,
+  relativePath: string
+): Promise<string> {
+  const target =
+    relativePath === "." ? root : await resolveProjectPath(root, relativePath);
+  if (!(await fs.stat(target)).isDirectory()) {
     throw new ShootingProjectError("INVALID_SOURCE");
   }
   return target;

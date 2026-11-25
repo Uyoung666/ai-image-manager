@@ -14,37 +14,18 @@ import {
 } from "./image-orientation";
 import { computePHash } from "./perceptual-hash";
 import { parseProjectExif } from "./project-exif";
-import {
-  extractRawPreview,
-  isRawFile,
-  RAW_EXTENSIONS,
-  readRawDimensions,
-} from "./raw-preview";
+import { extractRawPreview, isRawFile, readRawDimensions } from "./raw-preview";
 import {
   getLightweightFingerprint,
   hashProjectFile,
   projectPreviewPath,
   removeProjectPreviewTemporary,
   resolveProjectRelativePath,
+  SHOOTING_PROJECT_IMAGE_EXTENSIONS,
   ShootingProjectError,
   validateProjectPreviewLocation,
 } from "./shooting-project-files";
 
-const SUPPORTED_EXTENSIONS = new Set([
-  ".jpg",
-  ".jpeg",
-  ".png",
-  ".webp",
-  ".avif",
-  ".tiff",
-  ".tif",
-  ".heic",
-  ".heif",
-  ".gif",
-  ".bmp",
-  ".ico",
-  ...RAW_EXTENSIONS,
-]);
 const slots = new PrioritySemaphore(2);
 type ProjectPhotoRow = typeof shootingProjectPhotos.$inferSelect;
 interface Runtime {
@@ -497,7 +478,7 @@ async function discoverDirectory(context: ScanContext, directory: string) {
     if (
       !(
         entry.isFile() &&
-        SUPPORTED_EXTENSIONS.has(path.extname(file).toLowerCase())
+        SHOOTING_PROJECT_IMAGE_EXTENSIONS.has(path.extname(file).toLowerCase())
       )
     ) {
       continue;

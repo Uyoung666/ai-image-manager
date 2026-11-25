@@ -1425,6 +1425,9 @@ export const shootingProjectOutputs = sqliteTable(
       .notNull()
       .references(() => shootingProjects.id, { onDelete: "cascade" }),
     targetRoot: text("target_root").notNull(),
+    skippedSidecars: text("skipped_sidecars", { mode: "json" }).$type<
+      string[]
+    >(),
     status: text("status", {
       enum: [
         "pending",
@@ -1455,7 +1458,7 @@ export const shootingProjectOutputItems = sqliteTable(
       .notNull()
       .references(() => shootingProjectOutputs.id, { onDelete: "cascade" }),
     photoId: text("photo_id").notNull(),
-    kind: text("kind", { enum: ["original", "xmp"] }).notNull(),
+    kind: text("kind", { enum: ["original", "xmp", "acr"] }).notNull(),
     relativePath: text("relative_path").notNull(),
     sourcePath: text("source_path").notNull(),
     targetPath: text("target_path").notNull(),

@@ -364,7 +364,8 @@ i18n.use(initReactI18next).init({
           archivedProjects: "已归档",
           selectionSaved: "选片结果已保存",
           selectionSaveFailed: "本次操作未保存，请重试原操作",
-          outputPhotoCounts: "{{originals}} 张照片 · {{xmp}} 个 XMP 文件",
+          outputPhotoCounts:
+            "当前将复制 {{originals}} 张原片 · {{xmp}} 个 XMP · {{acr}} 个 ACR",
           saveFailed: "有操作尚未保存，请重试",
           photoWorkspace: "项目照片",
           pending: "待选",
@@ -464,11 +465,30 @@ i18n.use(initReactI18next).init({
           copyKept: "复制保留原片",
           copySelected: "复制选中原片",
           outputDescription:
-            "选择目标文件夹，软件将创建独立项目子目录，保留相对目录结构。原片逐字节复制并校验，不修改来源，也不覆盖已有文件。",
+            "在目标文件夹中创建项目子目录，按原目录结构复制并校验文件。",
           chooseOutput: "选择输出位置并预检",
           outputRange: "{{count}} 个文件 · {{size}} · {{unavailable}} 个不可用",
-          outputXmp:
-            "清单包含明确关联的同目录同名 XMP（若存在），去重后分别校验和记录结果。复制中可取消，已完成文件保留。",
+          outputXmp: "同目录中明确匹配的 XMP 和 ACR 会随原片复制，并逐个校验。",
+          outputAmbiguityTitle: "确认同名原片的伴随文件",
+          outputAmbiguityHelp:
+            "这些编辑文件可能属于同组的其他原片。跳过只影响本组列出的 XMP、ACR，已选原片仍会复制。",
+          outputAmbiguityRemaining: "还有 {{count}} 组待选择",
+          outputPhotoSelected: "已选原片",
+          outputPhotoNotSelected: "未选原片",
+          outputSidecarFiles: "待确认的编辑文件 · {{files}}",
+          outputSidecarUnavailable:
+            "本组有文件暂时无法读取。可跳过本组，或检查文件权限和占用情况后重新预检。",
+          outputIncludeSidecars: "带上伴随文件",
+          outputSkipSidecars: "跳过伴随文件",
+          outputSkippedSidecars: "已按选择跳过的伴随文件",
+          outputSkippedCount: "已跳过 {{count}} 个伴随文件",
+          outputInspecting: "正在检查原片和伴随文件…",
+          outputCreating: "正在创建复制任务…",
+          outputReconfirmSidecars: "请重新选择下方各组伴随文件的处理方式。",
+          outputInspectionChanged:
+            "文件或交付范围有变化，已更新预检结果。请核对后再开始复制。",
+          outputInspectionExpired:
+            "上次预检已过期，已更新预检结果。请核对后再开始复制。",
           outputWatchWarning:
             "目标位于已有图库监听范围，写入可能自动加入图库并触发 AI。可更换目标，或明确确认后继续。",
           outputWatchAcknowledge: "我了解可能加入图库并触发 AI，继续写入",
@@ -488,6 +508,7 @@ i18n.use(initReactI18next).init({
           outputItem_pending: "等待复制",
           outputItem_copying: "正在复制",
           outputItem_verifying: "正在校验",
+          outputItem_recheckPending: "等待重新校验",
           outputItem_committing: "正在提交已校验文件",
           outputItem_completed: "校验成功",
           outputItem_failed: "失败",
@@ -501,13 +522,16 @@ i18n.use(initReactI18next).init({
           outputNotFound: "未找到该复制任务。",
           outputBusy: "复制任务仍在运行，请等待或先取消。",
           outputSourceChanged:
-            "原片内容已变化或校验不符，请停止修改并重新核验来源。",
+            "来源文件已变化或校验不符，请停止修改并重新核验来源。",
           outputConflict:
             "目标文件已存在或已被修改。为保护用户文件，本任务不会覆盖，请检查后另建输出任务。",
           outputNoSpace: "目标磁盘空间不足，请释放空间后重试。",
           outputPermission: "没有读取或写入权限，请检查访问权限后重试。",
           outputVerifyFailed:
             "复制内容校验失败，此文件未标记为输出成功。请检查磁盘或连接后重试。",
+          outputRecheckUnavailable:
+            "暂时无法重新校验已复制的文件。请检查目标磁盘连接、文件占用和读取权限，然后重试原任务。",
+          outputReturnToTasks: "返回交付任务",
           outputCancelled: "复制已取消，已完成文件保留。",
           outputUnverified: "原片身份尚未核验，需重新连接并核验来源。",
           outputOpenFailed:

@@ -629,9 +629,13 @@ If the drive letter or root folder changes, use **Relink source**, inspect verif
 
 ### Copy originals, retry and add to the library
 
-Choose **Copy kept originals**, or copy selected photos from results. Confirm the destination, photo and XMP counts, total size and unavailable files. Output retains relative paths and original bytes, with matching same-name XMP sidecars copied once. It is ready for editing without ZIP extraction. SHA-256 verification checks source and destination.
+Choose **Copy kept originals**, or copy selected photos from results. Review the destination, original, XMP and ACR counts, total size, and unavailable files. For `IMG.NEF`, the app looks for `IMG.NEF.xmp`, `IMG.xmp` and `IMG.acr` in the same folder. If both `IMG.NEF` and `IMG.JPG` are selected, each shared sidecar is copied once. If only one is selected, choose whether to include or skip each group. The task manifest lists sidecars skipped by choice. Save edits stored only in an editing catalog to sidecars before copying. Other names and formats, such as numbered darktable edits and `.pp3` files, require separate handoff.
+
+The output keeps relative paths, filenames and original bytes. Review the updated preview if the source, files or destination change before copying starts. SHA-256 verification checks each copied source and destination file.
 
 The destination cannot be inside the source folder. The file list is fixed when the task starts. Cancellation keeps completed files. Retry the original task after insufficient space, permission errors, source loss or interruption; completed files are checked and conflicting or modified targets are not overwritten. Relinking does not rewrite old copy task source paths; create a new task for a new source. If the destination is already watched by the library, confirm that its existing import behavior remains active.
+
+If some source folders are offline during inspection, you can still copy from the available folders. After reconnecting, create a new task to include any XMP or ACR files that could not be discovered earlier.
 
 **Add to library** is separate. Choose verified output or available originals and confirm the exact list. Only those files are imported, with folder entries for navigation; this does not add automatic scanning or watching. AI processing then follows the existing library settings.
 

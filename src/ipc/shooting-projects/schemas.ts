@@ -73,7 +73,17 @@ export const projectOutputSchema = projectIdSchema
   })
   .strict();
 export const projectCreateOutputSchema = projectOutputSchema
-  .extend({ acknowledgeWatchedTarget: z.boolean().optional() })
+  .extend({
+    acknowledgeWatchedTarget: z.boolean().optional(),
+    inspectionToken: z.uuid(),
+    decisions: z
+      .array(
+        z
+          .object({ id: z.hash("sha256"), action: z.enum(["include", "skip"]) })
+          .strict()
+      )
+      .max(100_000),
+  })
   .strict();
 export const projectOutputTaskSchema = projectIdSchema
   .extend({ taskId: z.uuid() })

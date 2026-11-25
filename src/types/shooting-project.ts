@@ -113,7 +113,7 @@ export interface ShootingProjectOutputItem {
   error: string | null;
   fileSize: number;
   id: string;
-  kind: "original" | "xmp";
+  kind: "original" | "xmp" | "acr";
   photoId: string;
   relativePath: string;
   sha256: string | null;
@@ -135,6 +135,7 @@ export interface ShootingProjectOutputTask {
   id: string;
   items: ShootingProjectOutputItem[];
   projectId: string;
+  skippedSidecars?: string[];
   status:
     | "pending"
     | "running"
@@ -146,13 +147,32 @@ export interface ShootingProjectOutputTask {
 }
 
 export interface ShootingProjectOutputInspection {
+  acrCount: number;
+  ambiguities: ShootingProjectOutputAmbiguity[];
   bytes: number;
   count: number;
   originalCount: number;
   targetRoot: string;
+  token: string;
   unavailable: number;
   watched: boolean;
   xmpCount: number;
+}
+
+export interface ShootingProjectOutputAmbiguity {
+  files: {
+    relativePath: string;
+    kind: "xmp" | "acr";
+    fileSize: number;
+    unavailable?: boolean;
+  }[];
+  id: string;
+  photos: { relativePath: string; selected: boolean }[];
+}
+
+export interface ShootingProjectOutputDecision {
+  action: "include" | "skip";
+  id: string;
 }
 
 export interface ShootingProjectLibraryRequest {

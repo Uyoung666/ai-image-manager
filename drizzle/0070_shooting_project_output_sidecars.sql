@@ -1,0 +1,1 @@
+ALTER TABLE `shooting_project_outputs` ADD `skipped_sidecars` text;

@@ -136,7 +136,22 @@ describe("shooting project IPC boundary", () => {
       ],
       [
         shootingProjects.createOutput,
-        { projectId: id, targetParent: "D:\\output", overwrite: true },
+        {
+          projectId: id,
+          targetParent: "D:\\output",
+          inspectionToken: id,
+          decisions: [],
+          overwrite: true,
+        },
+      ],
+      [
+        shootingProjects.createOutput,
+        {
+          projectId: id,
+          targetParent: "D:\\output",
+          inspectionToken: id,
+          decisions: [{ id: "../sidecar.xmp", action: "include" }],
+        },
       ],
       [shootingProjects.retryOutput, { projectId: id, taskId: "../task" }],
       [
@@ -175,14 +190,32 @@ describe("shooting project IPC boundary", () => {
     services.output.mockRejectedValueOnce(
       new ShootingProjectOutputError("OUTPUT_CONFLICT")
     );
+    services.output.mockRejectedValueOnce(
+      new ShootingProjectOutputError("OUTPUT_INSPECTION_CHANGED")
+    );
     services.library.mockRejectedValueOnce(
       new ShootingProjectLibraryError("LIBRARY_SCOPE_CHANGED")
     );
     for (const [route, input, code] of [
       [
         shootingProjects.createOutput,
-        { projectId: id, targetParent: "D:\\output" },
+        {
+          projectId: id,
+          targetParent: "D:\\output",
+          inspectionToken: id,
+          decisions: [],
+        },
         "OUTPUT_CONFLICT",
+      ],
+      [
+        shootingProjects.createOutput,
+        {
+          projectId: id,
+          targetParent: "D:\\output",
+          inspectionToken: id,
+          decisions: [{ id: "a".repeat(64), action: "include" }],
+        },
+        "OUTPUT_INSPECTION_CHANGED",
       ],
       [
         shootingProjects.addToLibrary,
@@ -205,6 +238,12 @@ describe("shooting project IPC boundary", () => {
         );
       }
     }
+    expect(services.output).toHaveBeenLastCalledWith({
+      projectId: id,
+      targetParent: "D:\\output",
+      inspectionToken: id,
+      decisions: [{ id: "a".repeat(64), action: "include" }],
+    });
   });
 
   it("waits for file handoffs to stop before deleting project data", async () => {

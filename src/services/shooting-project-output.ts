@@ -12,6 +12,8 @@ import {
   shootingProjects,
 } from "@/db/schema";
 import type {
+  ShootingProjectOutputAmbiguity,
+  ShootingProjectOutputDecision,
   ShootingProjectOutputInspection,
   ShootingProjectOutputTask,
 } from "@/types/shooting-project";
@@ -21,14 +23,16 @@ import {
   isWithinProjectRoot,
   resolveProjectRelativePath,
 } from "./shooting-project-files";
+import { findShootingProjectSidecars } from "./shooting-project-sidecars";
 
 const CHUNK_BYTES = 1024 * 1024;
 const UNSAFE_DIRECTORY_CHARACTERS = /[<>:"/\\|?*]/g;
 const TRAILING_DIRECTORY_CHARACTERS = /[. ]+$/;
 const RESERVED_DIRECTORY_NAME = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i;
 const PATH_COMPONENTS = /[\\/]+/;
-const XMP_EXTENSION = /\.xmp$/i;
 const ID_PATTERN = /^[a-f0-9-]{36}$/i;
+const INSPECTION_TTL_MS = 10 * 60_000;
+const MAX_INSPECTIONS = 128;
 
 export class ShootingProjectOutputError extends Error {
   readonly code: string;
@@ -50,6 +54,12 @@ interface OutputInput {
   targetParent: string;
 }
 
+interface CreateOutputInput extends OutputInput {
+  acknowledgeWatchedTarget?: boolean;
+  decisions: ShootingProjectOutputDecision[];
+  inspectionToken: string;
+}
+
 interface ActiveOutput {
   controller: AbortController;
   projectId: string;
@@ -59,7 +69,7 @@ interface ActiveOutput {
 
 interface ManifestItem {
   fileSize: number;
-  kind: "original" | "xmp";
+  kind: ItemRow["kind"];
   lightweightFingerprint: string | null;
   modifiedAt: number;
   photoId: string;
@@ -67,9 +77,34 @@ interface ManifestItem {
   sourceHash: string | null;
   sourcePath: string;
   unavailable: string | null;
+  versionStamp?: number[];
+}
+
+interface SidecarManifestItem extends ManifestItem {
+  kind: "xmp" | "acr";
+}
+
+interface ManifestAmbiguity {
+  id: string;
+  items: SidecarManifestItem[];
+  photos: ShootingProjectOutputAmbiguity["photos"];
+}
+
+interface OutputInspectionReceipt {
+  busy: boolean;
+  expiresAt: number;
+  projectId: string;
+  signature: string;
 }
 
 const activeOutputs = new Map<string, ActiveOutput>();
+const outputInspections = new Map<string, OutputInspectionReceipt>();
+const outputCommits = new Map<
+  string,
+  { projectId: string; promise: Promise<ShootingProjectOutputTask> }
+>();
+const projectGenerations = new Map<string, number>();
+let serviceGeneration = 0;
 let stopping = false;
 
 function outputError(code: string): never {
@@ -84,7 +119,12 @@ function errorCode(error: unknown): string {
   if (code === "ENOSPC" || code === "EDQUOT") {
     return "OUTPUT_NO_SPACE";
   }
-  if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
+  if (
+    code === "EACCES" ||
+    code === "EPERM" ||
+    code === "EROFS" ||
+    code === "EBUSY"
+  ) {
     return "OUTPUT_PERMISSION_DENIED";
   }
   if (
@@ -105,6 +145,24 @@ function errorCode(error: unknown): string {
     return "OUTPUT_SOURCE_CHANGED";
   }
   return "OUTPUT_FAILED";
+}
+
+function outputGeneration(projectId: string): string {
+  return `${serviceGeneration}:${projectGenerations.get(projectId) ?? 0}`;
+}
+
+function assertOutputGeneration(projectId: string, generation: string): void {
+  if (stopping || generation !== outputGeneration(projectId)) {
+    outputError("OUTPUT_BUSY");
+  }
+}
+
+function canRecheckOutputLater(code: string): boolean {
+  return (
+    code === "OUTPUT_PERMISSION_DENIED" ||
+    code === "OUTPUT_SOURCE_UNAVAILABLE" ||
+    code === "OUTPUT_SOURCE_CHANGED"
+  );
 }
 
 function assertRunning(signal: AbortSignal): void {
@@ -166,8 +224,10 @@ function itemsForTask(taskId: string): ItemRow[] {
 }
 
 function describeTask(task: OutputRow): ShootingProjectOutputTask {
+  const { skippedSidecars, ...details } = task;
   return {
-    ...task,
+    ...details,
+    skippedSidecars: skippedSidecars ?? undefined,
     items: itemsForTask(task.id).map(
       ({
         id,
@@ -318,12 +378,7 @@ async function availableOutputDirectory(
   return outputError("OUTPUT_CONFLICT");
 }
 
-function selectedPhotos(projectId: string, photoIds?: string[]): PhotoRow[] {
-  const all = getDatabase()
-    .select()
-    .from(shootingProjectPhotos)
-    .where(eq(shootingProjectPhotos.projectId, projectId))
-    .all();
+function selectedPhotos(all: PhotoRow[], photoIds?: string[]): PhotoRow[] {
   if (photoIds) {
     const selected = new Set(photoIds);
     if (selected.size === 0) {
@@ -397,87 +452,142 @@ async function originalManifestItem(
   return item;
 }
 
-async function appendSidecar(
-  project: ProjectRow,
-  original: ManifestItem,
-  manifest: Map<string, ManifestItem>
-): Promise<void> {
-  const stem = path.basename(
-    original.sourcePath,
-    path.extname(original.sourcePath)
-  );
-  let entries: fs.Dirent[];
-  try {
-    entries = await fsp.readdir(path.dirname(original.sourcePath), {
-      withFileTypes: true,
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
-    }
-    if (original.unavailable) {
-      return;
-    }
-    throw error;
-  }
-  const matches = entries.filter(
-    (entry) =>
-      entry.isFile() &&
-      XMP_EXTENSION.test(entry.name) &&
-      (process.platform === "win32"
-        ? path.basename(entry.name, path.extname(entry.name)).toLowerCase() ===
-          stem.toLowerCase()
-        : path.basename(entry.name, path.extname(entry.name)) === stem)
-  );
-  if (matches.length > 1) {
-    outputError("OUTPUT_CONFLICT");
-  }
-  const entry = matches[0];
-  if (!entry) {
-    return;
-  }
-  const relativePath = path.join(
-    path.dirname(original.relativePath),
-    entry.name
-  );
-  const sourcePath = path.join(project.sourceRoot, relativePath);
-  if (manifest.has(pathKey(sourcePath))) {
-    return;
-  }
-  await resolveProjectRelativePath(project.sourceRoot, relativePath);
-  const before = await fsp.stat(sourcePath);
-  const fingerprint = await getLightweightFingerprint(sourcePath);
-  if (!sameOpenFile(before, await fsp.stat(sourcePath))) {
-    outputError("OUTPUT_SOURCE_CHANGED");
-  }
-  manifest.set(pathKey(sourcePath), {
-    photoId: original.photoId,
-    kind: "xmp",
+async function sidecarManifestItem(
+  root: string,
+  photoId: string,
+  relativePath: string,
+  kind: "xmp" | "acr",
+  optional: boolean
+): Promise<SidecarManifestItem> {
+  const item: SidecarManifestItem = {
+    photoId,
+    kind,
     relativePath,
-    sourcePath,
-    fileSize: before.size,
-    modifiedAt: before.mtimeMs,
-    lightweightFingerprint: fingerprint,
+    sourcePath: path.join(root, relativePath),
+    fileSize: 0,
+    modifiedAt: 0,
+    lightweightFingerprint: null,
     sourceHash: null,
     unavailable: null,
-  });
+  };
+  try {
+    const sourcePath = await resolveProjectRelativePath(root, relativePath);
+    const before = await fsp.stat(sourcePath);
+    item.fileSize = before.size;
+    item.modifiedAt = before.mtimeMs;
+    item.versionStamp = [before.ctimeMs, before.ino, before.dev];
+    const fingerprint = await getLightweightFingerprint(sourcePath);
+    if (!sameOpenFile(before, await fsp.stat(sourcePath))) {
+      outputError("OUTPUT_SOURCE_CHANGED");
+    }
+    item.lightweightFingerprint = fingerprint;
+  } catch (error) {
+    const code = errorCode(error);
+    if (!(optional && canRecheckOutputLater(code))) {
+      throw error;
+    }
+    item.unavailable = code;
+  }
+  return item;
 }
 
-async function buildManifest(
-  project: ProjectRow,
-  photoIds?: string[]
-): Promise<ManifestItem[]> {
-  const photos = selectedPhotos(project.id, photoIds);
+async function buildManifest(project: ProjectRow, photoIds?: string[]) {
+  const registered = getDatabase()
+    .select()
+    .from(shootingProjectPhotos)
+    .where(eq(shootingProjectPhotos.projectId, project.id))
+    .all();
+  const photos = selectedPhotos(registered, photoIds).sort((a, b) =>
+    a.relativePath.localeCompare(b.relativePath, "en")
+  );
   if (photos.length === 0) {
     outputError("OUTPUT_EMPTY");
   }
-  const manifest = new Map<string, ManifestItem>();
+  const originals = new Map<string, ManifestItem>();
+  const directories = new Map<
+    string,
+    {
+      relativePath: string;
+      selected: ManifestItem[];
+      registeredNames: string[];
+    }
+  >();
   for (const photo of photos) {
     const original = await originalManifestItem(project, photo);
-    manifest.set(pathKey(original.sourcePath), original);
-    await appendSidecar(project, original, manifest);
+    const key = pathKey(original.sourcePath);
+    if (originals.has(key)) {
+      outputError("OUTPUT_CONFLICT");
+    }
+    originals.set(key, original);
+    const relativePath = path.dirname(photo.relativePath);
+    const folderKey = pathKey(path.join(project.sourceRoot, relativePath));
+    const directory = directories.get(folderKey) ?? {
+      relativePath,
+      selected: [],
+      registeredNames: [],
+    };
+    directory.selected.push(original);
+    directories.set(folderKey, directory);
   }
-  return [...manifest.values()];
+  for (const photo of registered) {
+    const directory = directories.get(
+      pathKey(path.join(project.sourceRoot, path.dirname(photo.relativePath)))
+    );
+    directory?.registeredNames.push(path.basename(photo.relativePath));
+  }
+  const manifest = [...originals.values()];
+  const seen = new Set(originals.keys());
+  const ambiguities = new Map<string, ManifestAmbiguity>();
+  for (const {
+    relativePath,
+    selected,
+    registeredNames,
+  } of directories.values()) {
+    const matches = await findShootingProjectSidecars(
+      project.sourceRoot,
+      relativePath,
+      selected.map((item) => path.basename(item.relativePath)),
+      registeredNames
+    ).catch((error: unknown) => {
+      if (
+        selected.every((item) => item.unavailable) &&
+        ["OUTPUT_SOURCE_UNAVAILABLE", "OUTPUT_PERMISSION_DENIED"].includes(
+          errorCode(error)
+        )
+      ) {
+        return [];
+      }
+      throw error;
+    });
+    for (const match of matches) {
+      const original = originals.get(
+        pathKey(path.join(project.sourceRoot, match.originalPath))
+      );
+      const key = pathKey(path.join(project.sourceRoot, match.relativePath));
+      if (!original || seen.has(key)) {
+        outputError("OUTPUT_CONFLICT");
+      }
+      seen.add(key);
+      const item = await sidecarManifestItem(
+        project.sourceRoot,
+        original.photoId,
+        match.relativePath,
+        match.kind,
+        Boolean(match.ambiguity)
+      );
+      if (match.ambiguity) {
+        const group = ambiguities.get(match.ambiguity.id) ?? {
+          ...match.ambiguity,
+          items: [],
+        };
+        group.items.push(item);
+        ambiguities.set(group.id, group);
+      } else {
+        manifest.push(item);
+      }
+    }
+  }
+  return { manifest, ambiguities: [...ambiguities.values()] };
 }
 
 function watchedTarget(targetRoot: string, relativePaths: string[]): boolean {
@@ -511,31 +621,93 @@ function assertWatchedTargetAcknowledged(
   }
 }
 
-async function inspectOutput(input: OutputInput) {
+async function inspectOutput(input: OutputInput, assertActive: () => void) {
   try {
     const project = projectRow(input.projectId);
     const parent = await targetParent(project, input.targetParent);
-    const manifest = await buildManifest(project, input.photoIds);
+    assertActive();
+    const { manifest, ambiguities } = await buildManifest(
+      project,
+      input.photoIds
+    );
+    assertActive();
     const targetRoot = await availableOutputDirectory(parent, project.name);
-    return { project, parent, manifest, targetRoot };
+    return { ambiguities, project, parent, manifest, targetRoot };
   } catch (error) {
     return outputError(errorCode(error));
   }
 }
 
+function inspectionSignature(
+  inspected: Awaited<ReturnType<typeof inspectOutput>>
+) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        inspected.project.id,
+        inspected.project.sourceRoot,
+        inspected.targetRoot,
+        inspected.manifest,
+        inspected.ambiguities,
+      ])
+    )
+    .digest("hex");
+}
+
 export async function inspectShootingProjectOutput(
   input: OutputInput
 ): Promise<ShootingProjectOutputInspection> {
-  const inspected = await inspectOutput(input);
+  if (stopping) {
+    outputError("OUTPUT_BUSY");
+  }
+  const generation = outputGeneration(input.projectId);
+  const assertActive = () =>
+    assertOutputGeneration(input.projectId, generation);
+  const inspected = await inspectOutput(input, assertActive);
+  assertActive();
+  const token = randomUUID();
+  const now = Date.now();
+  for (const [key, receipt] of outputInspections) {
+    if (
+      !receipt.busy &&
+      (receipt.expiresAt <= now || outputInspections.size >= MAX_INSPECTIONS)
+    ) {
+      outputInspections.delete(key);
+    }
+  }
+  if (outputInspections.size >= MAX_INSPECTIONS) {
+    outputError("OUTPUT_BUSY");
+  }
+  outputInspections.set(token, {
+    busy: false,
+    expiresAt: now + INSPECTION_TTL_MS,
+    projectId: input.projectId,
+    signature: inspectionSignature(inspected),
+  });
+  const ambiguities = inspected.ambiguities.map(({ id, items, photos }) => ({
+    id,
+    photos,
+    files: items.map(({ relativePath, kind, fileSize, unavailable }) => ({
+      relativePath,
+      kind,
+      fileSize,
+      unavailable: Boolean(unavailable),
+    })),
+  }));
   return {
+    token,
+    ambiguities,
     targetRoot: inspected.targetRoot,
-    watched: watchedTarget(
-      inspected.targetRoot,
-      inspected.manifest.map((item) => item.relativePath)
-    ),
+    watched: watchedTarget(inspected.targetRoot, [
+      ...inspected.manifest.map((item) => item.relativePath),
+      ...ambiguities.flatMap((group) =>
+        group.files.map((file) => file.relativePath)
+      ),
+    ]),
     originalCount: inspected.manifest.filter((item) => item.kind === "original")
       .length,
     xmpCount: inspected.manifest.filter((item) => item.kind === "xmp").length,
+    acrCount: inspected.manifest.filter((item) => item.kind === "acr").length,
     count: inspected.manifest.length,
     unavailable: inspected.manifest.filter((item) => item.unavailable !== null)
       .length,
@@ -565,62 +737,172 @@ async function checkFreeSpace(
   }
 }
 
-async function createOutputDirectory(
-  parent: string,
-  project: ProjectRow,
-  relativePaths: string[],
-  acknowledged?: boolean
-): Promise<string> {
-  for (let attempts = 0; attempts < 20; attempts++) {
-    const candidate = await availableOutputDirectory(parent, project.name);
-    assertWatchedTargetAcknowledged(
-      { targetRoot: candidate },
-      relativePaths,
-      acknowledged
-    );
-    try {
-      await fsp.mkdir(candidate);
-      return candidate;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw error;
-      }
+function applySidecarDecisions(
+  manifest: ManifestItem[],
+  groups: ManifestAmbiguity[],
+  decisions: ShootingProjectOutputDecision[]
+) {
+  const byGroup = new Map(decisions.map(({ id, action }) => [id, action]));
+  if (byGroup.size !== groups.length || decisions.length !== groups.length) {
+    outputError("OUTPUT_INSPECTION_CHANGED");
+  }
+  const skippedSidecars: string[] = [];
+  const included = [...manifest];
+  for (const group of groups) {
+    switch (byGroup.get(group.id)) {
+      case "include":
+        for (const item of group.items) {
+          if (item.unavailable) {
+            outputError(item.unavailable);
+          }
+        }
+        included.push(...group.items);
+        break;
+      case "skip":
+        skippedSidecars.push(...group.items.map((item) => item.relativePath));
+        break;
+      default:
+        outputError("OUTPUT_INSPECTION_CHANGED");
     }
   }
-  return outputError("OUTPUT_CONFLICT");
+  return { included, skippedSidecars };
 }
 
 export async function createShootingProjectOutput(
-  input: OutputInput & { acknowledgeWatchedTarget?: boolean }
+  input: CreateOutputInput
 ): Promise<ShootingProjectOutputTask> {
   if (stopping) {
     outputError("OUTPUT_BUSY");
   }
-  const inspected = await inspectOutput(input);
+  const receipt = outputInspections.get(input.inspectionToken);
+  if (
+    !receipt ||
+    receipt.projectId !== input.projectId ||
+    receipt.expiresAt <= Date.now()
+  ) {
+    outputError("OUTPUT_INSPECTION_EXPIRED");
+  }
+  if (receipt.busy) {
+    outputError("OUTPUT_BUSY");
+  }
+  receipt.busy = true;
+  try {
+    return await createInspectedOutput(input, receipt);
+  } finally {
+    receipt.busy = false;
+  }
+}
+
+function ensureInspectionActive(
+  input: CreateOutputInput,
+  receipt: OutputInspectionReceipt
+) {
+  if (stopping || outputInspections.get(input.inspectionToken) !== receipt) {
+    outputError("OUTPUT_INSPECTION_EXPIRED");
+  }
+}
+
+async function createInspectedOutput(
+  input: CreateOutputInput,
+  receipt: OutputInspectionReceipt
+): Promise<ShootingProjectOutputTask> {
+  const assertActive = () => ensureInspectionActive(input, receipt);
+  const inspected = await inspectOutput(input, assertActive);
+  assertActive();
+  if (inspectionSignature(inspected) !== receipt.signature) {
+    outputInspections.delete(input.inspectionToken);
+    outputError("OUTPUT_INSPECTION_CHANGED");
+  }
+  const { included, skippedSidecars } = applySidecarDecisions(
+    inspected.manifest,
+    inspected.ambiguities,
+    input.decisions
+  );
+  const relativePaths = included.map((item) => item.relativePath);
   assertWatchedTargetAcknowledged(
     inspected,
-    inspected.manifest.map((item) => item.relativePath),
+    relativePaths,
     input.acknowledgeWatchedTarget
   );
-  await checkFreeSpace(inspected.parent, inspected.manifest);
-  const id = randomUUID();
-  let targetRoot: string;
+  await checkFreeSpace(inspected.parent, included);
+  assertActive();
+  await pinSidecarContents(inspected.project.sourceRoot, included);
+  assertActive();
+  const promise = commitInspectedOutput(
+    input,
+    receipt,
+    inspected.targetRoot,
+    included,
+    skippedSidecars
+  );
+  outputCommits.set(input.inspectionToken, {
+    projectId: input.projectId,
+    promise,
+  });
   try {
-    targetRoot = await createOutputDirectory(
-      inspected.parent,
-      inspected.project,
-      inspected.manifest.map((item) => item.relativePath),
-      input.acknowledgeWatchedTarget
-    );
+    return await promise;
+  } finally {
+    outputCommits.delete(input.inspectionToken);
+  }
+}
+
+async function pinSidecarContents(
+  root: string,
+  items: ManifestItem[]
+): Promise<void> {
+  for (const item of items) {
+    if (item.kind === "original") {
+      continue;
+    }
+    try {
+      const source = await resolveProjectRelativePath(root, item.relativePath);
+      const stat = await fsp.stat(source);
+      const [ctimeMs, ino, dev] = item.versionStamp ?? [];
+      if (
+        !(
+          sameVersion(stat, item) &&
+          stat.ctimeMs === ctimeMs &&
+          stat.ino === ino &&
+          stat.dev === dev
+        )
+      ) {
+        outputError("OUTPUT_INSPECTION_CHANGED");
+      }
+      item.sourceHash = await fullHash(source);
+      if (!sameOpenFile(stat, await fsp.stat(source))) {
+        outputError("OUTPUT_INSPECTION_CHANGED");
+      }
+    } catch (error) {
+      const code = errorCode(error);
+      outputError(
+        canRecheckOutputLater(code) ? "OUTPUT_INSPECTION_CHANGED" : code
+      );
+    }
+  }
+}
+
+async function commitInspectedOutput(
+  input: CreateOutputInput,
+  receipt: OutputInspectionReceipt,
+  targetRoot: string,
+  included: ManifestItem[],
+  skippedSidecars: string[]
+): Promise<ShootingProjectOutputTask> {
+  const id = randomUUID();
+  try {
+    await fsp.mkdir(targetRoot);
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      outputInspections.delete(input.inspectionToken);
+      outputError("OUTPUT_INSPECTION_CHANGED");
+    }
     return outputError(errorCode(error));
   }
-  // A competing directory creation can change the proposed suffix. Recheck the
-  // final scope before writing even the first temporary file.
   try {
+    ensureInspectionActive(input, receipt);
     assertWatchedTargetAcknowledged(
       { targetRoot },
-      inspected.manifest.map((item) => item.relativePath),
+      included.map((item) => item.relativePath),
       input.acknowledgeWatchedTarget
     );
     getDatabase().transaction((db) => {
@@ -629,11 +911,12 @@ export async function createShootingProjectOutput(
           id,
           projectId: input.projectId,
           targetRoot,
+          skippedSidecars: skippedSidecars.length ? skippedSidecars : null,
           status: "pending",
           createdAt: Date.now(),
         })
         .run();
-      for (const item of inspected.manifest) {
+      for (const item of included) {
         const itemId = randomUUID();
         const targetPath = path.join(
           targetRoot,
@@ -665,6 +948,7 @@ export async function createShootingProjectOutput(
     await fsp.rmdir(targetRoot).catch(() => undefined);
     return outputError(errorCode(error));
   }
+  outputInspections.delete(input.inspectionToken);
   beginOutput(taskRow(input.projectId, id));
   return describeTask(taskRow(input.projectId, id));
 }
@@ -906,6 +1190,9 @@ async function recoverCommittedItem(
     ) {
       return false;
     }
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
     outputError("OUTPUT_CONFLICT");
   }
   try {
@@ -913,7 +1200,8 @@ async function recoverCommittedItem(
       outputError("OUTPUT_CONFLICT");
     }
   } catch (error) {
-    if (errorCode(error) === "OUTPUT_CANCELLED") {
+    const code = errorCode(error);
+    if (code === "OUTPUT_CANCELLED" || canRecheckOutputLater(code)) {
       throw error;
     }
     outputError("OUTPUT_CONFLICT");
@@ -1023,27 +1311,45 @@ async function commitTemporary(item: ItemRow): Promise<void> {
   }
 }
 
+async function assertTargetVacant(targetPath: string): Promise<void> {
+  try {
+    await fsp.lstat(targetPath);
+    outputError("OUTPUT_CONFLICT");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+function preserveCommitForRecheck(item: ItemRow, code: string): boolean {
+  if (code === "OUTPUT_CANCELLED") {
+    return true;
+  }
+  if (canRecheckOutputLater(code)) {
+    updateItem(item.id, { error: "OUTPUT_RECHECK_UNAVAILABLE" });
+    return true;
+  }
+  return false;
+}
+
 async function runItem(
   task: OutputRow,
   item: ItemRow,
   signal: AbortSignal
 ): Promise<void> {
+  let recheckingCommit =
+    item.status === "completed" || item.status === "committing";
   let committing = false;
   let finalCreated = false;
   try {
     assertRunning(signal);
-    await validateTargetPaths(task, item, true);
+    await validateTargetPaths(task, item, item.status !== "completed");
     if (await recoverCommittedItem(task, item, signal)) {
       return;
     }
-    try {
-      await fsp.lstat(item.targetPath);
-      outputError("OUTPUT_CONFLICT");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
-    }
+    recheckingCommit = false;
+    await assertTargetVacant(item.targetPath);
     const source = await assertSourceVersion(item);
     await removeOwnedTemporary(task, item);
     const digest = await copyAndHash(item, source, signal);
@@ -1065,6 +1371,9 @@ async function runItem(
     await removeOwnedTemporary(task, item);
   } catch (error) {
     const code = errorCode(error);
+    if (recheckingCommit && preserveCommitForRecheck(item, code)) {
+      return;
+    }
     // A final file might already exist after a committed-but-unrecorded crash.
     // Keep the commit receipt so a later explicit retry can reconcile it.
     const keepReceipt =
@@ -1099,7 +1408,9 @@ async function runOutput(task: OutputRow, active: ActiveOutput): Promise<void> {
   }
   const items = itemsForTask(task.id);
   const aborted = active.controller.signal.aborted;
-  const completed = items.every((item) => item.status === "completed");
+  const completed = items.every(
+    (item) => item.status === "completed" && item.error === null
+  );
   let status: OutputRow["status"] = completed ? "completed" : "failed";
   if (aborted) {
     status = active.reason === "shutdown" ? "interrupted" : "cancelled";
@@ -1170,11 +1481,13 @@ export async function retryShootingProjectOutput(input: {
   if (stopping || activeOutputs.has(input.taskId)) {
     outputError("OUTPUT_BUSY");
   }
+  const generation = outputGeneration(input.projectId);
   const task = taskRow(input.projectId, input.taskId);
   const project = projectRow(input.projectId);
   const source = await fsp
     .realpath(project.sourceRoot)
     .catch(() => project.sourceRoot);
+  assertOutputGeneration(input.projectId, generation);
   if (isWithinProjectRoot(source, task.targetRoot)) {
     outputError("OUTPUT_TARGET_INSIDE_SOURCE");
   }
@@ -1191,6 +1504,8 @@ export async function cancelShootingProjectOutput(input: {
   projectId: string;
   taskId: string;
 }): Promise<ShootingProjectOutputTask> {
+  const generation = outputGeneration(input.projectId);
+  assertOutputGeneration(input.projectId, generation);
   taskRow(input.projectId, input.taskId);
   const active = activeOutputs.get(input.taskId);
   if (active) {
@@ -1207,18 +1522,32 @@ export async function cancelShootingProjectOutput(input: {
         .run();
     }
   }
+  assertOutputGeneration(input.projectId, generation);
   const cancelled = taskRow(input.projectId, input.taskId);
   for (const item of itemsForTask(cancelled.id)) {
     await removeOwnedTemporary(cancelled, item).catch(() => undefined);
   }
+  assertOutputGeneration(input.projectId, generation);
   return describeTask(taskRow(input.projectId, input.taskId));
 }
 
 export async function stopShootingProjectOutputTasks(
   projectId?: string
 ): Promise<void> {
-  if (!projectId) {
+  if (projectId) {
+    projectGenerations.set(
+      projectId,
+      (projectGenerations.get(projectId) ?? 0) + 1
+    );
+  } else {
     stopping = true;
+    serviceGeneration++;
+    projectGenerations.clear();
+  }
+  for (const [token, receipt] of outputInspections) {
+    if (!projectId || receipt.projectId === projectId) {
+      outputInspections.delete(token);
+    }
   }
   const selected = [...activeOutputs.values()].filter(
     (active) => !projectId || active.projectId === projectId
@@ -1227,7 +1556,13 @@ export async function stopShootingProjectOutputTasks(
     active.reason = "shutdown";
     active.controller.abort();
   }
-  await Promise.allSettled(selected.map((active) => active.promise));
+  const committing = [...outputCommits.values()].filter(
+    (operation) => !projectId || operation.projectId === projectId
+  );
+  await Promise.allSettled([
+    ...selected.map((active) => active.promise),
+    ...committing.map((operation) => operation.promise),
+  ]);
 }
 
 export function startShootingProjectOutputServices(): void {
@@ -1253,12 +1588,17 @@ export async function resolveShootingProjectCompletedOutputFiles(input: {
   projectId: string;
   taskId: string;
 }): Promise<{ photoId: string; path: string }[]> {
+  const generation = outputGeneration(input.projectId);
+  const assertActive = () =>
+    assertOutputGeneration(input.projectId, generation);
+  assertActive();
   const task = taskRow(input.projectId, input.taskId);
   if (task.status !== "completed") {
     outputError("OUTPUT_INCOMPLETE");
   }
   const items = itemsForTask(task.id);
   for (const item of items) {
+    assertActive();
     try {
       await validateTargetPaths(task, item, false);
       if (
@@ -1269,18 +1609,34 @@ export async function resolveShootingProjectCompletedOutputFiles(input: {
         outputError("OUTPUT_CONFLICT");
       }
     } catch (error) {
-      updateItem(item.id, { status: "failed", error: "OUTPUT_CONFLICT" });
-      getDatabase()
-        .update(shootingProjectOutputs)
-        .set({ status: "failed", completedAt: null })
-        .where(eq(shootingProjectOutputs.id, task.id))
-        .run();
+      assertActive();
+      const code = errorCode(error);
+      const temporary =
+        item.status === "completed" && canRecheckOutputLater(code);
+      getDatabase().transaction((db) => {
+        db.update(shootingProjectOutputItems)
+          .set(
+            temporary
+              ? { error: "OUTPUT_RECHECK_UNAVAILABLE" }
+              : { status: "failed", error: "OUTPUT_CONFLICT" }
+          )
+          .where(eq(shootingProjectOutputItems.id, item.id))
+          .run();
+        db.update(shootingProjectOutputs)
+          .set({ status: "failed", completedAt: null })
+          .where(eq(shootingProjectOutputs.id, task.id))
+          .run();
+      });
+      if (temporary) {
+        outputError("OUTPUT_RECHECK_UNAVAILABLE");
+      }
       if (error instanceof ShootingProjectOutputError) {
         throw error;
       }
       outputError("OUTPUT_CONFLICT");
     }
   }
+  assertActive();
   return items
     .filter((item) => item.kind === "original")
     .map((item) => ({ photoId: item.photoId, path: item.targetPath }));

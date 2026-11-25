@@ -22,6 +22,7 @@ import {
   sortShootingProjectPhotos,
 } from "@/hooks/use-shooting-project-workspace";
 import type {
+  ShootingProjectOutputInspection,
   ShootingProjectOutputTask,
   ShootingProjectPhoto,
   ShootingProjectWorkspaceData,
@@ -178,6 +179,18 @@ const TASK: ShootingProjectOutputTask = {
     },
   ],
 };
+const OUTPUT_INSPECTION: ShootingProjectOutputInspection = {
+  token: "receipt-output",
+  targetRoot: TASK.targetRoot,
+  originalCount: 2,
+  acrCount: 0,
+  xmpCount: 0,
+  count: 2,
+  unavailable: 0,
+  bytes: 200,
+  watched: false,
+  ambiguities: [],
+};
 
 describe("offline preview preparation feedback", () => {
   it("shows ready state and the purpose when all previews already exist", () => {
@@ -234,6 +247,59 @@ describe("offline preview preparation feedback", () => {
         projectId: "project-a",
         retryPreviews: true,
       })
+    );
+  });
+
+  it("explains an unreadable optional group and allows only skipping it", async () => {
+    mocks.inspectOutput.mockResolvedValue({
+      ...OUTPUT_INSPECTION,
+      ambiguities: [
+        {
+          id: "pair-a",
+          photos: [
+            { relativePath: "pair.nef", selected: true },
+            { relativePath: "pair.jpg", selected: false },
+          ],
+          files: [
+            {
+              relativePath: "pair.acr",
+              kind: "acr",
+              fileSize: 100,
+              unavailable: true,
+            },
+          ],
+        },
+      ],
+    });
+    mocks.createOutput.mockResolvedValue(TASK);
+    const created = vi.fn();
+    render(
+      <ShootingProjectOutputDialog
+        onClose={vi.fn()}
+        onCreated={created}
+        projectId="project-a"
+      />
+    );
+    fireEvent.click(screen.getByTestId("shooting-output-choose"));
+    const unavailable = "shootingProject.outputSidecarUnavailable";
+    expect(await screen.findByText(unavailable)).toBeVisible();
+    expect(screen.getByRole("group")).toHaveAccessibleDescription(unavailable);
+    expect(
+      screen.getByRole("radio", {
+        name: "shootingProject.outputIncludeSidecars",
+      })
+    ).toBeDisabled();
+    const confirm = screen.getByTestId("shooting-output-confirm");
+    expect(confirm).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole("radio", {
+        name: "shootingProject.outputSkipSidecars",
+      })
+    );
+    fireEvent.click(confirm);
+    await waitFor(() => expect(created).toHaveBeenCalledWith(TASK));
+    expect(mocks.createOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ decisions: [{ id: "pair-a", action: "skip" }] })
     );
   });
 
@@ -359,10 +425,7 @@ describe("shooting project confirmation boundaries", () => {
 
   it("blocks watched output until explicitly acknowledged and retains failed confirmation for retry", async () => {
     mocks.inspectOutput.mockResolvedValue({
-      targetRoot: TASK.targetRoot,
-      count: 2,
-      unavailable: 0,
-      bytes: 200,
+      ...OUTPUT_INSPECTION,
       watched: true,
     });
     mocks.createOutput
@@ -382,9 +445,9 @@ describe("shooting project confirmation boundaries", () => {
     expect(screen.getByTestId("shooting-output-confirm")).toBeDisabled();
     fireEvent.click(screen.getByTestId("shooting-output-watch-ack"));
     fireEvent.click(screen.getByTestId("shooting-output-confirm"));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "shootingProject.outputNoSpace"
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("shootingProject.outputNoSpace");
+    await waitFor(() => expect(alert).toHaveFocus());
     expect(created).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("shooting-output-confirm"));
     await waitFor(() => expect(created).toHaveBeenCalledWith(TASK));
@@ -393,6 +456,67 @@ describe("shooting project confirmation boundaries", () => {
       targetParent: "D:\\editing",
       photoIds: ["photo-a"],
       acknowledgeWatchedTarget: true,
+      inspectionToken: OUTPUT_INSPECTION.token,
+      decisions: [],
+    });
+  });
+
+  it.each([
+    ["OUTPUT_INSPECTION_CHANGED", "outputInspectionChanged"],
+    ["OUTPUT_INSPECTION_EXPIRED", "outputInspectionExpired"],
+  ])("refreshes %s in place and requires new decisions", async (code, key) => {
+    const group = {
+      id: "pair-a",
+      photos: [
+        { relativePath: "a.nef", selected: true },
+        { relativePath: "a.jpg", selected: false },
+      ],
+      files: [
+        { relativePath: "a.xmp", kind: "xmp", fileSize: 100 },
+        { relativePath: "a.acr", kind: "acr", fileSize: 200 },
+      ],
+    };
+    mocks.inspectOutput
+      .mockResolvedValueOnce({ ...OUTPUT_INSPECTION, ambiguities: [group] })
+      .mockResolvedValueOnce({
+        ...OUTPUT_INSPECTION,
+        ambiguities: [{ ...group, id: "refreshed-a" }],
+        token: "new-output",
+      });
+    mocks.createOutput.mockRejectedValueOnce({ code }).mockResolvedValue(TASK);
+    const created = vi.fn();
+    render(
+      <ShootingProjectOutputDialog
+        onClose={vi.fn()}
+        onCreated={created}
+        projectId="project-a"
+      />
+    );
+    fireEvent.click(screen.getByTestId("shooting-output-choose"));
+    const confirm = screen.getByTestId("shooting-output-confirm");
+    const include = { name: "shootingProject.outputIncludeSidecars" };
+    fireEvent.click(await screen.findByRole("radio", include));
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(key);
+    expect(alert).toHaveTextContent("shootingProject.outputReconfirmSidecars");
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(await screen.findByRole("radio", include)).not.toBeChecked();
+    expect(confirm).toBeDisabled();
+    expect(mocks.openFolderDialog).toHaveBeenCalledOnce();
+    expect(mocks.inspectOutput).toHaveBeenCalledTimes(2);
+    const skip = { name: "shootingProject.outputSkipSidecars" };
+    fireEvent.click(screen.getByRole("radio", skip));
+    fireEvent.click(confirm);
+    await waitFor(() => expect(created).toHaveBeenCalledWith(TASK));
+    expect(mocks.createOutput).toHaveBeenLastCalledWith({
+      projectId: "project-a",
+      photoIds: undefined,
+      targetParent: "D:\\editing",
+      inspectionToken: "new-output",
+      decisions: [{ id: "refreshed-a", action: "skip" }],
+      acknowledgeWatchedTarget: false,
     });
   });
 
@@ -433,6 +557,48 @@ describe("shooting project confirmation boundaries", () => {
     );
     expect(await screen.findByRole("status")).toHaveTextContent(
       "shootingProject.libraryResult"
+    );
+  });
+
+  it.each([
+    "OUTPUT_RECHECK_UNAVAILABLE",
+    "OUTPUT_INCOMPLETE",
+    "OUTPUT_CONFLICT",
+    "OUTPUT_INVALID_TARGET",
+    "OUTPUT_VERIFY_FAILED",
+  ])("returns to refreshed copy tasks when the library inspection reports %s", async (code) => {
+    mocks.listOutputs
+      .mockResolvedValueOnce([TASK])
+      .mockResolvedValue([{ ...TASK, status: "failed", completedAt: null }]);
+    mocks.inspectLibrary.mockRejectedValue({ code });
+    mocks.retryOutput.mockResolvedValue(TASK);
+    render(
+      <ShootingProjectOutputs
+        keptCount={1}
+        projectId="project-a"
+        selectedIds={[]}
+      />
+    );
+    const output = await screen.findByTestId("shooting-output-task");
+    expect(output).toHaveAttribute("data-status", "completed");
+    fireEvent.click(screen.getByTestId("shooting-add-library"));
+    const returnButton = await screen.findByRole("button", {
+      name: "shootingProject.outputReturnToTasks",
+    });
+    expect(screen.getByTestId("shooting-library-confirm")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "retry" })).toBeNull();
+    fireEvent.click(returnButton);
+    await waitFor(() =>
+      expect(output).toHaveAttribute("data-status", "failed")
+    );
+    expect(mocks.inspectLibrary).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId("shooting-output-retry"));
+    await waitFor(() =>
+      expect(mocks.retryOutput).toHaveBeenCalledWith({
+        projectId: "project-a",
+        taskId: TASK.id,
+        acknowledgeWatchedTarget: false,
+      })
     );
   });
 

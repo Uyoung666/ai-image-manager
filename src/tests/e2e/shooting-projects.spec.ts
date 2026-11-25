@@ -958,6 +958,166 @@ test("reuses curate and PK with usable results and copy dialogs at every support
   }
 });
 
+test("reviews shared sidecars for selected originals in the existing copy dialog", async () => {
+  const fixture = await createFixture("shooting-sidecar-decisions");
+  const originals = [
+    fixture.sourceFile,
+    path.join(
+      path.dirname(fixture.sourceFile),
+      "跨编辑器交接的长原片文件名-002.png"
+    ),
+  ];
+  fs.copyFileSync(originals[0], originals[1]);
+  for (const original of originals) {
+    const stem = original.slice(0, -4);
+    await sharp(original).jpeg().toFile(`${stem}.jpg`);
+    fs.writeFileSync(`${original}.xmp`, "dedicated to the PNG");
+    fs.writeFileSync(`${stem}.xmp`, "shared edits");
+    fs.writeFileSync(`${stem}.acr`, Buffer.from([0, 172, 255]));
+  }
+  try {
+    const page = await launch(fixture);
+    await navigateToCull(page);
+    await openFolder(fixture, page);
+    await waitPrepared(fixture, 4);
+    await keepAll(fixture, page, 4);
+    await page.getByTestId("shooting-tab-result").click();
+    for (const [index, original] of originals.entries()) {
+      await page.getByAltText(path.basename(original), { exact: true }).click({
+        modifiers: index > 0 ? ["Control"] : [],
+      });
+    }
+    const trigger = page.getByRole("button", {
+      name: "Copy selected originals",
+      exact: true,
+    });
+    const dialog = page.getByTestId("shooting-output-dialog");
+    const confirm = dialog.getByTestId("shooting-output-confirm");
+    const counts = dialog.getByTestId("shooting-output-counts");
+    const body = dialog.getByTestId("shooting-output-body");
+    const title = dialog.getByRole("heading", {
+      name: "Copy selected originals",
+    });
+    await trigger.click();
+    await choosePath(fixture, fixture.root);
+    await dialog.getByTestId("shooting-output-choose").click();
+    await expect(dialog.getByRole("group")).toHaveCount(2);
+    const remaining = dialog
+      .getByRole("status")
+      .filter({ hasText: "Groups awaiting a decision" });
+    await expect(remaining).toHaveText("Groups awaiting a decision · 2");
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate((value) => {
+        document.documentElement.classList.toggle("dark", value === "dark");
+        document.documentElement.classList.toggle("light", value === "light");
+      }, theme);
+      for (const size of [
+        ...SIZES.map((viewport) => ({ ...viewport, zoom: 1 })),
+        { ...SIZES[0], zoom: 1.25 },
+      ]) {
+        await resize(fixture, page, size, size.zoom);
+        await expectLayoutInsideViewport(page);
+        await expect(title).toBeInViewport({ ratio: 1 });
+        await expect(confirm).toBeInViewport({ ratio: 1 });
+        if (size.zoom > 1) {
+          const cancel = dialog.getByRole("button", { name: "Cancel" });
+          const actionPosition = await confirm.boundingBox();
+          const cancelPosition = await cancel.boundingBox();
+          expect(actionPosition?.y).toBe(cancelPosition?.y);
+          await body.evaluate((element) => {
+            element.scrollTop = 0;
+          });
+          await screenshot(fixture, page, `sidecars-${theme}-small-start.png`);
+        }
+        expect(
+          await body.evaluate(
+            (element) => element.scrollWidth <= element.clientWidth
+          )
+        ).toBe(true);
+        await dialog.getByRole("group").last().scrollIntoViewIfNeeded();
+        await dialog.getByRole("radio").last().scrollIntoViewIfNeeded();
+        await expect(dialog.getByRole("radio").last()).toBeInViewport({
+          ratio: 1,
+        });
+        await expect(title).toBeInViewport({ ratio: 1 });
+        await expect(confirm).toBeInViewport({ ratio: 1 });
+        if (size.zoom > 1 || size.width === 1280) {
+          await screenshot(
+            fixture,
+            page,
+            `sidecars-${theme}-${size.width}-${size.zoom}.png`
+          );
+        }
+      }
+    }
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press("Enter");
+    await dialog.getByTestId("shooting-output-choose").click();
+    await expect(confirm).toBeDisabled();
+    const include = dialog
+      .getByRole("group", { name: "原片-001" })
+      .locator('input[value="include"]');
+    await include.focus();
+    await page.keyboard.press("Space");
+    await expect(include).toBeChecked();
+    await expect(confirm).toBeDisabled();
+    await expect(remaining).toHaveText("Groups awaiting a decision · 1");
+    await expect(counts).toContainText("3 XMP");
+    await expect(counts).toContainText("1 ACR");
+    await page.keyboard.press("ArrowRight");
+    await expect(counts).toContainText("To copy · 2 originals · 2 XMP · 0 ACR");
+    await page.keyboard.press("ArrowLeft");
+    await expect(include).toBeChecked();
+    const otherGroup = dialog.getByRole("group", { name: "002" });
+    await otherGroup.locator('input[value="include"]').focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(otherGroup.locator('input[value="skip"]')).toBeChecked();
+    await expect(confirm).toBeEnabled();
+    await expect(remaining).toHaveCount(0);
+    await screenshot(fixture, page, "sidecars-ready-to-copy.png");
+    await confirm.click();
+    const task = page.getByTestId("shooting-output-task");
+    await expect(task).toHaveAttribute("data-status", "completed");
+    const summary = task.locator("summary");
+    await expect(summary).toContainText("Sidecars skipped · 2");
+    const skipped = originals[1].slice(0, -4);
+    const skippedPaths = [".acr", ".xmp"].map((extension) =>
+      task.getByText(path.relative(fixture.sourceRoot, skipped + extension), {
+        exact: true,
+      })
+    );
+    for (const skippedPath of skippedPaths) {
+      await expect(skippedPath).toHaveCount(0);
+    }
+    await summary.click();
+    for (const skippedPath of skippedPaths) {
+      await expect(skippedPath).toBeVisible();
+    }
+    await summary.click();
+    for (const skippedPath of skippedPaths) {
+      await expect(skippedPath).toHaveCount(0);
+    }
+    const items = database<{ relative_path: string }>(
+      fixture,
+      "SELECT relative_path FROM shooting_project_output_items"
+    ).map((item) => item.relative_path);
+    expect(items.sort()).toEqual(
+      [
+        ...originals,
+        ...originals.map((file) => `${file}.xmp`),
+        `${originals[0].slice(0, -4)}.xmp`,
+        `${originals[0].slice(0, -4)}.acr`,
+      ]
+        .map((file) => path.relative(fixture.sourceRoot, file))
+        .sort()
+    );
+  } finally {
+    await close(fixture);
+  }
+});
+
 test("curates, compares a kept subset and copies only final originals with XMP without ZIP or AI", async () => {
   const fixture = await createFixture("shooting-cull-workflow");
   await addPhotos(fixture);
@@ -973,6 +1133,11 @@ test("curates, compares a kept subset and copies only final originals with XMP w
     fs.writeFileSync(
       `${original.slice(0, -4)}.xmp`,
       '<x:xmpmeta xmlns:x="adobe:ns:meta/">original sidecar</x:xmpmeta>'
+    );
+    fs.writeFileSync(`${original}.xmp`, "complete filename XMP");
+    fs.writeFileSync(
+      `${original.slice(0, -4)}.acr`,
+      Buffer.from([172, 0, 255])
     );
   }
   try {
@@ -1047,7 +1212,8 @@ test("curates, compares a kept subset and copies only final originals with XMP w
       "SELECT kind,source_path,target_path,sha256 FROM shooting_project_output_items"
     );
     expect(items.filter((item) => item.kind === "original")).toHaveLength(3);
-    expect(items.filter((item) => item.kind === "xmp")).toHaveLength(3);
+    expect(items.filter((item) => item.kind === "xmp")).toHaveLength(6);
+    expect(items.filter((item) => item.kind === "acr")).toHaveLength(3);
     for (const item of items) {
       const digest = (filename: string) =>
         createHash("sha256").update(fs.readFileSync(filename)).digest("hex");
@@ -1318,8 +1484,14 @@ test("displays a real camera RAW and copies its original bytes directly", async 
   if (!sample) {
     throw new Error("RAW fixture not provided");
   }
-  const rawFile = path.join(fixture.sourceRoot, "原片.DNG");
+  const rawName = `原片${path.extname(sample).toUpperCase()}`;
+  const rawFile = path.join(fixture.sourceRoot, rawName);
   fs.copyFileSync(sample, rawFile);
+  const sampleXmp = `${sample}.xmp`;
+  const hasXmp = fs.existsSync(sampleXmp);
+  if (hasXmp) {
+    fs.copyFileSync(sampleXmp, `${rawFile}.xmp`);
+  }
   const expectedHash = createHash("sha256")
     .update(fs.readFileSync(rawFile))
     .digest("hex");
@@ -1331,8 +1503,8 @@ test("displays a real camera RAW and copies its original bytes directly", async 
     await openFolder(fixture, page);
     await waitPrepared(fixture, 2);
     await expectPreview(page);
-    const raw = projectPhotos(fixture).find((photo) =>
-      photo.relative_path.endsWith(".DNG")
+    const raw = projectPhotos(fixture).find(
+      (photo) => photo.relative_path === rawName
     );
     expect(raw?.width).toBeGreaterThan(2560);
     expect(raw?.preview_width).toBeLessThanOrEqual(2560);
@@ -1341,7 +1513,7 @@ test("displays a real camera RAW and copies its original bytes directly", async 
     await page.locator(`[data-photo-id="${raw?.id}"]`).dblclick();
     const rawPreview = page
       .getByRole("dialog")
-      .getByRole("img", { name: "原片.DNG", exact: true });
+      .getByRole("img", { name: rawName, exact: true });
     await expect(rawPreview).toBeVisible();
     await expect(page.getByRole("dialog")).toContainText(
       `Preview ${raw?.preview_width} ×`
@@ -1372,15 +1544,24 @@ test("displays a real camera RAW and copies its original bytes directly", async 
         { timeout: 60_000 }
       )
       .toBe("completed");
-    const [item] = database<{ target_path: string }>(
+    const items = database<{ relative_path: string; target_path: string }>(
       fixture,
-      "SELECT target_path FROM shooting_project_output_items WHERE kind='original' AND relative_path LIKE '%.DNG'"
+      "SELECT relative_path,target_path FROM shooting_project_output_items"
     );
+    const item = items.find((row) => row.relative_path === rawName);
     expect(
       createHash("sha256")
-        .update(fs.readFileSync(item.target_path))
+        .update(fs.readFileSync(item?.target_path ?? ""))
         .digest("hex")
     ).toBe(expectedHash);
+    if (hasXmp) {
+      const sidecar = items.find(
+        (row) => row.relative_path === `${rawName}.xmp`
+      );
+      expect(fs.readFileSync(sidecar?.target_path ?? "")).toEqual(
+        fs.readFileSync(sampleXmp)
+      );
+    }
     expectNoProjectImports(fixture);
   } finally {
     await close(fixture);
