@@ -843,7 +843,7 @@ for (const size of SIZES) {
     await menu.getByRole("button", { name: "Export", exact: true }).click();
     const exportDialog = page.getByRole("dialog", { name: EXPORT_TITLE });
     await exportDialog
-      .getByRole("button", { name: "Compressed", exact: true })
+      .getByRole("button", { name: "JPEG copies", exact: true })
       .click();
     const ranges = exportDialog.getByRole("slider");
     await ranges.nth(0).focus();
@@ -856,7 +856,12 @@ for (const size of SIZES) {
     for (let index = 0; index < 4; index++) {
       await page.keyboard.press("ArrowRight");
     }
-    await expect(exportDialog.getByRole("checkbox")).not.toBeChecked();
+    await expect(
+      exportDialog.getByRole("checkbox", {
+        name: "Open folder after export (remember choice)",
+        exact: true,
+      })
+    ).not.toBeChecked();
     await assertBounds();
     await exportDialog
       .getByRole("button", { name: "Export", exact: true })
