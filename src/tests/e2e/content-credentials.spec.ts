@@ -76,6 +76,9 @@ test("shows consistent Content Credentials in the inspector and lightbox at thre
   let app = await launch();
   const loadPage = async () => {
     const page = await app.firstWindow();
+    // firstWindow can resolve before Electron finishes the initial navigation.
+    await expect(page.locator("main").first()).toBeVisible();
+    await page.waitForLoadState("load");
     await page.addInitScript(() => localStorage.setItem("lang", "en"));
     await page.reload();
     return page;

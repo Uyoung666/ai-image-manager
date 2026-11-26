@@ -92,19 +92,17 @@ async function expectNavigationMaterial(toolbar: Locator, scrolled = false) {
 async function verifyToolbarScroll(toolbar: Locator) {
   const grid = page.locator(PHOTO_GRID);
   await expect(grid.locator("[data-photo-id]").first()).toBeVisible();
-  await grid.evaluate((element) => {
-    element.scrollTop = 0;
-  });
+  await expect(page.locator(".home-gallery-restore-overlay")).toHaveCount(0);
+  // Keyboard scrolling releases the restored photo anchor just as a wheel does.
+  await grid.press("Home");
+  await expect(grid).toHaveJSProperty("scrollTop", 0);
   await expect(toolbar).not.toHaveClass(SCROLLED_TOOLBAR);
   await expectNavigationMaterial(toolbar);
-  await grid.evaluate((element) => {
-    element.scrollTop = 100;
-  });
+  await grid.press("PageDown");
   await expectNavigationMaterial(toolbar, true);
   await bounds();
-  await grid.evaluate((element) => {
-    element.scrollTop = 0;
-  });
+  await grid.press("Home");
+  await expect(grid).toHaveJSProperty("scrollTop", 0);
   await expect(toolbar).not.toHaveClass(SCROLLED_TOOLBAR);
 }
 
