@@ -77,3 +77,32 @@ it("does not automatically open on a stage change, and closing never cancels a t
   );
   expect(fixture.store.getSnapshot().status.phase).toBe("restarting");
 });
+
+it("dismisses the details on the first Escape even when hovering its trigger", async () => {
+  const fixture = updateUiFixture({
+    phase: "error",
+    operation: "check",
+    message: "UPDATE_RATE_LIMITED",
+  });
+  fixture.render(<UpdateHeaderControl />);
+  const trigger = await screen.findByTestId("update-header-control");
+  const documentFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(trigger);
+    const details = screen.getByTestId("update-details");
+    expect(details).toBeVisible();
+
+    fireEvent.pointerOver(trigger, { pointerType: "mouse" });
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(details, { key: "Escape" });
+    await act(() => vi.runOnlyPendingTimersAsync());
+    expect(details).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  } finally {
+    vi.useRealTimers();
+    documentFocus.mockRestore();
+  }
+});

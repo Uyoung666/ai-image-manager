@@ -82,7 +82,7 @@ export function UpdateHeaderControl() {
   const Icon = updateIcon(view);
   return (
     <Popover onOpenChange={actions.setDetailsOpen} open={view.open}>
-      <Tooltip>
+      <Tooltip disabled={view.open}>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <button
